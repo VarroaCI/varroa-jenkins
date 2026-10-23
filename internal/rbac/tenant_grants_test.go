@@ -13,7 +13,7 @@ import (
 // contract of TenantGrants: entries sort by tenant name, then by each
 // entry's sorted Jobs list.
 func TestTenantGrants_OrdersByTenantNameThenSortedJobs(t *testing.T) {
-	teams := []*v1alpha1.Team{
+	tenants := []*v1alpha1.Tenant{
 		{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "billing"}},
 	}
@@ -34,7 +34,7 @@ func TestTenantGrants_OrdersByTenantNameThenSortedJobs(t *testing.T) {
 			Scope:    &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "billing"}}},
 		}},
 	}
-	r := testTenantResolver([]*v1alpha1.VarroaRole{viewerRole()}, bindings, teams, nil)
+	r := testTenantResolver([]*v1alpha1.VarroaRole{viewerRole()}, bindings, tenants, nil)
 	claims := &auth.Claims{Subject: "u"}
 
 	got := r.TenantGrants(claims)
@@ -52,15 +52,15 @@ func TestTenantGrants_OrdersByTenantNameThenSortedJobs(t *testing.T) {
 	}
 }
 
-// TestTenantGrants_TeamsWithNoPipelinesVerbDropped proves a Team the caller
+// TestTenantGrants_TenantsWithNoPipelinesVerbDropped proves a Tenant the caller
 // can access, but whose role grants no pipelines verb, produces no entry.
-func TestTenantGrants_TeamsWithNoPipelinesVerbDropped(t *testing.T) {
-	team := &v1alpha1.Team{
+func TestTenantGrants_TenantsWithNoPipelinesVerbDropped(t *testing.T) {
+	tenant := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec:       v1alpha1.TeamSpec{RoleRef: "controllers-only"},
-		Status: v1alpha1.TeamStatus{
-			GroupRef:   "team-payments",
-			Conditions: []v1alpha1.TeamCondition{{Type: v1alpha1.TeamConditionRBACReady, Status: metav1.ConditionTrue}},
+		Spec:       v1alpha1.TenantSpec{RoleRef: "controllers-only"},
+		Status: v1alpha1.TenantStatus{
+			GroupRef:   "tenant-payments",
+			Conditions: []v1alpha1.TenantCondition{{Type: v1alpha1.TenantConditionRBACReady, Status: metav1.ConditionTrue}},
 		},
 	}
 	role := &v1alpha1.VarroaRole{
@@ -69,8 +69,8 @@ func TestTenantGrants_TeamsWithNoPipelinesVerbDropped(t *testing.T) {
 			APIRules: []v1alpha1.APIRule{{Resources: []string{"controllers"}, Verbs: []string{"read"}}},
 		},
 	}
-	r := testTenantResolver([]*v1alpha1.VarroaRole{role}, nil, []*v1alpha1.Team{team}, nil)
-	claims := &auth.Claims{Groups: []string{"team-payments"}}
+	r := testTenantResolver([]*v1alpha1.VarroaRole{role}, nil, []*v1alpha1.Tenant{tenant}, nil)
+	claims := &auth.Claims{Groups: []string{"tenant-payments"}}
 
 	got := r.TenantGrants(claims)
 	if len(got) != 0 {

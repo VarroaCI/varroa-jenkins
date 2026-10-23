@@ -54,14 +54,14 @@ func TestIndexerControllerListerFiltersNamespaceAndSorts(t *testing.T) {
 		}
 	}
 
-	team, err := lister.ListControllers("team-a")
+	tenant, err := lister.ListControllers("team-a")
 	if err != nil {
 		t.Fatalf("list team-a: %v", err)
 	}
-	if len(team) != 2 || team[0].Name != "alpha" || team[1].Name != "beta" {
-		t.Fatalf("list team-a: got %d rows, want alpha and beta", len(team))
+	if len(tenant) != 2 || tenant[0].Name != "alpha" || tenant[1].Name != "beta" {
+		t.Fatalf("list team-a: got %d rows, want alpha and beta", len(tenant))
 	}
-	for _, cr := range team {
+	for _, cr := range tenant {
 		if cr.Namespace != "team-a" {
 			t.Errorf("list team-a returned %s/%s", cr.Namespace, cr.Name)
 		}

@@ -79,13 +79,13 @@ import type {
   TestCaseHistoryResponse,
   RunChangeListResponse,
   RunLinkPage,
-  TeamPipelines,
-  TeamPlacement,
-  TeamRehydration,
+  TenantPipelines,
+  TenantPlacement,
+  TenantRehydration,
   RunnerEntry,
   CellUsage,
   CellUsageListResponse,
-  TeamCell,
+  TenantCell,
   CellPool,
   CellPoolListResponse,
   CellPoolScaleRequest,
@@ -93,17 +93,17 @@ import type {
   FleetLockListResponse,
   FleetLockReleaseRequest,
   FleetLockReleaseResponse,
-  PipelineTeamList,
+  PipelineTenantList,
   ProposePipelineResponse,
 } from "../types";
 import type { ControllerDetail } from "../hooks/useControllers";
 import type {
-  TeamAgent,
-  TeamAgentCapabilities,
-  TeamAgentItemList,
-  TeamAgentSessionList,
-  TeamAgentUnattendedResult,
-} from "../types/teamAgent";
+  TenantAgent,
+  TenantAgentCapabilities,
+  TenantAgentItemList,
+  TenantAgentSessionList,
+  TenantAgentUnattendedResult,
+} from "../types/tenantAgent";
 import type { Permissions } from "../types/auth";
 import { ApiError, bffFetch, bffFetchText, bffUpload, getToken } from "../hooks/useApi";
 
@@ -897,14 +897,14 @@ export function resumeBundleRollout(cluster: string, ns: string, name: string): 
   );
 }
 
-// --- Teams (admin) ---
+// --- Tenants (admin) ---
 
-export interface TeamNamespaceState {
+export interface TenantNamespaceState {
   name: string;
   state: string;
 }
 
-export interface TeamCondition {
+export interface TenantCondition {
   type: string;
   status: string;
   reason?: string;
@@ -912,7 +912,7 @@ export interface TeamCondition {
   lastTransitionTime?: string;
 }
 
-export interface TeamEntry {
+export interface TenantEntry {
   name: string;
   displayName?: string;
   members?: string[];
@@ -923,14 +923,14 @@ export interface TeamEntry {
   observedGeneration?: number;
   groupRef?: string;
   bindingRef?: string;
-  namespaceStates?: TeamNamespaceState[];
-  conditions?: TeamCondition[];
-  pipelines?: TeamPipelines;
-  placement?: TeamPlacement;
-  rehydration?: TeamRehydration;
+  namespaceStates?: TenantNamespaceState[];
+  conditions?: TenantCondition[];
+  pipelines?: TenantPipelines;
+  placement?: TenantPlacement;
+  rehydration?: TenantRehydration;
 }
 
-export interface CreateTeamBody {
+export interface CreateTenantBody {
   name: string;
   displayName?: string;
   members?: string[];
@@ -938,44 +938,44 @@ export interface CreateTeamBody {
   namespaces: string[];
   roleRef?: string;
   provisionNamespaces?: boolean;
-  pipelines?: TeamPipelines;
+  pipelines?: TenantPipelines;
 }
 
-export function listTeams(): Promise<TeamEntry[]> {
-  return bffFetch<{items: TeamEntry[]}>("/teams").then(r => r.items);
+export function listTenants(): Promise<TenantEntry[]> {
+  return bffFetch<{items: TenantEntry[]}>("/tenants").then(r => r.items);
 }
 
-export function getTeam(name: string): Promise<TeamEntry> {
-  return bffFetch(`/teams/${encodeURIComponent(name)}`);
+export function getTenant(name: string): Promise<TenantEntry> {
+  return bffFetch(`/tenants/${encodeURIComponent(name)}`);
 }
 
-export function createTeam(body: CreateTeamBody): Promise<{ name: string }> {
-  return bffFetch("/teams", {
+export function createTenant(body: CreateTenantBody): Promise<{ name: string }> {
+  return bffFetch("/tenants", {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
-export function updateTeam(name: string, body: CreateTeamBody): Promise<{ name: string }> {
-  return bffFetch(`/teams/${encodeURIComponent(name)}`, {
+export function updateTenant(name: string, body: CreateTenantBody): Promise<{ name: string }> {
+  return bffFetch(`/tenants/${encodeURIComponent(name)}`, {
     method: "PUT",
     body: JSON.stringify(body),
   });
 }
 
-export function deleteTeam(name: string): Promise<void> {
-  return bffFetch(`/teams/${encodeURIComponent(name)}`, { method: "DELETE" });
+export function deleteTenant(name: string): Promise<void> {
+  return bffFetch(`/tenants/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 // --- Runners (external agents; design D1, D12) ---
 
 /**
- * Lists Runner objects, narrowed to one team when given. status.token is
+ * Lists Runner objects, narrowed to one tenant when given. status.token is
  * present only for a caller holding runners:create; the dashboard never
  * reads it.
  */
-export function listRunners(team?: string): Promise<RunnerEntry[]> {
-  const qs = team ? `?team=${enc(team)}` : "";
+export function listRunners(tenant?: string): Promise<RunnerEntry[]> {
+  const qs = tenant ? `?tenant=${enc(tenant)}` : "";
   return bffFetch<{ items: RunnerEntry[] }>(`/runners${qs}`).then((r) => r.items);
 }
 
@@ -1031,11 +1031,11 @@ export function broodStreamUrl(name: string, namespace: string): string {
   return `${BFF_BASE}/brood-operations/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/stream`;
 }
 
-/** teamRunStreamUrl builds the team run stream URL on BFF_BASE, so the
+/** tenantRunStreamUrl builds the tenant run stream URL on BFF_BASE, so the
  * browser reaches the API and not the SPA. useEventStream appends the
  * stream ticket as a query parameter; this URL holds none. */
-export function teamRunStreamUrl(team: string): string {
-  return `${BFF_BASE}/pipelines/${encodeURIComponent(team)}/stream`;
+export function tenantRunStreamUrl(tenant: string): string {
+  return `${BFF_BASE}/pipelines/${encodeURIComponent(tenant)}/stream`;
 }
 
 // ---- Brood Schedules ----
@@ -1159,39 +1159,39 @@ async function bffFetchBlob(path: string): Promise<Blob> {
   return res.blob();
 }
 
-const pipelinesBase = (team: string) => `/pipelines/${enc(team)}`;
+const pipelinesBase = (tenant: string) => `/pipelines/${enc(tenant)}`;
 // {job} is one path segment holding the percent-encoded job path (D2): a job
 // path payments/checkout-api/main becomes payments%2Fcheckout-api%2Fmain.
-const jobBase = (team: string, jobPath: string) => `${pipelinesBase(team)}/jobs/${enc(jobPath)}`;
+const jobBase = (tenant: string, jobPath: string) => `${pipelinesBase(tenant)}/jobs/${enc(jobPath)}`;
 const runBase = (runId: string) => `/runs/${enc(runId)}`;
 
 /**
- * Lists every pipelines Team the caller may read, on this cluster and on
+ * Lists every pipelines Tenant the caller may read, on this cluster and on
  * each member cluster. The pipelines landing page reads this route.
  */
-export function listPipelineTeams(): Promise<PipelineTeamList> {
-  return bffFetch<PipelineTeamList>("/pipelines");
+export function listPipelineTenants(): Promise<PipelineTenantList> {
+  return bffFetch<PipelineTenantList>("/pipelines");
 }
 
-export function listPipelines(team: string): Promise<PipelineListResponse> {
-  return bffFetch<PipelineListResponse>(pipelinesBase(team));
+export function listPipelines(tenant: string): Promise<PipelineListResponse> {
+  return bffFetch<PipelineListResponse>(pipelinesBase(tenant));
 }
 
-export function getPipelineJob(team: string, jobPath: string): Promise<PipelineJobDetail> {
-  return bffFetch<PipelineJobDetail>(jobBase(team, jobPath));
+export function getPipelineJob(tenant: string, jobPath: string): Promise<PipelineJobDetail> {
+  return bffFetch<PipelineJobDetail>(jobBase(tenant, jobPath));
 }
 
 /** listJobBranches reads the branch and change-request inventory of one
  * multibranch job. The inventory can be up to ten minutes stale. */
-export function listJobBranches(team: string, jobPath: string): Promise<JobBranchList> {
-  return bffFetch<JobBranchList>(`${jobBase(team, jobPath)}/branches`);
+export function listJobBranches(tenant: string, jobPath: string): Promise<JobBranchList> {
+  return bffFetch<JobBranchList>(`${jobBase(tenant, jobPath)}/branches`);
 }
 
 /** scanMultibranch requests a scan of a multibranch job's branches and pull
  * requests. The 202 answer carries the scan identifier; the inventory's
  * lastScan.scanId repeats it once the scan reports. */
-export function scanMultibranch(team: string, jobPath: string, cluster?: string): Promise<ScanRequestedResponse> {
-  return bffFetchJSON<ScanRequestedResponse>(`${jobBase(team, jobPath)}/scan`, {
+export function scanMultibranch(tenant: string, jobPath: string, cluster?: string): Promise<ScanRequestedResponse> {
+  return bffFetchJSON<ScanRequestedResponse>(`${jobBase(tenant, jobPath)}/scan`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(cluster ? { cluster } : {}),
@@ -1199,20 +1199,20 @@ export function scanMultibranch(team: string, jobPath: string, cluster?: string)
 }
 
 /**
- * Reads the team's own view of the cell that hosts its pipelines tenant.
- * A team that waits for its first cell answers state "unplaced" rather
+ * Reads the tenant's own view of the cell that hosts its pipelines tenant.
+ * A tenant that waits for its first cell answers state "unplaced" rather
  * than a 404.
  */
-export function getTeamCell(team: string): Promise<TeamCell> {
-  return bffFetch<TeamCell>(`${pipelinesBase(team)}/cell`);
+export function getTenantCell(tenant: string): Promise<TenantCell> {
+  return bffFetch<TenantCell>(`${pipelinesBase(tenant)}/cell`);
 }
 
 /**
- * Lists the fleet locks a team's own tenants own or wait on. A team that
+ * Lists the fleet locks a tenant's own tenants own or wait on. A tenant that
  * spans two tenants answers both tenants' rows in one list.
  */
-export function listFleetLocks(team: string): Promise<FleetLockListResponse> {
-  return bffFetch<FleetLockListResponse>(`${pipelinesBase(team)}/locks`);
+export function listFleetLocks(tenant: string): Promise<FleetLockListResponse> {
+  return bffFetch<FleetLockListResponse>(`${pipelinesBase(tenant)}/locks`);
 }
 
 /**
@@ -1281,8 +1281,8 @@ function listRunsQS(params?: ListRunsParams): string {
   return s ? `?${s}` : "";
 }
 
-export function listRuns(team: string, jobPath: string, params?: ListRunsParams): Promise<RunListResponse> {
-  return bffFetch<RunListResponse>(`${jobBase(team, jobPath)}/runs${listRunsQS(params)}`);
+export function listRuns(tenant: string, jobPath: string, params?: ListRunsParams): Promise<RunListResponse> {
+  return bffFetch<RunListResponse>(`${jobBase(tenant, jobPath)}/runs${listRunsQS(params)}`);
 }
 
 /**
@@ -1290,8 +1290,8 @@ export function listRuns(team: string, jobPath: string, params?: ListRunsParams)
  * number, so the 202 body's runId is the caller's only handle on the run
  * before it polls getRun.
  */
-export function createRun(team: string, jobPath: string, body?: CreateRunRequest): Promise<RunActionResponse> {
-  return bffFetchJSON<RunActionResponse>(`${jobBase(team, jobPath)}/runs`, {
+export function createRun(tenant: string, jobPath: string, body?: CreateRunRequest): Promise<RunActionResponse> {
+  return bffFetchJSON<RunActionResponse>(`${jobBase(tenant, jobPath)}/runs`, {
     method: "POST",
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
@@ -1350,13 +1350,13 @@ export function listRunTests(runId: string): Promise<RunTestListResponse> {
  * client never parses the key.
  */
 export function getTestCaseHistory(
-  team: string,
+  tenant: string,
   jobPath: string,
   caseKey: string,
   limit?: number,
 ): Promise<TestCaseHistoryResponse> {
   const qs = limit != null ? `?limit=${limit}` : "";
-  return bffFetch<TestCaseHistoryResponse>(`${jobBase(team, jobPath)}/tests/${enc(caseKey)}${qs}`);
+  return bffFetch<TestCaseHistoryResponse>(`${jobBase(tenant, jobPath)}/tests/${enc(caseKey)}${qs}`);
 }
 
 export function listRunChanges(runId: string): Promise<RunChangeListResponse> {
@@ -1499,59 +1499,59 @@ export function createAssistantSession(body: AssistantSessionCreate): Promise<As
 }
 
 export function listAssistantSessions(
-  params: { cursor?: string; limit?: number; prompt?: string; team?: string } = {},
+  params: { cursor?: string; limit?: number; prompt?: string; tenant?: string } = {},
 ): Promise<AssistantSessionList> {
   const q = new URLSearchParams();
   if (params.cursor) q.set("cursor", params.cursor);
   if (params.limit) q.set("limit", String(params.limit));
   if (params.prompt) q.set("prompt", params.prompt);
-  if (params.team) q.set("team", params.team);
+  if (params.tenant) q.set("tenant", params.tenant);
   const qs = q.toString();
   return bffFetch<AssistantSessionList>(`/assistant/sessions${qs ? `?${qs}` : ""}`);
 }
 
-/** Starts a session that proposes a first Jenkinsfile for a repository of a team. */
-export function proposePipeline(team: string, repo: string): Promise<ProposePipelineResponse> {
-  return bffFetch<ProposePipelineResponse>(`${pipelinesBase(team)}/propose`, {
+/** Starts a session that proposes a first Jenkinsfile for a repository of a tenant. */
+export function proposePipeline(tenant: string, repo: string): Promise<ProposePipelineResponse> {
+  return bffFetch<ProposePipelineResponse>(`${pipelinesBase(tenant)}/propose`, {
     method: "POST",
     body: JSON.stringify({ repo }),
   });
 }
 
-/** Reads the accepted Team agent of a pipelines tenant. 404 when none is accepted. */
-export function getTeamAgent(team: string): Promise<TeamAgent> {
-  return bffFetch<TeamAgent>(`${pipelinesBase(team)}/agent`);
+/** Reads the accepted Tenant agent of a pipelines tenant. 404 when none is accepted. */
+export function getTenantAgent(tenant: string): Promise<TenantAgent> {
+  return bffFetch<TenantAgent>(`${pipelinesBase(tenant)}/agent`);
 }
 
-export function listTeamAgentSessions(
-  team: string,
+export function listTenantAgentSessions(
+  tenant: string,
   params: { state?: string; cursor?: string; limit?: number } = {},
-): Promise<TeamAgentSessionList> {
+): Promise<TenantAgentSessionList> {
   const q = new URLSearchParams();
   if (params.state) q.set("state", params.state);
   if (params.cursor) q.set("cursor", params.cursor);
   if (params.limit) q.set("limit", String(params.limit));
   const qs = q.toString();
-  return bffFetch<TeamAgentSessionList>(`${pipelinesBase(team)}/agent/sessions${qs ? `?${qs}` : ""}`);
+  return bffFetch<TenantAgentSessionList>(`${pipelinesBase(tenant)}/agent/sessions${qs ? `?${qs}` : ""}`);
 }
 
-export function getTeamAgentCapabilities(team: string): Promise<TeamAgentCapabilities> {
-  return bffFetch<TeamAgentCapabilities>(`${pipelinesBase(team)}/agent/capabilities`);
+export function getTenantAgentCapabilities(tenant: string): Promise<TenantAgentCapabilities> {
+  return bffFetch<TenantAgentCapabilities>(`${pipelinesBase(tenant)}/agent/capabilities`);
 }
 
-export function runTeamAgent(team: string, body: { job?: string; run?: string } = {}): Promise<{ state: string }> {
-  return bffFetchJSON<{ state: string }>(`${pipelinesBase(team)}/agent/run`, {
+export function runTenantAgent(tenant: string, body: { job?: string; run?: string } = {}): Promise<{ state: string }> {
+  return bffFetchJSON<{ state: string }>(`${pipelinesBase(tenant)}/agent/run`, {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
-export function listAgents(): Promise<TeamAgentItemList> {
-  return bffFetch<TeamAgentItemList>("/agents");
+export function listAgents(): Promise<TenantAgentItemList> {
+  return bffFetch<TenantAgentItemList>("/agents");
 }
 
-export function putAgentUnattended(namespace: string, name: string, enabled: boolean): Promise<TeamAgentUnattendedResult> {
-  return bffFetchJSON<TeamAgentUnattendedResult>(`/agents/${enc(namespace)}/${enc(name)}/unattended`, {
+export function putAgentUnattended(namespace: string, name: string, enabled: boolean): Promise<TenantAgentUnattendedResult> {
+  return bffFetchJSON<TenantAgentUnattendedResult>(`/agents/${enc(namespace)}/${enc(name)}/unattended`, {
     method: "PUT",
     body: JSON.stringify({ enabled }),
   });
@@ -1640,8 +1640,8 @@ export function createRunNote(runId: string, body: CreateRunNoteRequest): Promis
   return bffFetch<RunNote>(`/runs/${enc(runId)}/notes`, { method: "POST", body: JSON.stringify(body) });
 }
 
-export function listJobNotes(team: string, jobPath: string): Promise<RunNoteList> {
-  return bffFetch<RunNoteList>(`${jobBase(team, jobPath)}/notes`);
+export function listJobNotes(tenant: string, jobPath: string): Promise<RunNoteList> {
+  return bffFetch<RunNoteList>(`${jobBase(tenant, jobPath)}/notes`);
 }
 
 /** assistantEventsUrl is the stream URL of one session, resumed after seq. */

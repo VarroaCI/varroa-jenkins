@@ -162,16 +162,16 @@ func TestMerge_DroppingATenantDeletesItsFolder(t *testing.T) {
 	mf := filepath.Join(t.TempDir(), "managed.json")
 	engine := &Engine{client: client, managedFile: mf}
 
-	teamA, err := ReRoot(&Manifest{}, "team-a")
+	tenantA, err := ReRoot(&Manifest{}, "team-a")
 	if err != nil {
 		t.Fatalf("ReRoot team-a: %v", err)
 	}
-	teamB, err := ReRoot(&Manifest{}, "team-b")
+	tenantB, err := ReRoot(&Manifest{}, "team-b")
 	if err != nil {
 		t.Fatalf("ReRoot team-b: %v", err)
 	}
 
-	firstMerge, err := Merge([]*Manifest{teamA, teamB})
+	firstMerge, err := Merge([]*Manifest{tenantA, tenantB})
 	if err != nil {
 		t.Fatalf("Merge (both tenants): %v", err)
 	}
@@ -186,7 +186,7 @@ func TestMerge_DroppingATenantDeletesItsFolder(t *testing.T) {
 		t.Fatalf("expected no deletions on the first apply, got %v", deleted)
 	}
 
-	secondMerge, err := Merge([]*Manifest{teamA})
+	secondMerge, err := Merge([]*Manifest{tenantA})
 	if err != nil {
 		t.Fatalf("Merge (team-a only): %v", err)
 	}

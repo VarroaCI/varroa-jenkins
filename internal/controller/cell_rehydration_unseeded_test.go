@@ -18,7 +18,7 @@ import (
 func unseededFixture(t *testing.T, jobCount, suffixLen int) (*Reconciler, *v1alpha1.Controller) {
 	t.Helper()
 	client := newTestClient()
-	seedRehydrationTeam(client, "team-a", 1)
+	seedRehydrationTenant(client, "team-a", 1)
 	rec := newTestReconciler(client)
 
 	longSuffix := strings.Repeat("x", suffixLen)

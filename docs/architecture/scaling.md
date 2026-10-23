@@ -31,7 +31,7 @@ Plan per controller for:
 
 No CPU or memory request is applied to Jenkins unless set on the `Controller` or its `ControllerClass`. The default persistent volume is 20 GiB. Treat these as installation floors, not production sizing. Configure controller resources and persistence from observed queue depth, heap pressure, plugin load, build concurrency, and retention needs.
 
-Jenkins controllers do not scale horizontally. Add controllers to isolate teams or workloads, increase a controller's resources for vertical capacity, and use hibernation for idle controllers. Kubernetes agents scale separately according to the pod templates and Jenkins cloud limits in the applied bundle.
+Jenkins controllers do not scale horizontally. Add controllers to isolate tenants or workloads, increase a controller's resources for vertical capacity, and use hibernation for idle controllers. Kubernetes agents scale separately according to the pod templates and Jenkins cloud limits in the applied bundle.
 
 ## NATS and Activity Storage
 

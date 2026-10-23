@@ -47,29 +47,29 @@ export function caseKeyFromPath(pathname: string): string | undefined {
  * no trend, and no chart.
  */
 export default function TestCaseHistory() {
-  const { team, job, case: caseParam } = useParams<{ team: string; job: string; case: string }>();
+  const { tenant, job, case: caseParam } = useParams<{ tenant: string; job: string; case: string }>();
   const location = useLocation();
   const caseKey = caseParam ? (caseKeyFromPath(location.pathname) ?? caseParam) : undefined;
 
   const history = useQuery({
-    queryKey: ["testCaseHistory", team, job, caseKey],
-    queryFn: () => getTestCaseHistory(team!, job!, caseKey!),
-    enabled: !!team && !!job && !!caseKey,
+    queryKey: ["testCaseHistory", tenant, job, caseKey],
+    queryFn: () => getTestCaseHistory(tenant!, job!, caseKey!),
+    enabled: !!tenant && !!job && !!caseKey,
   });
 
   // The job read builds the trail. It shares the cache entry of the job page,
   // and a failed read keeps the plain job link.
   const jobQuery = useQuery({
-    queryKey: ["pipelineJob", team, job],
-    queryFn: () => getPipelineJob(team!, job!),
-    enabled: !!team && !!job,
+    queryKey: ["pipelineJob", tenant, job],
+    queryFn: () => getPipelineJob(tenant!, job!),
+    enabled: !!tenant && !!job,
   });
 
   const title = caseTitle(location.state, caseKey ?? "");
   const jobDetail = jobQuery.data;
   useDocumentTitle(
-    team && job && caseKey
-      ? testCaseTitle(team, jobDetail ? relativeJob(jobDetail.tenantFolder, jobDetail.jobPath) : job, title.name)
+    tenant && job && caseKey
+      ? testCaseTitle(tenant, jobDetail ? relativeJob(jobDetail.tenantFolder, jobDetail.jobPath) : job, title.name)
       : null,
   );
 
@@ -86,7 +86,7 @@ export default function TestCaseHistory() {
   if (err instanceof ApiError && err.status === 404) return <NotFoundPage />;
   if (err instanceof ApiError && err.status === 503) return <RecordStoreDisabledPage />;
   if (err) return <GenericErrorPage onRetry={() => void history.refetch()} />;
-  if (!team || !job || !caseKey || !history.data) return <NotFoundPage />;
+  if (!tenant || !job || !caseKey || !history.data) return <NotFoundPage />;
 
   const items = history.data.items;
 
@@ -95,13 +95,13 @@ export default function TestCaseHistory() {
       <div className={styles.pageHead}>
         {jobDetail ? (
           <JobBreadcrumbs
-            team={team}
+            tenant={tenant}
             tenantFolder={jobDetail.tenantFolder}
             jobPath={jobDetail.jobPath}
             current={title.name}
           />
         ) : (
-          <Link to={`/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}`} className={styles.jobLink}>
+          <Link to={`/pipelines/${encodeURIComponent(tenant)}/${encodeURIComponent(job)}`} className={styles.jobLink}>
             {job}
           </Link>
         )}

@@ -36,9 +36,9 @@ const (
 	// assistantErrApprovalExpired answers a decision on an approval whose
 	// expiry passed. The decision is refused and the session is not resumed.
 	assistantErrApprovalExpired = "approval_expired"
-	// assistantErrTeamAgent answers a message to a Team agent session. Its
+	// assistantErrTenantAgent answers a message to a Tenant agent session. Its
 	// turns come from the runner, so a person cannot add one.
-	assistantErrTeamAgent = "team_agent_session"
+	assistantErrTenantAgent = "tenant_agent_session"
 )
 
 // AssistantRuntime holds the parts of the assistant that the BFF wires at
@@ -52,8 +52,8 @@ type AssistantRuntime struct {
 	// HostFor returns the tool host that acts as the caller.
 	HostFor func(*auth.Claims) loop.ToolHost
 	// HostForOrigin returns the tool host that acts as the caller and stamps
-	// origin on its activity. A Team agent approval uses it with the
-	// team_agent origin.
+	// origin on its activity. A Tenant agent approval uses it with the
+	// tenant_agent origin.
 	HostForOrigin func(*auth.Claims, string) loop.ToolHost
 	// Sealer opens and seals user keys. Nil turns PUT /me/assistant/key off.
 	Sealer  *sealedkey.Sealer
@@ -141,7 +141,7 @@ func (rt *AssistantRuntime) startRun(cfg loop.RunConfig, trig loop.Trigger) {
 	}()
 }
 
-// assistantTenantLookup maps a run or a team to its tenant for the caller.
+// assistantTenantLookup maps a run or a tenant to its tenant for the caller.
 // A lookup that finds nothing returns the empty tenant.
 type assistantTenantLookup struct {
 	s      *Server
@@ -159,10 +159,10 @@ func (l assistantTenantLookup) RunTenant(ctx context.Context, runID string) (str
 	return run.Tenant, nil
 }
 
-func (l assistantTenantLookup) TeamTenant(ctx context.Context, team string) (string, error) {
-	refs, serr := l.s.resolveTeamTenants(ctx, l.claims, team)
+func (l assistantTenantLookup) TenantTenant(ctx context.Context, tenant string) (string, error) {
+	refs, serr := l.s.resolveTenantTenants(ctx, l.claims, tenant)
 	if serr != nil || len(refs) == 0 {
-		return "", nil //nolint:nilerr // an unresolved team has no tenant to share data with
+		return "", nil //nolint:nilerr // an unresolved tenant has no tenant to share data with
 	}
 	return refs[0].Tenant, nil
 }
@@ -205,7 +205,7 @@ type assistantSessionJSON struct {
 	ID               string         `json:"id"`
 	Kind             string         `json:"kind"`
 	Principal        string         `json:"principal"`
-	Team             string         `json:"team"`
+	Tenant           string         `json:"tenant"`
 	Cluster          string         `json:"cluster"`
 	Trigger          string         `json:"trigger"`
 	Context          map[string]any `json:"context"`
@@ -224,7 +224,7 @@ type assistantSessionJSON struct {
 
 func toAssistantSessionJSON(s agent.Session) assistantSessionJSON {
 	out := assistantSessionJSON{
-		ID: s.ID.String(), Kind: string(s.Kind), Principal: s.Principal, Team: s.Team,
+		ID: s.ID.String(), Kind: string(s.Kind), Principal: s.Principal, Tenant: s.Tenant,
 		Cluster: s.Cluster, Trigger: s.Trigger, Context: s.Context, Provider: s.Provider,
 		Model: s.Model, KeySource: string(s.KeySource), DataSharing: string(s.DataSharing),
 		State: string(s.State), PromptTokens: s.PromptTokens, CompletionTokens: s.CompletionTokens,

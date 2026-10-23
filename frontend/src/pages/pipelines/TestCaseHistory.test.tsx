@@ -26,8 +26,8 @@ function renderPage(entry: InitialEntry = CASE_URL) {
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
-          <Route path="pipelines/:team/:job/tests/:case" element={<TestCaseHistory />} />
-          <Route path="pipelines/:team/:job/:run" element={<div>build page</div>} />
+          <Route path="pipelines/:tenant/:job/tests/:case" element={<TestCaseHistory />} />
+          <Route path="pipelines/:tenant/:job/:run" element={<div>build page</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -112,7 +112,7 @@ describe("TestCaseHistory", () => {
     expect(screen.queryByRole("navigation", { name: "Job path" })).toBeNull();
   });
 
-  it("sets the document title from the test, the job, and the team", async () => {
+  it("sets the document title from the test, the job, and the tenant", async () => {
     mockGetTestCaseHistory.mockResolvedValue({ items: [outcome()] });
     renderPage({ pathname: CASE_URL, state: { className: "com.example.FooTest", name: "bar" } });
 

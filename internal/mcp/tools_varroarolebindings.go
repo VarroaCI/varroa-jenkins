@@ -69,7 +69,7 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 		mcp.WithString("roleRef", mcp.Required(), mcp.Description("VarroaRole name to bind")),
 		mcp.WithArray("subjects", mcp.Required(), mcp.Description("Subject references, e.g. [{\"kind\":\"User\",\"name\":\"alice\"}]")),
 		mcp.WithObject("scope", mcp.Description("Scope restrictions: namespaces, controllerSelector, or tenants "+
-			"(e.g. [{\"name\":\"team-a\",\"jobs\":[\"release/*\"]}]). A scope names one dimension: tenants "+
+			"(e.g. [{\"name\":\"tenant-a\",\"jobs\":[\"release/*\"]}]). A scope names one dimension: tenants "+
 			"never combines with namespaces or controllerSelector.")),
 	)
 	addTool(mcpServer, kindCreateStrict, createRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

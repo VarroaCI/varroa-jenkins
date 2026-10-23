@@ -18,21 +18,21 @@ import (
 // leaves the previous map in place for that tick and retries on the next
 // assembly.
 func (r *Reconciler) attachTenantHomes(ctx context.Context, cr *v1alpha1.Controller,
-	teams []*v1alpha1.Team, desired *mitev1.DesiredStateCommand) {
-	if desired == nil || !isCellController(cr) || len(teams) == 0 {
+	tenants []*v1alpha1.Tenant, desired *mitev1.DesiredStateCommand) {
+	if desired == nil || !isCellController(cr) || len(tenants) == 0 {
 		return
 	}
 
 	var entries []*mitev1.TenantHomes
-	for _, team := range teams {
-		if team.Spec.Pipelines == nil {
+	for _, tenant := range tenants {
+		if tenant.Spec.Pipelines == nil {
 			continue
 		}
-		result := r.tenantHomes(ctx, cr, team.Name)
+		result := r.tenantHomes(ctx, cr, tenant.Name)
 		entry := &mitev1.TenantHomes{
-			Tenant:   team.Name,
-			Slot:     int(tenantSlotOnCell(team, cr)),
-			Role:     tenantRoleOnCell(team, cr),
+			Tenant:   tenant.Name,
+			Slot:     int(tenantSlotOnCell(tenant, cr)),
+			Role:     tenantRoleOnCell(tenant, cr),
 			JobHomes: intJobHomes(result.JobHomes),
 		}
 		entries = append(entries, entry)
@@ -81,19 +81,19 @@ func (r *Reconciler) storeHomes(key string, result cells.HomesResult) {
 // tenantRoleOnCell answers the role the tenant holds on cr: standby for a
 // standby member, and active for every other case, including a tenant
 // with no member list.
-func tenantRoleOnCell(team *v1alpha1.Team, cr *v1alpha1.Controller) string {
-	if team.Status.Placement == nil {
-		return v1alpha1.TeamMemberRoleActive
+func tenantRoleOnCell(tenant *v1alpha1.Tenant, cr *v1alpha1.Controller) string {
+	if tenant.Status.Placement == nil {
+		return v1alpha1.TenantMemberRoleActive
 	}
-	for _, m := range team.Status.Placement.Members {
+	for _, m := range tenant.Status.Placement.Members {
 		if m.Cell == cr.Name && m.CellNamespace == cr.Namespace {
-			if m.Role == v1alpha1.TeamMemberRoleStandby {
-				return v1alpha1.TeamMemberRoleStandby
+			if m.Role == v1alpha1.TenantMemberRoleStandby {
+				return v1alpha1.TenantMemberRoleStandby
 			}
-			return v1alpha1.TeamMemberRoleActive
+			return v1alpha1.TenantMemberRoleActive
 		}
 	}
-	return v1alpha1.TeamMemberRoleActive
+	return v1alpha1.TenantMemberRoleActive
 }
 
 // intJobHomes converts the recorder's int32 slot indexes to the generated

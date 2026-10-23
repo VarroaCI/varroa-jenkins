@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// TestWebhookEventFor checks that a Team agent message keeps its own event
+// TestWebhookEventFor checks that a Tenant agent message keeps its own event
 // type, and that a run row still reports a run completion.
 func TestWebhookEventFor(t *testing.T) {
-	if got := webhookEventFor("team_agent.message:s:c"); got != "team_agent.message" {
+	if got := webhookEventFor("tenant_agent.message:s:c"); got != "tenant_agent.message" {
 		t.Errorf("agent key event = %q", got)
 	}
 	if got := webhookEventFor("completed"); got != webhookEventRunCompleted {
@@ -21,7 +21,7 @@ func TestWebhookEventFor(t *testing.T) {
 }
 
 // TestRunCompletionKeepsAgentMessage checks that a run completion does not
-// drop a pending Team agent message on the same run.
+// drop a pending Tenant agent message on the same run.
 func TestRunCompletionKeepsAgentMessage(t *testing.T) {
 	t.Parallel()
 
@@ -35,7 +35,7 @@ func TestRunCompletionKeepsAgentMessage(t *testing.T) {
 	}
 	key := "manual:agent-keep-" + uuid.NewString()
 	runID := seedGrantedIntent(t, pool, key)
-	if _, err := EnqueueTeamAgentWebhook(context.Background(), pool, TeamAgentWebhookRequest{
+	if _, err := EnqueueTenantAgentWebhook(context.Background(), pool, TenantAgentWebhookRequest{
 		Cluster: testCluster, Tenant: testTenant, SessionID: uuid.NewString(), CallID: "c1",
 		RunID: runID.String(), Principal: "agent:ns/team/a", Body: json.RawMessage(`{"text":"hi"}`),
 	}, time.Now().UTC()); err != nil {
@@ -48,7 +48,7 @@ func TestRunCompletionKeepsAgentMessage(t *testing.T) {
 	var pending int
 	if err := db.QueryRow(`
 		SELECT count(*) FROM varroa.webhook_deliveries
-		WHERE run_id = $1 AND delivery_key LIKE 'team_agent.message:%' AND state = 'pending'
+		WHERE run_id = $1 AND delivery_key LIKE 'tenant_agent.message:%' AND state = 'pending'
 	`, runID).Scan(&pending); err != nil {
 		t.Fatalf("count agent deliveries: %v", err)
 	}

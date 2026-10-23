@@ -7,9 +7,9 @@ import type { ActivityEvent } from "../../types";
 const base = { id: "e", source: "user", actor: "alice" } as unknown as ActivityEvent;
 
 describe("isAgentRow", () => {
-  it("accepts an assistant source, a team agent source, and an agent actor", () => {
+  it("accepts an assistant source, a tenant agent source, and an agent actor", () => {
     expect(isAgentRow({ ...base, source: "assistant" } as ActivityEvent)).toBe(true);
-    expect(isAgentRow({ ...base, source: "team_agent" } as ActivityEvent)).toBe(true);
+    expect(isAgentRow({ ...base, source: "tenant_agent" } as ActivityEvent)).toBe(true);
     expect(isAgentRow({ ...base, actor: "agent:team-a" } as ActivityEvent)).toBe(true);
   });
 
@@ -21,7 +21,7 @@ describe("isAgentRow", () => {
     expect(passesSource({ ...base, source: "assistant" } as ActivityEvent, "agents")).toBe(true);
     expect(passesSource(base, "agents")).toBe(false);
     expect(SOURCE_LABELS.assistant).toBe("Assistant");
-    expect(SOURCE_LABELS.team_agent).toBe("Team agent");
+    expect(SOURCE_LABELS.tenant_agent).toBe("Tenant agent");
   });
 });
 

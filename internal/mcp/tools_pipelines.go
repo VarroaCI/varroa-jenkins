@@ -17,7 +17,7 @@ import (
 // =============================================================================
 // Pipeline tools (13): run_pipeline, list_runs, get_run, get_run_log,
 // list_job_branches, list_fleet_locks, release_fleet_lock, proceed_run_input,
-// abort_run_input, replay_run, restart_run, scan_multibranch, get_team_cell
+// abort_run_input, replay_run, restart_run, scan_multibranch, get_tenant_cell
 //
 // Design D1a: these tools call the same internal services the
 // pipelines HTTP handlers call (internal/api's RunPipeline, ListRuns,
@@ -53,27 +53,27 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 	registerReplayRunTool(mcpServer, deps)
 	registerScanMultibranchTool(mcpServer, deps)
 	registerRestartRunTool(mcpServer, deps)
-	registerGetTeamCellTool(mcpServer, deps)
+	registerGetTenantCellTool(mcpServer, deps)
 }
 
-// registerGetTeamCellTool registers get_team_cell: the cell that hosts a
-// team's pipelines tenant. It calls the same service the team cell HTTP
+// registerGetTenantCellTool registers get_tenant_cell: the cell that hosts a
+// tenant's pipelines tenant. It calls the same service the tenant cell HTTP
 // read calls, so both surfaces share one authorization check.
-func registerGetTeamCellTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
-	getTeamCellTool := mcp.NewTool("get_team_cell",
-		mcp.WithDescription("Get the cell that hosts a team's pipelines tenant: state, placement reason, load, members, and the tenant warning when one holds."),
-		mcp.WithString("team", mcp.Required(), mcp.Description("The team name")),
+func registerGetTenantCellTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	getTenantCellTool := mcp.NewTool("get_tenant_cell",
+		mcp.WithDescription("Get the cell that hosts a tenant's pipelines tenant: state, placement reason, load, members, and the tenant warning when one holds."),
+		mcp.WithString("tenant", mcp.Required(), mcp.Description("The tenant name")),
 	)
-	addTool(mcpServer, kindRead, getTeamCellTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addTool(mcpServer, kindRead, getTenantCellTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		claims, err := requireClaims(ctx)
 		if err != nil {
 			return mcp.NewToolResultError("authentication required"), nil
 		}
-		team := strArg(getArgs(req), "team")
-		if team == "" {
-			return mcp.NewToolResultError("team is required"), nil
+		tenant := strArg(getArgs(req), "tenant")
+		if tenant == "" {
+			return mcp.NewToolResultError("tenant is required"), nil
 		}
-		body, serr := api.NewServer(deps).TeamCell(ctx, claims, team)
+		body, serr := api.NewServer(deps).TenantCell(ctx, claims, tenant)
 		if serr != nil {
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
@@ -166,9 +166,9 @@ func registerScanMultibranchTool(mcpServer *server.MCPServer, deps *api.Dependen
 		mcp.WithDescription("Start a scan of a multibranch job's branches and pull requests, or of an organization folder's "+
 			"repositories, as the calling user. A job that is neither answers an error. The scan runs on the job's home "+
 			"member and reports no outcome here. Use list_job_branches to follow its result in lastScan."),
-		mcp.WithString("team", mcp.Required(), mcp.Description("Team name")),
+		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant name")),
 		mcp.WithString("job", mcp.Required(), mcp.Description("A multibranch job or an organization folder path, as the job page names it")),
-		mcp.WithString("cluster", mcp.Description("Cluster to select, when team and job resolve to more than one tenant")),
+		mcp.WithString("cluster", mcp.Description("Cluster to select, when tenant and job resolve to more than one tenant")),
 	)
 	addTool(mcpServer, kindAction, scanTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		claims, toolErr := requirePipelineCaller(ctx, deps)
@@ -176,12 +176,12 @@ func registerScanMultibranchTool(mcpServer *server.MCPServer, deps *api.Dependen
 			return toolErr, nil
 		}
 		args := getArgs(req)
-		team := strArg(args, "team")
+		tenant := strArg(args, "tenant")
 		job := strArg(args, "job")
-		if team == "" || job == "" {
-			return mcp.NewToolResultError("team and job are required"), nil
+		if tenant == "" || job == "" {
+			return mcp.NewToolResultError("tenant and job are required"), nil
 		}
-		scanID, targetCluster, serr := api.NewServer(deps).ScanMultibranch(ctx, claims, team, job, strArg(args, "cluster"))
+		scanID, targetCluster, serr := api.NewServer(deps).ScanMultibranch(ctx, claims, tenant, job, strArg(args, "cluster"))
 		if serr != nil {
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
@@ -217,10 +217,10 @@ func registerRunPipelineTool(mcpServer *server.MCPServer, deps *api.Dependencies
 			"wait for the build to start. Use get_run or get_run_log to follow it. "+
 			"A refused trigger ends the run with status COMPLETED, result TRIGGER_FAILED, and a triggerReasonCode in get_run. "+
 			"A trigger for a job the cell does not hold yet waits up to 90 seconds."),
-		mcp.WithString("team", mcp.Required(), mcp.Description("Team, or the controller name for a single-controller tenant")),
+		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant, or the controller name for a single-controller tenant")),
 		mcp.WithString("job", mcp.Required(), mcp.Description("Full job path, e.g. checkout-api/main")),
 		mcp.WithObject("parameters", mcp.Description("Build parameters, as name to string value")),
-		mcp.WithString("cluster", mcp.Description("Cluster to select, when team and job resolve to more than one tenant")),
+		mcp.WithString("cluster", mcp.Description("Cluster to select, when tenant and job resolve to more than one tenant")),
 	)
 	addTool(mcpServer, kindAction, runPipelineTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		claims, toolErr := requirePipelineCaller(ctx, deps)
@@ -228,10 +228,10 @@ func registerRunPipelineTool(mcpServer *server.MCPServer, deps *api.Dependencies
 			return toolErr, nil
 		}
 		args := getArgs(req)
-		team := strArg(args, "team")
+		tenant := strArg(args, "tenant")
 		job := strArg(args, "job")
-		if team == "" || job == "" {
-			return mcp.NewToolResultError("team and job are required"), nil
+		if tenant == "" || job == "" {
+			return mcp.NewToolResultError("tenant and job are required"), nil
 		}
 		var parameters map[string]string
 		if raw := args["parameters"]; raw != nil {
@@ -239,7 +239,7 @@ func registerRunPipelineTool(mcpServer *server.MCPServer, deps *api.Dependencies
 				return mcp.NewToolResultError(fmt.Sprintf("invalid parameters: %v", err)), nil
 			}
 		}
-		runID, intentKey, targetCluster, serr := api.NewServer(deps).RunPipeline(ctx, claims, team, job, strArg(args, "cluster"), parameters)
+		runID, intentKey, targetCluster, serr := api.NewServer(deps).RunPipeline(ctx, claims, tenant, job, strArg(args, "cluster"), parameters)
 		if serr != nil {
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
@@ -333,7 +333,7 @@ func registerListRunsTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listRunsTool := mcp.NewTool("list_runs",
 		mcp.WithDescription("List runs of one pipeline job, newest first, merged across every "+
 			"tenant the job path resolves to. Capped at limit (default 50, max 200)."),
-		mcp.WithString("team", mcp.Required(), mcp.Description("Team, or the controller name for a single-controller tenant")),
+		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant, or the controller name for a single-controller tenant")),
 		mcp.WithString("job", mcp.Required(), mcp.Description("Full job path, e.g. checkout-api/main")),
 		mcp.WithString("branch", mcp.Description("Filter by branch")),
 		mcp.WithString("result", mcp.Description("Filter by result: SUCCESS, FAILURE, UNSTABLE, or ABORTED")),
@@ -349,10 +349,10 @@ func registerListRunsTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 			return toolErr, nil
 		}
 		args := getArgs(req)
-		team := strArg(args, "team")
+		tenant := strArg(args, "tenant")
 		job := strArg(args, "job")
-		if team == "" || job == "" {
-			return mcp.NewToolResultError("team and job are required"), nil
+		if tenant == "" || job == "" {
+			return mcp.NewToolResultError("tenant and job are required"), nil
 		}
 		limit := defaultListRunsLimit
 		if n, ok := args["limit"].(float64); ok {
@@ -364,7 +364,7 @@ func registerListRunsTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 				limit = maxListRunsLimit
 			}
 		}
-		page, serr, err := api.NewServer(deps).ListRuns(ctx, claims, team, job,
+		page, serr, err := api.NewServer(deps).ListRuns(ctx, claims, tenant, job,
 			strArg(args, "branch"), strArg(args, "result"), strArg(args, "actor"), strArg(args, "cause"),
 			limit, strArg(args, "cursor"))
 		if serr != nil {
@@ -410,7 +410,7 @@ func registerGetRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 func registerListJobBranchesTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listJobBranchesTool := mcp.NewTool("list_job_branches",
 		mcp.WithDescription("List the branches, change requests, and tags a multibranch job has discovered, with each head's latest run. The inventory is exported by the cell that holds the job's home slot, so it can be up to ten minutes stale; a hibernated cell keeps its last inventory. A job with no export yet answers empty lists with no observedAt. Heads you may not read are omitted."),
-		mcp.WithString("team", mcp.Required(), mcp.Description("Team name")),
+		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant name")),
 		mcp.WithString("job", mcp.Required(), mcp.Description("Multibranch job path, as the job page names it")),
 		withListOutput(jobBranchesOutputSchema),
 	)
@@ -420,12 +420,12 @@ func registerListJobBranchesTool(mcpServer *server.MCPServer, deps *api.Dependen
 			return toolErr, nil
 		}
 		args := getArgs(req)
-		team := strArg(args, "team")
+		tenant := strArg(args, "tenant")
 		job := strArg(args, "job")
-		if team == "" || job == "" {
-			return mcp.NewToolResultError("team and job are required"), nil
+		if tenant == "" || job == "" {
+			return mcp.NewToolResultError("tenant and job are required"), nil
 		}
-		list, serr := api.NewServer(deps).ListJobBranches(ctx, claims, team, job)
+		list, serr := api.NewServer(deps).ListJobBranches(ctx, claims, tenant, job)
 		if serr != nil {
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
@@ -512,10 +512,10 @@ var runListOutputSchema = listOutputSchema("Run summary.", []schemaField{
 
 func registerListFleetLocksTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listFleetLocksTool := mcp.NewTool("list_fleet_locks",
-		mcp.WithDescription("List the fleet locks a team's tenants own, hold, or wait on. "+
-			"A lock another tenant owns appears when one of the team's own runs "+
+		mcp.WithDescription("List the fleet locks a tenant's tenants own, hold, or wait on. "+
+			"A lock another tenant owns appears when one of the tenant's own runs "+
 			"holds or waits on it."),
-		mcp.WithString("team", mcp.Required(), mcp.Description("Team, or the controller name for a single-controller tenant")),
+		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant, or the controller name for a single-controller tenant")),
 		withListOutput(fleetLockListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listFleetLocksTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -523,11 +523,11 @@ func registerListFleetLocksTool(mcpServer *server.MCPServer, deps *api.Dependenc
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		team := strArg(getArgs(req), "team")
-		if team == "" {
-			return mcp.NewToolResultError("team is required"), nil
+		tenant := strArg(getArgs(req), "tenant")
+		if tenant == "" {
+			return mcp.NewToolResultError("tenant is required"), nil
 		}
-		items, serr := api.NewServer(deps).ListFleetLocks(ctx, claims, team)
+		items, serr := api.NewServer(deps).ListFleetLocks(ctx, claims, tenant)
 		if serr != nil {
 			return mcp.NewToolResultError(serr.Error()), nil
 		}

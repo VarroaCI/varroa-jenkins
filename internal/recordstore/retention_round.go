@@ -229,10 +229,10 @@ func runMaintenanceSteps(ctx context.Context, db maintTxDB, cfg MaintenanceConfi
 		return fmt.Errorf("delete expired run notes: %w", err)
 	}
 
-	// The spend step deletes the Team agent spend rows that the runs window
+	// The spend step deletes the Tenant agent spend rows that the runs window
 	// has passed. A spend row is a day total, so it needs no session.
-	if _, err := deleteExpiredTeamAgentSpend(ctx, db, now, cfg.RunRetention); err != nil {
-		return fmt.Errorf("delete expired team agent spend: %w", err)
+	if _, err := deleteExpiredTenantAgentSpend(ctx, db, now, cfg.RunRetention); err != nil {
+		return fmt.Errorf("delete expired tenant agent spend: %w", err)
 	}
 
 	if _, err := finalizeStaleLogs(ctx, db, cfg.Liveness, cfg.FinalizeWait, now); err != nil {

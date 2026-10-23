@@ -1,5 +1,5 @@
 // Package budget holds the spend and step checks of an agent session. The
-// caller passes every limit, so a team agent may pass a lower limit than the
+// caller passes every limit, so a tenant agent may pass a lower limit than the
 // assistant's.
 package budget
 

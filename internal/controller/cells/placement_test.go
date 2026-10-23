@@ -18,12 +18,12 @@ func fixedClock(t time.Time) func() time.Time {
 	return func() time.Time { return t }
 }
 
-func testTeam() *v1alpha1.Team {
-	return &v1alpha1.Team{
+func testTenant() *v1alpha1.Tenant {
+	return &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec: v1alpha1.TeamSpec{
+		Spec: v1alpha1.TenantSpec{
 			Namespaces: []string{"payments-ns"},
-			Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Pipelines: &v1alpha1.TenantPipelinesSpec{
 				Profile:        "jenkins-lts",
 				AgentNamespace: "payments-ns",
 			},
@@ -79,21 +79,21 @@ func poolCell(name, pool string, tenants ...string) CellCandidate {
 	return c
 }
 
-func placedStatus(generation int64) *v1alpha1.TeamStatus {
-	return &v1alpha1.TeamStatus{
-		Placement: &v1alpha1.TeamPlacementStatus{
+func placedStatus(generation int64) *v1alpha1.TenantStatus {
+	return &v1alpha1.TenantStatus{
+		Placement: &v1alpha1.TenantPlacementStatus{
 			Cluster:       "core",
 			Cell:          "cell-a",
 			CellNamespace: "cells-ns",
 			Generation:    generation,
 		},
-		Pipelines: &v1alpha1.TeamPipelinesStatus{WebhookToken: "tok", WebhookSecret: "sec"},
+		Pipelines: &v1alpha1.TenantPipelinesStatus{WebhookToken: "tok", WebhookSecret: "sec"},
 	}
 }
 
-func condition(status *v1alpha1.TeamStatus) *v1alpha1.TeamCondition {
+func condition(status *v1alpha1.TenantStatus) *v1alpha1.TenantCondition {
 	for i := range status.Conditions {
-		if status.Conditions[i].Type == v1alpha1.TeamConditionPlaced {
+		if status.Conditions[i].Type == v1alpha1.TenantConditionPlaced {
 			return &status.Conditions[i]
 		}
 	}
@@ -105,24 +105,24 @@ func condition(status *v1alpha1.TeamStatus) *v1alpha1.TeamCondition {
 func TestPlace_RefusalGates(t *testing.T) {
 	cases := []struct {
 		name       string
-		mutate     func(*Inputs, *v1alpha1.Team)
+		mutate     func(*Inputs, *v1alpha1.Tenant)
 		wantReason string
 	}{
-		{"recordStoreDisabled", func(in *Inputs, _ *v1alpha1.Team) { in.RecordStoreEnabled = false }, v1alpha1.TeamReasonRecordStoreUnsupported},
-		{"blobTierNotS3", func(in *Inputs, _ *v1alpha1.Team) { in.BlobsModeS3 = false }, v1alpha1.TeamReasonBlobTierUnsupported},
-		{"profileMissing", func(in *Inputs, _ *v1alpha1.Team) { in.ProfileExists = func(string) bool { return false } }, v1alpha1.TeamReasonProfileNotFound},
-		{"agentNamespaceNotInSpec", func(_ *Inputs, team *v1alpha1.Team) { team.Spec.Pipelines.AgentNamespace = "other-ns" }, v1alpha1.TeamReasonAgentNamespaceUnmanaged},
-		{"agentNamespaceUnmanaged", func(in *Inputs, _ *v1alpha1.Team) {
+		{"recordStoreDisabled", func(in *Inputs, _ *v1alpha1.Tenant) { in.RecordStoreEnabled = false }, v1alpha1.TenantReasonRecordStoreUnsupported},
+		{"blobTierNotS3", func(in *Inputs, _ *v1alpha1.Tenant) { in.BlobsModeS3 = false }, v1alpha1.TenantReasonBlobTierUnsupported},
+		{"profileMissing", func(in *Inputs, _ *v1alpha1.Tenant) { in.ProfileExists = func(string) bool { return false } }, v1alpha1.TenantReasonProfileNotFound},
+		{"agentNamespaceNotInSpec", func(_ *Inputs, tenant *v1alpha1.Tenant) { tenant.Spec.Pipelines.AgentNamespace = "other-ns" }, v1alpha1.TenantReasonAgentNamespaceUnmanaged},
+		{"agentNamespaceUnmanaged", func(in *Inputs, _ *v1alpha1.Tenant) {
 			in.ManagedNamespaces = tenancy.NewManagedSet("some-other-ns", "op-ns")
-		}, v1alpha1.TeamReasonAgentNamespaceUnmanaged},
+		}, v1alpha1.TenantReasonAgentNamespaceUnmanaged},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			in := testInputs()
-			team := testTeam()
-			tc.mutate(&in, team)
-			status := &v1alpha1.TeamStatus{}
-			out, err := Place(context.Background(), in, team, status)
+			tenant := testTenant()
+			tc.mutate(&in, tenant)
+			status := &v1alpha1.TenantStatus{}
+			out, err := Place(context.Background(), in, tenant, status)
 			if err != nil {
 				t.Fatalf("Place returned error: %v", err)
 			}
@@ -147,10 +147,10 @@ func TestPlace_Refusal_LeavesExistingPlacementUntouched(t *testing.T) {
 	in := testInputs()
 	in.Cells = []CellCandidate{readyCell("cell-a")}
 	in.RecordStoreEnabled = false
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(1)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -166,13 +166,13 @@ func TestPlace_Refusal_LeavesExistingPlacementUntouched(t *testing.T) {
 
 func TestPlace_Keep_TransientNotReadyDoesNotMove(t *testing.T) {
 	in := testInputs()
-	team := testTeam()
-	notReady := readyCell("cell-a", team.Name)
+	tenant := testTenant()
+	notReady := readyCell("cell-a", tenant.Name)
 	notReady.CellReady = false
 	in.Cells = []CellCandidate{notReady}
 	status := placedStatus(3)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestPlace_Keep_TransientNotReadyDoesNotMove(t *testing.T) {
 		t.Error("a transient CellReady=False must not patch a cell")
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonCellNotReady {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonCellNotReady {
 		t.Errorf("expected reason CellNotReady, got %+v", cond)
 	}
 }
@@ -194,29 +194,29 @@ func TestPlace_Keep_TransientNotReadyDoesNotMove(t *testing.T) {
 func TestPlace_Keep_MissingTenantEntryPatchesAndClaims(t *testing.T) {
 	in := testInputs()
 	in.Cells = []CellCandidate{readyCell("cell-a")}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(3)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Placement.Generation != 3 || status.Placement.Cell != "cell-a" {
 		t.Errorf("a missing tenant entry must not move a tenant: %+v", status.Placement)
 	}
-	if len(out.CellClaims) != 1 || out.CellClaims[0].Name != "cell-a" || out.CellClaims[0].Tenant != team.Name {
-		t.Fatalf("expected a claim on cell-a for %s, got %+v", team.Name, out.CellClaims)
+	if len(out.CellClaims) != 1 || out.CellClaims[0].Name != "cell-a" || out.CellClaims[0].Tenant != tenant.Name {
+		t.Fatalf("expected a claim on cell-a for %s, got %+v", tenant.Name, out.CellClaims)
 	}
 	if len(out.CellPatches) != 1 || out.CellPatches[0].Name != "cell-a" {
 		t.Fatalf("expected one tenant patch on cell-a, got %+v", out.CellPatches)
 	}
-	if !containsString(out.CellPatches[0].Tenants, team.Name) {
-		t.Errorf("the tenant patch must add %s: %+v", team.Name, out.CellPatches[0].Tenants)
+	if !containsString(out.CellPatches[0].Tenants, tenant.Name) {
+		t.Errorf("the tenant patch must add %s: %+v", tenant.Name, out.CellPatches[0].Tenants)
 	}
 
 	// A cell that already lists the tenant needs no patch and no claim.
-	in.Cells = []CellCandidate{readyCell("cell-a", team.Name)}
-	out, err = Place(context.Background(), in, team, placedStatus(3))
+	in.Cells = []CellCandidate{readyCell("cell-a", tenant.Name)}
+	out, err = Place(context.Background(), in, tenant, placedStatus(3))
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -231,10 +231,10 @@ func TestPlace_Keep_EvacuatingCellMoves(t *testing.T) {
 	evacuating.Evacuate = true
 	fresh := readyCell("cell-b")
 	in.Cells = []CellCandidate{evacuating, fresh}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(3)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -257,11 +257,11 @@ func TestPlace_Selection_SingleTenantPool(t *testing.T) {
 	occupied := poolCell("cell-a", "solo", "other-team")
 	empty := poolCell("cell-b", "solo")
 	in.Cells = []CellCandidate{occupied, empty}
-	team := testTeam()
-	team.Spec.Pipelines.CellPool = "solo"
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	tenant.Spec.Pipelines.CellPool = "solo"
+	status := &v1alpha1.TenantStatus{}
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -282,11 +282,11 @@ func TestPlace_Selection_CellOfAnotherPoolNeverChosen(t *testing.T) {
 		{Name: "big", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 10},
 	}
 	in.Cells = []CellCandidate{poolCell("cell-a", "big")}
-	team := testTeam()
-	team.Spec.Pipelines.CellPool = "small"
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	tenant.Spec.Pipelines.CellPool = "small"
+	status := &v1alpha1.TenantStatus{}
 
-	_, err := Place(context.Background(), in, team, status)
+	_, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -305,10 +305,10 @@ func TestPlace_Selection_UnownedCellServesUnpooledTenant(t *testing.T) {
 	in := testInputs()
 	in.Pools = []CellPoolSummary{{Name: "jenkins-lts", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 10}}
 	in.Cells = []CellCandidate{readyCell("cell-hand")}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Placement == nil || status.Placement.Cell != "cell-hand" {
@@ -322,15 +322,15 @@ func TestPlace_Selection_UnownedCellServesUnpooledTenant(t *testing.T) {
 func TestPlace_Refusal_CellPoolNotFound(t *testing.T) {
 	in := testInputs()
 	in.Cells = []CellCandidate{readyCell("cell-a", "payments")}
-	team := testTeam()
-	team.Spec.Pipelines.CellPool = "nope"
+	tenant := testTenant()
+	tenant.Spec.Pipelines.CellPool = "nope"
 	status := placedStatus(3)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonCellPoolNotFound {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonCellPoolNotFound {
 		t.Fatalf("expected CellPoolNotFound, got %+v", cond)
 	}
 	if status.Placement == nil || status.Placement.Generation != 3 {
@@ -344,15 +344,15 @@ func TestPlace_Refusal_CellPoolNotFound(t *testing.T) {
 func TestPlace_Refusal_CellPoolServesAnotherProfile(t *testing.T) {
 	in := testInputs()
 	in.Pools = []CellPoolSummary{{Name: "big", ProfileRef: "jenkins-lts-old", MaxTenantsPerCell: 10}}
-	team := testTeam()
-	team.Spec.Pipelines.CellPool = "big"
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	tenant.Spec.Pipelines.CellPool = "big"
+	status := &v1alpha1.TenantStatus{}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonCellPoolNotFound {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonCellPoolNotFound {
 		t.Fatalf("expected CellPoolNotFound, got %+v", cond)
 	}
 	if !strings.Contains(cond.Message, "jenkins-lts-old") {
@@ -365,14 +365,14 @@ func TestPlace_Refusal_CellPoolServesAnotherProfile(t *testing.T) {
 // it within one tick, so the tenant reports AwaitingCell.
 func TestPlace_AwaitingCell_DefaultPoolNotCreatedYet(t *testing.T) {
 	in := testInputs()
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonAwaitingCell {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonAwaitingCell {
 		t.Fatalf("expected AwaitingCell, got %+v", cond)
 	}
 }
@@ -384,14 +384,14 @@ func TestPlace_CellCapReached(t *testing.T) {
 		Name: "jenkins-lts", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 1, CapReached: true,
 	}}
 	in.Cells = []CellCandidate{poolCell("cell-a", "jenkins-lts", "other-team")}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonCellCapReached {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonCellCapReached {
 		t.Fatalf("expected CellCapReached, got %+v", cond)
 	}
 	if status.Placement != nil {
@@ -406,10 +406,10 @@ func TestPlace_DeletedPoolKeepsPlacement(t *testing.T) {
 	in := testInputs()
 	bound := poolCell("cell-a", "gone", "payments")
 	in.Cells = []CellCandidate{bound}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(3)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Placement == nil || status.Placement.Generation != 3 {
@@ -432,15 +432,15 @@ func TestPlace_ChangingCellPoolIsVoluntary(t *testing.T) {
 	bound := poolCell("cell-a", "small", "payments")
 	bound.AppliedTenants = []string{"payments"}
 	in.Cells = []CellCandidate{bound, poolCell("cell-b", "big")}
-	team := testTeam()
-	team.Spec.Pipelines.CellPool = "big"
+	tenant := testTenant()
+	tenant.Spec.Pipelines.CellPool = "big"
 	status := placedStatus(3)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonTenantMoving {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonTenantMoving {
 		t.Fatalf("expected TenantMoving, got %+v", cond)
 	}
 	if status.Placement.Generation != 3 {
@@ -455,11 +455,11 @@ func TestPlace_Capacity_PoolCapAppliesToZeroMaxTenants(t *testing.T) {
 	in.Pools = []CellPoolSummary{{Name: "small", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 2}}
 	full := poolCell("cell-a", "small", "t1", "t2")
 	in.Cells = []CellCandidate{full}
-	team := testTeam()
-	team.Spec.Pipelines.CellPool = "small"
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	tenant.Spec.Pipelines.CellPool = "small"
+	status := &v1alpha1.TenantStatus{}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Placement != nil {
@@ -474,10 +474,10 @@ func TestPlace_Capacity_DeletedPoolFallsBackToChartValue(t *testing.T) {
 	in.MaxTenantsDefault = 3
 	orphan := poolCell("cell-a", "gone", "t1", "t2")
 	in.Cells = []CellCandidate{orphan}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Placement == nil || status.Placement.Cell != "cell-a" {
@@ -490,15 +490,15 @@ func TestPlace_Selection_FullCellNotChosen(t *testing.T) {
 	full := readyCell("cell-a", "t1", "t2")
 	full.MaxTenants = 2
 	in.Cells = []CellCandidate{full}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	_, err := Place(context.Background(), in, team, status)
+	_, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonAwaitingCell {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonAwaitingCell {
 		t.Errorf("expected AwaitingCell, got %+v", cond)
 	}
 	if status.Placement != nil {
@@ -511,10 +511,10 @@ func TestPlace_Selection_DeterministicTie(t *testing.T) {
 	b := readyCell("cell-b")
 	a := readyCell("cell-a")
 	in.Cells = []CellCandidate{b, a}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	_, err := Place(context.Background(), in, team, status)
+	_, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -531,10 +531,10 @@ func TestPlace_InvoluntaryMove_PlacementBeforeCellPatches(t *testing.T) {
 	evacuating.Evacuate = true
 	fresh := readyCell("cell-b")
 	in.Cells = []CellCandidate{evacuating, fresh}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(1)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -572,11 +572,11 @@ func TestPlace_VoluntaryMove_BusyFolderWaits(t *testing.T) {
 	mismatched.AppliedTenants = []string{"payments"} // still applying the old state
 	other := readyCell("cell-b")
 	in.Cells = []CellCandidate{mismatched, other}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(1)
 
 	// Tick 1: enter TenantMoving.
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -584,7 +584,7 @@ func TestPlace_VoluntaryMove_BusyFolderWaits(t *testing.T) {
 		t.Fatalf("the placement must not change on the tick that starts draining: %+v", status.Placement)
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonTenantMoving {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonTenantMoving {
 		t.Fatalf("expected TenantMoving, got %+v", cond)
 	}
 	if len(out.CellPatches) != 0 {
@@ -592,7 +592,7 @@ func TestPlace_VoluntaryMove_BusyFolderWaits(t *testing.T) {
 	}
 
 	// Tick 2: still applying the old state (busy folder) — keep waiting.
-	out, err = Place(context.Background(), in, team, status)
+	out, err = Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -612,15 +612,15 @@ func TestPlace_VoluntaryMove_DrainedCompletes(t *testing.T) {
 	// deletion for its folder: the drain has completed.
 	other := readyCell("cell-b")
 	in.Cells = []CellCandidate{mismatched, other}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(1)
 	// Simulate tick 1 having already set TenantMoving.
-	status.Conditions = []v1alpha1.TeamCondition{{
-		Type: v1alpha1.TeamConditionPlaced, Status: metav1.ConditionFalse,
-		Reason: v1alpha1.TeamReasonTenantMoving, Message: tenantMovingMessage,
+	status.Conditions = []v1alpha1.TenantCondition{{
+		Type: v1alpha1.TenantConditionPlaced, Status: metav1.ConditionFalse,
+		Reason: v1alpha1.TenantReasonTenantMoving, Message: tenantMovingMessage,
 	}}
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -639,14 +639,14 @@ func TestPlace_VoluntaryMove_PendingDeletionWaits(t *testing.T) {
 	mismatched.PendingDeletionPaths = []string{"payments/api"}
 	other := readyCell("cell-b")
 	in.Cells = []CellCandidate{mismatched, other}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(1)
-	status.Conditions = []v1alpha1.TeamCondition{{
-		Type: v1alpha1.TeamConditionPlaced, Status: metav1.ConditionFalse,
-		Reason: v1alpha1.TeamReasonTenantMoving, Message: tenantMovingMessage,
+	status.Conditions = []v1alpha1.TenantCondition{{
+		Type: v1alpha1.TenantConditionPlaced, Status: metav1.ConditionFalse,
+		Reason: v1alpha1.TenantReasonTenantMoving, Message: tenantMovingMessage,
 	}}
 
-	_, err := Place(context.Background(), in, team, status)
+	_, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -662,12 +662,12 @@ func TestPlace_Teardown_HeldBeforeApply(t *testing.T) {
 	cell := readyCell("cell-a", "payments")
 	cell.AppliedTenants = []string{"payments"}
 	in.Cells = []CellCandidate{cell}
-	team := testTeam()
-	team.Spec.Pipelines = nil
-	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+	tenant := testTenant()
+	tenant.Spec.Pipelines = nil
+	tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
 	status := placedStatus(1)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -678,7 +678,7 @@ func TestPlace_Teardown_HeldBeforeApply(t *testing.T) {
 		t.Error("the finalizer must not release before the cell applies")
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonTenantTeardownPending {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonTenantTeardownPending {
 		t.Errorf("expected TenantTeardownPending, got %+v", cond)
 	}
 	if len(out.CellPatches) != 1 || len(out.CellPatches[0].Tenants) != 0 {
@@ -691,12 +691,12 @@ func TestPlace_Teardown_DeferredDeletionHolds(t *testing.T) {
 	cell := readyCell("cell-a", "payments")
 	cell.PendingDeletionPaths = []string{"payments"}
 	in.Cells = []CellCandidate{cell}
-	team := testTeam()
-	team.Spec.Pipelines = nil
-	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+	tenant := testTenant()
+	tenant.Spec.Pipelines = nil
+	tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
 	status := placedStatus(1)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -711,12 +711,12 @@ func TestPlace_Teardown_DeferredDeletionHolds(t *testing.T) {
 func TestPlace_Teardown_ReleasesOnceDrainedAndPurged(t *testing.T) {
 	in := testInputs()
 	in.Cells = []CellCandidate{readyCell("cell-a")} // no longer applying the tenant
-	team := testTeam()
-	team.Spec.Pipelines = nil
-	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+	tenant := testTenant()
+	tenant.Spec.Pipelines = nil
+	tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
 	status := placedStatus(1)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -737,12 +737,12 @@ func TestPlace_Teardown_ReleasesOnceDrainedAndPurged(t *testing.T) {
 func TestPlace_Teardown_AbsentCellCompletesAtOnce(t *testing.T) {
 	in := testInputs()
 	in.Cells = nil // the owning Controller no longer exists
-	team := testTeam()
-	team.Spec.Pipelines = nil
-	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+	tenant := testTenant()
+	tenant.Spec.Pipelines = nil
+	tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
 	status := placedStatus(1)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -755,15 +755,15 @@ func TestPlace_Teardown_AbsentCellCompletesAtOnce(t *testing.T) {
 }
 
 func TestPlace_Teardown_NoFinalizerReleaseWhenAbsent(t *testing.T) {
-	// A never-placed Team with no finalizer and no placement: teardown is a
+	// A never-placed Tenant with no finalizer and no placement: teardown is a
 	// no-op, and Place must not ask the caller to release a finalizer that
 	// was never added.
 	in := testInputs()
-	team := testTeam()
-	team.Spec.Pipelines = nil
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	tenant.Spec.Pipelines = nil
+	status := &v1alpha1.TenantStatus{}
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -775,15 +775,15 @@ func TestPlace_Teardown_NoFinalizerReleaseWhenAbsent(t *testing.T) {
 func TestPlace_Teardown_BoundedWaitCompletes(t *testing.T) {
 	cell := readyCell("cell-a", "payments")
 	cell.AppliedTenants = []string{"payments"} // never confirms the drain
-	team := testTeam()
-	team.Spec.Pipelines = nil
-	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+	tenant := testTenant()
+	tenant.Spec.Pipelines = nil
+	tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
 	status := placedStatus(1)
 
 	in := testInputs()
 	in.Cells = []CellCandidate{cell}
 	in.Now = fixedClock(fixedNow)
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Placement == nil {
@@ -791,7 +791,7 @@ func TestPlace_Teardown_BoundedWaitCompletes(t *testing.T) {
 	}
 
 	in.Now = fixedClock(fixedNow.Add(11 * time.Minute))
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -812,27 +812,27 @@ func TestPlace_Teardown_AgentPodsHoldStageTwo(t *testing.T) {
 		{"absent cell", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			team := testTeam()
-			team.Spec.Pipelines = nil
-			team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+			tenant := testTenant()
+			tenant.Spec.Pipelines = nil
+			tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
 			status := placedStatus(1)
 
 			in := testInputs()
 			in.Cells = tc.cells
 			in.AgentPodsPending = true
-			out, err := Place(context.Background(), in, team, status)
+			out, err := Place(context.Background(), in, tenant, status)
 			if err != nil {
 				t.Fatalf("Place returned error: %v", err)
 			}
 			if out.FinalizerRelease || status.Placement == nil || status.Pipelines == nil {
 				t.Fatalf("a remaining agent pod must hold stage two, got release=%v status=%+v", out.FinalizerRelease, status)
 			}
-			if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TeamReasonTenantTeardownPending {
+			if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TenantReasonTenantTeardownPending {
 				t.Fatalf("Placed = %+v, want TenantTeardownPending", cond)
 			}
 
 			in.AgentPodsPending = false
-			out, err = Place(context.Background(), in, team, status)
+			out, err = Place(context.Background(), in, tenant, status)
 			if err != nil {
 				t.Fatalf("Place returned error: %v", err)
 			}
@@ -844,16 +844,16 @@ func TestPlace_Teardown_AgentPodsHoldStageTwo(t *testing.T) {
 }
 
 func TestPlace_Teardown_BoundedWaitEscapesAgentPods(t *testing.T) {
-	team := testTeam()
-	team.Spec.Pipelines = nil
-	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+	tenant := testTenant()
+	tenant.Spec.Pipelines = nil
+	tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
 	status := placedStatus(1)
 
 	in := testInputs()
 	in.Cells = nil
 	in.AgentPodsPending = true
 	in.Now = fixedClock(fixedNow)
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Placement == nil {
@@ -861,7 +861,7 @@ func TestPlace_Teardown_BoundedWaitEscapesAgentPods(t *testing.T) {
 	}
 
 	in.Now = fixedClock(fixedNow.Add(11 * time.Minute))
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -871,9 +871,9 @@ func TestPlace_Teardown_BoundedWaitEscapesAgentPods(t *testing.T) {
 }
 
 func TestPlace_Teardown_PurgeFailureHoldsThenGivesUp(t *testing.T) {
-	team := testTeam()
-	team.Spec.Pipelines = nil
-	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+	tenant := testTenant()
+	tenant.Spec.Pipelines = nil
+	tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
 	status := placedStatus(1)
 
 	in := testInputs()
@@ -883,7 +883,7 @@ func TestPlace_Teardown_PurgeFailureHoldsThenGivesUp(t *testing.T) {
 	var out Outcome
 	var err error
 	for i := 0; i < 9; i++ {
-		out, err = Place(context.Background(), in, team, status)
+		out, err = Place(context.Background(), in, tenant, status)
 		if err != nil {
 			t.Fatalf("Place returned error on attempt %d: %v", i+1, err)
 		}
@@ -894,12 +894,12 @@ func TestPlace_Teardown_PurgeFailureHoldsThenGivesUp(t *testing.T) {
 			t.Fatalf("attempt %d: purgeAttempts = %+v, want %d", i+1, status.Pipelines, i+1)
 		}
 		cond := condition(status)
-		if cond == nil || cond.Reason != v1alpha1.TeamReasonTenantTeardownPending {
+		if cond == nil || cond.Reason != v1alpha1.TenantReasonTenantTeardownPending {
 			t.Fatalf("attempt %d: expected TenantTeardownPending, got %+v", i+1, cond)
 		}
 	}
 
-	out, err = Place(context.Background(), in, team, status)
+	out, err = Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error on the tenth attempt: %v", err)
 	}
@@ -921,16 +921,16 @@ func TestPlace_Teardown_PurgeFailureHoldsThenGivesUp(t *testing.T) {
 }
 
 func TestPlace_Teardown_DoesNotHoldWhenControllerAbsent(t *testing.T) {
-	team := testTeam()
-	team.Spec.Pipelines = nil
-	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+	tenant := testTenant()
+	tenant.Spec.Pipelines = nil
+	tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
 	status := placedStatus(1)
 
 	in := testInputs()
 	in.Cells = nil // the owning Controller is gone
 	in.RequestPurge = failingPurge()
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -940,14 +940,14 @@ func TestPlace_Teardown_DoesNotHoldWhenControllerAbsent(t *testing.T) {
 }
 
 // TestPlace_TeardownPurgeCarriesTheIncarnation asserts the teardown purge
-// names the Team object it tears down. The recorder compares that value
+// names the Tenant object it tears down. The recorder compares that value
 // with the one its placement row holds, so a purge that arrives after a
 // tenant of the same name is created again keeps the new row.
 func TestPlace_TeardownPurgeCarriesTheIncarnation(t *testing.T) {
-	team := testTeam()
-	team.UID = "uid-old"
-	team.Spec.Pipelines = nil
-	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+	tenant := testTenant()
+	tenant.UID = "uid-old"
+	tenant.Spec.Pipelines = nil
+	tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
 	status := placedStatus(1)
 
 	var captured PurgeRequest
@@ -958,7 +958,7 @@ func TestPlace_TeardownPurgeCarriesTheIncarnation(t *testing.T) {
 		return true, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if captured.Incarnation != "uid-old" {
@@ -967,11 +967,11 @@ func TestPlace_TeardownPurgeCarriesTheIncarnation(t *testing.T) {
 }
 
 // TestPlace_AnnounceCarriesTheIncarnation asserts the placement
-// announcement names the Team object it places. The recorder stores that
+// announcement names the Tenant object it places. The recorder stores that
 // value, and the teardown purge reads it.
 func TestPlace_AnnounceCarriesTheIncarnation(t *testing.T) {
-	team := testTeam()
-	team.UID = "uid-new"
+	tenant := testTenant()
+	tenant.UID = "uid-new"
 
 	var captured AnnounceRequest
 	in := testInputs()
@@ -981,8 +981,8 @@ func TestPlace_AnnounceCarriesTheIncarnation(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	status := &v1alpha1.TeamStatus{}
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	status := &v1alpha1.TenantStatus{}
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if captured.Incarnation != "uid-new" {
@@ -1005,10 +1005,10 @@ func TestPlace_Move_PurgeRequestCarriesOldGeneration(t *testing.T) {
 	evacuating.Evacuate = true
 	other := readyCell("cell-b")
 	in.Cells = []CellCandidate{evacuating, other}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(5)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if !called {
@@ -1020,8 +1020,8 @@ func TestPlace_Move_PurgeRequestCarriesOldGeneration(t *testing.T) {
 	if captured.Cell != "cell-a" || captured.CellNamespace != "cells-ns" {
 		t.Errorf("the purge must name the old cell and its namespace: %+v", captured)
 	}
-	if captured.TeamDeleted {
-		t.Errorf("a move purge must not report a deleted Team: %+v", captured)
+	if captured.TenantDeleted {
+		t.Errorf("a move purge must not report a deleted Tenant: %+v", captured)
 	}
 }
 
@@ -1032,10 +1032,10 @@ func TestPlace_Move_PurgeFailureDoesNotBlock(t *testing.T) {
 	evacuating.Evacuate = true
 	other := readyCell("cell-b")
 	in.Cells = []CellCandidate{evacuating, other}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(1)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -1065,11 +1065,11 @@ func TestPlace_Move_PurgeRetrySurvivesTransientCellNotReadyTick(t *testing.T) {
 	evacuating.Evacuate = true
 	cellB := readyCell("cell-b")
 	in.Cells = []CellCandidate{evacuating, cellB}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(1)
 
 	// Tick 1: the move fires and its purge fails.
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Placement.Cell != "cell-b" || status.Placement.Generation != 2 {
@@ -1085,10 +1085,10 @@ func TestPlace_Move_PurgeRetrySurvivesTransientCellNotReadyTick(t *testing.T) {
 	notReadyB := readyCell("cell-b")
 	notReadyB.CellReady = false
 	in.Cells = []CellCandidate{notReadyB}
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
-	if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TeamReasonCellNotReady {
+	if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TenantReasonCellNotReady {
 		t.Fatalf("expected the transient tick to overwrite the reason to CellNotReady, got %+v", cond)
 	}
 	if len(requests) != 2 {
@@ -1107,7 +1107,7 @@ func TestPlace_Move_PurgeRetrySurvivesTransientCellNotReadyTick(t *testing.T) {
 	// Tick 3: cell-b is ready again and the purge now succeeds.
 	purgeOK = true
 	in.Cells = []CellCandidate{cellB}
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if len(requests) != 3 {
@@ -1128,7 +1128,7 @@ func TestPlace_Move_PurgeRetrySurvivesTransientCellNotReadyTick(t *testing.T) {
 	// Tick 4: the pending purge is gone, so the tick asks for nothing. A
 	// clear the status patch never carries would repeat the completed
 	// purge on every tick that follows.
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if len(requests) != 3 {
@@ -1141,10 +1141,10 @@ func TestPlace_Move_PurgeRetrySurvivesTransientCellNotReadyTick(t *testing.T) {
 func TestPlace_CredentialsMintedOnceAndStable(t *testing.T) {
 	in := testInputs()
 	in.Cells = []CellCandidate{readyCell("cell-a")}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Pipelines == nil || len(status.Pipelines.WebhookToken) != 32 || len(status.Pipelines.WebhookSecret) != 64 {
@@ -1152,7 +1152,7 @@ func TestPlace_CredentialsMintedOnceAndStable(t *testing.T) {
 	}
 	token, secret := status.Pipelines.WebhookToken, status.Pipelines.WebhookSecret
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Pipelines.WebhookToken != token || status.Pipelines.WebhookSecret != secret {
@@ -1166,10 +1166,10 @@ func TestPlace_PlacementClusterWrittenTogether(t *testing.T) {
 	in := testInputs()
 	in.Cells = []CellCandidate{readyCell("cell-a")}
 	in.ClusterIdentity = "core"
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Placement == nil {
@@ -1185,10 +1185,10 @@ func TestPlace_PlacementClusterWrittenTogether(t *testing.T) {
 func TestPlace_FinalizerAddOnFirstPlacement(t *testing.T) {
 	in := testInputs()
 	in.Cells = []CellCandidate{readyCell("cell-a")}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -1199,10 +1199,10 @@ func TestPlace_FinalizerAddOnFirstPlacement(t *testing.T) {
 
 func TestPlace_NoFinalizerAddWithoutPlacement(t *testing.T) {
 	in := testInputs()
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
@@ -1211,25 +1211,25 @@ func TestPlace_NoFinalizerAddWithoutPlacement(t *testing.T) {
 	}
 }
 
-// --- unaffected Team (tenant-model spec scenario) ---
+// --- unaffected Tenant (tenant-model spec scenario) ---
 
 func TestPlace_NoPipelinesIsUnaffected(t *testing.T) {
 	in := testInputs()
-	team := &v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "plain"}}
-	status := &v1alpha1.TeamStatus{}
+	tenant := &v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "plain"}}
+	status := &v1alpha1.TenantStatus{}
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Placement != nil || status.Pipelines != nil {
-		t.Errorf("a Team with no pipelines must stay untouched: %+v", status)
+		t.Errorf("a Tenant with no pipelines must stay untouched: %+v", status)
 	}
 	if condition(status) != nil {
-		t.Error("a Team with no pipelines must get no Placed condition")
+		t.Error("a Tenant with no pipelines must get no Placed condition")
 	}
 	if out.FinalizerAdd || out.FinalizerRelease {
-		t.Error("a Team with no pipelines must never touch the finalizer")
+		t.Error("a Tenant with no pipelines must never touch the finalizer")
 	}
 }
 
@@ -1244,11 +1244,11 @@ func TestPlace_Move_PurgeRetrySurvivesARefusalGate(t *testing.T) {
 	evacuating := readyCell("cell-a")
 	evacuating.Evacuate = true
 	in.Cells = []CellCandidate{evacuating, readyCell("cell-b")}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(1)
 
 	// Tick 1: the move fires and its purge fails.
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Pipelines == nil || status.Pipelines.PendingPurgeGeneration == nil {
@@ -1258,10 +1258,10 @@ func TestPlace_Move_PurgeRetrySurvivesARefusalGate(t *testing.T) {
 	// Tick 2: the profile is gone, so a refusal gate fires. The purge
 	// retry must still run.
 	in.ProfileExists = func(string) bool { return false }
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
-	if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TeamReasonProfileNotFound {
+	if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TenantReasonProfileNotFound {
 		t.Fatalf("expected ProfileNotFound, got %+v", cond)
 	}
 	if len(requests) != 2 || requests[1].OldGeneration != 1 {
@@ -1270,7 +1270,7 @@ func TestPlace_Move_PurgeRetrySurvivesARefusalGate(t *testing.T) {
 
 	// Tick 3: the purge succeeds and the pending generation clears.
 	purgeOK = true
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Pipelines.PendingPurgeGeneration != nil {
@@ -1301,9 +1301,9 @@ func TestPlace_Reannounce_StampsConfirmation(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(1)
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if len(got.DeadInstances) != 1 {
@@ -1339,9 +1339,9 @@ func TestPlace_Move_StampsNoConfirmation(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(1)
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if len(got.DeadInstances) != 1 {

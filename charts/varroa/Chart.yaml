@@ -15,7 +15,7 @@ keywords:
   - ci-cd
   - observability
 maintainers:
-  - name: Varroa Team
+  - name: Varroa Tenant
 dependencies:
   - name: nats
     version: "1.2.0"

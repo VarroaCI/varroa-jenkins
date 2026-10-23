@@ -17,7 +17,7 @@ import (
 const CellClaimTTL = 10 * time.Minute
 
 // WriteCellClaim records tenant's claim on a cell. The placement pass calls
-// it before it writes the Team fence.
+// it before it writes the Tenant fence.
 //
 // The claim closes this interleaving: the pool drain lists a cell as free,
 // reads no fence, and re-reads the cell; the placement pass then writes the

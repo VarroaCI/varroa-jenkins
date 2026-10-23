@@ -7,11 +7,11 @@ import { createPipelineSummary } from "../test/factories";
 import type { TenantScope } from "../types/auth";
 import TenantScopeEditor from "./TenantScopeEditor";
 
-const mockListTeams = vi.fn();
+const mockListTenants = vi.fn();
 const mockListPipelines = vi.fn();
 vi.mock("../api/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/client")>()),
-  listTeams: (...args: unknown[]) => mockListTeams(...args),
+  listTenants: (...args: unknown[]) => mockListTenants(...args),
   listPipelines: (...args: unknown[]) => mockListPipelines(...args),
 }));
 
@@ -37,9 +37,9 @@ function Harness({
 
 describe("TenantScopeEditor", () => {
   beforeEach(() => {
-    mockListTeams.mockReset();
+    mockListTenants.mockReset();
     mockListPipelines.mockReset();
-    mockListTeams.mockResolvedValue([{ name: "payments", namespaces: ["team-a"] }]);
+    mockListTenants.mockResolvedValue([{ name: "payments", namespaces: ["team-a"] }]);
     mockListPipelines.mockResolvedValue({
       items: [],
       runningNow: [],
@@ -48,13 +48,13 @@ describe("TenantScopeEditor", () => {
     });
   });
 
-  it("authors a tenant scope with a team name and a job pattern", async () => {
+  it("authors a tenant scope with a tenant name and a job pattern", async () => {
     const user = userEvent.setup();
     const onValue = vi.fn();
     renderWithProviders(<Harness onValue={onValue} />);
 
     await user.click(screen.getByRole("button", { name: "+ Add tenant" }));
-    await user.type(screen.getByLabelText("Team"), "payments");
+    await user.type(screen.getByLabelText("Tenant"), "payments");
     await user.click(screen.getByRole("button", { name: "+ Narrow to job patterns" }));
     await user.click(screen.getByRole("button", { name: "+ Add pattern" }));
     await user.type(screen.getByLabelText("Job pattern 1 for entry 1"), "release/*");
@@ -64,18 +64,18 @@ describe("TenantScopeEditor", () => {
     });
   });
 
-  it("accepts a team name the list does not hold", async () => {
+  it("accepts a tenant name the list does not hold", async () => {
     const user = userEvent.setup();
     const onValue = vi.fn();
     renderWithProviders(<Harness onValue={onValue} />);
 
     await user.click(screen.getByRole("button", { name: "+ Add tenant" }));
-    await user.type(screen.getByLabelText("Team"), "not-yet-created");
+    await user.type(screen.getByLabelText("Tenant"), "not-yet-created");
 
     await waitFor(() => {
       expect(onValue).toHaveBeenLastCalledWith([{ name: "not-yet-created" }]);
     });
-    expect(screen.queryByText(/must name a team/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/must name a tenant/)).not.toBeInTheDocument();
   });
 
   it("refuses an absolute pattern and names the folder-relative rule", async () => {

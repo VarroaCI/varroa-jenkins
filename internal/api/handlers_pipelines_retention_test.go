@@ -30,7 +30,7 @@ func TestHandleListPipelines_ReportsRetention(t *testing.T) {
 
 	srv := pipelinesTestServer(client, authz, reader, nil)
 	srv.deps.RecordStoreRunRetention = 365 * day
-	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"team": "ctrl-a"})
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"tenant": "ctrl-a"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}

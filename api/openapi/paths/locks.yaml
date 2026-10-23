@@ -1,6 +1,6 @@
 # locks: the fleet-wide read over the record store's varroa.fleet_locks
 # table, and the operator force release of a releasing lock. Both routes are
-# cluster-wide, like /cellpools: they name no team and no namespace segment.
+# cluster-wide, like /cellpools: they name no tenant and no namespace segment.
 /api/v1/locks:
   get:
     operationId: listAllFleetLocks

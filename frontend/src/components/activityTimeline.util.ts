@@ -230,9 +230,9 @@ export function passesLane(
   return lane === "All" || laneFor(e) === lane;
 }
 
-/** isAgentRow is the one predicate for an agent row: an assistant or team agent source, or an agent actor. */
+/** isAgentRow is the one predicate for an agent row: an assistant or tenant agent source, or an agent actor. */
 export function isAgentRow(e: ActivityEvent): boolean {
-  return e.source === "assistant" || e.source === "team_agent" || (e.actor ?? "").startsWith("agent:");
+  return e.source === "assistant" || e.source === "tenant_agent" || (e.actor ?? "").startsWith("agent:");
 }
 
 export function passesSource(
@@ -251,7 +251,7 @@ export const ACTIVITY_TYPE_MAP: Record<string, { icon: string; style: string }> 
   "fleetlock.wait_exceeded": { icon: "◷", style: "softWarn" },
   "cell.signature_refused": { icon: "⊘", style: "softBad" },
   "tenant.placement_moved": { icon: "⇄", style: "softInfo" },
-  "teamagent.run_requested": { icon: "▶", style: "softInfo" },
+  "tenantagent.run_requested": { icon: "▶", style: "softInfo" },
   "pipeline.proposal.opened": { icon: "⇪", style: "softOk" },
   connected: { icon: "⇡", style: "softInfo" },
   disconnected: { icon: "⇣", style: "softBad" },
@@ -408,7 +408,7 @@ export const SOURCE_COLORS: Record<string, string> = {
   jenkins: "var(--warn-soft)",
   mcp: "var(--honey-soft)",
   assistant: "var(--idle-soft)",
-  team_agent: "var(--idle-soft)",
+  tenant_agent: "var(--idle-soft)",
 };
 
 export const SOURCE_LABELS: Record<string, string> = {
@@ -418,7 +418,7 @@ export const SOURCE_LABELS: Record<string, string> = {
   jenkins: "Jenkins",
   mcp: "MCP",
   assistant: "Assistant",
-  team_agent: "Team agent",
+  tenant_agent: "Tenant agent",
 };
 
 // age renders a relative timestamp. The "heartbeat" variant reports cluster

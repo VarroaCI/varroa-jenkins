@@ -17,7 +17,7 @@ type RunnerContribution struct {
 	Nodes []any
 	// Credentials is one SYSTEM-scope global credential (design D5) per
 	// delivered ssh runner placed on this cell. Filled in once the SSH
-	// credential Secret projection reads the Team's agent namespace.
+	// credential Secret projection reads the Tenant's agent namespace.
 	Credentials []any
 	// EgressPeers is one resolved network destination per delivered ssh
 	// runner placed on this cell, for the cell NetworkPolicy egress builder
@@ -33,8 +33,8 @@ type RunnerEgressPeer struct {
 	Port int
 }
 
-// BuildContribution reads every Runner and Team through backend on every
-// call, keeps the runners whose owning Team is placed on cell, applies the
+// BuildContribution reads every Runner and Tenant through backend on every
+// call, keeps the runners whose owning Tenant is placed on cell, applies the
 // same delivery rule the Runner ticker's tick steps 4 to 6 apply, and
 // renders the delivered set through the shared renderer this package owns.
 //
@@ -45,24 +45,24 @@ type RunnerEgressPeer struct {
 // deleted or moved runner is simply absent from the next call's read, so
 // its node disappears with no bookkeeping.
 func BuildContribution(ctx context.Context, backend crdstore.Backend, secrets SecretReader, cell *v1alpha1.Controller) (RunnerContribution, error) {
-	teams, err := crdstore.List[v1alpha1.Team](ctx, backend, "", "")
+	tenants, err := crdstore.List[v1alpha1.Tenant](ctx, backend, "", "")
 	if err != nil {
-		return RunnerContribution{}, fmt.Errorf("runners: list teams: %w", err)
+		return RunnerContribution{}, fmt.Errorf("runners: list tenants: %w", err)
 	}
 	runnerList, err := crdstore.List[v1alpha1.Runner](ctx, backend, "", "")
 	if err != nil {
 		return RunnerContribution{}, fmt.Errorf("runners: list runners: %w", err)
 	}
 
-	teamsByName := make(map[string]*v1alpha1.Team, len(teams))
-	for _, t := range teams {
-		teamsByName[t.Name] = t
+	tenantsByName := make(map[string]*v1alpha1.Tenant, len(tenants))
+	for _, t := range tenants {
+		tenantsByName[t.Name] = t
 	}
 
 	var contrib RunnerContribution
 	for _, runner := range runnerList {
-		team := teamsByName[runner.Spec.Team]
-		eval := evaluateRunner(runner, team)
+		tenant := tenantsByName[runner.Spec.Tenant]
+		eval := evaluateRunner(runner, tenant)
 		if !eval.Delivered {
 			continue
 		}
@@ -73,8 +73,8 @@ func BuildContribution(ctx context.Context, backend crdstore.Backend, secrets Se
 			// Tick step 7: an ssh runner whose credential is missing or
 			// malformed gets no node, no credential, and no egress peer.
 			agentNamespace := ""
-			if team != nil && team.Spec.Pipelines != nil {
-				agentNamespace = team.Spec.Pipelines.AgentNamespace
+			if tenant != nil && tenant.Spec.Pipelines != nil {
+				agentNamespace = tenant.Spec.Pipelines.AgentNamespace
 			}
 			cred, fault := readCredential(ctx, secrets, runner, agentNamespace)
 			if fault != nil {

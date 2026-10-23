@@ -172,7 +172,7 @@ public class VarroaRunSourceTest {
 
     @Test
     public void aFolderLibraryShadowsAGlobalOfTheSameNameForAnUntrustedRecord() throws Exception {
-        Folder folder = j.jenkins.createProject(Folder.class, "team");
+        Folder folder = j.jenkins.createProject(Folder.class, "tenant");
         folder.addProperty(new FolderLibraries("shared-lib", "https://github.com/folder/shared-lib"));
         WorkflowJob job = folder.createProject(WorkflowJob.class, "library-run");
         job.setDefinition(new SourceFactsFlowDefinition("echo 'hi'", false, "shared-lib", false));
@@ -445,7 +445,7 @@ public class VarroaRunSourceTest {
     public void anInlineRunSkipsALibraryCheckoutForItsScmFacts() throws Exception {
         String[] library = newRepository("library-repo");
         String[] app = newRepository("app-repo");
-        Folder folder = j.jenkins.createProject(Folder.class, "inline-team");
+        Folder folder = j.jenkins.createProject(Folder.class, "inline-tenant");
         folder.addProperty(new FolderLibraries("shared-lib", library[0]));
         WorkflowJob job = folder.createProject(WorkflowJob.class, "inline-run");
         job.setDefinition(new SourceFactsFlowDefinition("node {\n"
@@ -618,7 +618,7 @@ public class VarroaRunSourceTest {
     public void aLibraryChangeIsNotTheCompletedRevision() throws Exception {
         String[] library = newRepository("library-repo");
         String[] app = newRepository("app-repo");
-        Folder folder = j.jenkins.createProject(Folder.class, "library-complete-team");
+        Folder folder = j.jenkins.createProject(Folder.class, "library-complete-tenant");
         folder.addProperty(new FolderLibraries("shared-lib", library[0]));
         WorkflowJob job = folder.createProject(WorkflowJob.class, "library-complete-run");
         job.setDefinition(new SourceFactsFlowDefinition("node {\n"

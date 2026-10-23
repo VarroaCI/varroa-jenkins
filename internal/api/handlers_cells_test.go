@@ -562,7 +562,7 @@ func TestCellGrantsMemberRolesNotCapped(t *testing.T) {
 		extra = append(extra, &v1alpha1.VarroaRoleBinding{
 			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("wide-%03d", i)},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
-				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: fmt.Sprintf("team-%03d", i)}},
+				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: fmt.Sprintf("tenant-%03d", i)}},
 				RoleRef:  "pipelines-developer",
 			},
 		})

@@ -31,7 +31,7 @@ func TestMigration00038AgentTables(t *testing.T) {
 		SELECT count(*) FROM pg_indexes
 		WHERE schemaname = 'varroa' AND indexname = ANY($1)`,
 		[]string{
-			"agent_sessions_principal_started_idx", "agent_sessions_team_started_idx",
+			"agent_sessions_principal_started_idx", "agent_sessions_tenant_started_idx",
 			"agent_sessions_lease_idx", "agent_approvals_session_idx",
 			"agent_approvals_pending_idx", "agent_approvals_target_idx",
 		},

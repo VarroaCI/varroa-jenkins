@@ -1,6 +1,6 @@
 # Tenant Pod Templates
 
-A pipelines tenant on a cell gets the operator's `<team>-default` pod template. The tenant bundle
+A pipelines tenant on a cell gets the operator's `<tenant>-default` pod template. The tenant bundle
 can add more pod templates. Read [Cells and pipelines tenants](cells.md) first.
 
 ## Where the templates come from
@@ -8,7 +8,7 @@ can add more pod templates. Read [Cells and pipelines tenants](cells.md) first.
 A tenant bundle composes `podtemplate` catalog items, or declares a kubernetes cloud in a `jcasc`
 item. The operator reads the `templates` list of every kubernetes cloud in the tenant's
 `jenkins.yaml`, in bundle order. It puts each template on the tenant's own cloud, after
-`<team>-default`. Every member cell of the tenant, active or standby, renders the same templates.
+`<tenant>-default`. Every member cell of the tenant, active or standby, renders the same templates.
 A draining tenant keeps its templates, so a build that still runs can get its agent.
 
 ## What the operator writes
@@ -17,10 +17,10 @@ The operator writes four keys on each template:
 
 | Key | Value |
 |---|---|
-| `name` | `<team>-<name>` |
+| `name` | `<tenant>-<name>` |
 | `namespace` | the tenant's `spec.pipelines.agentNamespace` |
-| `serviceAccount` | `varroa-agent-<team>` |
-| `label` | `varroa-tenant-<team>`, then `<team>-<token>` for each token of the tenant's `label` |
+| `serviceAccount` | `varroa-agent-<tenant>` |
+| `label` | `varroa-tenant-<tenant>`, then `<tenant>-<token>` for each token of the tenant's `label` |
 
 The tenant's own values of these four keys are not used. The operator drops a label token that
 starts with `varroa-tenant-`. It also drops a `labels` key and records no warning, because the
@@ -36,11 +36,11 @@ pipeline {
 }
 ```
 
-Do not use the label token `default`. It renders `<team>-default`, and the operator's own template
+Do not use the label token `default`. It renders `<tenant>-default`, and the operator's own template
 then answers that label.
 
 In `inheritFrom`, name a template by the name the bundle gives it. The operator changes that token
-to the `<team>-<name>` form. It keeps every other token as written.
+to the `<tenant>-<name>` form. It keeps every other token as written.
 
 ## Variables and skipped templates
 
@@ -55,7 +55,7 @@ template, and applies the others, when:
 5. `label` is present and is not a string;
 6. an earlier template of the tenant has the same `name`.
 
-Each skip adds a `PodTemplateSkipped` entry to the `Team`'s `TenantWarnings` condition. In a pod
+Each skip adds a `PodTemplateSkipped` entry to the `Tenant`'s `TenantWarnings` condition. In a pod
 `yaml`, write a shell variable as `$VAR`, not `${VAR}`.
 
 The operator ignores all other content of `jenkins.yaml`. It records one `BundleKeysIgnored`
@@ -72,7 +72,7 @@ it until a resume adopts it. These mechanisms delete such a pod:
 | The operator, for a pod that is not Running | Every case | About 4 minutes |
 | Kubernetes plugin garbage collection on the tenant cloud | A cell roll, a slot move, a standby promotion | About 41 minutes |
 | The operator, for a Running pod | An unschedulable slot holder, a removed slot, a plugin fault | About 46 minutes |
-| The operator, during teardown | A dropped `spec.pipelines` or a deleted `Team` | At once |
+| The operator, during teardown | A dropped `spec.pipelines` or a deleted `Tenant` | At once |
 | The operator, for the agent pods of a run that the mark ends | A run with replicated state | About 1 minute after the mark |
 | The operator, after it confirms a cell instance gone | A hard kill of a cell pod | About 1 to 4 minutes after the operator confirms the instance gone |
 | Graceful cell stop | Idle pod kept by `idleMinutes` | At stop |
@@ -83,9 +83,9 @@ build stores, because a resume can adopt it.
 A pod that is not Running never ran a build step, so no resume adopts it. A Running pod can hold
 a node that a late resume adopts, so it outlives the longest resume window.
 Every live cell instance refreshes the `kubernetes.jenkins.io/last-refresh` annotation on its own
-agent pods once a minute. The operator deletes only a pod that runs as `varroa-agent-<team>`,
+agent pods once a minute. The operator deletes only a pod that runs as `varroa-agent-<tenant>`,
 carries the `kubernetes.jenkins.io/controller` label, and carries a valid refresh annotation.
-Teardown keeps the `Team` finalizer until the tenant's agent pods are gone, or for ten minutes at
+Teardown keeps the `Tenant` finalizer until the tenant's agent pods are gone, or for ten minutes at
 most. Each check runs once a minute, and no timeout is configurable.
 
 ## Build a container image
@@ -129,9 +129,9 @@ namespace, so the cluster's own egress rules decide which registries the pod rea
 3. Store the file as a projected `secretFile` credential in the agent namespace:
 
    ```bash
-   kubectl -n team-payments create secret generic payments-registry --from-file=file=config.json
-   kubectl -n team-payments label secret payments-registry varroa.dev/tenant-credential=true
-   kubectl -n team-payments annotate secret payments-registry \
+   kubectl -n tenant-payments create secret generic payments-registry --from-file=file=config.json
+   kubectl -n tenant-payments label secret payments-registry varroa.dev/tenant-credential=true
+   kubectl -n tenant-payments annotate secret payments-registry \
      varroa.dev/credential-id=registry-push varroa.dev/credential-kind=secretFile \
      varroa.dev/credential-filename=config.json
    ```

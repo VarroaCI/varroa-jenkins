@@ -1,9 +1,9 @@
 // Package cells implements the pipelines-tenant placement pass (design D4 of
-// add-cell-controllers): the decision logic that binds a Team to a cell
+// add-cell-controllers): the decision logic that binds a Tenant to a cell
 // Controller. Place performs no Kubernetes write. It reads only the Inputs
-// and Team/TeamStatus values the caller hands it, and it names every write
+// and Tenant/TenantStatus values the caller hands it, and it names every write
 // the caller must apply through its return value and through the mutated
-// TeamStatus. The exceptions are PurgeFunc and Announcer, both NATS
+// TenantStatus. The exceptions are PurgeFunc and Announcer, both NATS
 // request-reply calls that are not a Kubernetes write (design D6, D7).
 package cells
 
@@ -117,12 +117,12 @@ type PurgeRequest struct {
 	// value with the one its placement row holds and keeps a row a newer
 	// tenant of the same name already owns.
 	Incarnation string
-	// TeamDeleted reports that the Team object is under deletion. The
+	// TenantDeleted reports that the Tenant object is under deletion. The
 	// recorder then retires Incarnation, so a late announcement of the
-	// deleted Team cannot restore the placement row. A teardown for a Team
-	// that only drops spec.pipelines leaves it false, because that Team
+	// deleted Tenant cannot restore the placement row. A teardown for a Tenant
+	// that only drops spec.pipelines leaves it false, because that Tenant
 	// keeps its uid. A move never sets it.
-	TeamDeleted bool
+	TenantDeleted bool
 }
 
 // PurgeFunc requests a tenant's job_schedules purge and reports whether the
@@ -130,7 +130,7 @@ type PurgeRequest struct {
 // call (bus.TenantPurgeSubject); a test injects a fake.
 type PurgeFunc func(ctx context.Context, req PurgeRequest) (bool, error)
 
-// Inputs carries every value Place needs beyond the Team itself: the cell
+// Inputs carries every value Place needs beyond the Tenant itself: the cell
 // listing, the profile presence test, the gate values, the managed-namespace
 // set, the clock, and the purge requester. The caller gathers all of it once
 // per tick; Place performs no Kubernetes read and no Kubernetes write.
@@ -247,7 +247,7 @@ type Inputs struct {
 }
 
 // CellPatch names one cell's new complete tenant list. The caller applies
-// each with PatchControllerCellStatus after the Team status patch succeeds
+// each with PatchControllerCellStatus after the Tenant status patch succeeds
 // (design D4's "one narrow writer" rule).
 type CellPatch struct {
 	Name      string
@@ -256,9 +256,9 @@ type CellPatch struct {
 }
 
 // CellClaim names the cell one tenant's new placement selected. The caller
-// writes it with WriteCellClaim before it patches the Team status, and
+// writes it with WriteCellClaim before it patches the Tenant status, and
 // retires it with ReleaseCellClaim after the tenant patch. The claim makes
-// the cell itself carry the intent the Team fence records, so a pool drain
+// the cell itself carry the intent the Tenant fence records, so a pool drain
 // cannot delete the chosen cell in the window between the two writes.
 type CellClaim struct {
 	Name      string
@@ -274,14 +274,14 @@ type ActivityEvent struct {
 }
 
 // Outcome names every write the caller must apply after Place returns, on
-// top of the TeamStatus Place already mutated in place.
+// top of the TenantStatus Place already mutated in place.
 type Outcome struct {
 	// CellPatches lists each affected cell's new tenant list.
 	CellPatches []CellPatch
 	// CellClaims names every cell this tenant needs held: the cell a new
 	// placement selected, and each member cell whose tenant list does not
 	// name the tenant yet. A cell leaves the list once its tenant patch
-	// has landed. The caller writes every entry before the Team status
+	// has landed. The caller writes every entry before the Tenant status
 	// patch, and retires each one only after that cell's own tenant patch
 	// succeeds.
 	//
@@ -293,8 +293,8 @@ type Outcome struct {
 	// ActivityEvents lists the events to publish.
 	ActivityEvents []ActivityEvent
 	// FinalizerAdd is true when the caller must add
-	// v1alpha1.TeamFinalizerTenantPlacement: a placement now exists and the
-	// Team does not carry the finalizer yet.
+	// v1alpha1.TenantFinalizerTenantPlacement: a placement now exists and the
+	// Tenant does not carry the finalizer yet.
 	FinalizerAdd bool
 	// FinalizerRelease is true when the caller must remove the finalizer:
 	// teardown has converged.
@@ -307,36 +307,36 @@ type Outcome struct {
 }
 
 // Place mutates status in place and returns the writes the caller must
-// still apply. It never patches the Team itself and it performs no
+// still apply. It never patches the Tenant itself and it performs no
 // Kubernetes write of its own.
-func Place(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus) (Outcome, error) {
-	if team == nil || status == nil {
-		return Outcome{}, fmt.Errorf("cells: Place needs a non-nil team and status")
+func Place(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus) (Outcome, error) {
+	if tenant == nil || status == nil {
+		return Outcome{}, fmt.Errorf("cells: Place needs a non-nil tenant and status")
 	}
 	now := in.Now
 	if now == nil {
 		now = time.Now
 	}
 	nowT := now()
-	hasFinalizer := containsString(team.Finalizers, v1alpha1.TeamFinalizerTenantPlacement)
-	beingDeleted := team.DeletionTimestamp != nil && !team.DeletionTimestamp.IsZero()
+	hasFinalizer := containsString(tenant.Finalizers, v1alpha1.TenantFinalizerTenantPlacement)
+	beingDeleted := tenant.DeletionTimestamp != nil && !tenant.DeletionTimestamp.IsZero()
 
 	var out Outcome
 
-	if team.Spec.Pipelines == nil || beingDeleted {
+	if tenant.Spec.Pipelines == nil || beingDeleted {
 		if status.Placement == nil && !hasFinalizer {
 			// Never a pipelines tenant, or a prior teardown already
 			// finished; nothing to do.
 			return out, nil
 		}
-		teardown(ctx, in, team, status, nowT, hasFinalizer, &out)
+		teardown(ctx, in, tenant, status, nowT, hasFinalizer, &out)
 		return out, nil
 	}
 
 	// Credentials are unconditional: the door needs them even while a
 	// refusal gate withholds placement.
 	mintCredentials(status)
-	status.Pipelines.AgentNamespace = team.Spec.Pipelines.AgentNamespace
+	status.Pipelines.AgentNamespace = tenant.Spec.Pipelines.AgentNamespace
 
 	if status.Pipelines.PendingPurgeGeneration != nil {
 		// A move still owes a purge for its old generation. This runs
@@ -344,25 +344,25 @@ func Place(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1
 		// or the current Placed reason, so neither a transient
 		// CellNotReady tick nor a later refusal loses the retry (design
 		// D4's move-purge retry).
-		retryMovePurge(ctx, in, team, status)
+		retryMovePurge(ctx, in, tenant, status)
 	}
 
-	if reason, message, refused := refuse(in, team); refused {
+	if reason, message, refused := refuse(in, tenant); refused {
 		setPlaced(status, metav1.ConditionFalse, reason, message, nowT)
 		return out, nil
 	}
 
-	cell, kind := evaluateKeep(in, team, status)
+	cell, kind := evaluateKeep(in, tenant, status)
 	switch kind {
 	case moveNone:
-		reason := v1alpha1.TeamReasonTenantPlaced
-		if placedReason(status) == v1alpha1.TeamReasonTenantMoved {
-			reason = v1alpha1.TeamReasonTenantMoved
+		reason := v1alpha1.TenantReasonTenantPlaced
+		if placedReason(status) == v1alpha1.TenantReasonTenantMoved {
+			reason = v1alpha1.TenantReasonTenantMoved
 		}
 		if cell.CellReady {
 			setPlaced(status, metav1.ConditionTrue, reason, "", nowT)
 		} else {
-			setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonCellNotReady,
+			setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonCellNotReady,
 				"the bound cell reports CellReady=False; this tenant's builds do not start", nowT)
 		}
 		// The fence names this cell, and the cell's own tenant list does
@@ -372,26 +372,26 @@ func Place(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1
 		// find a cell with no tenant and no claim. The claim retires only
 		// when the patch lands, so the tenant list converges or the cell
 		// stays held.
-		if !containsString(cell.Tenants, team.Name) {
+		if !containsString(cell.Tenants, tenant.Name) {
 			out.CellClaims = append(out.CellClaims, CellClaim{
 				Name:      cell.Name,
 				Namespace: cell.Namespace,
-				Tenant:    team.Name,
+				Tenant:    tenant.Name,
 			})
 			out.CellPatches = append(out.CellPatches, CellPatch{
 				Name:      cell.Name,
 				Namespace: cell.Namespace,
-				Tenants:   appendUnique(cell.Tenants, team.Name),
+				Tenants:   appendUnique(cell.Tenants, tenant.Name),
 			})
 		}
-		maybeReannounce(ctx, in, team, status, *cell, nowT, &out)
+		maybeReannounce(ctx, in, tenant, status, *cell, nowT, &out)
 	case moveImmediate:
-		performMove(ctx, in, team, status, cell, nowT, &out)
+		performMove(ctx, in, tenant, status, cell, nowT, &out)
 	case moveVoluntary:
-		performVoluntaryMove(ctx, in, team, status, cell, nowT, &out)
+		performVoluntaryMove(ctx, in, tenant, status, cell, nowT, &out)
 	}
 
-	applyMemberReason(team, status, nowT)
+	applyMemberReason(tenant, status, nowT)
 
 	if status.Placement != nil && !hasFinalizer {
 		out.FinalizerAdd = true
@@ -406,30 +406,30 @@ func Place(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1
 //
 // A tenant that asks for one member and no standby never reaches this
 // path, so every earlier reason is unchanged for it.
-func applyMemberReason(team *v1alpha1.Team, status *v1alpha1.TeamStatus, nowT time.Time) {
-	if status.Placement == nil || team.Spec.Pipelines == nil {
+func applyMemberReason(tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, nowT time.Time) {
+	if status.Placement == nil || tenant.Spec.Pipelines == nil {
 		return
 	}
-	wantedSlots := team.Spec.Pipelines.EffectiveMembers()
-	wantedStandby := team.Spec.Pipelines.EffectiveStandby()
+	wantedSlots := tenant.Spec.Pipelines.EffectiveMembers()
+	wantedStandby := tenant.Spec.Pipelines.EffectiveStandby()
 	if wantedSlots+wantedStandby <= 1 {
 		return
 	}
 	switch memberReasonFromStatus(status.Placement.Members, wantedSlots, wantedStandby) {
-	case v1alpha1.TeamReasonSlotPending:
-		setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonSlotPending,
+	case v1alpha1.TenantReasonSlotPending:
+		setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonSlotPending,
 			"at least one active slot holds no cell", nowT)
-	case v1alpha1.TeamReasonStandbyPending:
-		setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonStandbyPending,
+	case v1alpha1.TenantReasonStandbyPending:
+		setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonStandbyPending,
 			"every active slot holds a cell and at least one standby does not", nowT)
-	case v1alpha1.TeamReasonMembersApplied:
-		setPlaced(status, metav1.ConditionTrue, v1alpha1.TeamReasonMembersApplied, "", nowT)
+	case v1alpha1.TenantReasonMembersApplied:
+		setPlaced(status, metav1.ConditionTrue, v1alpha1.TenantReasonMembersApplied, "", nowT)
 	}
 }
 
 // memberReasonFromStatus answers the member reason for a stored member
 // list, the shape applyMemberReason reads after the pass wrote it.
-func memberReasonFromStatus(members []v1alpha1.TeamMemberStatus, wantedSlots, wantedStandby int32) string {
+func memberReasonFromStatus(members []v1alpha1.TenantMemberStatus, wantedSlots, wantedStandby int32) string {
 	bound := make([]MemberBinding, 0, len(members))
 	for _, m := range members {
 		bound = append(bound, MemberBinding{
@@ -459,7 +459,7 @@ const (
 // evaluateKeep implements the keep rule (task 6.3, tenant-placement spec).
 // cell is nil for moveImmediate when there was no prior placement at all;
 // otherwise it names the bound cell (found or not).
-func evaluateKeep(in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus) (*CellCandidate, moveKind) {
+func evaluateKeep(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus) (*CellCandidate, moveKind) {
 	if status.Placement == nil {
 		return nil, moveImmediate
 	}
@@ -470,7 +470,7 @@ func evaluateKeep(in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus) (
 	if c.Evacuate {
 		return &c, moveImmediate
 	}
-	if !c.Enabled || c.ResolvedProfile != team.Spec.Pipelines.Profile || !keepsMembership(in, team, c) {
+	if !c.Enabled || c.ResolvedProfile != tenant.Spec.Pipelines.Profile || !keepsMembership(in, tenant, c) {
 		return &c, moveVoluntary
 	}
 	return &c, moveNone
@@ -479,25 +479,25 @@ func evaluateKeep(in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus) (
 // keepsMembership answers the membership test for a bound cell: it holds
 // when the cell has no effective owner, or when its effective owner equals
 // the tenant's resolved pool. Deleting a pool therefore moves no tenant.
-func keepsMembership(in Inputs, team *v1alpha1.Team, c CellCandidate) bool {
+func keepsMembership(in Inputs, tenant *v1alpha1.Tenant, c CellCandidate) bool {
 	owner := effectiveOwner(in.Pools, c.Pool)
-	return owner == nil || owner.Name == ResolvedPoolName(team.Spec.Pipelines)
+	return owner == nil || owner.Name == ResolvedPoolName(tenant.Spec.Pipelines)
 }
 
 // refuse applies the six refusal gates in order (tenant-placement spec). It
 // returns the reason and the message together, because gate 4 names the pool
 // and the profile that pool actually serves, values refusalMessage cannot
 // reach from a reason alone.
-func refuse(in Inputs, team *v1alpha1.Team) (string, string, bool) {
-	p := team.Spec.Pipelines
+func refuse(in Inputs, tenant *v1alpha1.Tenant) (string, string, bool) {
+	p := tenant.Spec.Pipelines
 	if !in.RecordStoreEnabled {
-		return refused(v1alpha1.TeamReasonRecordStoreUnsupported)
+		return refused(v1alpha1.TenantReasonRecordStoreUnsupported)
 	}
 	if !in.BlobsModeS3 {
-		return refused(v1alpha1.TeamReasonBlobTierUnsupported)
+		return refused(v1alpha1.TenantReasonBlobTierUnsupported)
 	}
 	if in.ProfileExists != nil && !in.ProfileExists(p.Profile) {
-		return refused(v1alpha1.TeamReasonProfileNotFound)
+		return refused(v1alpha1.TenantReasonProfileNotFound)
 	}
 	// A named pool must exist and must serve the named profile. A default
 	// pool the operator has not created yet is not a refusal: the pool
@@ -506,18 +506,18 @@ func refuse(in Inputs, team *v1alpha1.Team) (string, string, bool) {
 		owner := effectiveOwner(in.Pools, p.CellPool)
 		switch {
 		case owner == nil:
-			return v1alpha1.TeamReasonCellPoolNotFound,
+			return v1alpha1.TenantReasonCellPoolNotFound,
 				fmt.Sprintf("the CellPool %q does not exist", p.CellPool), true
 		case owner.ProfileRef != p.Profile:
-			return v1alpha1.TeamReasonCellPoolNotFound,
+			return v1alpha1.TenantReasonCellPoolNotFound,
 				fmt.Sprintf("the CellPool %q serves profile %q, not %q", p.CellPool, owner.ProfileRef, p.Profile), true
 		}
 	}
-	if !containsString(team.Spec.Namespaces, p.AgentNamespace) {
-		return refused(v1alpha1.TeamReasonAgentNamespaceUnmanaged)
+	if !containsString(tenant.Spec.Namespaces, p.AgentNamespace) {
+		return refused(v1alpha1.TenantReasonAgentNamespaceUnmanaged)
 	}
 	if !in.ManagedNamespaces.Contains(p.AgentNamespace) {
-		return refused(v1alpha1.TeamReasonAgentNamespaceUnmanaged)
+		return refused(v1alpha1.TenantReasonAgentNamespaceUnmanaged)
 	}
 	return "", "", false
 }
@@ -529,13 +529,13 @@ func refused(reason string) (string, string, bool) {
 
 func refusalMessage(reason string) string {
 	switch reason {
-	case v1alpha1.TeamReasonRecordStoreUnsupported:
+	case v1alpha1.TenantReasonRecordStoreUnsupported:
 		return "pipelines need the record store enabled (recordStore.enabled)"
-	case v1alpha1.TeamReasonBlobTierUnsupported:
+	case v1alpha1.TenantReasonBlobTierUnsupported:
 		return "pipelines need the s3 blob tier (recordStore.blobs.mode)"
-	case v1alpha1.TeamReasonProfileNotFound:
+	case v1alpha1.TenantReasonProfileNotFound:
 		return "the named JenkinsVersionProfile does not exist"
-	case v1alpha1.TeamReasonAgentNamespaceUnmanaged:
+	case v1alpha1.TenantReasonAgentNamespaceUnmanaged:
 		return "agentNamespace must be one of spec.namespaces and must be a managed namespace"
 	default:
 		return ""
@@ -544,9 +544,9 @@ func refusalMessage(reason string) string {
 
 // mintCredentials mints the two door credentials, once, when spec.pipelines
 // first appears. A stored value is never regenerated.
-func mintCredentials(status *v1alpha1.TeamStatus) {
+func mintCredentials(status *v1alpha1.TenantStatus) {
 	if status.Pipelines == nil {
-		status.Pipelines = &v1alpha1.TeamPipelinesStatus{}
+		status.Pipelines = &v1alpha1.TenantPipelinesStatus{}
 	}
 	if status.Pipelines.WebhookToken == "" {
 		status.Pipelines.WebhookToken = randHex(16)
@@ -568,19 +568,19 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// selectCandidate picks a cell for team, following the selection rule
+// selectCandidate picks a cell for tenant, following the selection rule
 // (tenant-placement spec): enabled, CellReady, not evacuating, the resolved
 // profile matches, the membership test holds, and the cell holds fewer
 // tenants than its resolved capacity. It takes the fewest tenants first and
 // breaks a tie by name.
-func selectCandidate(in Inputs, team *v1alpha1.Team) *CellCandidate {
-	resolvedPool := ResolvedPoolName(team.Spec.Pipelines)
+func selectCandidate(in Inputs, tenant *v1alpha1.Tenant) *CellCandidate {
+	resolvedPool := ResolvedPoolName(tenant.Spec.Pipelines)
 	var candidates []CellCandidate
 	for _, c := range in.Cells {
 		if !c.Enabled || !c.CellReady || c.Evacuate {
 			continue
 		}
-		if c.ResolvedProfile == "" || c.ResolvedProfile != team.Spec.Pipelines.Profile {
+		if c.ResolvedProfile == "" || c.ResolvedProfile != tenant.Spec.Pipelines.Profile {
 			continue
 		}
 		// The membership test for a candidate: the effective owner equals
@@ -592,7 +592,7 @@ func selectCandidate(in Inputs, team *v1alpha1.Team) *CellCandidate {
 			if owner.Name != resolvedPool {
 				continue
 			}
-		} else if team.Spec.Pipelines.CellPool != "" {
+		} else if tenant.Spec.Pipelines.CellPool != "" {
 			continue
 		}
 		if int32(len(c.Tenants)) >= resolveCellCapacity(c.MaxTenants, owner, in.MaxTenantsDefault) {
@@ -615,25 +615,25 @@ func selectCandidate(in Inputs, team *v1alpha1.Team) *CellCandidate {
 // noCandidateReason answers the Placed reason for a tick that found no
 // candidate: CellCapReached when the tenant's resolved pool sits at its cap,
 // and AwaitingCell otherwise. The pass still creates no Controller.
-func noCandidateReason(in Inputs, team *v1alpha1.Team) (string, string) {
-	pool := effectiveOwner(in.Pools, ResolvedPoolName(team.Spec.Pipelines))
+func noCandidateReason(in Inputs, tenant *v1alpha1.Tenant) (string, string) {
+	pool := effectiveOwner(in.Pools, ResolvedPoolName(tenant.Spec.Pipelines))
 	if pool != nil && pool.CapReached {
-		return v1alpha1.TeamReasonCellCapReached,
+		return v1alpha1.TenantReasonCellCapReached,
 			fmt.Sprintf("the CellPool %q holds maxCells cells and none has a free tenant slot", pool.Name)
 	}
-	return v1alpha1.TeamReasonAwaitingCell, ""
+	return v1alpha1.TenantReasonAwaitingCell, ""
 }
 
 // performMove implements the involuntary move order (tenant-placement
 // spec): the fence (the new placement, with generation+1) is written before
 // either cell's tenant list is patched.
-func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus, oldCell *CellCandidate, nowT time.Time, out *Outcome) {
-	newCell := promotionCellForSlotZero(in, team, status)
+func performMove(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, oldCell *CellCandidate, nowT time.Time, out *Outcome) {
+	newCell := promotionCellForSlotZero(in, tenant, status)
 	if newCell == nil {
-		newCell = selectCandidate(in, team)
+		newCell = selectCandidate(in, tenant)
 	}
 	if newCell == nil {
-		reason, message := noCandidateReason(in, team)
+		reason, message := noCandidateReason(in, tenant)
 		setPlaced(status, metav1.ConditionFalse, reason, message, nowT)
 		return
 	}
@@ -648,10 +648,10 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 	}
 	newGeneration := oldGeneration + 1
 
-	reason := v1alpha1.TeamReasonTenantPlaced
+	reason := v1alpha1.TenantReasonTenantPlaced
 	eventType := "tenant.placed"
 	if wasPlaced {
-		reason = v1alpha1.TeamReasonTenantMoved
+		reason = v1alpha1.TenantReasonTenantMoved
 		eventType = "tenant.moved"
 	}
 
@@ -661,8 +661,8 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 	// because this is the one tick that still knows its identity. A
 	// rolled pod of a cell that stays a candidate is reported through
 	// cellPreviousInstances, on this path and on the moveNone path.
-	policy := syncPolicyFor(in, team)
-	agentNamespace := teamAgentNamespace(team)
+	policy := syncPolicyFor(in, tenant)
+	agentNamespace := tenantAgentNamespace(tenant)
 	var dead []DeadInstance
 	if wasPlaced && oldCell == nil {
 		// The old cell left the candidate set, so this call site reads
@@ -674,15 +674,15 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 			confirmedGoneAt(in, oldCellNamespace, oldCellName, nowT))
 	}
 	priorMembers := status.Placement.DeepCopy()
-	members, _ := desiredMembers(in, team, status, newCell, nowT)
+	members, _ := desiredMembers(in, tenant, status, newCell, nowT)
 	announced := announceMembers(members)
 	dead = append(dead, memberDeadInstances(in.LastSync, announced, dead, in.DepartedPods, nowT)...)
 	dead = cellPreviousInstances(in, priorMembers, announced, dead, nowT)
 	dead = appendConfirmedDeparted(dead, in.ConfirmedDeparted, announced)
 	result, announceErr := sendAnnounce(ctx, in, AnnounceRequest{
 		Cluster:        in.ClusterIdentity,
-		Tenant:         team.Name,
-		Incarnation:    string(team.UID),
+		Tenant:         tenant.Name,
+		Incarnation:    string(tenant.UID),
 		Namespace:      newCell.Namespace,
 		Cell:           newCell.Name,
 		Generation:     newGeneration,
@@ -711,17 +711,17 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 	}
 
 	// The claim: the caller writes it onto the new cell before the fence
-	// below reaches the Team. A pool drain that re-read the cell earlier
+	// below reaches the Tenant. A pool drain that re-read the cell earlier
 	// then loses its delete precondition, and one that re-reads it later
 	// finds the claim.
 	out.CellClaims = append(out.CellClaims, CellClaim{
 		Name:      newCell.Name,
 		Namespace: newCell.Namespace,
-		Tenant:    team.Name,
+		Tenant:    tenant.Name,
 	})
 
 	// The fence: write the placement before either cell's tenant list.
-	status.Placement = &v1alpha1.TeamPlacementStatus{
+	status.Placement = &v1alpha1.TenantPlacementStatus{
 		Cluster:       in.ClusterIdentity,
 		Cell:          newCell.Name,
 		CellNamespace: newCell.Namespace,
@@ -731,21 +731,21 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 	setPlaced(status, metav1.ConditionTrue, reason, "", nowT)
 	out.ActivityEvents = append(out.ActivityEvents, ActivityEvent{
 		Type:    eventType,
-		Message: fmt.Sprintf("team %s placed on cell %s/%s", team.Name, newCell.Namespace, newCell.Name),
+		Message: fmt.Sprintf("tenant %s placed on cell %s/%s", tenant.Name, newCell.Namespace, newCell.Name),
 	})
 
 	out.CellPatches = append(out.CellPatches, CellPatch{
 		Name:      newCell.Name,
 		Namespace: newCell.Namespace,
-		Tenants:   appendUnique(newCell.Tenants, team.Name),
+		Tenants:   appendUnique(newCell.Tenants, tenant.Name),
 	})
-	appendMemberCellPatches(in, team, members, out)
-	appendReleasedMemberPatches(ctx, in, team, priorMembers, members, out)
+	appendMemberCellPatches(in, tenant, members, out)
+	appendReleasedMemberPatches(ctx, in, tenant, priorMembers, members, out)
 	if wasPlaced && oldCell != nil {
 		out.CellPatches = append(out.CellPatches, CellPatch{
 			Name:      oldCell.Name,
 			Namespace: oldCell.Namespace,
-			Tenants:   removeString(oldCell.Tenants, team.Name),
+			Tenants:   removeString(oldCell.Tenants, tenant.Name),
 		})
 	}
 
@@ -753,7 +753,7 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 		gen := oldGeneration
 		status.Pipelines.PendingPurgeGeneration = &gen
 		status.Pipelines.PendingPurgeCell, status.Pipelines.PendingPurgeCellNamespace = purgeCellRef(oldCell)
-		if requestPurge(ctx, in, team, oldGeneration,
+		if requestPurge(ctx, in, tenant, oldGeneration,
 			status.Pipelines.PendingPurgeCell, status.Pipelines.PendingPurgeCellNamespace) {
 			status.Pipelines.PendingPurgeGeneration = nil
 			status.Pipelines.PendingPurgeCell = ""
@@ -765,18 +765,18 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 // performVoluntaryMove implements the three-step voluntary move
 // (tenant-placement spec): set TenantMoving and wait for the drain signal,
 // then perform the move exactly like an involuntary one.
-func performVoluntaryMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus, oldCell *CellCandidate, nowT time.Time, out *Outcome) {
-	if placedReason(status) != v1alpha1.TeamReasonTenantMoving {
-		setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonTenantMoving, tenantMovingMessage, nowT)
+func performVoluntaryMove(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, oldCell *CellCandidate, nowT time.Time, out *Outcome) {
+	if placedReason(status) != v1alpha1.TenantReasonTenantMoving {
+		setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonTenantMoving, tenantMovingMessage, nowT)
 		return
 	}
-	if containsString(oldCell.AppliedTenants, team.Name) || hasPendingDeletionForTenant(oldCell.PendingDeletionPaths, team.Name) {
+	if containsString(oldCell.AppliedTenants, tenant.Name) || hasPendingDeletionForTenant(oldCell.PendingDeletionPaths, tenant.Name) {
 		// Still draining: keep the message constant so LastTransitionTime
 		// keeps recording when the wait began.
-		setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonTenantMoving, tenantMovingMessage, nowT)
+		setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonTenantMoving, tenantMovingMessage, nowT)
 		return
 	}
-	performMove(ctx, in, team, status, oldCell, nowT, out)
+	performMove(ctx, in, tenant, status, oldCell, nowT, out)
 }
 
 // retryMovePurge re-requests the purge for status.Pipelines.
@@ -785,9 +785,9 @@ func performVoluntaryMove(ctx context.Context, in Inputs, team *v1alpha1.Team, s
 // because a move never blocks on it. The field, not the transient Placed
 // reason, drives the retry, so it survives a tick that changes the reason
 // for an unrelated cause (design D4's move-purge retry).
-func retryMovePurge(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus) {
+func retryMovePurge(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus) {
 	gen := *status.Pipelines.PendingPurgeGeneration
-	if requestPurge(ctx, in, team, gen,
+	if requestPurge(ctx, in, tenant, gen,
 		status.Pipelines.PendingPurgeCell, status.Pipelines.PendingPurgeCellNamespace) {
 		status.Pipelines.PendingPurgeGeneration = nil
 		status.Pipelines.PendingPurgeCell = ""
@@ -808,45 +808,45 @@ func purgeCellRef(oldCell *CellCandidate) (name, namespace string) {
 // requestPurge calls Inputs.RequestPurge and reports success. A failed
 // purge on a move never blocks the move (tenant-placement spec); the caller
 // decides what a failure means for its own retry state.
-func requestPurge(ctx context.Context, in Inputs, team *v1alpha1.Team, oldGeneration int64,
+func requestPurge(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, oldGeneration int64,
 	cell, cellNamespace string) bool {
 	if in.RequestPurge == nil {
 		return false
 	}
 	ok, err := in.RequestPurge(ctx, PurgeRequest{
 		Cluster:       in.ClusterIdentity,
-		Tenant:        team.Name,
+		Tenant:        tenant.Name,
 		OldGeneration: oldGeneration,
 		Cell:          cell,
 		CellNamespace: cellNamespace,
-		Incarnation:   string(team.UID),
+		Incarnation:   string(tenant.UID),
 	})
 	return ok && err == nil
 }
 
 // requestTeardownPurge requests the whole-tenant purge of a teardown. It
-// reports a deleted Team, so the recorder retires the Team's incarnation.
+// reports a deleted Tenant, so the recorder retires the Tenant's incarnation.
 // A nil RequestPurge answers a failure, the same way requestPurge does.
-func requestTeardownPurge(ctx context.Context, in Inputs, team *v1alpha1.Team, generation int64) (bool, error) {
+func requestTeardownPurge(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, generation int64) (bool, error) {
 	if in.RequestPurge == nil {
 		return false, nil
 	}
 	return in.RequestPurge(ctx, PurgeRequest{
 		Cluster:       in.ClusterIdentity,
-		Tenant:        team.Name,
+		Tenant:        tenant.Name,
 		OldGeneration: generation,
-		Incarnation:   string(team.UID),
-		TeamDeleted:   team.DeletionTimestamp != nil && !team.DeletionTimestamp.IsZero(),
+		Incarnation:   string(tenant.UID),
+		TenantDeleted: tenant.DeletionTimestamp != nil && !tenant.DeletionTimestamp.IsZero(),
 	})
 }
 
-// teamAgentNamespace answers the tenant's spec.pipelines.agentNamespace,
-// or the empty string for a Team with no pipelines spec.
-func teamAgentNamespace(team *v1alpha1.Team) string {
-	if team.Spec.Pipelines == nil {
+// tenantAgentNamespace answers the tenant's spec.pipelines.agentNamespace,
+// or the empty string for a Tenant with no pipelines spec.
+func tenantAgentNamespace(tenant *v1alpha1.Tenant) string {
+	if tenant.Spec.Pipelines == nil {
 		return ""
 	}
-	return team.Spec.Pipelines.AgentNamespace
+	return tenant.Spec.Pipelines.AgentNamespace
 }
 
 // sendAnnounce calls Inputs.Announce and reports its reply. A nil Announce
@@ -862,10 +862,10 @@ func sendAnnounce(ctx context.Context, in Inputs, req AnnounceRequest) (Announce
 // syncPolicyFor builds the announce policy of one tenant: the seven
 // pipelines settings and the export grants, plus the resolved webhook the
 // caller read from the tenant's Secret.
-func syncPolicyFor(in Inputs, team *v1alpha1.Team) SyncPolicy {
-	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
+func syncPolicyFor(in Inputs, tenant *v1alpha1.Tenant) SyncPolicy {
+	policy := SyncPolicyFromPipelines(tenant.Spec.Pipelines)
 	policy.Webhook = in.Webhook
-	if pool := effectiveOwner(in.Pools, ResolvedPoolName(team.Spec.Pipelines)); pool != nil {
+	if pool := effectiveOwner(in.Pools, ResolvedPoolName(tenant.Spec.Pipelines)); pool != nil {
 		policy.CellMaxRuns = pool.MaxRunsPerTenant
 	}
 	return policy
@@ -877,12 +877,12 @@ func syncPolicyFor(in Inputs, team *v1alpha1.Team) SyncPolicy {
 // agent namespace changed, the caller confirmed a departed instance gone,
 // or the resync window elapsed. cell is the tenant's current, unchanged
 // binding (moveNone): status.Placement already names it.
-func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus, cell CellCandidate, nowT time.Time, out *Outcome) {
-	policy := syncPolicyFor(in, team)
-	agentNamespace := teamAgentNamespace(team)
+func maybeReannounce(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, cell CellCandidate, nowT time.Time, out *Outcome) {
+	policy := syncPolicyFor(in, tenant)
+	agentNamespace := tenantAgentNamespace(tenant)
 	rehydratedInstance, pendingJobs := currentRehydrationState(in, cell)
 
-	members, _ := desiredMembers(in, team, status, &cell, nowT)
+	members, _ := desiredMembers(in, tenant, status, &cell, nowT)
 	announced := announceMembers(members)
 	// A member joining, a member leaving, a member instance change, a
 	// member seed change, and a member applied change are each a trigger.
@@ -918,8 +918,8 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 
 	result, err := sendAnnounce(ctx, in, AnnounceRequest{
 		Cluster:            in.ClusterIdentity,
-		Tenant:             team.Name,
-		Incarnation:        string(team.UID),
+		Tenant:             tenant.Name,
+		Incarnation:        string(tenant.UID),
 		Namespace:          status.Placement.CellNamespace,
 		Cell:               status.Placement.Cell,
 		Generation:         generation,
@@ -953,8 +953,8 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 	prior := status.Placement.DeepCopy()
 	status.Placement.Generation = generation
 	status.Placement.Members = memberStatuses(members)
-	appendMemberCellPatches(in, team, members, out)
-	appendReleasedMemberPatches(ctx, in, team, prior, members, out)
+	appendMemberCellPatches(in, tenant, members, out)
+	appendReleasedMemberPatches(ctx, in, tenant, prior, members, out)
 }
 
 // memberCellSetChanged reports whether the tenant's bound cell set
@@ -963,7 +963,7 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 // A placement whose stored member list is empty describes one slot-0
 // member on its scalar cell, so a tenant the pass has not yet written a
 // member list for raises no generation on its first member-carrying tick.
-func memberCellSetChanged(placement *v1alpha1.TeamPlacementStatus, decided []MemberBinding) bool {
+func memberCellSetChanged(placement *v1alpha1.TenantPlacementStatus, decided []MemberBinding) bool {
 	before := map[string]bool{}
 	for _, m := range placement.Members {
 		before[memberKey(m.CellNamespace, m.Cell)] = true
@@ -1066,7 +1066,7 @@ func memberDeadInstances(last *SyncCache, announced []AnnounceMember, reported [
 // Such an entry also takes the recorded heartbeat when it is newer.
 // An instance that a member runs now is never reported. The answer is
 // dead with the new entries appended.
-func cellPreviousInstances(in Inputs, placement *v1alpha1.TeamPlacementStatus,
+func cellPreviousInstances(in Inputs, placement *v1alpha1.TenantPlacementStatus,
 	announced []AnnounceMember, dead []DeadInstance, nowT time.Time) []DeadInstance {
 	type cellRef struct{ name, namespace string }
 	var refs []cellRef
@@ -1194,7 +1194,7 @@ func memberLastSeen(before AnnounceMember, last *SyncCache) time.Time {
 // not list it yet. The tenant's items and its placement rehydration seed
 // then apply on every member, active or standby, exactly as they do for
 // slot 0.
-func appendMemberCellPatches(in Inputs, team *v1alpha1.Team, members []MemberBinding, out *Outcome) {
+func appendMemberCellPatches(in Inputs, tenant *v1alpha1.Tenant, members []MemberBinding, out *Outcome) {
 	for _, m := range members {
 		if m.Slot != nil && *m.Slot == 0 {
 			// Slot 0's patch is the caller's own, written beside its
@@ -1202,7 +1202,7 @@ func appendMemberCellPatches(in Inputs, team *v1alpha1.Team, members []MemberBin
 			continue
 		}
 		cell, found := lookupCell(in.Cells, m.Cell, m.Namespace)
-		if !found || containsString(cell.Tenants, team.Name) {
+		if !found || containsString(cell.Tenants, tenant.Name) {
 			continue
 		}
 		// The claim holds this cell for the same window slot 0's claim
@@ -1212,12 +1212,12 @@ func appendMemberCellPatches(in Inputs, team *v1alpha1.Team, members []MemberBin
 		out.CellClaims = append(out.CellClaims, CellClaim{
 			Name:      cell.Name,
 			Namespace: cell.Namespace,
-			Tenant:    team.Name,
+			Tenant:    tenant.Name,
 		})
 		out.CellPatches = append(out.CellPatches, CellPatch{
 			Name:      cell.Name,
 			Namespace: cell.Namespace,
-			Tenants:   appendUnique(cell.Tenants, team.Name),
+			Tenants:   appendUnique(cell.Tenants, tenant.Name),
 		})
 	}
 }
@@ -1236,8 +1236,8 @@ func appendMemberCellPatches(in Inputs, team *v1alpha1.Team, members []MemberBin
 // backstop stops firing that cell's rows. The purge is best effort, the
 // same way a move's is: the row's own staleness test already skips a row
 // the released cell exported.
-func appendReleasedMemberPatches(ctx context.Context, in Inputs, team *v1alpha1.Team,
-	prior *v1alpha1.TeamPlacementStatus, members []MemberBinding, out *Outcome) {
+func appendReleasedMemberPatches(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant,
+	prior *v1alpha1.TenantPlacementStatus, members []MemberBinding, out *Outcome) {
 	if prior == nil {
 		return
 	}
@@ -1252,15 +1252,15 @@ func appendReleasedMemberPatches(ctx context.Context, in Inputs, team *v1alpha1.
 		if before.Slot != nil && *before.Slot == 0 {
 			continue
 		}
-		requestPurge(ctx, in, team, prior.Generation, before.Cell, before.CellNamespace)
+		requestPurge(ctx, in, tenant, prior.Generation, before.Cell, before.CellNamespace)
 		cell, found := lookupCell(in.Cells, before.Cell, before.CellNamespace)
-		if !found || !containsString(cell.Tenants, team.Name) {
+		if !found || !containsString(cell.Tenants, tenant.Name) {
 			continue
 		}
 		out.CellPatches = append(out.CellPatches, CellPatch{
 			Name:      cell.Name,
 			Namespace: cell.Namespace,
-			Tenants:   removeString(cell.Tenants, team.Name),
+			Tenants:   removeString(cell.Tenants, tenant.Name),
 		})
 	}
 }
@@ -1329,37 +1329,37 @@ func stringSlicesEqual(a, b []string) bool {
 // finalizer once the cell confirms the drain (or is absent, or the bounded
 // wait expires) and the schedule purge succeeds or exhausts its ten
 // attempts.
-func teardown(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus, nowT time.Time, hasFinalizer bool, out *Outcome) {
+func teardown(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, nowT time.Time, hasFinalizer bool, out *Outcome) {
 	if status.Placement == nil {
 		finishTeardown(status, out, hasFinalizer)
 		return
 	}
 
 	cell, found := lookupCell(in.Cells, status.Placement.Cell, status.Placement.CellNamespace)
-	if found && containsString(cell.Tenants, team.Name) {
+	if found && containsString(cell.Tenants, tenant.Name) {
 		out.CellPatches = append(out.CellPatches, CellPatch{
 			Name:      cell.Name,
 			Namespace: cell.Namespace,
-			Tenants:   removeString(cell.Tenants, team.Name),
+			Tenants:   removeString(cell.Tenants, tenant.Name),
 		})
 	}
 	// A tenant holds one member on each of several cells, so teardown
 	// drops it from every one of them. A cell the pass misses keeps the
 	// tenant folder and a unit of its own capacity for good.
-	appendTeardownMemberPatches(in, team, status.Placement, out)
+	appendTeardownMemberPatches(in, tenant, status.Placement, out)
 
-	membersDrained := membersDrainedTenant(in, team, status.Placement)
+	membersDrained := membersDrainedTenant(in, tenant, status.Placement)
 	// The bounded wait is the escape from every hold below, the agent
 	// pods included: a pod that never goes still completes the teardown.
 	boundedWaitExpired := nowT.Sub(placedTransitionTime(status)) >= teardownBoundedWait &&
-		placedReason(status) == v1alpha1.TeamReasonTenantTeardownPending
+		placedReason(status) == v1alpha1.TenantReasonTenantTeardownPending
 	podsGone := !in.AgentPodsPending || boundedWaitExpired
 	if !found && membersDrained && podsGone {
 		// A deleted cell never reports an apply, and every other member
 		// has drained, so teardown completes at once. The purge is still
 		// attempted, best effort, but never holds the finalizer: no cell
 		// remains to drain.
-		_, _ = requestTeardownPurge(ctx, in, team, status.Placement.Generation)
+		_, _ = requestTeardownPurge(ctx, in, tenant, status.Placement.Generation)
 		finishTeardown(status, out, hasFinalizer)
 		return
 	}
@@ -1372,13 +1372,13 @@ func teardown(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alp
 	// The finishing tick clears status.pipelines, which holds the only
 	// copy of the agent namespace once spec.pipelines is gone, so the
 	// agent pods hold this stage and not the caller's finalizer release.
-	drained := membersDrained && (!found || cellDrainedTenant(cell, team.Name)) && podsGone
+	drained := membersDrained && (!found || cellDrainedTenant(cell, tenant.Name)) && podsGone
 	if !drained && !boundedWaitExpired {
-		setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonTenantTeardownPending, teardownPendingMessage, nowT)
+		setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonTenantTeardownPending, teardownPendingMessage, nowT)
 		return
 	}
 
-	ok, err := requestTeardownPurge(ctx, in, team, status.Placement.Generation)
+	ok, err := requestTeardownPurge(ctx, in, tenant, status.Placement.Generation)
 	if ok && err == nil {
 		finishTeardown(status, out, hasFinalizer)
 		return
@@ -1390,35 +1390,35 @@ func teardown(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alp
 	}
 	attempts++
 	if status.Pipelines == nil {
-		status.Pipelines = &v1alpha1.TeamPipelinesStatus{}
+		status.Pipelines = &v1alpha1.TenantPipelinesStatus{}
 	}
 	status.Pipelines.PurgeAttempts = attempts
 	if attempts >= maxPurgeAttempts {
 		out.ActivityEvents = append(out.ActivityEvents, ActivityEvent{
 			Type:    "tenant.purge_failed",
-			Message: fmt.Sprintf("cluster %s tenant %s: schedule purge failed %d times; teardown completed anyway", in.ClusterIdentity, team.Name, attempts),
+			Message: fmt.Sprintf("cluster %s tenant %s: schedule purge failed %d times; teardown completed anyway", in.ClusterIdentity, tenant.Name, attempts),
 		})
 		finishTeardown(status, out, hasFinalizer)
 		return
 	}
-	setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonTenantTeardownPending, teardownPendingMessage, nowT)
+	setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonTenantTeardownPending, teardownPendingMessage, nowT)
 }
 
 // appendTeardownMemberPatches drops the tenant from every member cell but
 // slot 0's, which the caller patches beside this call.
-func appendTeardownMemberPatches(in Inputs, team *v1alpha1.Team, placement *v1alpha1.TeamPlacementStatus, out *Outcome) {
+func appendTeardownMemberPatches(in Inputs, tenant *v1alpha1.Tenant, placement *v1alpha1.TenantPlacementStatus, out *Outcome) {
 	for _, m := range placement.Members {
 		if m.Cell == "" || (m.Cell == placement.Cell && m.CellNamespace == placement.CellNamespace) {
 			continue
 		}
 		cell, found := lookupCell(in.Cells, m.Cell, m.CellNamespace)
-		if !found || !containsString(cell.Tenants, team.Name) {
+		if !found || !containsString(cell.Tenants, tenant.Name) {
 			continue
 		}
 		out.CellPatches = append(out.CellPatches, CellPatch{
 			Name:      cell.Name,
 			Namespace: cell.Namespace,
-			Tenants:   removeString(cell.Tenants, team.Name),
+			Tenants:   removeString(cell.Tenants, tenant.Name),
 		})
 	}
 }
@@ -1435,13 +1435,13 @@ func cellDrainedTenant(cell CellCandidate, tenant string) bool {
 // still read has dropped the tenant. A cell the candidate set no longer
 // holds counts as drained: the object is gone, so nothing remains to
 // drain and nothing would ever report one.
-func membersDrainedTenant(in Inputs, team *v1alpha1.Team, placement *v1alpha1.TeamPlacementStatus) bool {
+func membersDrainedTenant(in Inputs, tenant *v1alpha1.Tenant, placement *v1alpha1.TenantPlacementStatus) bool {
 	for _, m := range placement.Members {
 		cell, found := lookupCell(in.Cells, m.Cell, m.CellNamespace)
 		if !found {
 			continue
 		}
-		if !cellDrainedTenant(cell, team.Name) {
+		if !cellDrainedTenant(cell, tenant.Name) {
 			return false
 		}
 	}
@@ -1449,12 +1449,12 @@ func membersDrainedTenant(in Inputs, team *v1alpha1.Team, placement *v1alpha1.Te
 }
 
 // finishTeardown clears the placement and every pipelines status field, and
-// removes the Placed condition, matching "the Team SHALL survive with no
+// removes the Placed condition, matching "the Tenant SHALL survive with no
 // placement and no Placed condition once teardown completes".
-func finishTeardown(status *v1alpha1.TeamStatus, out *Outcome, hasFinalizer bool) {
+func finishTeardown(status *v1alpha1.TenantStatus, out *Outcome, hasFinalizer bool) {
 	status.Placement = nil
 	status.Pipelines = nil
-	status.Conditions = removeCondition(status.Conditions, v1alpha1.TeamConditionPlaced)
+	status.Conditions = removeCondition(status.Conditions, v1alpha1.TenantConditionPlaced)
 	if hasFinalizer {
 		out.FinalizerRelease = true
 	}
@@ -1485,13 +1485,13 @@ func hasPendingDeletionForTenant(paths []string, tenant string) bool {
 
 // setPlaced upserts the Placed condition, preserving LastTransitionTime
 // when Status, Reason, and Message are unchanged — the same rule
-// TeamReconciler.setCondition applies to every other Team condition, kept
+// TenantReconciler.setCondition applies to every other Tenant condition, kept
 // local here because Place is the only writer of this one's Message during
 // a wait, and the wait's bounded-timeout arithmetic depends on that
 // preserved timestamp.
-func setPlaced(status *v1alpha1.TeamStatus, s metav1.ConditionStatus, reason, message string, nowT time.Time) {
-	cond := v1alpha1.TeamCondition{
-		Type:               v1alpha1.TeamConditionPlaced,
+func setPlaced(status *v1alpha1.TenantStatus, s metav1.ConditionStatus, reason, message string, nowT time.Time) {
+	cond := v1alpha1.TenantCondition{
+		Type:               v1alpha1.TenantConditionPlaced,
 		Status:             s,
 		Reason:             reason,
 		Message:            message,
@@ -1511,8 +1511,8 @@ func setPlaced(status *v1alpha1.TeamStatus, s metav1.ConditionStatus, reason, me
 }
 
 // removeCondition drops every condition of the given type.
-func removeCondition(conds []v1alpha1.TeamCondition, condType string) []v1alpha1.TeamCondition {
-	out := make([]v1alpha1.TeamCondition, 0, len(conds))
+func removeCondition(conds []v1alpha1.TenantCondition, condType string) []v1alpha1.TenantCondition {
+	out := make([]v1alpha1.TenantCondition, 0, len(conds))
 	for _, c := range conds {
 		if c.Type != condType {
 			out = append(out, c)
@@ -1523,9 +1523,9 @@ func removeCondition(conds []v1alpha1.TeamCondition, condType string) []v1alpha1
 
 // placedReason returns the current Placed condition's Reason, or "" when
 // none is set.
-func placedReason(status *v1alpha1.TeamStatus) string {
+func placedReason(status *v1alpha1.TenantStatus) string {
 	for _, c := range status.Conditions {
-		if c.Type == v1alpha1.TeamConditionPlaced {
+		if c.Type == v1alpha1.TenantConditionPlaced {
 			return c.Reason
 		}
 	}
@@ -1534,9 +1534,9 @@ func placedReason(status *v1alpha1.TeamStatus) string {
 
 // placedTransitionTime returns the current Placed condition's
 // LastTransitionTime, or the zero time when none is set.
-func placedTransitionTime(status *v1alpha1.TeamStatus) time.Time {
+func placedTransitionTime(status *v1alpha1.TenantStatus) time.Time {
 	for _, c := range status.Conditions {
-		if c.Type == v1alpha1.TeamConditionPlaced {
+		if c.Type == v1alpha1.TenantConditionPlaced {
 			return c.LastTransitionTime.Time
 		}
 	}

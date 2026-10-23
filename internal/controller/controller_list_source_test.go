@@ -35,12 +35,12 @@ func TestCacheControllerListSource_NamespaceFilter(t *testing.T) {
 		t.Fatalf("all namespaces: got %d rows, want 2", len(all))
 	}
 
-	teamA, err := src.ListControllers(context.Background(), "team-a")
+	tenantA, err := src.ListControllers(context.Background(), "team-a")
 	if err != nil {
 		t.Fatalf("list team-a: %v", err)
 	}
-	if len(teamA) != 1 || teamA[0].Name != "alpha" {
-		t.Fatalf("team-a rows = %+v, want only alpha", teamA)
+	if len(tenantA) != 1 || tenantA[0].Name != "alpha" {
+		t.Fatalf("team-a rows = %+v, want only alpha", tenantA)
 	}
 }
 

@@ -23,8 +23,8 @@ const CleanupTimeout = 15 * time.Second
 // A failed delete stops the attempt.
 func (o *Ops) PullRequest(ctx context.Context, req forgeapi.PullRequestRequest) forgeapi.PullRequestReply {
 	fail := func(err error) forgeapi.PullRequestReply { return forgeapi.PullRequestReply{Status: asStatus(err)} }
-	if req.Team == "" {
-		return fail(replyErr(forgeapi.CodeInvalidRequest, "team is required"))
+	if req.Tenant == "" {
+		return fail(replyErr(forgeapi.CodeInvalidRequest, "tenant is required"))
 	}
 	repo, err := forgeurl.NormalizeRepoURL(req.Repo)
 	if err != nil {
@@ -39,7 +39,7 @@ func (o *Ops) PullRequest(ctx context.Context, req forgeapi.PullRequestRequest) 
 	); err != nil {
 		return fail(replyErr(forgeapi.CodeInvalidRequest, "%v", err))
 	}
-	creds, err := o.chooseCredential(ctx, req.Team, repo.Host)
+	creds, err := o.chooseCredential(ctx, req.Tenant, repo.Host)
 	if err != nil {
 		return fail(err)
 	}

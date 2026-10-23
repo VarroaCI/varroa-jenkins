@@ -101,28 +101,28 @@ func TestEmitActivity_AssistantOrigin(t *testing.T) {
 	}
 }
 
-func TestEmitActivity_TeamAgentOrigin(t *testing.T) {
+func TestEmitActivity_TenantAgentOrigin(t *testing.T) {
 	sink := &recordingSink{}
 	deps := &api.Dependencies{ActivityPublisher: sink}
-	ctx := WithOrigin(context.Background(), OriginTeamAgent)
+	ctx := WithOrigin(context.Background(), OriginTenantAgent)
 	emitActivity(ctx, deps, &auth.Claims{Subject: "s"}, activity.Event{Type: "x.y"})
-	if got := sink.events[0].Source; got != "team_agent" {
-		t.Errorf("Source = %q, want team_agent", got)
+	if got := sink.events[0].Source; got != "tenant_agent" {
+		t.Errorf("Source = %q, want tenant_agent", got)
 	}
 }
 
-func TestEmitActivity_TeamAgentSubject(t *testing.T) {
+func TestEmitActivity_TenantAgentSubject(t *testing.T) {
 	sink := &recordingSink{}
 	deps := &api.Dependencies{ActivityPublisher: sink}
 	emitActivity(context.Background(), deps, &auth.Claims{Subject: "agent:ns/team/x"}, activity.Event{Type: "x.y"})
-	if got := sink.events[0].Source; got != "team_agent" {
-		t.Errorf("Source = %q, want team_agent", got)
+	if got := sink.events[0].Source; got != "tenant_agent" {
+		t.Errorf("Source = %q, want tenant_agent", got)
 	}
 }
 
 func TestInProcessHostWithOrigin_StampsOrigin(t *testing.T) {
-	h := NewInProcessHostWithOrigin(nil, &auth.Claims{Subject: "s"}, OriginTeamAgent)
-	if got := OriginFrom(h.callCtx(context.Background())); got != OriginTeamAgent {
-		t.Errorf("origin = %q, want %q", got, OriginTeamAgent)
+	h := NewInProcessHostWithOrigin(nil, &auth.Claims{Subject: "s"}, OriginTenantAgent)
+	if got := OriginFrom(h.callCtx(context.Background())); got != OriginTenantAgent {
+		t.Errorf("origin = %q, want %q", got, OriginTenantAgent)
 	}
 }

@@ -33,7 +33,7 @@ const searchFetchLimit = 25
 // appears in Scope (Scope only reflects a controllers:read verb) or in
 // Tenants (a cluster-wide binding names no tenant), so a caller holding
 // only a cluster-wide pipelines:read grant would otherwise push down
-// nothing for a synthetic or deleted-Team tenant (ruling y). AllTenants
+// nothing for a synthetic or deleted-Tenant tenant (ruling y). AllTenants
 // carries that case: when true, every job/run row is admitted regardless
 // of namespace or tenant. JobRunNamespaces carries a namespace-scoped
 // pipelines grant's namespaces, unioned with Scope's own namespaces
@@ -135,7 +135,7 @@ const (
 // every bound value appended. A job or run row is never global. When
 // allTenants is true, every row is admitted regardless of namespace or
 // tenant — a cluster-wide pipelines grant reaches every synthetic and
-// deleted-Team tenant, which no namespace or tenant list can enumerate
+// deleted-Tenant tenant, which no namespace or tenant list can enumerate
 // (ruling y). Otherwise the row is admitted when its namespace lies in
 // namespaces OR its tenant lies in tenants — an empty tenants array
 // binds to an array that matches no row. When namespace is set, the

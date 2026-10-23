@@ -1,8 +1,8 @@
 // Package api: the pipelines read paths (design D1, D2, D7). Router
 // registration lives in router.go, which lists the twelve pipelines
-// routes together. This file implements the team-scoped paths:
-// GET /pipelines/{team}, GET /pipelines/{team}/jobs/{job}, and
-// GET /pipelines/{team}/jobs/{job}/runs. POST .../runs lives in
+// routes together. This file implements the tenant-scoped paths:
+// GET /pipelines/{tenant}, GET /pipelines/{tenant}/jobs/{job}, and
+// GET /pipelines/{tenant}/jobs/{job}/runs. POST .../runs lives in
 // handlers_pipelines_write.go, alongside the run-scoped write paths.
 package api
 
@@ -28,7 +28,7 @@ import (
 )
 
 // runningNowPageLimit is design D7's page size: one page per tenant, per
-// status value, capped so a webhook herd cannot make the team home read
+// status value, capped so a webhook herd cannot make the tenant home read
 // unbounded rows.
 const runningNowPageLimit = 50
 
@@ -102,7 +102,7 @@ type pipelineListResponse struct {
 	// globs removed: such a count is itself a disclosure.
 	TenantFolder string `json:"tenantFolder"`
 	Truncated    bool   `json:"truncated"`
-	// Retention reports the record-store windows that apply to this team.
+	// Retention reports the record-store windows that apply to this tenant.
 	Retention pipelineRetentionJSON `json:"retention"`
 }
 
@@ -293,19 +293,19 @@ func (s *Server) handleReaderError(w http.ResponseWriter, err error, action stri
 	return true
 }
 
-// resolveTeamTenants resolves team through TenantResolver, translating a
+// resolveTenantTenants resolves tenant through TenantResolver, translating a
 // nil resolver and a *ServiceError into the response the handler writes.
-func (s *Server) resolveTeamTenants(ctx context.Context, claims *auth.Claims, team string) ([]TenantRef, *ServiceError) {
+func (s *Server) resolveTenantTenants(ctx context.Context, claims *auth.Claims, tenant string) ([]TenantRef, *ServiceError) {
 	if s.deps.TenantResolver == nil {
 		return nil, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
 	}
-	refs, err := s.deps.TenantResolver.Resolve(ctx, claims, team)
+	refs, err := s.deps.TenantResolver.Resolve(ctx, claims, tenant)
 	if err != nil {
 		var serr *ServiceError
 		if errors.As(err, &serr) {
 			return nil, serr
 		}
-		return nil, &ServiceError{Status: http.StatusInternalServerError, Message: "resolve team failed"}
+		return nil, &ServiceError{Status: http.StatusInternalServerError, Message: "resolve tenant failed"}
 	}
 	return refs, nil
 }
@@ -503,7 +503,7 @@ func (s *Server) runningNowForTenant(ctx context.Context, ref TenantRef) ([]reco
 	return all, truncated, nil
 }
 
-// --- GET /pipelines/{team} ---
+// --- GET /pipelines/{tenant} ---
 
 func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 	if s.deps.RecordStore == nil {
@@ -512,9 +512,9 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	claims := auth.ClaimsFromContext(ctx)
-	team := r.PathValue("team")
+	tenant := r.PathValue("tenant")
 
-	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	refs, serr := s.resolveTenantTenants(ctx, claims, tenant)
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return
@@ -534,7 +534,7 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 	var listings []tenantListing
 	truncated := false
 
-	// Every tenant one team resolves to shares one folder, so one envelope
+	// Every tenant one tenant resolves to shares one folder, so one envelope
 	// field describes the whole response. A ref that Resolve admitted still
 	// supplies the folder when the row filter below refuses every one of
 	// its rows.
@@ -670,7 +670,7 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// The retention block reads the first tenant's policy. Every tenant
-	// one team resolves to shares one placement policy in practice.
+	// one tenant resolves to shares one placement policy in practice.
 	var policy recordstore.TenantRetentionPolicy
 	if len(refs) > 0 {
 		p, err := s.deps.RecordStore.TenantRetention(ctx, refs[0].Cluster, refs[0].Tenant)
@@ -689,7 +689,7 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- GET /pipelines/{team}/jobs/{job} ---
+// --- GET /pipelines/{tenant}/jobs/{job} ---
 
 func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 	if s.deps.RecordStore == nil {
@@ -698,10 +698,10 @@ func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	claims := auth.ClaimsFromContext(ctx)
-	team := r.PathValue("team")
+	tenant := r.PathValue("tenant")
 	jobPath := r.PathValue("job")
 
-	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	refs, serr := s.resolveTenantTenants(ctx, claims, tenant)
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return
@@ -817,7 +817,7 @@ func declaredJobPending(inv recordstore.JobInventory, path, kind string) bool {
 	return false
 }
 
-// jobPendingAcross answers whether a job of the team is pending. It runs in
+// jobPendingAcross answers whether a job of the tenant is pending. It runs in
 // two passes over the refs the caller reads. First, a run of jobPath on any
 // readable tenant means not pending, the same rule the list applies through
 // hasRun. A summary read that fails also means not pending. Second, every
@@ -972,7 +972,7 @@ func (s *Server) buildLast30Days(ctx context.Context, ref TenantRef, jobPath str
 	return out
 }
 
-// --- GET/POST /pipelines/{team}/jobs/{job}/runs ---
+// --- GET/POST /pipelines/{tenant}/jobs/{job}/runs ---
 
 // listRunsFilters carries the four run-list filters, decoded from the
 // request's query parameters.
@@ -997,10 +997,10 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	claims := auth.ClaimsFromContext(ctx)
-	team := r.PathValue("team")
+	tenant := r.PathValue("tenant")
 	jobPath := r.PathValue("job")
 
-	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	refs, serr := s.resolveTenantTenants(ctx, claims, tenant)
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return
@@ -1045,7 +1045,7 @@ func parseRunsLimit(r *http.Request) (int, error) {
 	return n, nil
 }
 
-// --- GET /pipelines/{team}/jobs/{job}/tests/{case} ---
+// --- GET /pipelines/{tenant}/jobs/{job}/tests/{case} ---
 
 // testCaseHistoryDefaultLimit and testCaseHistoryMaxLimit bound the case
 // history read. A limit above the maximum is clamped, never refused.
@@ -1094,11 +1094,11 @@ func parseTestCaseHistoryLimit(r *http.Request) (int, error) {
 }
 
 // handleListJobTestCaseHistory serves one test case's recent outcomes for
-// one job. It resolves the team the way handleListRuns does, applies the
+// one job. It resolves the tenant the way handleListRuns does, applies the
 // tenant read check to each tenant with the decoded job path, and reads
 // only the admitted tenants. A job the store holds no case row for
 // answers an empty list, never 404: the case rows hold no job inventory,
-// and GET /pipelines/{team}/jobs/{job} answers whether a job exists.
+// and GET /pipelines/{tenant}/jobs/{job} answers whether a job exists.
 func (s *Server) handleListJobTestCaseHistory(w http.ResponseWriter, r *http.Request) {
 	if s.deps.RecordStore == nil {
 		s.pipelinesUnavailable(w)
@@ -1106,10 +1106,10 @@ func (s *Server) handleListJobTestCaseHistory(w http.ResponseWriter, r *http.Req
 	}
 	ctx := r.Context()
 	claims := auth.ClaimsFromContext(ctx)
-	team := r.PathValue("team")
+	tenant := r.PathValue("tenant")
 	jobPath := r.PathValue("job")
 
-	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	refs, serr := s.resolveTenantTenants(ctx, claims, tenant)
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return
@@ -1175,7 +1175,7 @@ func buildTestCaseOutcome(ref TenantRef, jobPath string, o recordstore.TestCaseO
 		Status:       o.Status,
 		ErrorDetails: o.ErrorDetails,
 		CreatedAt:    o.CreatedAt,
-		RunLink:      searchRunLink(ref.Team, jobPath, o.RunID),
+		RunLink:      searchRunLink(ref.TenantName, jobPath, o.RunID),
 	}
 	if o.BuildNumber != nil {
 		out.BuildNumber = *o.BuildNumber
@@ -1362,23 +1362,23 @@ func (s *Server) listRunsMerged(ctx context.Context, admitted []TenantRef, jobPa
 	return resp, nil, nil
 }
 
-// --- GET /pipelines/{team}/cell ---
+// --- GET /pipelines/{tenant}/cell ---
 
-// Team cell states. The handler tests them in this order and stops at
+// Tenant cell states. The handler tests them in this order and stops at
 // the first match.
 const (
-	teamCellNotCellHosted = "notCellHosted"
-	teamCellUnplaced      = "unplaced"
-	teamCellMoving        = "moving"
-	teamCellRehydrating   = "rehydrating"
-	teamCellPlaced        = "placed"
+	tenantCellNotCellHosted = "notCellHosted"
+	tenantCellUnplaced      = "unplaced"
+	tenantCellMoving        = "moving"
+	tenantCellRehydrating   = "rehydrating"
+	tenantCellPlaced        = "placed"
 )
 
-// teamCellJSON is the tenant's own view of the cell that hosts it. An
+// tenantCellJSON is the tenant's own view of the cell that hosts it. An
 // absent field is absent from the object: it is never a null and never a
 // zero. The body carries no other tenant's name, job path, run, or
 // count.
-type teamCellJSON struct {
+type tenantCellJSON struct {
 	State            string `json:"state"`
 	Reason           string `json:"reason,omitempty"`
 	Cell             string `json:"cell,omitempty"`
@@ -1399,23 +1399,23 @@ type teamCellJSON struct {
 	// by role: active members by ascending slot first, then standbys by
 	// cell name. It is absent for unplaced and notCellHosted. Every
 	// top-level field above keeps describing slot 0.
-	Members []teamCellMemberJSON `json:"members,omitempty"`
-	// Warning is the Team's TenantWarnings condition, verbatim, when its
+	Members []tenantCellMemberJSON `json:"members,omitempty"`
+	// Warning is the Tenant's TenantWarnings condition, verbatim, when its
 	// status is True. This surface owns no reason vocabulary.
-	Warning *teamCellWarningJSON `json:"warning,omitempty"`
+	Warning *tenantCellWarningJSON `json:"warning,omitempty"`
 }
 
-// teamCellWarningJSON is the Team's TenantWarnings condition on the team
+// tenantCellWarningJSON is the Tenant's TenantWarnings condition on the tenant
 // cell read.
-type teamCellWarningJSON struct {
+type tenantCellWarningJSON struct {
 	Reason  string `json:"reason"`
 	Message string `json:"message"`
 }
 
-// teamCellMemberJSON is one member of the tenant on the team cell read.
+// tenantCellMemberJSON is one member of the tenant on the tenant cell read.
 // Each entry carries that member's own four load counts, narrowed by the
 // caller's own grant exactly as the top-level counts are.
-type teamCellMemberJSON struct {
+type tenantCellMemberJSON struct {
 	Cell          string `json:"cell"`
 	Namespace     string `json:"namespace"`
 	Cluster       string `json:"cluster"`
@@ -1426,39 +1426,39 @@ type teamCellMemberJSON struct {
 	Jobs          int64  `json:"jobs"`
 }
 
-// tenantWarning returns the Team's TenantWarnings condition as a warning,
+// tenantWarning returns the Tenant's TenantWarnings condition as a warning,
 // or nil when the condition is absent or not True.
-func tenantWarning(team *v1alpha1.Team) *teamCellWarningJSON {
-	if team == nil {
+func tenantWarning(tenant *v1alpha1.Tenant) *tenantCellWarningJSON {
+	if tenant == nil {
 		return nil
 	}
-	for _, c := range team.Status.Conditions {
-		if c.Type == v1alpha1.TeamConditionTenantWarnings && c.Status == metav1.ConditionTrue {
-			return &teamCellWarningJSON{Reason: c.Reason, Message: c.Message}
+	for _, c := range tenant.Status.Conditions {
+		if c.Type == v1alpha1.TenantConditionTenantWarnings && c.Status == metav1.ConditionTrue {
+			return &tenantCellWarningJSON{Reason: c.Reason, Message: c.Message}
 		}
 	}
 	return nil
 }
 
-// placedConditionReason returns the Team's Placed condition reason, or
-// the empty string when the Team carries no such condition.
-func placedConditionReason(team *v1alpha1.Team) string {
-	if team == nil {
+// placedConditionReason returns the Tenant's Placed condition reason, or
+// the empty string when the Tenant carries no such condition.
+func placedConditionReason(tenant *v1alpha1.Tenant) string {
+	if tenant == nil {
 		return ""
 	}
-	for _, c := range team.Status.Conditions {
-		if c.Type == v1alpha1.TeamConditionPlaced {
+	for _, c := range tenant.Status.Conditions {
+		if c.Type == v1alpha1.TenantConditionPlaced {
 			return c.Reason
 		}
 	}
 	return ""
 }
 
-// handleGetTeamCell serves GET /pipelines/{team}/cell. It is the one
+// handleGetTenantCell serves GET /pipelines/{tenant}/cell. It is the one
 // pipelines path whose subject is the placement, not the jobs, so it
-// resolves the Team object first and falls back to the tenant resolver.
-func (s *Server) handleGetTeamCell(w http.ResponseWriter, r *http.Request) {
-	body, serr := s.TeamCell(r.Context(), auth.ClaimsFromContext(r.Context()), r.PathValue("team"))
+// resolves the Tenant object first and falls back to the tenant resolver.
+func (s *Server) handleGetTenantCell(w http.ResponseWriter, r *http.Request) {
+	body, serr := s.TenantCell(r.Context(), auth.ClaimsFromContext(r.Context()), r.PathValue("tenant"))
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return
@@ -1466,26 +1466,26 @@ func (s *Server) handleGetTeamCell(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, body)
 }
 
-// TeamCell answers the tenant's own cell read for one Team. The HTTP
+// TenantCell answers the tenant's own cell read for one Tenant. The HTTP
 // handler and the MCP tool both call it, so they share one body and one
 // authorization check.
-func (s *Server) TeamCell(ctx context.Context, claims *auth.Claims, teamName string) (any, *ServiceError) {
+func (s *Server) TenantCell(ctx context.Context, claims *auth.Claims, tenantName string) (any, *ServiceError) {
 	if s.deps.RecordStore == nil {
 		return nil, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
 	}
 
-	team, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, teamName, "")
-	if err != nil || team == nil || team.Spec.Pipelines == nil {
-		refs, serr := s.resolveTeamTenants(ctx, claims, teamName)
+	tenant, err := crdstore.Get[v1alpha1.Tenant](ctx, s.deps.Store, tenantName, "")
+	if err != nil || tenant == nil || tenant.Spec.Pipelines == nil {
+		refs, serr := s.resolveTenantTenants(ctx, claims, tenantName)
 		if serr != nil {
 			return nil, serr
 		}
-		// A Team that only a member cluster holds resolves to one placed
-		// tenant of its own name. The member's API server holds the Team
+		// A Tenant that only a member cluster holds resolves to one placed
+		// tenant of its own name. The member's API server holds the Tenant
 		// status, so the body carries no Placed reason and one slot-0
 		// member.
-		if len(refs) == 1 && refs[0].Tenant == teamName && refs[0].Controller != "" {
-			body, serr := s.buildTeamCell(ctx, claims, refs[0], "", nil)
+		if len(refs) == 1 && refs[0].Tenant == tenantName && refs[0].Controller != "" {
+			body, serr := s.buildTenantCell(ctx, claims, refs[0], "", nil)
 			if serr != nil {
 				return nil, serr
 			}
@@ -1493,49 +1493,49 @@ func (s *Server) TeamCell(ctx context.Context, claims *auth.Claims, teamName str
 		}
 		// Step 2: every surviving candidate is a single-controller
 		// tenant, so the answer is notCellHosted.
-		return teamCellJSON{State: teamCellNotCellHosted}, nil
+		return tenantCellJSON{State: tenantCellNotCellHosted}, nil
 	}
 
-	// Step 1: a pipelines Team authorizes through the tenant read check
+	// Step 1: a pipelines Tenant authorizes through the tenant read check
 	// with an empty job path. A refusal answers 404, so the surface does
-	// not confirm that the team exists.
-	ref := TenantRef{Tenant: team.Name, Team: team.Name, Folder: team.Name}
-	if p := team.Status.Placement; p != nil {
+	// not confirm that the tenant exists.
+	ref := TenantRef{Tenant: tenant.Name, TenantName: tenant.Name, Folder: tenant.Name}
+	if p := tenant.Status.Placement; p != nil {
 		ref.Cluster = p.Cluster
 		ref.Namespace = p.CellNamespace
 		ref.Controller = p.Cell
 	}
 	if !s.canReadPipeline(claims, ref, "") {
-		return nil, &ServiceError{Status: http.StatusNotFound, Message: "team not found"}
+		return nil, &ServiceError{Status: http.StatusNotFound, Message: "tenant not found"}
 	}
 
-	reason := placedConditionReason(team)
+	reason := placedConditionReason(tenant)
 	if ref.Controller == "" {
-		return teamCellJSON{State: teamCellUnplaced, Reason: reason, Warning: tenantWarning(team)}, nil
+		return tenantCellJSON{State: tenantCellUnplaced, Reason: reason, Warning: tenantWarning(tenant)}, nil
 	}
 
-	body, serr := s.buildTeamCell(ctx, claims, ref, reason, team)
+	body, serr := s.buildTenantCell(ctx, claims, ref, reason, tenant)
 	if serr != nil {
 		return nil, serr
 	}
 	return body, nil
 }
 
-// buildTeamCell fills the placed, moving, and rehydrating body. Rule 4
+// buildTenantCell fills the placed, moving, and rehydrating body. Rule 4
 // reads status.cell.appliedTenants. It reads no status.cell.rehydration:
 // the cell-controllers capability keeps that key internal to the
 // operator.
-func (s *Server) buildTeamCell(ctx context.Context, claims *auth.Claims, ref TenantRef, reason string,
-	team *v1alpha1.Team) (teamCellJSON, *ServiceError) {
+func (s *Server) buildTenantCell(ctx context.Context, claims *auth.Claims, ref TenantRef, reason string,
+	tenant *v1alpha1.Tenant) (tenantCellJSON, *ServiceError) {
 	cr, err := s.cellController(ctx, ref.Cluster, ref.Namespace, ref.Controller)
 	if err != nil {
-		s.deps.Logger.Error("read team cell", "team", ref.Team, "error", err)
-		return teamCellJSON{}, &ServiceError{Status: http.StatusInternalServerError, Message: "read team cell failed"}
+		s.deps.Logger.Error("read tenant cell", "tenant", ref.TenantName, "error", err)
+		return tenantCellJSON{}, &ServiceError{Status: http.StatusInternalServerError, Message: "read tenant cell failed"}
 	}
 
 	jobRows, err := s.deps.RecordStore.CellTenantUsage(ctx, ref.Cluster, ref.Namespace, ref.Controller, ref.Tenant)
-	if serr := s.readerServiceError(err, "read team cell usage"); serr != nil {
-		return teamCellJSON{}, serr
+	if serr := s.readerServiceError(err, "read tenant cell usage"); serr != nil {
+		return tenantCellJSON{}, serr
 	}
 	counts := s.admittedJobCounts(claims, ref, jobRows)
 
@@ -1547,8 +1547,8 @@ func (s *Server) buildTeamCell(ctx context.Context, claims *auth.Claims, ref Ten
 		others = 0
 	}
 
-	body := teamCellJSON{
-		State:            s.teamCellState(cr, ref, reason),
+	body := tenantCellJSON{
+		State:            s.tenantCellState(cr, ref, reason),
 		Reason:           reason,
 		Cell:             ref.Controller,
 		Namespace:        ref.Namespace,
@@ -1570,12 +1570,12 @@ func (s *Server) buildTeamCell(ctx context.Context, claims *auth.Claims, ref Ten
 	if s.deps.Authorizer != nil {
 		body.CanOpenCell = s.deps.Authorizer.CanReadController(claims, ref.Namespace, ref.Controller)
 	}
-	body.Members = s.teamCellMembers(ctx, claims, ref, team)
-	body.Warning = tenantWarning(team)
+	body.Members = s.tenantCellMembers(ctx, claims, ref, tenant)
+	body.Warning = tenantWarning(tenant)
 	return body, nil
 }
 
-// teamCellMembers answers one entry for each member of the tenant,
+// tenantCellMembers answers one entry for each member of the tenant,
 // ordered by role: active members by ascending slot first, then standbys
 // by cell name. Each entry carries that member's own four load counts,
 // narrowed by the caller's own grant.
@@ -1583,22 +1583,22 @@ func (s *Server) buildTeamCell(ctx context.Context, claims *auth.Claims, ref Ten
 // The body names no other tenant. A tenant with no stored member list
 // answers one entry for slot 0, so a single-member tenant reads one
 // member and the top-level fields describe that same cell.
-func (s *Server) teamCellMembers(ctx context.Context, claims *auth.Claims, ref TenantRef,
-	team *v1alpha1.Team) []teamCellMemberJSON {
-	members := orderedTeamMembers(team, ref)
-	out := make([]teamCellMemberJSON, 0, len(members))
+func (s *Server) tenantCellMembers(ctx context.Context, claims *auth.Claims, ref TenantRef,
+	tenant *v1alpha1.Tenant) []tenantCellMemberJSON {
+	members := orderedTenantMembers(tenant, ref)
+	out := make([]tenantCellMemberJSON, 0, len(members))
 	for _, m := range members {
-		entry := teamCellMemberJSON{
+		entry := tenantCellMemberJSON{
 			Cell: m.Cell, Namespace: m.CellNamespace, Cluster: ref.Cluster,
-			Role: renderTeamMemberRole(m),
+			Role: renderTenantMemberRole(m),
 		}
 		memberRef := ref
 		memberRef.Namespace = m.CellNamespace
 		memberRef.Controller = m.Cell
 		rows, err := s.deps.RecordStore.CellTenantUsage(ctx, ref.Cluster, m.CellNamespace, m.Cell, ref.Tenant)
 		if err != nil {
-			s.deps.Logger.Warn("read a team cell member's usage",
-				"team", ref.Team, "cell", m.Cell, "error", err)
+			s.deps.Logger.Warn("read a tenant cell member's usage",
+				"tenant", ref.TenantName, "cell", m.Cell, "error", err)
 		} else {
 			counts := s.admittedJobCounts(claims, memberRef, rows)
 			entry.RunningNow = counts.RunningNow
@@ -1611,24 +1611,24 @@ func (s *Server) teamCellMembers(ctx context.Context, claims *auth.Claims, ref T
 	return out
 }
 
-// orderedTeamMembers answers the tenant's members in the response order:
+// orderedTenantMembers answers the tenant's members in the response order:
 // active members by ascending slot, then standbys by cell name. A tenant
 // with no stored member list answers one synthetic slot-0 entry built
 // from the scalar placement.
-func orderedTeamMembers(team *v1alpha1.Team, ref TenantRef) []v1alpha1.TeamMemberStatus {
-	var members []v1alpha1.TeamMemberStatus
-	if team != nil && team.Status.Placement != nil {
-		members = append(members, team.Status.Placement.Members...)
+func orderedTenantMembers(tenant *v1alpha1.Tenant, ref TenantRef) []v1alpha1.TenantMemberStatus {
+	var members []v1alpha1.TenantMemberStatus
+	if tenant != nil && tenant.Status.Placement != nil {
+		members = append(members, tenant.Status.Placement.Members...)
 	}
 	if len(members) == 0 {
 		slot := int32(0)
-		members = []v1alpha1.TeamMemberStatus{{
+		members = []v1alpha1.TenantMemberStatus{{
 			Cell: ref.Controller, CellNamespace: ref.Namespace,
-			Role: v1alpha1.TeamMemberRoleActive, Slot: &slot,
+			Role: v1alpha1.TenantMemberRoleActive, Slot: &slot,
 		}}
 	}
 	sort.SliceStable(members, func(i, j int) bool {
-		si, sj := teamMemberSortKey(members[i]), teamMemberSortKey(members[j])
+		si, sj := tenantMemberSortKey(members[i]), tenantMemberSortKey(members[j])
 		if si != sj {
 			return si < sj
 		}
@@ -1637,21 +1637,21 @@ func orderedTeamMembers(team *v1alpha1.Team, ref TenantRef) []v1alpha1.TeamMembe
 	return members
 }
 
-// teamMemberSortKey answers an active member's slot index, and a value
+// tenantMemberSortKey answers an active member's slot index, and a value
 // above every slot for a standby, so a standby sorts last.
-func teamMemberSortKey(m v1alpha1.TeamMemberStatus) int32 {
-	if m.Role == v1alpha1.TeamMemberRoleStandby || m.Slot == nil {
+func tenantMemberSortKey(m v1alpha1.TenantMemberStatus) int32 {
+	if m.Role == v1alpha1.TenantMemberRoleStandby || m.Slot == nil {
 		return 1 << 20
 	}
 	return *m.Slot
 }
 
-// renderTeamMemberRole answers the rendered role: "slot <n>" for an
+// renderTenantMemberRole answers the rendered role: "slot <n>" for an
 // active member and "standby" for a standby.
-func renderTeamMemberRole(m v1alpha1.TeamMemberStatus) string {
-	if m.Role == v1alpha1.TeamMemberRoleStandby || m.Slot == nil {
-		if m.Role == v1alpha1.TeamMemberRoleStandby {
-			return v1alpha1.TeamMemberRoleStandby
+func renderTenantMemberRole(m v1alpha1.TenantMemberStatus) string {
+	if m.Role == v1alpha1.TenantMemberRoleStandby || m.Slot == nil {
+		if m.Role == v1alpha1.TenantMemberRoleStandby {
+			return v1alpha1.TenantMemberRoleStandby
 		}
 		return "slot 0"
 	}
@@ -1661,7 +1661,7 @@ func renderTeamMemberRole(m v1alpha1.TeamMemberStatus) string {
 // admittedJobCounts sums the counts of the jobs this caller may read.
 // The tenant read check admits the empty job path for a grant narrowed by
 // jobs globs, so the gate alone cannot scope the numbers; each job path
-// must meet the globs on its own, exactly as the team listing tests each
+// must meet the globs on its own, exactly as the tenant listing tests each
 // row. An unnarrowed grant admits every row and reports the tenant's
 // whole load.
 func (s *Server) admittedJobCounts(claims *auth.Claims, ref TenantRef, rows []recordstore.CellJobUsage) recordstore.CellUsageCounts {
@@ -1682,20 +1682,20 @@ func (s *Server) admittedJobCounts(claims *auth.Claims, ref TenantRef, rows []re
 	return total
 }
 
-// teamCellState applies rules 3 to 5 of the state ladder.
-func (s *Server) teamCellState(cr *v1alpha1.Controller, ref TenantRef, reason string) string {
-	if reason == v1alpha1.TeamReasonTenantMoving {
-		return teamCellMoving
+// tenantCellState applies rules 3 to 5 of the state ladder.
+func (s *Server) tenantCellState(cr *v1alpha1.Controller, ref TenantRef, reason string) string {
+	if reason == v1alpha1.TenantReasonTenantMoving {
+		return tenantCellMoving
 	}
 	if cr == nil || cr.Status.Cell == nil {
-		return teamCellRehydrating
+		return tenantCellRehydrating
 	}
 	for _, applied := range cr.Status.Cell.AppliedTenants {
 		if applied == ref.Tenant {
-			return teamCellPlaced
+			return tenantCellPlaced
 		}
 	}
-	return teamCellRehydrating
+	return tenantCellRehydrating
 }
 
 // --- Fleet locks (components/schemas.yaml#FleetLock) ---
@@ -1721,18 +1721,18 @@ type fleetLockJSON struct {
 
 // fleetLockGrant is one tenant's own read decision. It is held for the
 // length of one request, so a page of rows sharing few tenants resolves
-// few grants. team is the resolved ref's own team, the first segment of
+// few grants. tenant is the resolved ref's own tenant, the first segment of
 // the run link the grant allows.
 type fleetLockGrant struct {
 	folder  string
-	team    string
+	tenant  string
 	grants  []rbac.TenantGrant
 	granted bool
 }
 
 // fleetLockMergeKey is one row's own place in a merged list: the
 // ordering triple both reads share. The read of one tenant can answer a
-// row twice for a team of two tenants, once by the row's owner tenant
+// row twice for a tenant of two tenants, once by the row's owner tenant
 // and once by the row's tenant column, so the merge de-duplicates by
 // this triple.
 type fleetLockMergeKey struct {
@@ -1741,12 +1741,12 @@ type fleetLockMergeKey struct {
 	runID        string
 }
 
-// handleListTeamFleetLocks serves GET /pipelines/{team}/locks. It
-// answers what the list_fleet_locks MCP tool answers for the same team,
+// handleListTenantFleetLocks serves GET /pipelines/{tenant}/locks. It
+// answers what the list_fleet_locks MCP tool answers for the same tenant,
 // because both call ListFleetLocks.
-func (s *Server) handleListTeamFleetLocks(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListTenantFleetLocks(w http.ResponseWriter, r *http.Request) {
 	claims := auth.ClaimsFromContext(r.Context())
-	rows, serr := s.ListFleetLocks(r.Context(), claims, r.PathValue("team"))
+	rows, serr := s.ListFleetLocks(r.Context(), claims, r.PathValue("tenant"))
 	if serr != nil {
 		s.writeJSONError(w, serr.Status, serr.Message)
 		return
@@ -1774,11 +1774,11 @@ func (s *Server) handleListAllFleetLocks(w http.ResponseWriter, r *http.Request)
 	s.writeJSON(w, http.StatusOK, itemsEnvelope(s.fleetLockRows(claims, nil, locks)))
 }
 
-// listTeamFleetLocks reads every admitted tenant's locks and merges them
+// listTenantFleetLocks reads every admitted tenant's locks and merges them
 // into one list. The order is (name, waiting_since, run_id), the order
 // one read answers with, so the merge keeps a holder ahead of its
 // waiters.
-func (s *Server) listTeamFleetLocks(ctx context.Context, claims *auth.Claims, refs []TenantRef) ([]fleetLockJSON, error) {
+func (s *Server) listTenantFleetLocks(ctx context.Context, claims *auth.Claims, refs []TenantRef) ([]fleetLockJSON, error) {
 	seen := make(map[fleetLockMergeKey]bool)
 	var merged []recordstore.FleetLock
 	for _, ref := range refs {
@@ -1829,7 +1829,7 @@ func (s *Server) fleetLockRows(claims *auth.Claims, refs []TenantRef, locks []re
 		}
 		grant := s.fleetLockGrantFor(claims, refs, cache, lock.Tenant)
 		if lock.JobPath != "" && grant.granted && grantsAllow(grant.grants, grant.folder, lock.JobPath, "read") {
-			link := searchRunLink(grant.team, lock.JobPath, lock.RunID)
+			link := searchRunLink(grant.tenant, lock.JobPath, lock.RunID)
 			row.RunLink = &link
 		}
 		rows = append(rows, row)
@@ -1839,7 +1839,7 @@ func (s *Server) fleetLockRows(claims *auth.Claims, refs []TenantRef, locks []re
 
 // fleetLockGrantFor answers the read decision of one row's own tenant. A
 // tenant one of refs already names reuses that ref's folder and grants,
-// so the team route resolves no grant twice. Every other tenant resolves
+// so the tenant route resolves no grant twice. Every other tenant resolves
 // through TenantRefFromTenant alone: a pure parse, and no resolver round
 // trip. The result is cached per tenant string, because a page holds
 // many rows and few tenants. A tenant value that does not parse answers
@@ -1856,7 +1856,7 @@ func (s *Server) fleetLockGrantFor(claims *auth.Claims, refs []TenantRef, cache 
 			continue
 		}
 		grant.folder = ref.Folder
-		grant.team = ref.Team
+		grant.tenant = ref.TenantName
 		grant.grants, grant.granted = s.deps.Authorizer.tenantGrants(claims, ref.Tenant, ref.Folder)
 		matched = true
 		break
@@ -1864,7 +1864,7 @@ func (s *Server) fleetLockGrantFor(claims *auth.Claims, refs []TenantRef, cache 
 	if !matched {
 		if ref, err := TenantRefFromTenant(tenant); err == nil {
 			grant.folder = ref.Folder
-			grant.team = ref.Team
+			grant.tenant = ref.TenantName
 			grant.grants, grant.granted = s.deps.Authorizer.tenantGrants(claims, tenant, ref.Folder)
 		}
 	}

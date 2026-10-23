@@ -11,7 +11,7 @@ apiVersion: varroa.dev/v1alpha1
 kind: Controller
 metadata:
   name: demo
-  namespace: teams-platform
+  namespace: tenants-platform
 spec:
   podOverrides:
     jvmOpts: -XX:MaxRAMPercentage=75 -Duser.timezone=UTC

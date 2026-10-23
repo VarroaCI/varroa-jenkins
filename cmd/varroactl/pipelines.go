@@ -37,12 +37,12 @@ func init() {
 
 func registerPipelineCommands(root *cobra.Command) {
 	runCmd := &cobra.Command{
-		Use:   "run <team>/<job>",
+		Use:   "run <tenant>/<job>",
 		Short: "Trigger a pipeline run",
 		Long: `Trigger a pipeline run.
 
-<team>/<job> splits on the first slash. <job> may hold further slashes.
-<job> may omit the team's own folder segment; the server adds it. <job>
+<tenant>/<job> splits on the first slash. <job> may hold further slashes.
+<job> may omit the tenant's own folder segment; the server adds it. <job>
 may also repeat the folder segment; both forms name the same job.
 --param is repeatable. It takes key=value. --follow waits for the run to
 appear. It then streams the log until the run ends. It exits non-zero
@@ -55,7 +55,7 @@ when the result is not a success.`,
 	root.AddCommand(runCmd)
 
 	buildsCmd := &cobra.Command{
-		Use:   "builds <team>/<job>",
+		Use:   "builds <tenant>/<job>",
 		Short: "List runs for a pipeline job",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runListBuilds,
@@ -92,15 +92,15 @@ func looksLikeRunID(arg string) bool {
 	return id.Version() == 7
 }
 
-// splitTeamJob splits "<team>/<job>" on the first slash. The generated
+// splitTenantJob splits "<tenant>/<job>" on the first slash. The generated
 // client percent-encodes the job path when it builds the request (D2). This
 // function returns the raw, unescaped job path.
-func splitTeamJob(arg string) (team, job string, err error) {
-	team, job, ok := strings.Cut(arg, "/")
-	if !ok || team == "" || job == "" {
-		return "", "", usagef("expected <team>/<job>, got %q", arg)
+func splitTenantJob(arg string) (tenant, job string, err error) {
+	tenant, job, ok := strings.Cut(arg, "/")
+	if !ok || tenant == "" || job == "" {
+		return "", "", usagef("expected <tenant>/<job>, got %q", arg)
 	}
-	return team, job, nil
+	return tenant, job, nil
 }
 
 // parseParamFlags reads --param key=value flags into a map. A repeated key
@@ -125,11 +125,11 @@ func parseParamFlags(cmd *cobra.Command) (map[string]string, error) {
 }
 
 // ---------------------------------------------------------------------------
-// run <team>/<job>
+// run <tenant>/<job>
 // ---------------------------------------------------------------------------
 
 func runTriggerRun(cmd *cobra.Command, args []string) error {
-	team, job, err := splitTeamJob(args[0])
+	tenant, job, err := splitTenantJob(args[0])
 	if err != nil {
 		return err
 	}
@@ -159,7 +159,7 @@ func runTriggerRun(cmd *cobra.Command, args []string) error {
 		body.Parameters = &params
 	}
 
-	resp, err := c.CreateRunWithResponse(cmd.Context(), team, job, body)
+	resp, err := c.CreateRunWithResponse(cmd.Context(), tenant, job, body)
 	if err != nil {
 		return err
 	}
@@ -210,11 +210,11 @@ func waitForRunToAppear(ctx context.Context, c *client.ClientWithResponses, runI
 }
 
 // ---------------------------------------------------------------------------
-// builds <team>/<job>
+// builds <tenant>/<job>
 // ---------------------------------------------------------------------------
 
 func runListBuilds(cmd *cobra.Command, args []string) error {
-	team, job, err := splitTeamJob(args[0])
+	tenant, job, err := splitTenantJob(args[0])
 	if err != nil {
 		return err
 	}
@@ -224,7 +224,7 @@ func runListBuilds(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	resp, err := c.ListRunsWithResponse(cmd.Context(), team, job, &client.ListRunsParams{})
+	resp, err := c.ListRunsWithResponse(cmd.Context(), tenant, job, &client.ListRunsParams{})
 	if err != nil {
 		return err
 	}

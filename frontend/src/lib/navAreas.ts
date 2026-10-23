@@ -19,7 +19,7 @@ export const SETTINGS_ITEMS: AreaNavItem[] = [
   { to: "/access/role-bindings", label: "Varroa Role Bindings", icon: Link2, description: "Bind Varroa roles to subjects", gate: { resource: "rolebindings", verb: "read", globalOnly: true } },
   { to: "/access/jenkins-roles", label: "Jenkins Roles", icon: Wrench, description: "Jenkins permission sets (Global/Item/Agent)", gate: { resource: "jenkinsroles", verb: "read", globalOnly: true } },
   { to: "/access/jenkins-role-bindings", label: "Jenkins Role Bindings", icon: Cable, description: "Assign Jenkins roles to subjects", gate: { resource: "jenkinsrolebindings", verb: "read", globalOnly: true } },
-  { to: "/access/teams", label: "Teams", icon: Users2, description: "Team-scoped access and publishing", gate: { resource: "roles", verb: "read", globalOnly: true } },
+  { to: "/access/tenants", label: "Tenants", icon: Users2, description: "Tenant-scoped access and publishing", gate: { resource: "roles", verb: "read", globalOnly: true } },
   { to: "/administration/provisioning", label: "Provisioning", icon: Settings2, description: "Cluster provisioning defaults", gate: { resource: "provisioningdefaults", verb: "update", globalOnly: true } },
   { to: "/administration/versions", label: "Versions", icon: GitCompareArrows, description: "Jenkins version profiles and channels", gate: { resource: "provisioningdefaults", verb: "update", globalOnly: true } },
   { to: "/administration/identity", label: "Identity", icon: Fingerprint, description: "OIDC identity provider settings", gate: "admin" },

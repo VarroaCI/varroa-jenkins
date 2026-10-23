@@ -20,8 +20,8 @@ describe("pipelines table layout", () => {
     expect(body).toMatch(/overflow-wrap:\s*break-word/);
   });
 
-  it("defines the horizontal scroll wrapper on the team home and the build page", () => {
-    expect(read("TeamHome.module.css")).toMatch(/\.tableScroll\s*\{/);
+  it("defines the horizontal scroll wrapper on the tenant home and the build page", () => {
+    expect(read("TenantHome.module.css")).toMatch(/\.tableScroll\s*\{/);
     expect(read("BuildPage.module.css")).toMatch(/\.tableScroll\s*\{/);
   });
 });

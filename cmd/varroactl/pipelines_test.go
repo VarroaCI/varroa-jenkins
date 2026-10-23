@@ -17,21 +17,21 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// splitTeamJob / parseParamFlags / looksLikeRunID unit tests
+// splitTenantJob / parseParamFlags / looksLikeRunID unit tests
 // ---------------------------------------------------------------------------
 
-func TestSplitTeamJob(t *testing.T) {
-	team, job, err := splitTeamJob("payments/checkout-api/main")
+func TestSplitTenantJob(t *testing.T) {
+	tenant, job, err := splitTenantJob("payments/checkout-api/main")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if team != "payments" || job != "checkout-api/main" {
-		t.Errorf("expected team=payments job=checkout-api/main, got team=%s job=%s", team, job)
+	if tenant != "payments" || job != "checkout-api/main" {
+		t.Errorf("expected tenant=payments job=checkout-api/main, got tenant=%s job=%s", tenant, job)
 	}
 }
 
-func TestSplitTeamJob_NoSlash(t *testing.T) {
-	if _, _, err := splitTeamJob("payments"); err == nil {
+func TestSplitTenantJob_NoSlash(t *testing.T) {
+	if _, _, err := splitTenantJob("payments"); err == nil {
 		t.Fatal("expected error for argument with no slash")
 	}
 }
@@ -50,7 +50,7 @@ func TestLooksLikeRunID(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// run <team>/<job>
+// run <tenant>/<job>
 // ---------------------------------------------------------------------------
 
 func TestPipelinesRun_PrintsRunID(t *testing.T) {
@@ -130,7 +130,7 @@ func TestPipelinesRun_AccessDenied(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// builds <team>/<job>
+// builds <tenant>/<job>
 // ---------------------------------------------------------------------------
 
 func TestPipelinesBuilds_JobPathEncodedAndTable(t *testing.T) {

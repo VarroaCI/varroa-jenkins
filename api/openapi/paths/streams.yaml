@@ -76,7 +76,7 @@
                 description: >
                   The one stream the ticket opens. One of brood, activity,
                   controller:{cluster}/{ns}/{name}, broodop:{ns}/{name},
-                  run:{run_id}, or pipelines:{team}. A ticket opens the
+                  run:{run_id}, or pipelines:{tenant}. A ticket opens the
                   stream whose path maps onto the same scope, and no other.
             additionalProperties: false
     responses:

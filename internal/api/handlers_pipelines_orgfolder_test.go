@@ -56,7 +56,7 @@ func newItemsFixture(itemsYAML string) *fakeResourceClient {
 	return client
 }
 
-// newItemsServer serves the team ctrl-a with a read grant and itemsYAML.
+// newItemsServer serves the tenant ctrl-a with a read grant and itemsYAML.
 func newItemsServer(reader *fakeRecordReader, itemsYAML string) *Server {
 	authz := pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a")
 	return pipelinesTestServer(newItemsFixture(itemsYAML), authz, reader, nil)
@@ -211,7 +211,7 @@ func TestDeclaredJobPendingOrganizationFolder(t *testing.T) {
 	}
 }
 
-// scanServerWithItems serves the team ci, whose composed bundle declares
+// scanServerWithItems serves the tenant ci, whose composed bundle declares
 // itemsYAML, with the given reader and transport.
 func scanServerWithItems(reader recordstore.Reader, mt transport.Transport, itemsYAML string) *Server {
 	client := newFakeResourceClient()
@@ -236,17 +236,17 @@ func scanServerWithItems(reader recordstore.Reader, mt transport.Transport, item
 	return srv
 }
 
-// postScanOf posts a scan of job on the team ci.
+// postScanOf posts a scan of job on the tenant ci.
 func postScanOf(t *testing.T, srv *Server, job string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := doWriteRequest("/pipelines/ci/jobs/"+strings.ReplaceAll(job, "/", "%2F")+"/scan",
-		map[string]string{"team": "ci", "job": job}, testClaims(), scanMultibranchRequest{})
+		map[string]string{"tenant": "ci", "job": job}, testClaims(), scanMultibranchRequest{})
 	rec := httptest.NewRecorder()
 	srv.handleScanMultibranch(rec, req)
 	return rec
 }
 
-// scanItemsYAML declares the pipeline svc/main on the team ci.
+// scanItemsYAML declares the pipeline svc/main on the tenant ci.
 const scanItemsYAML = `
 items:
   - kind: folder
@@ -340,7 +340,7 @@ func TestJobBranchesRepositoryHeads(t *testing.T) {
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
 	}
-	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
 	authz := NewAuthorizer(testResolver(pipelinesRoles(), []*v1alpha1.VarroaRoleBinding{
 		branchTestBinding("org", "org/*"),
 	}), false)
@@ -358,7 +358,7 @@ func TestJobBranchesRepositoryHeads(t *testing.T) {
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleListJobBranches, "/pipelines/payments/jobs/payments%2Forg/branches",
-		map[string]string{"team": "payments", "job": "payments/org"})
+		map[string]string{"tenant": "payments", "job": "payments/org"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}

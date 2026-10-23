@@ -57,8 +57,8 @@ func (p *scriptProvider) Stream(context.Context, provider.Key, provider.Request)
 
 type noTenants struct{}
 
-func (noTenants) RunTenant(context.Context, string) (string, error)  { return "", nil }
-func (noTenants) TeamTenant(context.Context, string) (string, error) { return "", nil }
+func (noTenants) RunTenant(context.Context, string) (string, error)    { return "", nil }
+func (noTenants) TenantTenant(context.Context, string) (string, error) { return "", nil }
 
 func toolTurn(id, name, args string) []provider.Delta {
 	return []provider.Delta{

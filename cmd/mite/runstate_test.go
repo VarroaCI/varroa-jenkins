@@ -25,7 +25,7 @@ import (
 // still fails the command when it names another job or another build.
 // A node path carries no job, so it takes no binding check.
 func TestCheckResumePathBinding_MismatchFails(t *testing.T) {
-	payload := &mitev1.ResumeBuildPayload{JobPath: "team/pipeline", BuildNumber: 7}
+	payload := &mitev1.ResumeBuildPayload{JobPath: "tenant/pipeline", BuildNumber: 7}
 	cases := []struct {
 		name    string
 		parsed  parsedRehydrationPath
@@ -33,16 +33,16 @@ func TestCheckResumePathBinding_MismatchFails(t *testing.T) {
 	}{
 		{
 			name:   "matching job and build passes",
-			parsed: parsedRehydrationPath{kind: rehydrationPathBuildXML, jobPath: "team/pipeline", buildNumber: 7},
+			parsed: parsedRehydrationPath{kind: rehydrationPathBuildXML, jobPath: "tenant/pipeline", buildNumber: 7},
 		},
 		{
 			name:    "mismatched job path fails",
-			parsed:  parsedRehydrationPath{kind: rehydrationPathBuildXML, jobPath: "team/other", buildNumber: 7},
+			parsed:  parsedRehydrationPath{kind: rehydrationPathBuildXML, jobPath: "tenant/other", buildNumber: 7},
 			wantErr: true,
 		},
 		{
 			name:    "mismatched build number fails",
-			parsed:  parsedRehydrationPath{kind: rehydrationPathProgramDat, jobPath: "team/pipeline", buildNumber: 8},
+			parsed:  parsedRehydrationPath{kind: rehydrationPathProgramDat, jobPath: "tenant/pipeline", buildNumber: 8},
 			wantErr: true,
 		},
 		{
@@ -187,7 +187,7 @@ const testPusherEpoch = int64(1737000000000)
 
 const testPusherGen = int64(4)
 
-const stubJobPath = "team/pipeline"
+const stubJobPath = "tenant/pipeline"
 
 // resumeStub records what the resume called on the Jenkins side, and
 // scripts the load route's answer.
@@ -334,7 +334,7 @@ func TestApplyResumeBuild_FetchErrorFailsBeforeReload(t *testing.T) {
 
 	payload := &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: jobPath, BuildNumber: 7,
-		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/program.dat", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}}, Instance: agent.cfg.CellInstance,
+		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/program.dat", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}}, Instance: agent.cfg.CellInstance,
 	}
 	err := agent.applyResumeBuild(context.Background(), payload)
 	if err == nil {
@@ -365,9 +365,9 @@ func TestApplyResumeBuild_ForeignInstanceIsRefused(t *testing.T) {
 
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId:       "run-1",
-		JobPath:     "team/pipeline",
+		JobPath:     "tenant/pipeline",
 		BuildNumber: 7,
-		StateFiles:  []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles:  []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:    "pod-dead",
 	})
 	if err == nil {
@@ -397,9 +397,9 @@ func TestApplyResumeBuild_OwnInstanceIsAccepted(t *testing.T) {
 
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId:       "run-1",
-		JobPath:     "team/pipeline",
+		JobPath:     "tenant/pipeline",
 		BuildNumber: 7,
-		StateFiles:  []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles:  []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:    "pod-live",
 	})
 	if err == nil {
@@ -421,9 +421,9 @@ func TestApplyResumeBuild_MissingInstanceIsRefused(t *testing.T) {
 
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId:       "run-1",
-		JobPath:     "team/pipeline",
+		JobPath:     "tenant/pipeline",
 		BuildNumber: 7,
-		StateFiles:  []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles:  []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 	})
 	if err == nil {
 		t.Fatal("want a refusal for a command that names no instance")
@@ -450,9 +450,9 @@ func TestApplyResumeBuild_AnExpiredDeadlineIsRefused(t *testing.T) {
 
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId:        "run-1",
-		JobPath:      "team/pipeline",
+		JobPath:      "tenant/pipeline",
 		BuildNumber:  7,
-		StateFiles:   []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles:   []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:     "pod-live",
 		DeadlineUnix: time.Now().Add(-time.Minute).Unix(),
 	})
@@ -483,9 +483,9 @@ func TestApplyResumeBuild_AFutureDeadlineIsAccepted(t *testing.T) {
 
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId:        "run-1",
-		JobPath:      "team/pipeline",
+		JobPath:      "tenant/pipeline",
 		BuildNumber:  7,
-		StateFiles:   []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles:   []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:     "pod-live",
 		DeadlineUnix: time.Now().Add(5 * time.Minute).Unix(),
 	})
@@ -524,7 +524,7 @@ func TestApplyResumeBuild_LoadsTheBuildAfterTheReload(t *testing.T) {
 	agent := newResumeAgent(t, t.TempDir(), []byte("<build/>"))
 	payload := &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: jobPath, BuildNumber: 7,
-		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:   agent.cfg.CellInstance,
 	}
 	if err := agent.applyResumeBuild(context.Background(), payload); err != nil {
@@ -553,7 +553,7 @@ func TestApplyResumeBuild_ABuildThatDoesNotRunFailsTheCommand(t *testing.T) {
 	agent := newResumeAgent(t, t.TempDir(), []byte("<build/>"))
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: jobPath, BuildNumber: 7,
-		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:   agent.cfg.CellInstance,
 	})
 	if err == nil {
@@ -574,7 +574,7 @@ func TestApplyResumeBuild_ALoadFailureFailsTheCommand(t *testing.T) {
 	agent := newResumeAgent(t, t.TempDir(), []byte("<build/>"))
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: jobPath, BuildNumber: 7,
-		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:   agent.cfg.CellInstance,
 	})
 	if err == nil {
@@ -606,7 +606,7 @@ func TestApplyResumeBuild_ARedeliveredCommandTouchesNothing(t *testing.T) {
 
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
-		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:   agent.cfg.CellInstance,
 	})
 	if err != nil {
@@ -643,7 +643,7 @@ func TestApplyResumeBuild_TheAbsoluteDeadlineBoundsEveryStep(t *testing.T) {
 	started := time.Now()
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
-		StateFiles:   []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles:   []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:     agent.cfg.CellInstance,
 		DeadlineUnix: time.Now().Add(time.Second).Unix(),
 	})
@@ -675,7 +675,7 @@ func TestApplyResumeBuild_AProbeThatNeverAnswersFailsClosed(t *testing.T) {
 	agent := newResumeAgent(t, home, []byte("<build/>"))
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
-		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:   agent.cfg.CellInstance,
 	})
 	if err == nil {
@@ -703,7 +703,7 @@ func TestApplyResumeBuild_ATransientProbeFailureStillResumes(t *testing.T) {
 	agent := newResumeAgent(t, t.TempDir(), []byte("<build/>"))
 	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
-		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:   agent.cfg.CellInstance,
 	}); err != nil {
 		t.Fatalf("applyResumeBuild: %v", err)
@@ -733,7 +733,7 @@ func TestApplyResumeBuild_AFinishedBuildIsNotRestored(t *testing.T) {
 			stub.answerProbe(false, tc.probe)
 
 			home := t.TempDir()
-			buildDir := filepath.Join(home, "jobs", "team", "jobs", "pipeline", "builds", "7")
+			buildDir := filepath.Join(home, "jobs", "tenant", "jobs", "pipeline", "builds", "7")
 			if err := os.MkdirAll(buildDir, 0755); err != nil {
 				t.Fatal(err)
 			}
@@ -752,7 +752,7 @@ func TestApplyResumeBuild_AFinishedBuildIsNotRestored(t *testing.T) {
 			agent := newResumeAgent(t, home, []byte("<from-the-gateway/>"))
 			if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 				RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
-				StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+				StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 				Instance:   agent.cfg.CellInstance,
 			}); err != nil {
 				t.Fatalf("a finished build must answer success: %v", err)
@@ -801,8 +801,8 @@ func TestApplyResumeBuild_FetchesEachFileAtItsEpoch(t *testing.T) {
 		return nil
 	}})
 
-	const programPath = "jobs/team/jobs/pipeline/builds/7/program.dat"
-	const recordPath = "jobs/team/jobs/pipeline/builds/7/build.xml"
+	const programPath = "jobs/tenant/jobs/pipeline/builds/7/program.dat"
+	const recordPath = "jobs/tenant/jobs/pipeline/builds/7/build.xml"
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: jobPath, BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{
@@ -839,7 +839,7 @@ func TestApplyResumeBuild_FetchesEachFileAtItsEpoch(t *testing.T) {
 func TestApplyResumeBuild_WritesTheLogNextSeqBeforeTheReload(t *testing.T) {
 	stub := startAdoptAndReloadStub(t)
 	home := t.TempDir()
-	buildDir := filepath.Join(home, "jobs", "team", "jobs", "pipeline", "builds", "7")
+	buildDir := filepath.Join(home, "jobs", "tenant", "jobs", "pipeline", "builds", "7")
 	var atReload atomic.Value
 	hook := func() {
 		data, _ := os.ReadFile(filepath.Join(buildDir, resumeLogNextSeqFile))
@@ -850,7 +850,7 @@ func TestApplyResumeBuild_WritesTheLogNextSeqBeforeTheReload(t *testing.T) {
 	agent := newResumeAgent(t, home, []byte("<build/>"))
 	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
-		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:   agent.cfg.CellInstance,
 		LogNextSeq: 12,
 	}); err != nil {
@@ -869,12 +869,12 @@ func TestApplyResumeBuild_ZeroLogNextSeqWritesNoFile(t *testing.T) {
 	agent := newResumeAgent(t, home, []byte("<build/>"))
 	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
-		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
 		Instance:   agent.cfg.CellInstance,
 	}); err != nil {
 		t.Fatalf("applyResumeBuild: %v", err)
 	}
-	path := filepath.Join(home, "jobs", "team", "jobs", "pipeline", "builds", "7", resumeLogNextSeqFile)
+	path := filepath.Join(home, "jobs", "tenant", "jobs", "pipeline", "builds", "7", resumeLogNextSeqFile)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("stat %s = %v, want no file", path, err)
 	}
@@ -961,21 +961,21 @@ func TestApplyResumeBuild_WritesOrgFolderBranchFilesUnderResolvedDirs(t *testing
 // TestApplyResumeBuild_PlainJobWritesUnderJobs proves a plain job keeps its
 // logical directory.
 func TestApplyResumeBuild_PlainJobWritesUnderJobs(t *testing.T) {
-	startAdoptAndReloadStubFor(t, "team/pipeline")
+	startAdoptAndReloadStubFor(t, "tenant/pipeline")
 	home := t.TempDir()
-	writeJobConfig(t, home, "team/pipeline", folderConfig)
+	writeJobConfig(t, home, "tenant/pipeline", folderConfig)
 
 	agent := newResumeAgent(t, home, []byte("<build/>"))
 	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
-		RunId: "run-1", JobPath: "team/pipeline", BuildNumber: 7,
+		RunId: "run-1", JobPath: "tenant/pipeline", BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{
-			{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen},
+			{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen},
 		},
 		Instance: agent.cfg.CellInstance,
 	}); err != nil {
 		t.Fatalf("applyResumeBuild: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(home, "jobs", "team", "jobs", "pipeline", "builds", "7", "build.xml")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, "jobs", "tenant", "jobs", "pipeline", "builds", "7", "build.xml")); err != nil {
 		t.Errorf("build.xml not written under the logical job directory: %v", err)
 	}
 }

@@ -6,10 +6,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Default values for the seven Team.spec.pipelines ledger and rehydration
+// Default values for the seven Tenant.spec.pipelines ledger and rehydration
 // settings. The apiserver's CRD schema default applies these on create; the
 // Effective* methods below apply the same values to Go code that builds or
-// reads a Team without going through the apiserver, such as a test or an
+// reads a Tenant without going through the apiserver, such as a test or an
 // in-memory fake.
 const (
 	// DefaultRehydrateBuilds is spec.pipelines.rehydrateBuilds's default.
@@ -29,10 +29,10 @@ const (
 // Member roles of a pipelines tenant. An active member holds one slot. A
 // standby holds the folder, holds no slot, and runs no build.
 const (
-	// TeamMemberRoleActive names a member that holds a slot.
-	TeamMemberRoleActive = "active"
-	// TeamMemberRoleStandby names a warm member that holds no slot.
-	TeamMemberRoleStandby = "standby"
+	// TenantMemberRoleActive names a member that holds a slot.
+	TenantMemberRoleActive = "active"
+	// TenantMemberRoleStandby names a warm member that holds no slot.
+	TenantMemberRoleStandby = "standby"
 )
 
 // DefaultRehydrateDeadline is spec.pipelines.rehydrateDeadline's default.
@@ -43,7 +43,7 @@ func DefaultCronGrace() metav1.Duration { return metav1.Duration{Duration: 5 * t
 
 // EffectiveRehydrateBuilds resolves spec.pipelines.rehydrateBuilds. A nil
 // spec or a nil field means the default.
-func (p *TeamPipelinesSpec) EffectiveRehydrateBuilds() int32 {
+func (p *TenantPipelinesSpec) EffectiveRehydrateBuilds() int32 {
 	if p == nil || p.RehydrateBuilds == nil {
 		return DefaultRehydrateBuilds
 	}
@@ -52,7 +52,7 @@ func (p *TeamPipelinesSpec) EffectiveRehydrateBuilds() int32 {
 
 // EffectiveRehydrateDeadline resolves spec.pipelines.rehydrateDeadline. A
 // nil spec or a nil field means the default.
-func (p *TeamPipelinesSpec) EffectiveRehydrateDeadline() time.Duration {
+func (p *TenantPipelinesSpec) EffectiveRehydrateDeadline() time.Duration {
 	if p == nil || p.RehydrateDeadline == nil {
 		return DefaultRehydrateDeadline().Duration
 	}
@@ -61,7 +61,7 @@ func (p *TeamPipelinesSpec) EffectiveRehydrateDeadline() time.Duration {
 
 // EffectiveInterruptedRetry resolves spec.pipelines.interruptedRetry. A nil
 // spec or an empty field means the default.
-func (p *TeamPipelinesSpec) EffectiveInterruptedRetry() string {
+func (p *TenantPipelinesSpec) EffectiveInterruptedRetry() string {
 	if p == nil || p.InterruptedRetry == "" {
 		return DefaultInterruptedRetry
 	}
@@ -70,7 +70,7 @@ func (p *TeamPipelinesSpec) EffectiveInterruptedRetry() string {
 
 // EffectiveConcurrency resolves spec.pipelines.concurrency. A nil spec or an
 // empty field means the default.
-func (p *TeamPipelinesSpec) EffectiveConcurrency() string {
+func (p *TenantPipelinesSpec) EffectiveConcurrency() string {
 	if p == nil || p.Concurrency == "" {
 		return DefaultConcurrency
 	}
@@ -79,7 +79,7 @@ func (p *TeamPipelinesSpec) EffectiveConcurrency() string {
 
 // EffectiveCronBackstop resolves spec.pipelines.cronBackstop. A nil spec or
 // a nil field means on.
-func (p *TeamPipelinesSpec) EffectiveCronBackstop() bool {
+func (p *TenantPipelinesSpec) EffectiveCronBackstop() bool {
 	if p == nil || p.CronBackstop == nil {
 		return true
 	}
@@ -88,7 +88,7 @@ func (p *TeamPipelinesSpec) EffectiveCronBackstop() bool {
 
 // EffectiveCronCatchUp resolves spec.pipelines.cronCatchUp. A nil spec or an
 // empty field means the default.
-func (p *TeamPipelinesSpec) EffectiveCronCatchUp() string {
+func (p *TenantPipelinesSpec) EffectiveCronCatchUp() string {
 	if p == nil || p.CronCatchUp == "" {
 		return DefaultCronCatchUp
 	}
@@ -97,7 +97,7 @@ func (p *TeamPipelinesSpec) EffectiveCronCatchUp() string {
 
 // EffectiveCronGrace resolves spec.pipelines.cronGrace. A nil spec or a nil
 // field means the default.
-func (p *TeamPipelinesSpec) EffectiveCronGrace() time.Duration {
+func (p *TenantPipelinesSpec) EffectiveCronGrace() time.Duration {
 	if p == nil || p.CronGrace == nil {
 		return DefaultCronGrace().Duration
 	}
@@ -107,7 +107,7 @@ func (p *TeamPipelinesSpec) EffectiveCronGrace() time.Duration {
 // EffectiveMembers resolves spec.pipelines.members, the tenant's active slot
 // count. A nil spec or a nil field means the default. A value below one
 // reads as one, because slot indexes are dense from zero.
-func (p *TeamPipelinesSpec) EffectiveMembers() int32 {
+func (p *TenantPipelinesSpec) EffectiveMembers() int32 {
 	if p == nil || p.Members == nil || *p.Members < 1 {
 		return DefaultPipelineMembers
 	}
@@ -117,7 +117,7 @@ func (p *TeamPipelinesSpec) EffectiveMembers() int32 {
 // EffectiveStandby resolves spec.pipelines.standby, the tenant's warm member
 // count. A nil spec or a nil field means the default. A negative value reads
 // as zero.
-func (p *TeamPipelinesSpec) EffectiveStandby() int32 {
+func (p *TenantPipelinesSpec) EffectiveStandby() int32 {
 	if p == nil || p.Standby == nil || *p.Standby < 0 {
 		return DefaultPipelineStandby
 	}

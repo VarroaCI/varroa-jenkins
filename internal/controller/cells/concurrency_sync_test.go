@@ -9,8 +9,8 @@ import (
 func TestSyncPolicyFromPipelinesCarriesConcurrencyLimits(t *testing.T) {
 	t.Parallel()
 
-	limits := []v1alpha1.TeamConcurrencyLimit{{Name: "deploys", Jobs: []string{"deploy/*"}, Max: 1}}
-	got := SyncPolicyFromPipelines(&v1alpha1.TeamPipelinesSpec{ConcurrencyLimits: limits})
+	limits := []v1alpha1.TenantConcurrencyLimit{{Name: "deploys", Jobs: []string{"deploy/*"}, Max: 1}}
+	got := SyncPolicyFromPipelines(&v1alpha1.TenantPipelinesSpec{ConcurrencyLimits: limits})
 	if len(got.ConcurrencyLimits) != 1 || got.ConcurrencyLimits[0].Name != "deploys" {
 		t.Fatalf("ConcurrencyLimits = %+v, want the deploys limit", got.ConcurrencyLimits)
 	}
@@ -19,8 +19,8 @@ func TestSyncPolicyFromPipelinesCarriesConcurrencyLimits(t *testing.T) {
 func TestSyncPolicyEqualDetectsLimitChange(t *testing.T) {
 	t.Parallel()
 
-	a := SyncPolicy{ConcurrencyLimits: []v1alpha1.TeamConcurrencyLimit{{Name: "x", Jobs: []string{"*"}, Max: 1}}}
-	b := SyncPolicy{ConcurrencyLimits: []v1alpha1.TeamConcurrencyLimit{{Name: "x", Jobs: []string{"*"}, Max: 2}}}
+	a := SyncPolicy{ConcurrencyLimits: []v1alpha1.TenantConcurrencyLimit{{Name: "x", Jobs: []string{"*"}, Max: 1}}}
+	b := SyncPolicy{ConcurrencyLimits: []v1alpha1.TenantConcurrencyLimit{{Name: "x", Jobs: []string{"*"}, Max: 2}}}
 	if a.Equal(b) {
 		t.Fatal("a changed limit max must not compare equal")
 	}
@@ -42,9 +42,9 @@ func TestSyncPolicyEqualDetectsCellMaxRunsChange(t *testing.T) {
 func TestSyncPolicyFor_ResolvesPoolMaxRunsPerTenant(t *testing.T) {
 	t.Parallel()
 
-	team := &v1alpha1.Team{Spec: v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{CellPool: "pool-a"}}}
+	tenant := &v1alpha1.Tenant{Spec: v1alpha1.TenantSpec{Pipelines: &v1alpha1.TenantPipelinesSpec{CellPool: "pool-a"}}}
 	in := Inputs{Pools: []CellPoolSummary{{Name: "pool-a", MaxRunsPerTenant: 4}}}
-	if got := syncPolicyFor(in, team).CellMaxRuns; got != 4 {
+	if got := syncPolicyFor(in, tenant).CellMaxRuns; got != 4 {
 		t.Fatalf("CellMaxRuns = %d, want 4", got)
 	}
 }

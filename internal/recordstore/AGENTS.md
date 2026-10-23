@@ -32,8 +32,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   write path.
 - **`Reader.ListTenantPlacements`** (`reader_placements.go`) answers the
   slot-0 coordinate of every `tenant_placements` row of one tenant, one per
-  cluster. It is the core BFF's only view of a Team that a member cluster
-  places, because that Team lives on the member's API server.
+  cluster. It is the core BFF's only view of a Tenant that a member cluster
+  places, because that Tenant lives on the member's API server.
   `Reader.ListAllTenantPlacements` answers the same coordinate plus the
   generation for every row of every tenant; the BFF's `GET /pipelines`
   landing list reads it. A generation-0 row names a torn-down tenant.
@@ -281,7 +281,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   `tenant_placements.retired_incarnations`, a jsonb list of the
   incarnations a take-over replaced, newest first. It defaults to `[]`.
   The migration's own comment says a teardown purge adds no entry; a
-  teardown for a deleted `Team` now adds one (`retireDeletedTeam`), and
+  teardown for a deleted `Tenant` now adds one (`retireDeletedTenant`), and
   the applied migration stays unedited.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
@@ -521,13 +521,13 @@ of the fleet's audit activity, once a controller becomes disposable.
   construction. A teardown also resets that tenant's
   `tenant_placements.generation` to zero
   (`resetTenantPlacementGeneration`), under the same at-most test, because
-  the announce never lowers a stored generation and a `Team` created again
+  the announce never lowers a stored generation and a `Tenant` created again
   under the old name restarts at generation 1. The row itself survives the
   reset: the interrupted-run sweep still reads its cell-liveness fields
   for a run the teardown left behind. A purge that names a cell is a slot
   move and resets nothing. **A teardown tests the incarnation first, and
   one transaction holds both of its writes** (`purgeTornDownTenant`): the
-  request carries the `Team`'s `metadata.uid`, the purge reads the row's
+  request carries the `Tenant`'s `metadata.uid`, the purge reads the row's
   `incarnation` column under `FOR UPDATE`, and a request that names
   another incarnation than the stored one logs at info and writes nothing.
   A teardown purge can arrive up to ten seconds after the finalizer
@@ -539,12 +539,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   tenant sync responder below). An empty value on either side means
   unknown and matches, and a tenant with no placement row is purged too,
   because the schedule rows can outlive it. **A teardown for a deleted
-  `Team` retires its incarnation** (`retireDeletedTeam`): the request sets
-  `team_deleted`, and the purge adds `incarnation` to
+  `Tenant` retires its incarnation** (`retireDeletedTenant`): the request sets
+  `tenant_deleted`, and the purge adds `incarnation` to
   `retired_incarnations` in the same transaction, so a late announcement
-  of that `Team` is stale and cannot restore the reset row. A retiring
+  of that `Tenant` is stale and cannot restore the reset row. A retiring
   purge with no row writes no row. A request that names a cell and sets
-  `team_deleted` is refused. The operator side of this contract lives
+  `tenant_deleted` is refused. The operator side of this contract lives
   outside this package.
 - **Tenant sync responder** (`tenant_sync.go`, `tenant_sync_types.go`) —
   `RegisterTenantSyncResponder` subscribes `bus.TenantSyncSubject` with
@@ -564,7 +564,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   (`retireIncarnation`): it adds that value to `retired_incarnations`.
   The list keeps eight entries and has no time limit, because a
   `metadata.uid` never comes back. A teardown purge retires only the
-  incarnation of a deleted `Team`: a `Team` that drops `spec.pipelines`
+  incarnation of a deleted `Tenant`: a `Tenant` that drops `spec.pipelines`
   keeps its uid and can add the field again. **A take-over deletes every `job_schedules` row of the
   name** (`deleteTenantJobSchedules`), inside the same transaction: a cell
   exports a tenant's jobs only after the announce that placed it, so at
@@ -1350,7 +1350,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   newest `build.scheduled.backstop` occurrence of the job in the last 24
   hours (the fired occurrence itself stays, so a lost fire can re-fire): a row keeps passed occurrences, so without it each round fires
   the next older miss. `selectFire` applies
-  `Team.spec.pipelines.cronCatchUp`; `selectReadyFires` applies
+  `Tenant.spec.pipelines.cronCatchUp`; `selectReadyFires` applies
   the `sha256(cluster|tenant|job_path) mod grace_seconds` spreading delay
   and the 100-fire-per-round bound. `readTenantSchedulePolicy` answers
   the backstop-scheduler capability's defaults (backstop on, catch-up
@@ -1481,7 +1481,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   (`reader_cellusage.go`) report one cell's load. The first two answer
   tenant by tenant; `CellUsage` calls `CellUsageMany` with one cell.
   `CellTenantUsage` answers one row lower — **one row for each of one
-  tenant's jobs** — because the team cell read must sum only the jobs the
+  tenant's jobs** — because the tenant cell read must sum only the jobs the
   caller's `jobs` globs admit, and a tenant-wide number would leak the
   rest. Its row set is the union of the tenant's `job_schedules` paths and
   every job path the two `runs` aggregates name, and its `jobs` value is
@@ -1520,9 +1520,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   fails, because an empty keep set would delete adoptable pods. The moved and
   silent arms release nothing.
 
-- Migration `00040_team_agent_spend.sql` adds `team_agent_spend` (team, day rollup). `varroa_client` holds INSERT and UPDATE only. The retention round drops days outside the `runs` window (`retention_team_agent_spend.go`).
+- Migration `00040_tenant_agent_spend.sql` adds `tenant_agent_spend` (tenant, day rollup). `varroa_client` holds INSERT and UPDATE only. The retention round drops days outside the `runs` window (`retention_tenant_agent_spend.go`).
 - Activity rows that the recorder writes publish on `activity.<cluster>.<ns>.<ctrl>` (or `_global`) only after the commit (`activity_publish.go`). A re-ingested copy finds its row through `ON CONFLICT (ts, event_key)` and writes nothing. `activity.EventKey` lives in `internal/api/activity`. Producers: `build.failed` (`ingest_build_failed.go`), `pipeline.branch_scan_failed` (`ingest_branch_scan_failed.go`), `fleetlock.wait_exceeded` (`fleet_lock_wait_exceeded.go`, once per waiter through the backstop round), and the interruption and backstop rows.
-- `varroa.recordstore.webhook.enqueue` (queue `recorder`) enqueues one Team agent message. The delivery key is `team_agent.message:<session>:<call>`, so a retry adds no row. A tenant without a webhook answers `no webhook`. Without a run, the session id is the delivery's `run_id`.
+- `varroa.recordstore.webhook.enqueue` (queue `recorder`) enqueues one Tenant agent message. The delivery key is `tenant_agent.message:<session>:<call>`, so a retry adds no row. A tenant without a webhook answers `no webhook`. Without a run, the session id is the delivery's `run_id`.
 
 ## Work Guidance
 

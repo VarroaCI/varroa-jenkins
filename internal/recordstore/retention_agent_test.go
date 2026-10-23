@@ -12,7 +12,7 @@ import (
 // seedAgentSession inserts one agent session with two events and one
 // approval. A nil ended leaves the session open. A skipped session takes
 // ended equal to started, as the store writes it.
-func seedAgentSession(ctx context.Context, t *testing.T, pool *pgxpool.Pool, team, state string, started time.Time, ended *time.Time) uuid.UUID {
+func seedAgentSession(ctx context.Context, t *testing.T, pool *pgxpool.Pool, tenant, state string, started time.Time, ended *time.Time) uuid.UUID {
 	t.Helper()
 	id := uuid.Must(uuid.NewV7())
 	var skipReason any
@@ -26,11 +26,11 @@ func seedAgentSession(ctx context.Context, t *testing.T, pool *pgxpool.Pool, tea
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO varroa.agent_sessions
-		  (id, kind, principal, team, cluster, provider, model, key_source, data_sharing,
+		  (id, kind, principal, tenant, cluster, provider, model, key_source, data_sharing,
 		   state, skip_reason, started_at, ended_at)
-		VALUES ($1, 'team_agent', 'alice', $2, $3, 'anthropic', 'm', 'chart', 'logs',
+		VALUES ($1, 'tenant_agent', 'alice', $2, $3, 'anthropic', 'm', 'chart', 'logs',
 		        $4, $5, $6, $7)`,
-		id, team, "core", state, skipReason, started, endedAt,
+		id, tenant, "core", state, skipReason, started, endedAt,
 	); err != nil {
 		t.Fatalf("insert agent session: %v", err)
 	}
@@ -100,10 +100,10 @@ func TestAgentRetentionDeletesOldSessionWithTranscript(t *testing.T) {
 	}
 }
 
-// TestAgentRetentionTenantWindowShortensTeamSession asserts that a tenant
+// TestAgentRetentionTenantWindowShortensTenantSession asserts that a tenant
 // window shorter than the store window deletes that tenant's session and
 // keeps another tenant's session of the same age.
-func TestAgentRetentionTenantWindowShortensTeamSession(t *testing.T) {
+func TestAgentRetentionTenantWindowShortensTenantSession(t *testing.T) {
 	t.Parallel()
 
 	pool, _ := setupLedgerPool(t)
@@ -123,7 +123,7 @@ func TestAgentRetentionTenantWindowShortensTeamSession(t *testing.T) {
 		t.Fatalf("deleteExpiredAgentSessions: %v", err)
 	}
 	if agentSessionExists(ctx, t, pool, acme) {
-		t.Fatal("team session past the tenant window still exists")
+		t.Fatal("tenant session past the tenant window still exists")
 	}
 	if !agentSessionExists(ctx, t, pool, other) {
 		t.Fatal("session of a tenant without a shorter window was deleted")

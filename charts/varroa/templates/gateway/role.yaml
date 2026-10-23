@@ -38,10 +38,10 @@ rules:
     resources: ["groups"]
     verbs: ["list"]
   # The cell tenant resolver reads every Controller (a cell lives in any
-  # namespace) and every Team (cluster-scoped) to name the tenant a claim,
+  # namespace) and every Tenant (cluster-scoped) to name the tenant a claim,
   # a build event, or a schedule row belongs to.
   - apiGroups: ["varroa.dev"]
-    resources: ["controllers", "teams"]
+    resources: ["controllers", "tenants"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

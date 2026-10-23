@@ -11,16 +11,16 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
-// memberRoleTestTeam returns a Team whose managed Group is ready and whose
+// memberRoleTestTenant returns a Tenant whose managed Group is ready and whose
 // spec subjects hold the given roleRef.
-func memberRoleTestTeam(roleRef string, subjects ...v1alpha1.SubjectRef) *v1alpha1.Team {
+func memberRoleTestTenant(roleRef string, subjects ...v1alpha1.SubjectRef) *v1alpha1.Tenant {
 	const name = "sbsoftware"
-	return &v1alpha1.Team{
+	return &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       v1alpha1.TeamSpec{RoleRef: roleRef, Subjects: subjects},
-		Status: v1alpha1.TeamStatus{
-			GroupRef:   "team-" + name,
-			Conditions: []v1alpha1.TeamCondition{{Type: v1alpha1.TeamConditionRBACReady, Status: metav1.ConditionTrue}},
+		Spec:       v1alpha1.TenantSpec{RoleRef: roleRef, Subjects: subjects},
+		Status: v1alpha1.TenantStatus{
+			GroupRef:   "tenant-" + name,
+			Conditions: []v1alpha1.TenantCondition{{Type: v1alpha1.TenantConditionRBACReady, Status: metav1.ConditionTrue}},
 		},
 	}
 }
@@ -42,10 +42,10 @@ func memberRoleTestController() *v1alpha1.Controller {
 	}
 }
 
-func TestJenkinsRoleAssignments_TenantMemberRole_TeamSubjects(t *testing.T) {
+func TestJenkinsRoleAssignments_TenantMemberRole_TenantSubjects(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	tenant := memberRoleTestTenant("developer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 
 	assignments, err := r.JenkinsRoleAssignments(controller)
 	if err != nil {
@@ -89,8 +89,8 @@ func TestJenkinsRoleAssignments_TenantMemberRole_TeamSubjects(t *testing.T) {
 
 func TestJenkinsRoleAssignments_TenantMemberRole_DefaultRoleRef(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	tenant := memberRoleTestTenant("", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 
 	assignments, err := r.JenkinsRoleAssignments(controller)
 	if err != nil {
@@ -103,21 +103,21 @@ func TestJenkinsRoleAssignments_TenantMemberRole_DefaultRoleRef(t *testing.T) {
 	if !equalStringSets(a.Permissions, tenantMemberPermissions) {
 		t.Errorf("expected permissions %v, got %v", tenantMemberPermissions, a.Permissions)
 	}
-	hasTeamGroup := false
+	hasTenantGroup := false
 	for _, s := range a.Subjects {
-		if s.Kind == "Group" && s.Name == "team-sbsoftware" {
-			hasTeamGroup = true
+		if s.Kind == "Group" && s.Name == "tenant-sbsoftware" {
+			hasTenantGroup = true
 		}
 	}
-	if !hasTeamGroup {
-		t.Errorf("expected subject Group:team-sbsoftware, got %+v", a.Subjects)
+	if !hasTenantGroup {
+		t.Errorf("expected subject Group:tenant-sbsoftware, got %+v", a.Subjects)
 	}
 }
 
 func TestJenkinsRoleAssignments_TenantMemberRole_ReadOnlyGrantExcluded(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("viewer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Readers"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{viewerRole()}, nil, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	tenant := memberRoleTestTenant("viewer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Readers"})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{viewerRole()}, nil, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 
 	assignments, err := r.JenkinsRoleAssignments(controller)
 	if err != nil {
@@ -234,8 +234,8 @@ func TestJenkinsRoleAssignments_TenantMemberRole_NotCapped(t *testing.T) {
 
 func TestGenerate_TenantMemberRoleRendered(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	tenant := memberRoleTestTenant("developer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 
 	yamlOut, err := NewGenerator(r).Generate(controller)
 	if err != nil {
@@ -272,12 +272,12 @@ func memberRoleAssignmentKeys(subjects []SubjectAssignment) []string {
 	return keys
 }
 
-// memberRoleMixedFixture grants developer to a Team group, cluster-wide to one
+// memberRoleMixedFixture grants developer to a Tenant group, cluster-wide to one
 // User subject, and narrowed to two job globs of the same tenant.
 func memberRoleMixedFixture(t *testing.T) (*Resolver, *v1alpha1.Controller) {
 	t.Helper()
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
+	tenant := memberRoleTestTenant("developer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
 	narrowed := &v1alpha1.VarroaRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: "projgen-devs"},
 		Spec: v1alpha1.VarroaRoleBindingSpec{
@@ -295,7 +295,7 @@ func memberRoleMixedFixture(t *testing.T) (*Resolver, *v1alpha1.Controller) {
 	r := testTenantResolver(
 		[]*v1alpha1.VarroaRole{developerRole()},
 		[]*v1alpha1.VarroaRoleBinding{writer, narrowed},
-		[]*v1alpha1.Team{team},
+		[]*v1alpha1.Tenant{tenant},
 		[]*v1alpha1.Controller{controller},
 	)
 	withUserDirectory(r, memberUserTestUser("alice", memberUserTestNamespace, "alice", ""))
@@ -308,7 +308,7 @@ func TestTenantMemberRoles_MatchesJenkinsRoleAssignments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTeam, Team: "sbsoftware", Folder: "sbsoftware"})
+	roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTenant, Tenant: "sbsoftware", Folder: "sbsoftware"})
 	if len(roles) != 2 {
 		t.Fatalf("expected 2 member roles, got %d: %+v", len(roles), roles)
 	}
@@ -333,7 +333,7 @@ func TestTenantMemberRoles_MatchesJenkinsRoleAssignments(t *testing.T) {
 
 func TestTenantMemberRoles_SubtreeRoleFirstThenNarrowed(t *testing.T) {
 	r, _ := memberRoleMixedFixture(t)
-	roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTeam, Team: "sbsoftware", Folder: "sbsoftware"})
+	roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTenant, Tenant: "sbsoftware", Folder: "sbsoftware"})
 	if len(roles) == 0 {
 		t.Fatal("expected member roles")
 	}
@@ -355,20 +355,20 @@ func TestTenantMemberRoles_SubtreeRoleFirstThenNarrowed(t *testing.T) {
 
 func TestTenantMemberRoles_ReadOnlyGrantYieldsNone(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("viewer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Readers"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{viewerRole()}, nil, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
-	if roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTeam, Team: "sbsoftware", Folder: "sbsoftware"}); len(roles) != 0 {
+	tenant := memberRoleTestTenant("viewer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Readers"})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{viewerRole()}, nil, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
+	if roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTenant, Tenant: "sbsoftware", Folder: "sbsoftware"}); len(roles) != 0 {
 		t.Errorf("read-only grant must yield no member role, got %+v", roles)
 	}
 }
 
-func TestTenantMemberRoles_NonTeamTenantYieldsNil(t *testing.T) {
+func TestTenantMemberRoles_NonTenantTenantYieldsNil(t *testing.T) {
 	r, _ := memberRoleMixedFixture(t)
 	if roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantController, Namespace: "varroa-system", Controller: "cell-a"}); roles != nil {
 		t.Errorf("controller tenant must yield nil, got %+v", roles)
 	}
 	var nilResolver *Resolver
-	if roles := nilResolver.TenantMemberRoles(ParsedTenant{Kind: TenantTeam, Team: "sbsoftware"}); roles != nil {
+	if roles := nilResolver.TenantMemberRoles(ParsedTenant{Kind: TenantTenant, Tenant: "sbsoftware"}); roles != nil {
 		t.Errorf("nil resolver must yield nil, got %+v", roles)
 	}
 }
@@ -376,8 +376,8 @@ func TestTenantMemberRoles_NonTeamTenantYieldsNil(t *testing.T) {
 // federatedTenantCopy returns a tenant-member copy as the hive projection
 // writes it. The jobs argument is the raw annotation value; an empty
 // string leaves the annotation absent.
-func federatedTenantCopy(name, team, jobs string, subjects ...v1alpha1.SubjectRef) *v1alpha1.JenkinsRoleBinding {
-	annotations := map[string]string{AnnotationFederatedTenant: team}
+func federatedTenantCopy(name, tenant, jobs string, subjects ...v1alpha1.SubjectRef) *v1alpha1.JenkinsRoleBinding {
+	annotations := map[string]string{AnnotationFederatedTenant: tenant}
 	if jobs != "" {
 		annotations[AnnotationFederatedTenantJobs] = jobs
 	}
@@ -387,7 +387,7 @@ func federatedTenantCopy(name, team, jobs string, subjects ...v1alpha1.SubjectRe
 			Labels:      map[string]string{LabelFederatedFrom: "pipelines-writer", LabelFederatedTenantMember: "true"},
 			Annotations: annotations,
 		},
-		Spec: v1alpha1.JenkinsRoleBindingSpec{RoleRef: TenantMemberRoleName(team), Subjects: subjects},
+		Spec: v1alpha1.JenkinsRoleBindingSpec{RoleRef: TenantMemberRoleName(tenant), Subjects: subjects},
 	}
 }
 
@@ -516,7 +516,7 @@ func TestTenantMemberRolesListsFederatedCopy(t *testing.T) {
 	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, []*v1alpha1.Controller{controller})
 	r = withFederatedCopies(r, federatedTenantCopy("varroa-fed-tenant-narrow", "sbsoftware", `["repos/projgen/*"]`,
 		v1alpha1.SubjectRef{Kind: "User", Name: "bob"}))
-	roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTeam, Team: "sbsoftware", Folder: "sbsoftware"})
+	roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTenant, Tenant: "sbsoftware", Folder: "sbsoftware"})
 	if len(roles) != 1 || roles[0].Binding != "varroa-fed-tenant-narrow" {
 		t.Fatalf("roles = %+v, want the narrowed federated copy", roles)
 	}
@@ -536,17 +536,17 @@ func TestMemberRoleIncludesAllTenantsFederatedCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, team := range []string{"sbsoftware", "other"} {
-		a := memberRoleTestAssignment(assignments, "varroa:tenant-member:"+team)
+	for _, tenant := range []string{"sbsoftware", "other"} {
+		a := memberRoleTestAssignment(assignments, "varroa:tenant-member:"+tenant)
 		if a == nil {
-			t.Fatalf("expected the member role of %s, got %+v", team, assignments)
+			t.Fatalf("expected the member role of %s, got %+v", tenant, assignments)
 		}
 		if len(a.Subjects) != 1 || a.Subjects[0].Name != "alice" {
-			t.Errorf("%s subjects = %+v, want alice", team, a.Subjects)
+			t.Errorf("%s subjects = %+v, want alice", tenant, a.Subjects)
 		}
 		perms := strings.Join(a.Permissions, " ")
 		if !strings.Contains(perms, "Cancel") || !strings.Contains(perms, "Replay") {
-			t.Errorf("%s permissions = %v, want Item.Cancel and Run.Replay", team, a.Permissions)
+			t.Errorf("%s permissions = %v, want Item.Cancel and Run.Replay", tenant, a.Permissions)
 		}
 	}
 }
@@ -596,7 +596,7 @@ func TestTenantMemberRolesListsAllTenantsCopy(t *testing.T) {
 	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, []*v1alpha1.Controller{controller})
 	r = withFederatedCopies(r, federatedTenantCopy("varroa-fed-tenant-all-z", FederatedAllTenants, "",
 		v1alpha1.SubjectRef{Kind: "User", Name: "bob"}))
-	roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTeam, Team: "sbsoftware", Folder: "sbsoftware"})
+	roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTenant, Tenant: "sbsoftware", Folder: "sbsoftware"})
 	if len(roles) != 1 || roles[0].Binding != "" || len(roles[0].Subjects) != 1 {
 		t.Fatalf("roles = %+v, want the whole-folder role with bob", roles)
 	}

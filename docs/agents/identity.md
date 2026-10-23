@@ -43,9 +43,9 @@ spec:
   roleRef: mcp-reader
   subjects:
     - kind: Group
-      name: platform-team
+      name: platform-tenant
   controllerScope:
-    namespaces: [teams-platform]
+    namespaces: [tenants-platform]
   jenkinsScope:
     type: Global
 ```

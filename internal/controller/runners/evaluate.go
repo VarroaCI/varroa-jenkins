@@ -6,15 +6,15 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
-// The Ready=False reasons this package produces. TeamNameUnsupported and
+// The Ready=False reasons this package produces. TenantNameUnsupported and
 // RunnerNameUnsupported are distinct reasons: each names the object an
-// operator must rename to make the rendered node name <team>-<runner name>
+// operator must rename to make the rendered node name <tenant>-<runner name>
 // legal.
 const (
-	ReasonTeamNotFound          = "TeamNotFound"
-	ReasonTeamNotPipelines      = "TeamNotPipelines"
+	ReasonTenantNotFound        = "TenantNotFound"
+	ReasonTenantNotPipelines    = "TenantNotPipelines"
 	ReasonLauncherUnsupported   = "LauncherUnsupported"
-	ReasonTeamNameUnsupported   = "TeamNameUnsupported"
+	ReasonTenantNameUnsupported = "TenantNameUnsupported"
 	ReasonRunnerNameUnsupported = "RunnerNameUnsupported"
 	ReasonAwaitingPlacement     = "AwaitingPlacement"
 	ReasonOffline               = "Offline"
@@ -46,40 +46,40 @@ type evaluation struct {
 	Message       string
 }
 
-// evaluateRunner applies tick steps 3 to 6. team is nil when spec.team names
-// no Team object. Both the ticker (Tick) and the desired-state accessor
+// evaluateRunner applies tick steps 3 to 6. tenant is nil when spec.tenant names
+// no Tenant object. Both the ticker (Tick) and the desired-state accessor
 // (BuildContribution) call this so the reported status and the rendered
 // node set can never drift apart.
-func evaluateRunner(runner *v1alpha1.Runner, team *v1alpha1.Team) evaluation {
+func evaluateRunner(runner *v1alpha1.Runner, tenant *v1alpha1.Tenant) evaluation {
 	eval := evaluation{
-		NodeName: runner.Spec.Team + "-" + runner.Name,
+		NodeName: runner.Spec.Tenant + "-" + runner.Name,
 	}
 
-	if team != nil && team.Status.Placement != nil {
-		eval.Cell = team.Status.Placement.Cell
-		eval.CellNamespace = team.Status.Placement.CellNamespace
-		eval.Cluster = team.Status.Placement.Cluster
+	if tenant != nil && tenant.Status.Placement != nil {
+		eval.Cell = tenant.Status.Placement.Cell
+		eval.CellNamespace = tenant.Status.Placement.CellNamespace
+		eval.Cluster = tenant.Status.Placement.Cluster
 	}
 
 	switch {
-	case team == nil:
-		eval.Reason = ReasonTeamNotFound
-		eval.Message = "spec.team names no Team"
-	case team.Spec.Pipelines == nil:
-		eval.Reason = ReasonTeamNotPipelines
-		eval.Message = "the named Team sets no spec.pipelines"
+	case tenant == nil:
+		eval.Reason = ReasonTenantNotFound
+		eval.Message = "spec.tenant names no Tenant"
+	case tenant.Spec.Pipelines == nil:
+		eval.Reason = ReasonTenantNotPipelines
+		eval.Message = "the named Tenant sets no spec.pipelines"
 	case runner.Spec.Launcher != launcherSSH && runner.Spec.Launcher != launcherInbound:
 		eval.Reason = ReasonLauncherUnsupported
 		eval.Message = "spec.launcher is neither ssh nor inbound"
-	case !isDNS1123Label(runner.Spec.Team):
-		eval.Reason = ReasonTeamNameUnsupported
-		eval.Message = "the Team name is not a DNS-1123 label"
+	case !isDNS1123Label(runner.Spec.Tenant):
+		eval.Reason = ReasonTenantNameUnsupported
+		eval.Message = "the Tenant name is not a DNS-1123 label"
 	case !isDNS1123Label(runner.Name):
 		eval.Reason = ReasonRunnerNameUnsupported
 		eval.Message = "the Runner name is not a DNS-1123 label"
 	case eval.Cell == "" || eval.CellNamespace == "":
 		eval.Reason = ReasonAwaitingPlacement
-		eval.Message = "the Team has no cell placement"
+		eval.Message = "the Tenant has no cell placement"
 	}
 
 	eval.Delivered = eval.Reason == ""

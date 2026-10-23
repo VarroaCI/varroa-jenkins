@@ -124,7 +124,7 @@ func TestProjectTenantCredentials_MalformedSecretSkipped(t *testing.T) {
 	folder := newFolderItem(t)
 
 	warnings := rec.projectTenantCredentials(context.Background(), "payments", "payments-ns", folder)
-	if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Tenant != "payments" {
+	if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TenantReasonCredentialSkipped || warnings[0].Tenant != "payments" {
 		t.Fatalf("expected one CredentialSkipped warning, got %+v", warnings)
 	}
 	for _, p := range folder.Properties {
@@ -149,7 +149,7 @@ func TestProjectTenantCredentials_UnknownKindSkipped(t *testing.T) {
 	folder := newFolderItem(t)
 
 	warnings := rec.projectTenantCredentials(context.Background(), "payments", "payments-ns", folder)
-	if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped {
+	if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TenantReasonCredentialSkipped {
 		t.Fatalf("expected one CredentialSkipped warning, got %+v", warnings)
 	}
 }
@@ -171,7 +171,7 @@ func TestProjectTenantCredentials_DuplicateIDSkipped(t *testing.T) {
 	folder := newFolderItem(t)
 
 	warnings := rec.projectTenantCredentials(context.Background(), "payments", "payments-ns", folder)
-	if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped {
+	if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TenantReasonCredentialSkipped {
 		t.Fatalf("expected one CredentialSkipped warning, got %+v", warnings)
 	}
 	if !containsSubstr(warnings[0].Message, "dup") {
@@ -293,7 +293,7 @@ func TestProjectTenantCredentials_SSHPrivateKeyMissingPrivateKey(t *testing.T) {
 
 			warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
 			want := `secret "deploy-key": sshPrivateKey secret missing the privateKey data key`
-			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Message != want {
+			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TenantReasonCredentialSkipped || warnings[0].Message != want {
 				t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
 			}
 			if creds := projectedCredentials(t, folder); len(creds) != 0 {
@@ -317,7 +317,7 @@ func TestProjectTenantCredentials_SSHPrivateKeyMissingUsername(t *testing.T) {
 
 			warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
 			want := `secret "deploy-key": sshPrivateKey secret missing the username data key`
-			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Message != want {
+			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TenantReasonCredentialSkipped || warnings[0].Message != want {
 				t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
 			}
 			if creds := projectedCredentials(t, folder); len(creds) != 0 {
@@ -341,7 +341,7 @@ func TestProjectTenantCredentials_SSHPrivateKeyDuplicateID(t *testing.T) {
 
 	warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
 	want := `secret "cred-b": duplicate credential id "dup"`
-	if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Message != want {
+	if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TenantReasonCredentialSkipped || warnings[0].Message != want {
 		t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
 	}
 	creds := projectedCredentials(t, folder)
@@ -365,11 +365,11 @@ func containsSubstr(s, sub string) bool {
 // operator creates or updates.
 func TestApplyCellContent_TenantCredentialsNeverReachAConfigMap(t *testing.T) {
 	client := newTestClient()
-	crdstore.MustSeed(client.store, &v1alpha1.Team{
+	crdstore.MustSeed(client.store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec: v1alpha1.TeamSpec{
+		Spec: v1alpha1.TenantSpec{
 			Namespaces: []string{"payments-ns"},
-			Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Pipelines: &v1alpha1.TenantPipelinesSpec{
 				Profile:        "jenkins-lts",
 				AgentNamespace: "payments-ns",
 			},
@@ -428,11 +428,11 @@ func TestResolveBundleForController_CellCredentialWithInterpolationTextKeepsTheC
 	rec := newTestReconciler(client)
 	cr := cellControllerFixture()
 
-	payments := &v1alpha1.Team{
+	payments := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec: v1alpha1.TeamSpec{
+		Spec: v1alpha1.TenantSpec{
 			Namespaces: []string{tenantCredentialTestNamespace},
-			Pipelines:  &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: tenantCredentialTestNamespace},
+			Pipelines:  &v1alpha1.TenantPipelinesSpec{Profile: "lts", AgentNamespace: tenantCredentialTestNamespace},
 		},
 	}
 	seedTenantBundle(client, payments, "payments-bundle", cleanPipelineItemsYAML)
@@ -449,11 +449,11 @@ func TestResolveBundleForController_CellCredentialWithInterpolationTextKeepsTheC
 		map[string][]byte{"username": []byte("u${x}"), "password": []byte("${varroa_controller_name}")},
 	)
 
-	other := &v1alpha1.Team{
+	other := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "team-b"},
-		Spec: v1alpha1.TeamSpec{
+		Spec: v1alpha1.TenantSpec{
 			Namespaces: []string{"team-b-ns"},
-			Pipelines:  &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: "team-b-ns"},
+			Pipelines:  &v1alpha1.TenantPipelinesSpec{Profile: "lts", AgentNamespace: "team-b-ns"},
 		},
 	}
 	seedTenantBundle(client, other, "team-b-bundle", cleanPipelineItemsYAML)
@@ -672,7 +672,7 @@ func TestProjectTenantCredentials_SecretFileSkipped(t *testing.T) {
 
 			warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
 			want := `secret "kube-secret": ` + tc.reason
-			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Message != want {
+			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TenantReasonCredentialSkipped || warnings[0].Message != want {
 				t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
 			}
 			if creds := projectedCredentials(t, folder); len(creds) != 0 {
@@ -794,7 +794,7 @@ func TestProjectTenantCredentials_CertificateSkipped(t *testing.T) {
 
 			warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
 			want := `secret "signing": ` + tc.reason
-			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Message != want {
+			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TenantReasonCredentialSkipped || warnings[0].Message != want {
 				t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
 			}
 			if creds := projectedCredentials(t, folder); len(creds) != 0 {
@@ -914,7 +914,7 @@ func TestProjectTenantCredentials_GitHubAppSkipped(t *testing.T) {
 
 			warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
 			want := `secret "gh-app": ` + tc.reason
-			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Message != want {
+			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TenantReasonCredentialSkipped || warnings[0].Message != want {
 				t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
 			}
 			if creds := projectedCredentials(t, folder); len(creds) != 0 {
@@ -989,7 +989,7 @@ func TestCellCredentialBudget_SkipsTheCredentialThatCrossesAndKeepsLaterOnesThat
 		t.Fatalf("expected one warning, got %+v", warnings)
 	}
 	w := warnings[0]
-	if w.Reason != v1alpha1.TeamReasonCredentialSkipped || w.Tenant != "payments" || !strings.Contains(w.Message, `"b"`) {
+	if w.Reason != v1alpha1.TenantReasonCredentialSkipped || w.Tenant != "payments" || !strings.Contains(w.Message, `"b"`) {
 		t.Errorf("expected a CredentialSkipped warning for payments naming b, got %+v", w)
 	}
 }

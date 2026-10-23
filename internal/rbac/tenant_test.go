@@ -12,11 +12,11 @@ func TestParseTenant(t *testing.T) {
 		want    ParsedTenant
 	}{
 		{
-			name:   "team name",
+			name:   "tenant name",
 			tenant: "payments",
 			want: ParsedTenant{
-				Kind:   TenantTeam,
-				Team:   "payments",
+				Kind:   TenantTenant,
+				Tenant: "payments",
 				Folder: "payments",
 			},
 		},
@@ -58,11 +58,11 @@ func TestParseTenant(t *testing.T) {
 // TestParseTenantNeedsNoState calls the free function directly, with no
 // Resolver and no informer, proving ParseTenant performs no lookup.
 func TestParseTenantNeedsNoState(t *testing.T) {
-	got, err := ParseTenant("team-a")
+	got, err := ParseTenant("tenant-a")
 	if err != nil {
 		t.Fatalf("ParseTenant returned error with no Resolver or informer: %v", err)
 	}
-	if got.Kind != TenantTeam || got.Team != "team-a" {
-		t.Fatalf("ParseTenant(%q) = %+v, want TenantTeam %q", "team-a", got, "team-a")
+	if got.Kind != TenantTenant || got.Tenant != "tenant-a" {
+		t.Fatalf("ParseTenant(%q) = %+v, want TenantTenant %q", "tenant-a", got, "tenant-a")
 	}
 }

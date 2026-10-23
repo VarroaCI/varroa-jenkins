@@ -35,13 +35,13 @@ type fakeLedgerActionRunner struct {
 	hibernated bool
 	events     []string
 
-	releasedTeam      string
+	releasedTenant    string
 	releasedNamespace string
 	releasedNames     []string
 	releaseCalls      int
 
 	instanceReleaseCalls int
-	instanceTeam         string
+	instanceTenant       string
 	instanceNamespace    string
 	instanceKeep         []string
 	instanceBefore       time.Time
@@ -49,18 +49,18 @@ type fakeLedgerActionRunner struct {
 
 // ReleaseInstanceAgentPods records the call a release_instance_agents
 // action makes.
-func (f *fakeLedgerActionRunner) ReleaseInstanceAgentPods(_ context.Context, team, namespace string, keep []string, refreshedBefore time.Time) {
+func (f *fakeLedgerActionRunner) ReleaseInstanceAgentPods(_ context.Context, tenant, namespace string, keep []string, refreshedBefore time.Time) {
 	f.instanceReleaseCalls++
-	f.instanceTeam = team
+	f.instanceTenant = tenant
 	f.instanceNamespace = namespace
 	f.instanceKeep = keep
 	f.instanceBefore = refreshedBefore
 }
 
 // ReleaseRunAgentPods records the call a release_agents action makes.
-func (f *fakeLedgerActionRunner) ReleaseRunAgentPods(_ context.Context, team, namespace string, names []string) {
+func (f *fakeLedgerActionRunner) ReleaseRunAgentPods(_ context.Context, tenant, namespace string, names []string) {
 	f.releaseCalls++
-	f.releasedTeam = team
+	f.releasedTenant = tenant
 	f.releasedNamespace = namespace
 	f.releasedNames = names
 }
@@ -486,8 +486,8 @@ func TestHandleLedgerAction_ReleaseAgents(t *testing.T) {
 	if rec.releaseCalls != 1 {
 		t.Fatalf("ReleaseRunAgentPods calls = %d, want 1", rec.releaseCalls)
 	}
-	if rec.releasedTeam != "sbsoftware" || rec.releasedNamespace != "sbsoftware" {
-		t.Fatalf("released team/namespace = %q/%q", rec.releasedTeam, rec.releasedNamespace)
+	if rec.releasedTenant != "sbsoftware" || rec.releasedNamespace != "sbsoftware" {
+		t.Fatalf("released team/namespace = %q/%q", rec.releasedTenant, rec.releasedNamespace)
 	}
 	if !reflect.DeepEqual(rec.releasedNames, action.AgentPods) {
 		t.Fatalf("released names = %v, want %v", rec.releasedNames, action.AgentPods)
@@ -541,8 +541,8 @@ func TestHandleLedgerAction_ReleaseInstanceAgents(t *testing.T) {
 	if rec.instanceReleaseCalls != 1 {
 		t.Fatalf("ReleaseInstanceAgentPods calls = %d, want 1", rec.instanceReleaseCalls)
 	}
-	if rec.instanceTeam != "sbsoftware" || rec.instanceNamespace != "sbsoftware" {
-		t.Fatalf("released team/namespace = %q/%q", rec.instanceTeam, rec.instanceNamespace)
+	if rec.instanceTenant != "sbsoftware" || rec.instanceNamespace != "sbsoftware" {
+		t.Fatalf("released team/namespace = %q/%q", rec.instanceTenant, rec.instanceNamespace)
 	}
 	if !reflect.DeepEqual(rec.instanceKeep, action.KeepPods) {
 		t.Fatalf("keep = %v, want %v", rec.instanceKeep, action.KeepPods)

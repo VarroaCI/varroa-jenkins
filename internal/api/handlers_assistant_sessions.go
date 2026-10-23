@@ -115,7 +115,7 @@ func (s *Server) createAssistantSession(ctx context.Context, rt *AssistantRuntim
 		return agent.Session{}, failWith(http.StatusTooManyRequests, assistantErrBusy, "too many sessions are running")
 	}
 
-	team, cluster, serr := s.assistantContext(ctx, claims, st.Values)
+	tenant, cluster, serr := s.assistantContext(ctx, claims, st.Values)
 	if serr != nil {
 		return agent.Session{}, serr
 	}
@@ -145,7 +145,7 @@ func (s *Server) createAssistantSession(ctx context.Context, rt *AssistantRuntim
 		}
 	}
 
-	level := rt.sessionLevel(user, global, team, entry)
+	level := rt.sessionLevel(user, global, tenant, entry)
 
 	day, err := rt.Store.DaySpend(ctx, sub)
 	if err != nil {
@@ -161,7 +161,7 @@ func (s *Server) createAssistantSession(ctx context.Context, rt *AssistantRuntim
 		return agent.Session{}, err
 	}
 	sess := agent.Session{
-		ID: id, Kind: agent.KindAssistant, Principal: sub, Team: team, Cluster: cluster,
+		ID: id, Kind: agent.KindAssistant, Principal: sub, Tenant: tenant, Cluster: cluster,
 		Trigger: agent.TriggerManual, Context: st.Values, Provider: name, Model: model,
 		KeySource: keySource, DataSharing: level, StartedAt: rt.now(),
 	}
@@ -203,13 +203,13 @@ func (rt *AssistantRuntime) sessionLevel(user, global agent.Settings, tenant str
 		trust = entry.Endpoint.Trust
 	}
 	return datashare.Effective(datashare.Inputs{
-		User: userLevel, Team: tenant, TenantLevels: global.TenantDataSharing,
+		User: userLevel, Tenant: tenant, TenantLevels: global.TenantDataSharing,
 		Trust: trust, ExternalCeiling: rt.Config.ExternalDataSharing,
 	})
 }
 
-// assistantContext resolves the team and the cluster of a session from its
-// run, team, or job context. A run the caller cannot read answers 404 with no
+// assistantContext resolves the tenant and the cluster of a session from its
+// run, tenant, or job context. A run the caller cannot read answers 404 with no
 // detail, so the answer does not reveal the run.
 func (s *Server) assistantContext(ctx context.Context, claims *auth.Claims, values map[string]any) (string, string, error) {
 	rt := s.deps.Assistant
@@ -227,8 +227,8 @@ func (s *Server) assistantContext(ctx context.Context, claims *auth.Claims, valu
 		}
 		return run.Tenant, run.Cluster, nil
 	}
-	if team := str(agent.CtxTeam); team != "" {
-		refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	if tenant := str(agent.CtxTenant); tenant != "" {
+		refs, serr := s.resolveTenantTenants(ctx, claims, tenant)
 		if serr != nil {
 			return "", "", failWith(serr.Status, "", serr.Message)
 		}
@@ -245,7 +245,7 @@ func (s *Server) assistantContext(ctx context.Context, claims *auth.Claims, valu
 		return ref.Tenant, ref.Cluster, nil
 	}
 	if str(agent.CtxJob) != "" {
-		return "", "", failWith(http.StatusBadRequest, "", "a job context needs a team or a run")
+		return "", "", failWith(http.StatusBadRequest, "", "a job context needs a tenant or a run")
 	}
 	return "", rt.Cluster, nil
 }
@@ -365,7 +365,7 @@ func (s *Server) handleListAssistantSessions(w http.ResponseWriter, r *http.Requ
 		Principal: claims.Subject,
 		Kind:      agent.SessionKind(q.Get("kind")),
 		Prompt:    q.Get("prompt"),
-		Team:      q.Get("team"),
+		Tenant:    q.Get("tenant"),
 		State:     agent.SessionState(q.Get("state")),
 		Cursor:    q.Get("cursor"),
 	}
@@ -500,8 +500,8 @@ func (s *Server) handlePostAssistantMessage(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	if sess.Kind == agent.KindTeamAgent {
-		writeAssistantError(s, w, http.StatusConflict, assistantErrTeamAgent, "a Team agent session takes no messages")
+	if sess.Kind == agent.KindTenantAgent {
+		writeAssistantError(s, w, http.StatusConflict, assistantErrTenantAgent, "a Tenant agent session takes no messages")
 		return
 	}
 	if sess.Principal != claims.Subject {

@@ -32,7 +32,7 @@ func TestRenderNode_DeclaredLabelsPrefixed(t *testing.T) {
 
 // TestRenderNode_CannotForgeReservedToken matches "A tenant cannot forge the
 // reserved token": a declared label matching the reserved token's own shape
-// is rendered as an ordinary <team>-prefixed label, never at the reserved
+// is rendered as an ordinary <tenant>-prefixed label, never at the reserved
 // position.
 func TestRenderNode_CannotForgeReservedToken(t *testing.T) {
 	runner := sshRunner("win-1", "payments")
@@ -171,13 +171,13 @@ func TestRenderNode_InboundLauncher_MatchesDesignYAML(t *testing.T) {
 	}
 }
 
-// TestRenderNode_OnlyOwningTeamsReservedTokenAppears is task 4.6's Go-side
-// fence-interaction acceptance: a node rendered for team A carries exactly
+// TestRenderNode_OnlyOwningTenantsReservedTokenAppears is task 4.6's Go-side
+// fence-interaction acceptance: a node rendered for tenant A carries exactly
 // the reserved token varroa-tenant-A plus A's prefixed user labels, and no
-// reserved token naming any other team. C5's dispatcher (plugin side, task
+// reserved token naming any other tenant. C5's dispatcher (plugin side, task
 // 4.5) is what actually fences a build on this token; this proves the
 // renderer never hands it a competing or forged one.
-func TestRenderNode_OnlyOwningTeamsReservedTokenAppears(t *testing.T) {
+func TestRenderNode_OnlyOwningTenantsReservedTokenAppears(t *testing.T) {
 	runner := sshRunner("agent-1", "alpha")
 	runner.Spec.Labels = []string{"linux"}
 
@@ -191,11 +191,11 @@ func TestRenderNode_OnlyOwningTeamsReservedTokenAppears(t *testing.T) {
 	}
 	for _, l := range labels {
 		if strings.HasPrefix(l, "varroa-tenant-") && l != "varroa-tenant-alpha" {
-			t.Fatalf("label %q names a team other than alpha", l)
+			t.Fatalf("label %q names a tenant other than alpha", l)
 		}
 	}
 	if strings.Contains(labelStr, "varroa-tenant-bravo") {
-		t.Fatal("node carries a reserved token for team bravo")
+		t.Fatal("node carries a reserved token for tenant bravo")
 	}
 }
 

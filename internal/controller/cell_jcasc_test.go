@@ -208,11 +208,11 @@ func TestApplyCellContent_NonCellGetsNoGitHostKeyDefault(t *testing.T) {
 // kubernetes folder property naming that one cloud.
 func TestApplyCellContent_TenantCloudRendering(t *testing.T) {
 	client := newTestClient()
-	crdstore.MustSeed(client.store, &v1alpha1.Team{
+	crdstore.MustSeed(client.store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec: v1alpha1.TeamSpec{
+		Spec: v1alpha1.TenantSpec{
 			Namespaces: []string{"payments-agents"},
-			Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Pipelines: &v1alpha1.TenantPipelinesSpec{
 				Profile:        "lts",
 				AgentNamespace: "payments-agents",
 			},
@@ -289,16 +289,16 @@ func TestApplyCellContent_TenantCloudRendering(t *testing.T) {
 }
 
 // TestApplyCellContent_LiftedTemplateRendering asserts that a tenant
-// bundle's pod template renders after <team>-default with the stamped
+// bundle's pod template renders after <tenant>-default with the stamped
 // keys and the singular label, and that a skipped template reaches
 // cr.Status.Cell.TenantWarnings as PodTemplateSkipped.
 func TestApplyCellContent_LiftedTemplateRendering(t *testing.T) {
 	client := newTestClient()
-	team := pipelinesTeam("payments")
-	seedTenantBundleContent(client, team, "payments-bundle", map[string]string{
+	tenant := pipelinesTenant("payments")
+	seedTenantBundleContent(client, tenant, "payments-bundle", map[string]string{
 		"jenkins.yaml": minimalCloud("- name: golang\n  label: golang\n  labels: golang\n  namespace: kube-system\n  idleMinutes: 5\n- name: default\n"),
 	})
-	crdstore.MustSeed(client.store, team)
+	crdstore.MustSeed(client.store, tenant)
 	rec := newTestReconciler(client)
 
 	cr := cellControllerFixture()
@@ -339,7 +339,7 @@ func TestApplyCellContent_LiftedTemplateRendering(t *testing.T) {
 
 	var skips []v1alpha1.TenantWarning
 	for _, w := range cr.Status.Cell.TenantWarnings {
-		if w.Reason == v1alpha1.TeamReasonPodTemplateSkipped {
+		if w.Reason == v1alpha1.TenantReasonPodTemplateSkipped {
 			skips = append(skips, w)
 		}
 	}

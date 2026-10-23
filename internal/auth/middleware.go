@@ -32,7 +32,7 @@ func jsonError(w http.ResponseWriter, msg string) {
 }
 
 //nolint:revive // AuthMiddleware is the canonical name, stutter is acceptable
-func AuthMiddleware(p Provider, kv APIKeyVerifier, tv *TicketVerifier, sv ScheduleVerifier, av TeamAgentVerifier, next http.Handler, logger *slog.Logger) http.Handler {
+func AuthMiddleware(p Provider, kv APIKeyVerifier, tv *TicketVerifier, sv ScheduleVerifier, av TenantAgentVerifier, next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Only require auth for /api/ routes.
 		if !strings.HasPrefix(r.URL.Path, "/api/") {
@@ -126,13 +126,13 @@ func AuthMiddleware(p Provider, kv APIKeyVerifier, tv *TicketVerifier, sv Schedu
 					return
 				}
 			}
-			// A Team agent token names its session. The verifier checks the
+			// A Tenant agent token names its session. The verifier checks the
 			// audience first, so a token of another kind falls through.
 			if av != nil {
 				if aClaims, sid, matched, verr := av.Verify(r, token); matched {
 					if verr != nil {
-						logger.Warn("team agent token verification failed", "error", verr)
-						jsonError(w, "invalid team agent token")
+						logger.Warn("tenant agent token verification failed", "error", verr)
+						jsonError(w, "invalid tenant agent token")
 						return
 					}
 					ctx := context.WithValue(r.Context(), claimsKey, aClaims)
@@ -161,7 +161,7 @@ func AuthMiddleware(p Provider, kv APIKeyVerifier, tv *TicketVerifier, sv Schedu
 
 // sseScope returns the canonical stream scope for an SSE route, or "" if the path is
 // not a server-sent-events route. Scopes: "brood", "activity", "controller:{ns}/{name}",
-// "broodop:{ns}/{name}", "run:{run_id}", or "pipelines:{team}". A stream ticket is bound
+// "broodop:{ns}/{name}", "run:{run_id}", or "pipelines:{tenant}". A stream ticket is bound
 // to one scope, so a ticket minted for one stream cannot open another.
 func sseScope(path string) string {
 	p := strings.TrimPrefix(path, "/api/v1")
@@ -215,7 +215,7 @@ func sseScope(path string) string {
 	}
 	if strings.HasPrefix(p, "/pipelines/") {
 		segs := strings.Split(strings.TrimPrefix(p, "/pipelines/"), "/")
-		// /pipelines/{team}/stream. A team name holds no "/".
+		// /pipelines/{tenant}/stream. A tenant name holds no "/".
 		if len(segs) == 2 && segs[1] == "stream" && segs[0] != "" {
 			return "pipelines:" + segs[0]
 		}

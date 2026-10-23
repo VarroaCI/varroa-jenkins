@@ -12,7 +12,7 @@ import (
 //	!has(self.pipelines) || !has(self.pipelines.rehydrateDeadline) ||
 //	  (duration(self.pipelines.rehydrateDeadline) >= duration('1m') &&
 //	   duration(self.pipelines.rehydrateDeadline) <= duration('24h'))
-func evalPipelinesRehydrateDeadlineRange(spec *TeamSpec) bool {
+func evalPipelinesRehydrateDeadlineRange(spec *TenantSpec) bool {
 	if spec.Pipelines == nil || spec.Pipelines.RehydrateDeadline == nil {
 		return true
 	}
@@ -25,7 +25,7 @@ func evalPipelinesRehydrateDeadlineRange(spec *TeamSpec) bool {
 //	!has(self.pipelines) || !has(self.pipelines.cronGrace) ||
 //	  (duration(self.pipelines.cronGrace) >= duration('1m') &&
 //	   duration(self.pipelines.cronGrace) <= duration('60m'))
-func evalPipelinesCronGraceRange(spec *TeamSpec) bool {
+func evalPipelinesCronGraceRange(spec *TenantSpec) bool {
 	if spec.Pipelines == nil || spec.Pipelines.CronGrace == nil {
 		return true
 	}
@@ -33,34 +33,34 @@ func evalPipelinesCronGraceRange(spec *TeamSpec) bool {
 	return d >= time.Minute && d <= 60*time.Minute
 }
 
-func TestTeamPipelinesRehydrationDeadlineRangeCEL(t *testing.T) {
+func TestTenantPipelinesRehydrationDeadlineRangeCEL(t *testing.T) {
 	tests := []struct {
 		name         string
-		spec         *TeamSpec
+		spec         *TenantSpec
 		wantAccepted bool
 	}{
 		{
 			name:         "unset accepted",
-			spec:         &TeamSpec{Pipelines: &TeamPipelinesSpec{}},
+			spec:         &TenantSpec{Pipelines: &TenantPipelinesSpec{}},
 			wantAccepted: true,
 		},
 		{
 			name: "below minimum refused",
-			spec: &TeamSpec{Pipelines: &TeamPipelinesSpec{
+			spec: &TenantSpec{Pipelines: &TenantPipelinesSpec{
 				RehydrateDeadline: &metav1.Duration{Duration: 30 * time.Second},
 			}},
 			wantAccepted: false,
 		},
 		{
 			name: "above maximum refused",
-			spec: &TeamSpec{Pipelines: &TeamPipelinesSpec{
+			spec: &TenantSpec{Pipelines: &TenantPipelinesSpec{
 				RehydrateDeadline: &metav1.Duration{Duration: 25 * time.Hour},
 			}},
 			wantAccepted: false,
 		},
 		{
 			name: "in range accepted",
-			spec: &TeamSpec{Pipelines: &TeamPipelinesSpec{
+			spec: &TenantSpec{Pipelines: &TenantPipelinesSpec{
 				RehydrateDeadline: &metav1.Duration{Duration: 30 * time.Minute},
 			}},
 			wantAccepted: true,
@@ -75,34 +75,34 @@ func TestTeamPipelinesRehydrationDeadlineRangeCEL(t *testing.T) {
 	}
 }
 
-func TestTeamPipelinesRehydrationCronGraceRangeCEL(t *testing.T) {
+func TestTenantPipelinesRehydrationCronGraceRangeCEL(t *testing.T) {
 	tests := []struct {
 		name         string
-		spec         *TeamSpec
+		spec         *TenantSpec
 		wantAccepted bool
 	}{
 		{
 			name:         "unset accepted",
-			spec:         &TeamSpec{Pipelines: &TeamPipelinesSpec{}},
+			spec:         &TenantSpec{Pipelines: &TenantPipelinesSpec{}},
 			wantAccepted: true,
 		},
 		{
 			name: "below minimum refused",
-			spec: &TeamSpec{Pipelines: &TeamPipelinesSpec{
+			spec: &TenantSpec{Pipelines: &TenantPipelinesSpec{
 				CronGrace: &metav1.Duration{Duration: 30 * time.Second},
 			}},
 			wantAccepted: false,
 		},
 		{
 			name: "above maximum refused",
-			spec: &TeamSpec{Pipelines: &TeamPipelinesSpec{
+			spec: &TenantSpec{Pipelines: &TenantPipelinesSpec{
 				CronGrace: &metav1.Duration{Duration: 61 * time.Minute},
 			}},
 			wantAccepted: false,
 		},
 		{
 			name: "in range accepted",
-			spec: &TeamSpec{Pipelines: &TeamPipelinesSpec{
+			spec: &TenantSpec{Pipelines: &TenantPipelinesSpec{
 				CronGrace: &metav1.Duration{Duration: 5 * time.Minute},
 			}},
 			wantAccepted: true,
@@ -117,12 +117,12 @@ func TestTeamPipelinesRehydrationCronGraceRangeCEL(t *testing.T) {
 	}
 }
 
-// TestTeamPipelinesRehydrationEffectiveDefaults asserts that a tenant
+// TestTenantPipelinesRehydrationEffectiveDefaults asserts that a tenant
 // setting none of the seven ledger and rehydration fields resolves every
 // default through the Effective* accessors — the same defaults the CRD
 // schema applies at the apiserver.
-func TestTeamPipelinesRehydrationEffectiveDefaults(t *testing.T) {
-	var p *TeamPipelinesSpec // nil spec: a Team with no spec.pipelines at all
+func TestTenantPipelinesRehydrationEffectiveDefaults(t *testing.T) {
+	var p *TenantPipelinesSpec // nil spec: a Tenant with no spec.pipelines at all
 	if got := p.EffectiveRehydrateBuilds(); got != DefaultRehydrateBuilds {
 		t.Errorf("EffectiveRehydrateBuilds() = %v, want %v", got, DefaultRehydrateBuilds)
 	}
@@ -147,7 +147,7 @@ func TestTeamPipelinesRehydrationEffectiveDefaults(t *testing.T) {
 
 	// A pipelines tenant setting none of the seven fields (a non-nil spec
 	// with every field at its zero value) gets the same defaults.
-	empty := &TeamPipelinesSpec{Profile: "lts", AgentNamespace: "payments"}
+	empty := &TenantPipelinesSpec{Profile: "lts", AgentNamespace: "payments"}
 	if got := empty.EffectiveRehydrateBuilds(); got != DefaultRehydrateBuilds {
 		t.Errorf("EffectiveRehydrateBuilds() = %v, want %v", got, DefaultRehydrateBuilds)
 	}

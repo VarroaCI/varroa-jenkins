@@ -20,24 +20,24 @@ const enc = (s: string) => encodeURIComponent(s);
 
 interface RunMetadataProps {
   run: RunDetail;
-  team?: string;
+  tenant?: string;
   job?: string;
 }
 
 /** RunMetadata renders the facts above a build: the meta line, the replay
  * origin, the parameters, and the run's definition. Each row hides itself
  * when the record carries no value for it. */
-export function RunMetadata({ run, team, job }: RunMetadataProps) {
+export function RunMetadata({ run, tenant, job }: RunMetadataProps) {
   const wait = queueWaitMs(run);
   const params = sortedParams(run.params);
-  const hasJobLink = !!team && !!job;
+  const hasJobLink = !!tenant && !!job;
 
   return (
     <>
       <div className={styles.meta}>
         {run.branch &&
           (hasJobLink ? (
-            <Link to={`/pipelines/${enc(team!)}/${enc(job!)}?branch=${enc(run.branch)}`}>{run.branch}</Link>
+            <Link to={`/pipelines/${enc(tenant!)}/${enc(job!)}?branch=${enc(run.branch)}`}>{run.branch}</Link>
           ) : (
             <span>{run.branch}</span>
           ))}
@@ -53,9 +53,9 @@ export function RunMetadata({ run, team, job }: RunMetadataProps) {
         {wait !== undefined && wait > QUEUE_WAIT_SHOWN_MS && <span>Waited {formatDuration(wait)} in queue</span>}
       </div>
       {run.changeRequest && <ChangeRequestRow changeRequest={run.changeRequest} />}
-      {run.replayOf && <ReplayOrigin replayOf={run.replayOf} team={team} job={job} />}
+      {run.replayOf && <ReplayOrigin replayOf={run.replayOf} tenant={tenant} job={job} />}
       {run.restartOf && run.restartStage && (
-        <RestartOrigin restartOf={run.restartOf} stage={run.restartStage} team={team} job={job} />
+        <RestartOrigin restartOf={run.restartOf} stage={run.restartStage} tenant={tenant} job={job} />
       )}
       {params.length > 0 && (
         <div className={styles.row}>
@@ -106,12 +106,12 @@ export function RunMetadata({ run, team, job }: RunMetadataProps) {
 function RestartOrigin({
   restartOf,
   stage,
-  team,
+  tenant,
   job,
 }: {
   restartOf: string;
   stage: string;
-  team?: string;
+  tenant?: string;
   job?: string;
 }) {
   const origin = useQuery({
@@ -124,12 +124,12 @@ function RestartOrigin({
   const number = origin.data?.buildNumber;
   const from = number ? `#${number}` : "an earlier build";
   const text = `Restarted from ${from} at stage ${stage}`;
-  const linked = !!team && !!job;
+  const linked = !!tenant && !!job;
 
   return (
     <div className={styles.row}>
       {linked ? (
-        <Link to={`/pipelines/${enc(team!)}/${enc(job!)}/${enc(restartOf)}`}>{text}</Link>
+        <Link to={`/pipelines/${enc(tenant!)}/${enc(job!)}/${enc(restartOf)}`}>{text}</Link>
       ) : (
         <span>{text}</span>
       )}
@@ -160,7 +160,7 @@ function ChangeRequestRow({ changeRequest }: { changeRequest: ChangeRequest }) {
 /** ReplayOrigin links the build a replay copied. It reads that build to
  * learn its number. Until the read answers, or when it fails, the row names
  * an earlier build without a number. */
-function ReplayOrigin({ replayOf, team, job }: { replayOf: string; team?: string; job?: string }) {
+function ReplayOrigin({ replayOf, tenant, job }: { replayOf: string; tenant?: string; job?: string }) {
   const origin = useQuery({
     queryKey: ["run-replay-origin", replayOf],
     queryFn: () => getRun(replayOf),
@@ -170,12 +170,12 @@ function ReplayOrigin({ replayOf, team, job }: { replayOf: string; team?: string
   });
   const number = origin.data?.buildNumber;
   const text = number ? `Replay of #${number}` : "Replay of an earlier build";
-  const linked = !!team && !!job;
+  const linked = !!tenant && !!job;
 
   return (
     <div className={styles.row}>
       {linked ? (
-        <Link to={`/pipelines/${enc(team!)}/${enc(job!)}/${enc(replayOf)}`}>{text}</Link>
+        <Link to={`/pipelines/${enc(tenant!)}/${enc(job!)}/${enc(replayOf)}`}>{text}</Link>
       ) : (
         <span>{text}</span>
       )}

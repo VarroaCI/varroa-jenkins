@@ -22,7 +22,7 @@ import (
 type MemberBinding struct {
 	Cell      string
 	Namespace string
-	// Role is v1alpha1.TeamMemberRoleActive or TeamMemberRoleStandby.
+	// Role is v1alpha1.TenantMemberRoleActive or TenantMemberRoleStandby.
 	Role string
 	// Slot is set only on an active member.
 	Slot *int32
@@ -59,17 +59,17 @@ func memberKey(namespace, cell string) string { return namespace + "/" + cell }
 //
 // slotZero is the tenant's scalar binding, which the existing keep and
 // move path decides. A nil slotZero means the tenant holds no cell yet.
-func desiredMembers(in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus,
+func desiredMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus,
 	slotZero *CellCandidate, nowT time.Time) ([]MemberBinding, string) {
-	wantedSlots := team.Spec.Pipelines.EffectiveMembers()
-	wantedStandby := team.Spec.Pipelines.EffectiveStandby()
+	wantedSlots := tenant.Spec.Pipelines.EffectiveMembers()
+	wantedStandby := tenant.Spec.Pipelines.EffectiveStandby()
 
-	surviving, standbys := survivingMembers(in, team, status, nowT)
+	surviving, standbys := survivingMembers(in, tenant, status, nowT)
 	held := map[string]bool{}
 	var out []MemberBinding
 
 	for slot := int32(0); slot < wantedSlots; slot++ {
-		bound := bindSlot(in, team, slot, slotZero, surviving, &standbys, held)
+		bound := bindSlot(in, tenant, slot, slotZero, surviving, &standbys, held)
 		if bound == nil {
 			continue
 		}
@@ -89,18 +89,18 @@ func desiredMembers(in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus,
 			continue
 		}
 		held[memberKey(s.Namespace, s.Cell)] = true
-		s.Role = v1alpha1.TeamMemberRoleStandby
+		s.Role = v1alpha1.TenantMemberRoleStandby
 		s.Slot = nil
 		keptStandby = append(keptStandby, s)
 	}
 	for int32(len(keptStandby)) < wantedStandby {
-		candidate := selectCandidateExcluding(in, team, held)
+		candidate := selectCandidateExcluding(in, tenant, held)
 		if candidate == nil {
 			break
 		}
 		held[memberKey(candidate.Namespace, candidate.Name)] = true
-		keptStandby = append(keptStandby, newMember(in, team, *candidate,
-			v1alpha1.TeamMemberRoleStandby, nil, nowT))
+		keptStandby = append(keptStandby, newMember(in, tenant, *candidate,
+			v1alpha1.TenantMemberRoleStandby, nil, nowT))
 	}
 	out = append(out, keptStandby...)
 
@@ -110,35 +110,35 @@ func desiredMembers(in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus,
 // bindSlot answers the member that holds slot this tick. Slot 0 is the
 // scalar binding. Every other slot keeps its live holder, else takes the
 // newest applied standby, else takes a fresh candidate from the pool.
-func bindSlot(in Inputs, team *v1alpha1.Team, slot int32, slotZero *CellCandidate,
+func bindSlot(in Inputs, tenant *v1alpha1.Tenant, slot int32, slotZero *CellCandidate,
 	surviving map[int32]MemberBinding, standbys *[]MemberBinding, held map[string]bool) *MemberBinding {
 	nowT := placementNow(in)
 	if slot == 0 {
 		if slotZero == nil {
 			return nil
 		}
-		zero := newMember(in, team, *slotZero, v1alpha1.TeamMemberRoleActive, &slot, nowT)
+		zero := newMember(in, tenant, *slotZero, v1alpha1.TenantMemberRoleActive, &slot, nowT)
 		return &zero
 	}
 	if existing, ok := surviving[slot]; ok && !held[memberKey(existing.Namespace, existing.Cell)] {
 		refreshed := existing
 		if cell, found := lookupCell(in.Cells, existing.Cell, existing.Namespace); found {
-			refreshed = newMember(in, team, cell, v1alpha1.TeamMemberRoleActive, &slot, nowT)
+			refreshed = newMember(in, tenant, cell, v1alpha1.TenantMemberRoleActive, &slot, nowT)
 			refreshed.AppliedAt = keepAppliedAt(existing.AppliedAt, refreshed.Applied, nowT)
 		}
 		return &refreshed
 	}
 	if promoted := takePromotionSource(standbys, held); promoted != nil {
-		promoted.Role = v1alpha1.TeamMemberRoleActive
+		promoted.Role = v1alpha1.TenantMemberRoleActive
 		s := slot
 		promoted.Slot = &s
 		return promoted
 	}
-	candidate := selectCandidateExcluding(in, team, held)
+	candidate := selectCandidateExcluding(in, tenant, held)
 	if candidate == nil {
 		return nil
 	}
-	fresh := newMember(in, team, *candidate, v1alpha1.TeamMemberRoleActive, &slot, nowT)
+	fresh := newMember(in, tenant, *candidate, v1alpha1.TenantMemberRoleActive, &slot, nowT)
 	return &fresh
 }
 
@@ -183,7 +183,7 @@ func newerApplied(a, b MemberBinding) bool {
 // its current standbys, dropping every member whose cell left the
 // candidate set, is evacuating, or is disabled. Slot 0 is excluded: the
 // keep and move path owns it.
-func survivingMembers(in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus,
+func survivingMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus,
 	nowT time.Time) (map[int32]MemberBinding, []MemberBinding) {
 	active := map[int32]MemberBinding{}
 	var standbys []MemberBinding
@@ -198,11 +198,11 @@ func survivingMembers(in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatu
 		}
 		role := m.Role
 		if role == "" {
-			role = v1alpha1.TeamMemberRoleActive
+			role = v1alpha1.TenantMemberRoleActive
 		}
-		bound := newMember(in, team, cell, role, m.Slot, nowT)
+		bound := newMember(in, tenant, cell, role, m.Slot, nowT)
 		bound.AppliedAt = keepAppliedAt(memberAppliedAt(in, m.CellNamespace, m.Cell), bound.Applied, nowT)
-		if role == v1alpha1.TeamMemberRoleStandby {
+		if role == v1alpha1.TenantMemberRoleStandby {
 			standbys = append(standbys, bound)
 			continue
 		}
@@ -245,14 +245,14 @@ func keepAppliedAt(stored *time.Time, applied bool, nowT time.Time) *time.Time {
 // newMember builds one member from a cell candidate. Its seed state comes
 // from that cell's own rehydration entry, through the MemberSeed seam, so
 // one member's deferred job never holds another member's build.
-func newMember(in Inputs, team *v1alpha1.Team, cell CellCandidate, role string,
+func newMember(in Inputs, tenant *v1alpha1.Tenant, cell CellCandidate, role string,
 	slot *int32, nowT time.Time) MemberBinding {
 	m := MemberBinding{
 		Cell:       cell.Name,
 		Namespace:  cell.Namespace,
 		Role:       role,
 		Instance:   cell.Instance,
-		Applied:    containsString(cell.AppliedTenants, team.Name),
+		Applied:    containsString(cell.AppliedTenants, tenant.Name),
 		LastSeenAt: cell.MiteLastSeen,
 	}
 	if slot != nil {
@@ -272,11 +272,11 @@ func newMember(in Inputs, team *v1alpha1.Team, cell CellCandidate, role string,
 //
 // A newer applied time means a fresher folder, so a promoted standby
 // carries a usable history the moment it takes the slot.
-func promotionCellForSlotZero(in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus) *CellCandidate {
-	if status.Placement == nil || team.Spec.Pipelines == nil {
+func promotionCellForSlotZero(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus) *CellCandidate {
+	if status.Placement == nil || tenant.Spec.Pipelines == nil {
 		return nil
 	}
-	_, standbys := survivingMembers(in, team, status, placementNow(in))
+	_, standbys := survivingMembers(in, tenant, status, placementNow(in))
 	chosen := takePromotionSource(&standbys, map[string]bool{})
 	if chosen == nil {
 		return nil
@@ -290,7 +290,7 @@ func promotionCellForSlotZero(in Inputs, team *v1alpha1.Team, status *v1alpha1.T
 
 // selectCandidateExcluding is selectCandidate with one added test: the
 // cell must not already hold a member of this tenant.
-func selectCandidateExcluding(in Inputs, team *v1alpha1.Team, held map[string]bool) *CellCandidate {
+func selectCandidateExcluding(in Inputs, tenant *v1alpha1.Tenant, held map[string]bool) *CellCandidate {
 	narrowed := in
 	narrowed.Cells = nil
 	for _, c := range in.Cells {
@@ -299,7 +299,7 @@ func selectCandidateExcluding(in Inputs, team *v1alpha1.Team, held map[string]bo
 		}
 		narrowed.Cells = append(narrowed.Cells, c)
 	}
-	return selectCandidate(narrowed, team)
+	return selectCandidate(narrowed, tenant)
 }
 
 // memberReason answers the Placed reason the member set implies.
@@ -310,7 +310,7 @@ func memberReason(members []MemberBinding, wantedSlots, wantedStandby int32) str
 	standbyCount := int32(0)
 	applied := true
 	for _, m := range members {
-		if m.Role == v1alpha1.TeamMemberRoleStandby {
+		if m.Role == v1alpha1.TenantMemberRoleStandby {
 			standbyCount++
 		} else {
 			activeCount++
@@ -321,26 +321,26 @@ func memberReason(members []MemberBinding, wantedSlots, wantedStandby int32) str
 	}
 	switch {
 	case activeCount < wantedSlots:
-		return v1alpha1.TeamReasonSlotPending
+		return v1alpha1.TenantReasonSlotPending
 	case standbyCount < wantedStandby:
-		return v1alpha1.TeamReasonStandbyPending
+		return v1alpha1.TenantReasonStandbyPending
 	case applied && wantedSlots+wantedStandby > 1:
 		// A tenant that asks for one member keeps today's TenantPlaced
 		// reason, so every earlier rule is unchanged for it.
-		return v1alpha1.TeamReasonMembersApplied
+		return v1alpha1.TenantReasonMembersApplied
 	default:
 		return ""
 	}
 }
 
 // memberStatuses turns the decided member list into the status shape.
-func memberStatuses(members []MemberBinding) []v1alpha1.TeamMemberStatus {
+func memberStatuses(members []MemberBinding) []v1alpha1.TenantMemberStatus {
 	if len(members) == 0 {
 		return nil
 	}
-	out := make([]v1alpha1.TeamMemberStatus, 0, len(members))
+	out := make([]v1alpha1.TenantMemberStatus, 0, len(members))
 	for _, m := range members {
-		entry := v1alpha1.TeamMemberStatus{
+		entry := v1alpha1.TenantMemberStatus{
 			Cell: m.Cell, CellNamespace: m.Namespace, Role: m.Role, Applied: m.Applied,
 		}
 		if m.Slot != nil {

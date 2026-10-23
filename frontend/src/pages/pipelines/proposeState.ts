@@ -1,4 +1,4 @@
-// proposeState turns a proposal session into the view that the Team home card
+// proposeState turns a proposal session into the view that the Tenant home card
 // shows. The rules are pure, so the card and its tests share one answer.
 import type { AssistantApproval, AssistantSessionDetail } from "../../types/assistant";
 import { SKIP_LABELS, STATE_LABELS } from "../../components/assistant/labels";

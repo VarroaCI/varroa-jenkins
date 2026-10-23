@@ -225,10 +225,10 @@ input from `spec.parameters` and `varroaParams` only.
 ## Check a marker before you commit it
 
 ```bash
-varroactl lint marker --team payments --marker .varroa/pipeline.yaml
+varroactl lint marker --tenant payments --marker .varroa/pipeline.yaml
 ```
 
-The command posts the marker to the team's own template set and prints each finding's severity,
+The command posts the marker to the tenant's own template set and prints each finding's severity,
 path, and message. It exits zero when the marker is valid, and non-zero otherwise, so a pre-commit
 hook or a pipeline step can gate on it. It contacts no Jenkins controller, so it works even while
 one is down. See [varroactl](../varroactl.md) for the full command reference.

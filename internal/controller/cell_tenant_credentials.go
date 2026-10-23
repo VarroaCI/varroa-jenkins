@@ -101,13 +101,13 @@ func (b *cellCredentialBudget) trim(tenant string, prop *items.FolderCredentials
 			case err != nil:
 				warnings = append(warnings, v1alpha1.TenantWarning{
 					Tenant:  tenant,
-					Reason:  v1alpha1.TeamReasonCredentialSkipped,
+					Reason:  v1alpha1.TenantReasonCredentialSkipped,
 					Message: fmt.Sprintf("credential %q skipped: it cannot be measured: %v", id, err),
 				})
 			case b.used+size > b.limit:
 				warnings = append(warnings, v1alpha1.TenantWarning{
 					Tenant:  tenant,
-					Reason:  v1alpha1.TeamReasonCredentialSkipped,
+					Reason:  v1alpha1.TenantReasonCredentialSkipped,
 					Message: fmt.Sprintf("credential %q skipped: its %d bytes do not fit in the %d-byte credential budget of the cell", id, size, b.limit),
 				})
 			default:
@@ -188,7 +188,7 @@ func (r *Reconciler) buildTenantCredential(ctx context.Context, tenant, agentNam
 	skip := func(reason string) *v1alpha1.TenantWarning {
 		return &v1alpha1.TenantWarning{
 			Tenant:  tenant,
-			Reason:  v1alpha1.TeamReasonCredentialSkipped,
+			Reason:  v1alpha1.TenantReasonCredentialSkipped,
 			Message: fmt.Sprintf("secret %q: %s", name, reason),
 		}
 	}

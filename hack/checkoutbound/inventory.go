@@ -52,7 +52,7 @@ var componentOrder = []componentSection{
 	{"bff", "BFF"},
 	{"updatecenter", "Update center"},
 	{"recorder", "Recorder"},
-	{"agentrunner", "Team agent runner"},
+	{"agentrunner", "Tenant agent runner"},
 	{"mite", "Mite"},
 	{"jenkins", "Jenkins controller"},
 	{"agents", "Jenkins agents"},

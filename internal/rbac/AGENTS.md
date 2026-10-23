@@ -49,7 +49,7 @@ with what this package generates.
     (`tenant_grants.go`) walk the four tenant paths
     `EffectiveTenantCapabilities` walks, with the subject filter removed:
     they answer **which grants reach a tenant**, so they take no claims and
-    decide nothing. The order is `teamMembership`, `tenantScopedBinding`,
+    decide nothing. The order is `tenantMembership`, `tenantScopedBinding`,
     `federatedBinding`, `clusterWideBinding`, then binding name, and the list is capped at
     `MaxTenantGrants` (50). The exported `TenantGrantSources` returns the
     capped list; a caller that must tell a full list from a cut list calls
@@ -59,25 +59,25 @@ with what this package generates.
     pattern; `JenkinsRoleAssignments` calls them, so the BFF's cell grants
     read never opens a `JenkinsRole` object.
   - Member role: `JenkinsRoleAssignments` also emits, per tenant on a cell,
-    a `varroa:tenant-member:<team>` Item role for every grant with pipelines
+    a `varroa:tenant-member:<tenant>` Item role for every grant with pipelines
     `write`. It carries the person checks of the acting-user routes (scan,
     run, replay, restart, input answers). A grant with no `scope.tenants`
     job list gets one role on the whole folder subtree. A tenant-scoped
-    grant gets `varroa:tenant-member:<team>:<binding>` with the job globs
+    grant gets `varroa:tenant-member:<tenant>:<binding>` with the job globs
     (`TenantMemberNarrowedPattern`). The member walk
     (`allTenantGrantSources`, which also appends the federated copies) is uncapped, because a cut list drops a
     Jenkins subject silently. `Resolver.TenantMemberRoles` is the single
     source of these roles. `JenkinsRoleAssignments` and the BFF cell grants
     read both call it. No generated name may equal
-    `varroa:tenant:<team>`: the plugin looks that exact name up.
+    `varroa:tenant:<tenant>`: the plugin looks that exact name up.
     `User` subjects of the role also resolve through the idp-managed `User`
     objects of the operator namespace (`SetUserDirectory`, `tenant_member_users.go`):
     each person's principal (preferred username, email, subject) joins the grant.
     Alias claims are the configured claim names, including custom claims stored in
     `varroa.dev/oidc-user-claims` at login.
     Only the current claim values count; `varroa.dev/oidc-former-identifiers` is for deprovisioning only.
-    The operator builds its resolver with a Team informer and a User informer, so the
-    Team-membership path reaches the member role.
+    The operator builds its resolver with a Tenant informer and a User informer, so the
+    Tenant-membership path reaches the member role.
     Tenant-member copies (`federatedTenantMemberSources`) reach the member role of their
     tenant. A copy annotated `"*"` (`FederatedAllTenants`) reaches the member role of every
     tenant the cell hosts; it never narrows, and a copy with a jobs annotation fails closed. A copy is a `JenkinsRoleBinding` labelled `varroa.dev/federated-tenant-member`
@@ -131,7 +131,7 @@ with what this package generates.
   onto the reserved `system-mite` or `system-operator` role (with a warning), a
   binding with no Jenkins projection (`NoJenkinsProjection`) unless it is a
   cluster-wide pipelines write, and a
-  binding with no subjects (silent, because a Team with no members is a
+  binding with no subjects (silent, because a Tenant with no members is a
   normal state). The empty-subjects skip comes first, before every check that
   warns and before the role is recorded, so a role that only empty bindings
   reference is not federated. A

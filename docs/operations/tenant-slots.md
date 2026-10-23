@@ -5,7 +5,7 @@ A pipelines tenant can run on several cells. Each such cell is a **member**. Rea
 
 ## Slots and standbys
 
-`Team.spec.pipelines.members` is the tenant's active slot count, not `Team.spec.members`, which
+`Tenant.spec.pipelines.members` is the tenant's active slot count, not `Tenant.spec.members`, which
 lists local usernames.
 
 ```yaml
@@ -17,7 +17,7 @@ spec:
     standby: 1      # warm members, 0 to 8, default 0
 ```
 
-The Team form edits both counts: **Active slots** sets `members` and **Standby members** sets `standby`.
+The Tenant form edits both counts: **Active slots** sets `members` and **Standby members** sets `standby`.
 
 An **active** member holds one slot index, dense from `0` to `members - 1`. A **standby** holds
 the tenant folder, no slot, and runs no build.
@@ -33,7 +33,7 @@ and one whose members all report applied reports `MembersApplied`.
 Read the members:
 
 ```bash
-kubectl get team payments -o jsonpath='{.status.placement.members}'
+kubectl get tenant payments -o jsonpath='{.status.placement.members}'
 ```
 
 ## Every job has one home slot
@@ -70,7 +70,7 @@ with the newest applied time, ties broken by name.
 
 The promoted cell already holds the tenant folder and its history, so the slot stays warm. It
 keeps its slot index and job set, so no job's home changes. The agent Service
-`varroa-agents-<team>-<slot>` keeps its name, and its selector moves to the promoted cell. The
+`varroa-agents-<tenant>-<slot>` keeps its name, and its selector moves to the promoted cell. The
 old holder's agent pods go as [Agent pod lifetime](tenant-pod-templates.md#agent-pod-lifetime) states.
 
 Every other slot keeps building. A claim carrying the generation from before the promotion

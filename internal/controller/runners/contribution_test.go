@@ -20,7 +20,7 @@ func cellFor(name string) *v1alpha1.Controller {
 // renders the full node list straight from the CRDs.
 func TestBuildContribution_ReplicaWithNoTickerStillRenders(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 	crdstore.MustSeed(f, inboundRunner())
 
@@ -38,7 +38,7 @@ func TestBuildContribution_ReplicaWithNoTickerStillRenders(t *testing.T) {
 // bookkeeping.
 func TestBuildContribution_DeletedRunnerDisappears(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 
 	cell := cellFor("cell-a")
@@ -67,7 +67,7 @@ func TestBuildContribution_DeletedRunnerDisappears(t *testing.T) {
 // cell contributes nothing.
 func TestBuildContribution_OnlyThisCell(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 
 	contrib, err := BuildContribution(context.Background(), f, sshSecrets(), cellFor("cell-b"))
@@ -89,7 +89,7 @@ func TestBuildContribution_OnlyThisCell(t *testing.T) {
 // interval of delay on that departure, never a wrong node list.
 func TestTick_EmptyHintMap_StillRendersCorrectNodeList(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 
 	rec := newTestReconciler(f) // lastCellForRunner is nil: an empty hint map
@@ -112,7 +112,7 @@ func TestTick_EmptyHintMap_StillRendersCorrectNodeList(t *testing.T) {
 // delivery rule the ticker applies also gates BuildContribution.
 func TestBuildContribution_UndeliveredRunnerContributesNoNode(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	broken := sshRunner("win-1", "payments")
 	broken.Spec.Launcher = "winrm"
 	crdstore.MustSeed(f, broken)
@@ -131,7 +131,7 @@ func TestBuildContribution_UndeliveredRunnerContributesNoNode(t *testing.T) {
 // 6.2), from the same read that produced its node.
 func TestBuildContribution_SSHRunnerContributesEgressPeer(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	runner := sshRunner("win-1", "payments")
 	runner.Spec.Host = "10.20.0.5"
 	crdstore.MustSeed(f, runner)
@@ -150,7 +150,7 @@ func TestBuildContribution_SSHRunnerContributesEgressPeer(t *testing.T) {
 // "a cell with only inbound runners producing no rule" acceptance.
 func TestBuildContribution_InboundOnlyContributesNoEgressPeer(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, inboundRunner())
 
 	contrib, err := BuildContribution(context.Background(), f, sshSecrets(), cellFor("cell-a"))
@@ -166,7 +166,7 @@ func TestBuildContribution_InboundOnlyContributesNoEgressPeer(t *testing.T) {
 // cell whose runners were all deleted producing no rule" acceptance.
 func TestBuildContribution_DeletedRunnerLosesItsEgressPeer(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	runner := sshRunner("win-1", "payments")
 	runner.Spec.Host = "10.20.0.5"
 	crdstore.MustSeed(f, runner)
@@ -199,7 +199,7 @@ func TestBuildContribution_DeletedRunnerLosesItsEgressPeer(t *testing.T) {
 // design D2's "delivery is independent of liveness".
 func TestBuildContribution_OfflineRunnerKeepsItsNode(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 
 	// Simulate what the ticker would have written for an offline probe:

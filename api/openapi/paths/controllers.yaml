@@ -759,7 +759,7 @@
     summary: Resolves a Jenkins item path under a headless controller to its Varroa page.
     description: |
       The dashboard door route redirects through this endpoint. The path names
-      a Jenkins item, such as job/team/job/app/12/display/redirect. The answer
+      a Jenkins item, such as job/tenant/job/app/12/display/redirect. The answer
       is the build page for that build, or the job page when the path names no
       build number. The caller needs read access to the matched run.
     parameters:

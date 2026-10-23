@@ -18,11 +18,11 @@ func recordingAnnounce(ok bool, seen *[]AnnounceRequest) Announcer {
 
 // TestPlaceAnnouncesTheMemberListBeforeTheStatusWrite asserts the announce
 // is the pre-step: the recorder holds the new member list before
-// Team.status.placement.members changes.
+// Tenant.status.placement.members changes.
 func TestPlaceAnnouncesTheMemberListBeforeTheStatusWrite(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name), readyCell("cell-b")}
+	tenant := slotTenant(2, 0)
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name), readyCell("cell-b")}
 	status := placedStatus(3)
 
 	var seen []AnnounceRequest
@@ -36,7 +36,7 @@ func TestPlaceAnnouncesTheMemberListBeforeTheStatusWrite(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(seen) != 1 {
@@ -55,14 +55,14 @@ func TestPlaceAnnouncesTheMemberListBeforeTheStatusWrite(t *testing.T) {
 // later tick.
 func TestPlaceStopsTheMemberChangeOnAFailedAnnounce(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name), readyCell("cell-b")}
+	tenant := slotTenant(2, 0)
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name), readyCell("cell-b")}
 	status := placedStatus(3)
 
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(false, &seen)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
@@ -90,16 +90,16 @@ func TestPlaceStopsTheMemberChangeOnAFailedAnnounce(t *testing.T) {
 // unchanged for a single-member tenant.
 func TestPlaceAnnouncesSlotZeroAsTheFirstMember(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 1)
+	tenant := slotTenant(2, 1)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", team.Name), readyCell("cell-b"), readyCell("cell-c"),
+		appliedCell("cell-a", tenant.Name), readyCell("cell-b"), readyCell("cell-c"),
 	}
 	status := placedStatus(3)
 
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(seen) != 1 {
@@ -110,11 +110,11 @@ func TestPlaceAnnouncesSlotZeroAsTheFirstMember(t *testing.T) {
 		t.Fatalf("the first member %+v does not repeat the scalar cell %s/%s",
 			first, seen[0].Namespace, seen[0].Cell)
 	}
-	if first.Slot == nil || *first.Slot != 0 || first.Role != v1alpha1.TeamMemberRoleActive {
+	if first.Slot == nil || *first.Slot != 0 || first.Role != v1alpha1.TenantMemberRoleActive {
 		t.Fatalf("the first member is not slot 0: %+v", first)
 	}
 	last := seen[0].Members[len(seen[0].Members)-1]
-	if last.Role != v1alpha1.TeamMemberRoleStandby || last.Slot != nil {
+	if last.Role != v1alpha1.TenantMemberRoleStandby || last.Slot != nil {
 		t.Fatalf("the last member is not a standby with no slot: %+v", last)
 	}
 }
@@ -123,15 +123,15 @@ func TestPlaceAnnouncesSlotZeroAsTheFirstMember(t *testing.T) {
 // with the same member set leaves the generation alone.
 func TestPlaceRaisesTheGenerationOnlyOnACellSetChange(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name), appliedCell("cell-b", team.Name)}
+	tenant := slotTenant(2, 0)
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name), appliedCell("cell-b", tenant.Name)}
 	status := placedStatus(3)
-	status.Placement.Members = []v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	status.Placement.Members = []v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if status.Placement.Generation != 3 {
@@ -143,15 +143,15 @@ func TestPlaceRaisesTheGenerationOnlyOnACellSetChange(t *testing.T) {
 // another cell raises the tenant's one generation.
 func TestPlaceRaisesTheGenerationWhenASlotRebinds(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name), readyCell("cell-new")}
+	tenant := slotTenant(2, 0)
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name), readyCell("cell-new")}
 	status := placedStatus(3)
-	status.Placement.Members = []v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-gone", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	status.Placement.Members = []v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-gone", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if status.Placement.Generation != 4 {
@@ -164,28 +164,28 @@ func TestPlaceRaisesTheGenerationWhenASlotRebinds(t *testing.T) {
 // for slot 0 alone.
 func TestPlaceReportsADeadInstanceForEveryMember(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	rolled := appliedCell("cell-b", team.Name)
+	tenant := slotTenant(2, 0)
+	rolled := appliedCell("cell-b", tenant.Name)
 	rolled.Instance = "uid-b2"
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name), rolled}
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name), rolled}
 	status := placedStatus(3)
-	status.Placement.Members = []v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	status.Placement.Members = []v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	}
 	in.LastSync = &SyncCache{
 		Cell: "cell-a", CellNamespace: "cells-ns", Generation: 3, CellInstance: "uid-cell-a",
 		At: fixedNow.Add(-time.Minute),
 		Members: []AnnounceMember{
-			{Cell: "cell-a", Namespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: intPtr(0), Instance: "uid-cell-a"},
-			{Cell: "cell-b", Namespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: intPtr(1), Instance: "uid-b1"},
+			{Cell: "cell-a", Namespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive, Slot: intPtr(0), Instance: "uid-cell-a"},
+			{Cell: "cell-b", Namespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive, Slot: intPtr(1), Instance: "uid-b1"},
 		},
 	}
 
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(seen) != 1 {

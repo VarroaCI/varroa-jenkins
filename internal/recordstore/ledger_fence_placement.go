@@ -12,8 +12,8 @@ import (
 )
 
 // crossTenantActorPrefix is the tenant service identity prefix the
-// cross-tenant-veto capability defines. A build running as svc-<team>
-// carries that team's own identity as its actor.
+// cross-tenant-veto capability defines. A build running as svc-<tenant>
+// carries that tenant's own identity as its actor.
 const crossTenantActorPrefix = "svc-"
 
 // crossTenantMessage is the exact message the cross-tenant-veto

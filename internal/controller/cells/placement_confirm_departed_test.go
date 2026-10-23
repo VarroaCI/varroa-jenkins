@@ -18,31 +18,31 @@ func confirmedDeparted(instance string) DeadInstance {
 	}
 }
 
-// warmInputs places testTeam on cell-a and answers inputs whose cache holds
+// warmInputs places testTenant on cell-a and answers inputs whose cache holds
 // the first pass's announcement, so nothing else is due.
-func warmInputs(t *testing.T) (Inputs, *v1alpha1.Team, *v1alpha1.TeamStatus) {
+func warmInputs(t *testing.T) (Inputs, *v1alpha1.Tenant, *v1alpha1.TenantStatus) {
 	t.Helper()
 	in := testInputs()
-	team := testTeam()
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name)}
+	tenant := testTenant()
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name)}
 	status := placedStatus(1)
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil || out.SyncCacheUpdate == nil {
 		t.Fatalf("first pass: err = %v, cache update = %v", err, out.SyncCacheUpdate)
 	}
 	in.LastSync = out.SyncCacheUpdate
-	return in, team, status
+	return in, tenant, status
 }
 
 // TestConfirmedDepartedMakesAnAnnounceDue asserts a confirmed departed
 // instance is a trigger, and that the announcement carries it with its
 // confirmation and its cell.
 func TestConfirmedDepartedMakesAnAnnounceDue(t *testing.T) {
-	in, team, status := warmInputs(t)
+	in, tenant, status := warmInputs(t)
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(seen) != 0 {
@@ -50,7 +50,7 @@ func TestConfirmedDepartedMakesAnAnnounceDue(t *testing.T) {
 	}
 
 	in.ConfirmedDeparted = []DeadInstance{confirmedDeparted("uid-left")}
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(seen) != 1 {
@@ -75,12 +75,12 @@ func TestConfirmedDepartedMakesAnAnnounceDue(t *testing.T) {
 // an instance an announced member runs is dropped. The recorder would
 // otherwise refuse every later announcement as stale.
 func TestConfirmedDepartedNeverNamesALiveInstance(t *testing.T) {
-	in, team, status := warmInputs(t)
+	in, tenant, status := warmInputs(t)
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 	in.ConfirmedDeparted = []DeadInstance{confirmedDeparted("uid-cell-a")}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	for _, req := range seen {
@@ -94,15 +94,15 @@ func TestConfirmedDepartedNeverNamesALiveInstance(t *testing.T) {
 // reaches the cache, so the caller reads those pods on the next tick.
 func TestPlaceCachesTheUnconfirmedReply(t *testing.T) {
 	in := testInputs()
-	team := testTeam()
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name)}
+	tenant := testTenant()
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name)}
 	status := placedStatus(1)
 	unconfirmed := []DeadInstance{{Instance: "uid-left", Cell: "cell-gone", Namespace: "cells-ns"}}
 	in.Announce = func(context.Context, AnnounceRequest) (AnnounceResult, error) {
 		return AnnounceResult{OK: true, Unconfirmed: unconfirmed}, nil
 	}
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
@@ -116,8 +116,8 @@ func TestPlaceCachesTheUnconfirmedReply(t *testing.T) {
 // confirmation too, so a move tick never drops one.
 func TestMoveCarriesConfirmedDeparted(t *testing.T) {
 	in := testInputs()
-	team := testTeam()
-	evacuating := appliedCell("cell-a", team.Name)
+	tenant := testTenant()
+	evacuating := appliedCell("cell-a", tenant.Name)
 	evacuating.Evacuate = true
 	in.Cells = []CellCandidate{evacuating, readyCell("cell-b")}
 	in.ConfirmedDeparted = []DeadInstance{confirmedDeparted("uid-left")}
@@ -125,7 +125,7 @@ func TestMoveCarriesConfirmedDeparted(t *testing.T) {
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(seen) != 1 || seen[0].Cell != "cell-b" {

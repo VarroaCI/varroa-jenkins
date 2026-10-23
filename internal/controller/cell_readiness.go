@@ -439,11 +439,11 @@ func (r *Reconciler) recordCellHibernationIgnored(cr *v1alpha1.Controller) {
 	for _, tenant := range cr.Status.Cell.Tenants {
 		fresh = append(fresh, v1alpha1.TenantWarning{
 			Tenant:  tenant,
-			Reason:  v1alpha1.TeamReasonHibernationIgnored,
+			Reason:  v1alpha1.TenantReasonHibernationIgnored,
 			Message: "spec.hibernation.enabled is ignored on a cell; a cell holds no durable state to hibernate",
 		})
 	}
-	cr.Status.Cell.TenantWarnings = replaceTenantWarnings(cr.Status.Cell.TenantWarnings, v1alpha1.TeamReasonHibernationIgnored, fresh)
+	cr.Status.Cell.TenantWarnings = replaceTenantWarnings(cr.Status.Cell.TenantWarnings, v1alpha1.TenantReasonHibernationIgnored, fresh)
 }
 
 // replaceTenantWarnings returns existing with every entry of the given

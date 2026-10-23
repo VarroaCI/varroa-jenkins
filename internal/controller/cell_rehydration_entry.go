@@ -127,7 +127,7 @@ type seedAnswer struct {
 	pending  []string
 }
 
-// seedAnswerOf returns the seed answer that the Team reconciler reads from
+// seedAnswerOf returns the seed answer that the Tenant reconciler reads from
 // one rehydration entry. An entry that is not applied answers no instance,
 // which holds every build on the member until its seed lands. An applied
 // entry answers its instance and its pending jobs, the deferred and the
@@ -166,7 +166,7 @@ func seedAnswersOf(cr *v1alpha1.Controller) map[string]seedAnswer {
 
 // CellSeedStateChanged reports whether a Controller update changed the seed
 // answer of any tenant on a cell. The Controller informer handler calls it
-// on every replica. A true answer wakes the Team ticker, which reads the same
+// on every replica. A true answer wakes the Tenant ticker, which reads the same
 // answers through memberSeedReader. Only the instance and the pending job
 // paths count. A change of the entry time alone is false.
 func CellSeedStateChanged(oldCR, newCR *v1alpha1.Controller) bool {
@@ -351,7 +351,7 @@ func partitionReloadFailuresByTenant(failures []*mitev1.RehydrationReloadFailure
 // tenant of one cell, because one command covers every tenant on it. It
 // uses each path's owning tenant, by that tenant's own job-path prefix (a
 // pipelines tenant's jobs all live under its own top-level folder, its
-// Team name). It serves the deferred list of DesiredStateResult
+// Tenant name). It serves the deferred list of DesiredStateResult
 // (task 6.2) and the covered job paths of a number-only push.
 func partitionJobPathsByTenant(jobPaths []string, tenants []string) map[string][]string {
 	out := make(map[string][]string, len(tenants))

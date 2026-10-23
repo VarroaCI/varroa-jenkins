@@ -165,7 +165,7 @@ function PoolBlock({
         <p className={styles.empty}>
           {pool.spec.warm === 0 || pool.spec.warm == null
             ? "This pool owns no cell: warm is zero and no tenant waits for one."
-            : "This pool owns no cell: no Team requests its profile yet."}
+            : "This pool owns no cell: no Tenant requests its profile yet."}
         </p>
       ) : (
         <table className={styles.table}>

@@ -1215,10 +1215,10 @@ func TestOnBuildEvent_MoveIsServedStaleWithinTTLThenRefreshedAfterExpiry(t *test
 		ObjectMeta: metav1.ObjectMeta{Name: "ctrl1", Namespace: "ns1"},
 		Spec:       v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
 	})
-	crdstore.MustSeed(store, &v1alpha1.Team{
+	crdstore.MustSeed(store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Status: v1alpha1.TeamStatus{
-			Placement: &v1alpha1.TeamPlacementStatus{Cell: "ctrl1", CellNamespace: "ns1", Generation: 1},
+		Status: v1alpha1.TenantStatus{
+			Placement: &v1alpha1.TenantPlacementStatus{Cell: "ctrl1", CellNamespace: "ns1", Generation: 1},
 		},
 	})
 	resolver := NewCellTenantResolver(store)
@@ -1239,10 +1239,10 @@ func TestOnBuildEvent_MoveIsServedStaleWithinTTLThenRefreshedAfterExpiry(t *test
 	}
 
 	// The tenant moves off ctrl1/ns1 before the cache entry expires.
-	crdstore.MustSeed(store, &v1alpha1.Team{
+	crdstore.MustSeed(store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Status: v1alpha1.TeamStatus{
-			Placement: &v1alpha1.TeamPlacementStatus{Cell: "ctrl2", CellNamespace: "ns2", Generation: 2},
+		Status: v1alpha1.TenantStatus{
+			Placement: &v1alpha1.TenantPlacementStatus{Cell: "ctrl2", CellNamespace: "ns2", Generation: 2},
 		},
 	})
 
@@ -1262,9 +1262,9 @@ func TestOnBuildEvent_MoveIsServedStaleWithinTTLThenRefreshedAfterExpiry(t *test
 		t.Fatalf("NewCellTenantResolver returned %T, want *crdCellTenantResolver", resolver)
 	}
 	cr.mu.Lock()
-	entry := cr.teams["payments"]
+	entry := cr.tenants["payments"]
 	entry.expires = time.Now().Add(-time.Second)
-	cr.teams["payments"] = entry
+	cr.tenants["payments"] = entry
 	cr.mu.Unlock()
 
 	acksBefore := len(sender.acks())

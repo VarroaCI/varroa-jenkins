@@ -325,14 +325,14 @@ func tenantQueueTestBus(t *testing.T) *bus.Conn {
 	return conn
 }
 
-// placedPipelinesTeam builds a Team CRD carrying a pipelines door token
+// placedPipelinesTenant builds a Tenant CRD carrying a pipelines door token
 // and secret, for the tenant queue tests.
-func placedPipelinesTeam(name, token, secret string) *v1alpha1.Team {
-	return &v1alpha1.Team{
+func placedPipelinesTenant(name, token, secret string) *v1alpha1.Tenant {
+	return &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns1"}},
-		Status: v1alpha1.TeamStatus{
-			Pipelines: &v1alpha1.TeamPipelinesStatus{
+		Spec:       v1alpha1.TenantSpec{Namespaces: []string{"ns1"}},
+		Status: v1alpha1.TenantStatus{
+			Pipelines: &v1alpha1.TenantPipelinesStatus{
 				WebhookToken:  token,
 				WebhookSecret: secret,
 			},
@@ -346,30 +346,30 @@ func githubSignature(secret string, body []byte) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-func TestTenantWebhookQueue_UnknownTeamAnswers401(t *testing.T) {
+func TestTenantWebhookQueue_UnknownTenantAnswers401(t *testing.T) {
 	store := crdstore.NewFake()
 	client := newFakeResourceClient()
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
 
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/nosuchteam/queue/github-webhook/", bytes.NewReader([]byte("{}")))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/tenants/nosuchteam/queue/github-webhook/", bytes.NewReader([]byte("{}")))
 	rec := httptest.NewRecorder()
 
 	srv.HandleHibernationDispatch(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 for an unknown team", rec.Code)
+		t.Fatalf("status = %d, want 401 for an unknown tenant", rec.Code)
 	}
 }
 
 func TestTenantWebhookQueue_CrossTenantTokenAnswers401(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "payments-token", "payments-secret"))
-	crdstore.MustSeed(store, placedPipelinesTeam("search", "search-token", "search-secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "payments-token", "payments-secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("search", "search-token", "search-secret"))
 	client := newFakeResourceClient()
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
 
-	// The request names the "payments" Team but carries "search"'s token.
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/search-token/teams/payments/queue/github-webhook/", bytes.NewReader([]byte("{}")))
+	// The request names the "payments" Tenant but carries "search"'s token.
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/search-token/tenants/payments/queue/github-webhook/", bytes.NewReader([]byte("{}")))
 	rec := httptest.NewRecorder()
 
 	srv.HandleHibernationDispatch(rec, req)
@@ -381,11 +381,11 @@ func TestTenantWebhookQueue_CrossTenantTokenAnswers401(t *testing.T) {
 
 func TestTenantWebhookQueue_NonAllowlistedPathAnswers404(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "tok", "secret"))
 	client := newFakeResourceClient()
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
 
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/scriptText", bytes.NewReader([]byte("{}")))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/tenants/payments/queue/scriptText", bytes.NewReader([]byte("{}")))
 	rec := httptest.NewRecorder()
 
 	srv.HandleHibernationDispatch(rec, req)
@@ -397,11 +397,11 @@ func TestTenantWebhookQueue_NonAllowlistedPathAnswers404(t *testing.T) {
 
 func TestTenantWebhookQueue_RedirectNotServed404(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "tok", "secret"))
 	client := newFakeResourceClient()
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
 
-	req := httptest.NewRequest(http.MethodGet, "/hibernation/tok/teams/payments/redirect/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/hibernation/tok/tenants/payments/redirect/", nil)
 	rec := httptest.NewRecorder()
 
 	srv.HandleHibernationDispatch(rec, req)
@@ -413,12 +413,12 @@ func TestTenantWebhookQueue_RedirectNotServed404(t *testing.T) {
 
 func TestTenantWebhookQueue_BodyTooLargeAnswers413(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "tok", "secret"))
 	client := newFakeResourceClient()
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
 
 	big := bytes.Repeat([]byte("a"), maxWebhookBodyBytes+1)
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/github-webhook/", bytes.NewReader(big))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/tenants/payments/queue/github-webhook/", bytes.NewReader(big))
 	rec := httptest.NewRecorder()
 
 	srv.HandleHibernationDispatch(rec, req)
@@ -430,11 +430,11 @@ func TestTenantWebhookQueue_BodyTooLargeAnswers413(t *testing.T) {
 
 func TestTenantWebhookQueue_MissingGitHubSignatureAnswers400(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "tok", "secret"))
 	client := newFakeResourceClient()
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
 
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/github-webhook/", bytes.NewReader([]byte("{}")))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/tenants/payments/queue/github-webhook/", bytes.NewReader([]byte("{}")))
 	req.Header.Set("X-GitHub-Event", "push")
 	// No X-Hub-Signature-256.
 	rec := httptest.NewRecorder()
@@ -448,12 +448,12 @@ func TestTenantWebhookQueue_MissingGitHubSignatureAnswers400(t *testing.T) {
 
 func TestTenantWebhookQueue_WrongSecretSignatureAnswers400(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "tok", "secret"))
 	client := newFakeResourceClient()
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
 
 	body := []byte(`{"ref":"refs/heads/main"}`)
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/github-webhook/", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/tenants/payments/queue/github-webhook/", bytes.NewReader(body))
 	req.Header.Set("X-GitHub-Event", "push")
 	req.Header.Set("X-Hub-Signature-256", githubSignature("some-other-secret", body))
 	rec := httptest.NewRecorder()
@@ -469,12 +469,12 @@ func TestTenantWebhookQueue_EmptyStoredSecretAnswers503(t *testing.T) {
 	store := crdstore.NewFake()
 	// A token exists (so the request clears step 2), but the secret is
 	// still empty: the placement pass has not finished minting it.
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", ""))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "tok", ""))
 	client := newFakeResourceClient()
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
 
 	body := []byte(`{}`)
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/github-webhook/", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/tenants/payments/queue/github-webhook/", bytes.NewReader(body))
 	req.Header.Set("X-GitHub-Event", "push")
 	req.Header.Set("X-Hub-Signature-256", githubSignature("whatever", body))
 	rec := httptest.NewRecorder()
@@ -488,15 +488,15 @@ func TestTenantWebhookQueue_EmptyStoredSecretAnswers503(t *testing.T) {
 
 // TestTenantWebhookQueue_GitLabTokenPublishesTenantEnvelope covers the GitLab
 // token path end to end: a valid delivery is accepted, published on
-// webhook.<cluster>.tenant.<team>, and the envelope carries the request's
+// webhook.<cluster>.tenant.<tenant>, and the envelope carries the request's
 // forge/team/delivery identity but neither secret header.
-// tenantDoorFixture returns a tenant door server for team payments, with
+// tenantDoorFixture returns a tenant door server for tenant payments, with
 // the door token "tok" and the secret "secret", and the subject a
 // delivery publishes on.
 func tenantDoorFixture(t *testing.T) (*Server, *bus.Conn, string) {
 	t.Helper()
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "tok", "secret"))
 	client := newFakeResourceClient()
 	conn := tenantQueueTestBus(t)
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, BusConn: conn, Logger: slog.Default()})
@@ -507,7 +507,7 @@ func tenantDoorFixture(t *testing.T) (*Server, *bus.Conn, string) {
 // status code.
 func postTenantDoor(t *testing.T, srv *Server, path string, headers map[string]string) int {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/"+path, bytes.NewReader([]byte(`{}`)))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/tenants/payments/queue/"+path, bytes.NewReader([]byte(`{}`)))
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -524,7 +524,7 @@ func TestTenantWebhookQueue_GenericWithoutTokenAnswers400(t *testing.T) {
 	}
 }
 
-func TestTenantWebhookQueue_GenericWithOtherTeamTokenAnswers400(t *testing.T) {
+func TestTenantWebhookQueue_GenericWithOtherTenantTokenAnswers400(t *testing.T) {
 	srv, _, _ := tenantDoorFixture(t)
 	code := postTenantDoor(t, srv, "generic-webhook-trigger/invoke?token=billing:x", map[string]string{"X-Varroa-Token": "secret"})
 	if code != http.StatusBadRequest {
@@ -602,13 +602,13 @@ func TestTenantPathServes(t *testing.T) {
 		{"gitea path on gitea delivery", "gitea-webhook/", "gitea", "", true},
 		{"gitea path on github delivery", "gitea-webhook/", "github", "", false},
 		{"gitea path on generic delivery", "gitea-webhook/", "generic", "", false},
-		{"generic path with own team token", "generic-webhook-trigger/invoke", "generic", "token=payments:gl", true},
-		{"generic path with own team token on gitlab", "generic-webhook-trigger/invoke", "gitlab", "token=payments:x", true},
+		{"generic path with own tenant token", "generic-webhook-trigger/invoke", "generic", "token=payments:gl", true},
+		{"generic path with own tenant token on gitlab", "generic-webhook-trigger/invoke", "gitlab", "token=payments:x", true},
 		{"generic path without token", "generic-webhook-trigger/invoke", "generic", "", false},
-		{"generic path with other team token", "generic-webhook-trigger/invoke", "generic", "token=billing:x", false},
-		{"generic path with team name as prefix of another team", "generic-webhook-trigger/invoke", "generic", "token=payments-2:x", false},
+		{"generic path with other tenant token", "generic-webhook-trigger/invoke", "generic", "token=billing:x", false},
+		{"generic path with tenant name as prefix of another tenant", "generic-webhook-trigger/invoke", "generic", "token=payments-2:x", false},
 		{"generic path with prefix only", "generic-webhook-trigger/invoke", "generic", "token=payments:", false},
-		{"generic path with bare team name", "generic-webhook-trigger/invoke", "generic", "token=payments", false},
+		{"generic path with bare tenant name", "generic-webhook-trigger/invoke", "generic", "token=payments", false},
 		{"generic path with empty token", "generic-webhook-trigger/invoke", "generic", "token=", false},
 		{"generic path on the header token only", "generic-webhook-trigger/invoke", "generic", "x=payments:gl", false},
 		{"generic path with a trailing slash and own token", "generic-webhook-trigger/invoke/", "generic", "token=payments:gl", true},
@@ -624,7 +624,7 @@ func TestTenantPathServes(t *testing.T) {
 
 func TestTenantWebhookQueue_GitLabTokenPublishesTenantEnvelope(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "tok", "secret"))
 	client := newFakeResourceClient()
 	conn := tenantQueueTestBus(t)
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, BusConn: conn, Logger: slog.Default()})
@@ -639,7 +639,7 @@ func TestTenantWebhookQueue_GitLabTokenPublishesTenantEnvelope(t *testing.T) {
 	defer func() { _ = sub.Unsubscribe() }()
 
 	body := []byte(`{"object_kind":"push"}`)
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/generic-webhook-trigger/invoke?token=payments:gl", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/tenants/payments/queue/generic-webhook-trigger/invoke?token=payments:gl", bytes.NewReader(body))
 	req.Header.Set("X-Gitlab-Event", "Push Hook")
 	req.Header.Set("X-Gitlab-Token", "secret")
 	req.Header.Set("X-Gitlab-Event-UUID", "gl-uuid-1")
@@ -657,8 +657,8 @@ func TestTenantWebhookQueue_GitLabTokenPublishesTenantEnvelope(t *testing.T) {
 		if err := json.Unmarshal(data, &env); err != nil {
 			t.Fatalf("unmarshal published envelope: %v", err)
 		}
-		if env["team"] != "payments" || env["forge"] != "gitlab" || env["deliveryId"] != "gl-uuid-1" {
-			t.Fatalf("envelope identity = %+v, want team=payments forge=gitlab deliveryId=gl-uuid-1", env)
+		if env["tenant"] != "payments" || env["forge"] != "gitlab" || env["deliveryId"] != "gl-uuid-1" {
+			t.Fatalf("envelope identity = %+v, want tenant=payments forge=gitlab deliveryId=gl-uuid-1", env)
 		}
 		if _, hasNS := env["namespace"]; hasNS {
 			t.Errorf("tenant envelope carries a namespace: %+v", env)
@@ -689,7 +689,7 @@ func TestTenantWebhookQueue_UnverifiedHeaderIsReadFromRequestNotAllowlist(t *tes
 	}
 
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "tok", "secret"))
 	client := newFakeResourceClient()
 	conn := tenantQueueTestBus(t)
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, BusConn: conn, Logger: slog.Default()})
@@ -704,7 +704,7 @@ func TestTenantWebhookQueue_UnverifiedHeaderIsReadFromRequestNotAllowlist(t *tes
 	defer func() { _ = sub.Unsubscribe() }()
 
 	body := []byte(`{}`)
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/generic-webhook-trigger/invoke?token=payments:x", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/tenants/payments/queue/generic-webhook-trigger/invoke?token=payments:x", bytes.NewReader(body))
 	req.Header.Set("X-Varroa-Token", "secret")
 	rec := httptest.NewRecorder()
 
@@ -747,7 +747,7 @@ func TestIdentifyForge_GiteaBeforeGitHub(t *testing.T) {
 
 func TestTenantQueue_GiteaSignatureAccepted(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "tok", "secret"))
 	client := newFakeResourceClient()
 	conn := tenantQueueTestBus(t)
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, BusConn: conn, Logger: slog.Default()})
@@ -762,7 +762,7 @@ func TestTenantQueue_GiteaSignatureAccepted(t *testing.T) {
 	defer func() { _ = sub.Unsubscribe() }()
 
 	body := []byte(`{"ref":"refs/heads/main"}`)
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/gitea-webhook/post", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/tenants/payments/queue/gitea-webhook/post", bytes.NewReader(body))
 	req.Header.Set("X-Gitea-Event", "push")
 	req.Header.Set("X-Gitea-Signature", giteaHexSignature("secret", body))
 	req.Header.Set("X-Gitea-Delivery", "gt-delivery-1")
@@ -793,7 +793,7 @@ func TestTenantQueue_GiteaSignatureAccepted(t *testing.T) {
 
 func TestTenantQueue_ForgejoSignatureHeaderAccepted(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "tok", "secret"))
 	client := newFakeResourceClient()
 	conn := tenantQueueTestBus(t)
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, BusConn: conn, Logger: slog.Default()})
@@ -808,7 +808,7 @@ func TestTenantQueue_ForgejoSignatureHeaderAccepted(t *testing.T) {
 	defer func() { _ = sub.Unsubscribe() }()
 
 	body := []byte(`{"ref":"refs/heads/main"}`)
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/gitea-webhook/post", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/tenants/payments/queue/gitea-webhook/post", bytes.NewReader(body))
 	req.Header.Set("X-Forgejo-Event", "pull_request")
 	req.Header.Set("X-Forgejo-Signature", giteaHexSignature("secret", body))
 	req.Header.Set("X-Forgejo-Delivery", "fj-delivery-1")
@@ -835,12 +835,12 @@ func TestTenantQueue_ForgejoSignatureHeaderAccepted(t *testing.T) {
 
 func TestTenantQueue_GiteaBadSignatureRejected(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	crdstore.MustSeed(store, placedPipelinesTenant("payments", "tok", "secret"))
 	client := newFakeResourceClient()
 	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
 
 	body := []byte(`{"ref":"refs/heads/main"}`)
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/gitea-webhook/post", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/tenants/payments/queue/gitea-webhook/post", bytes.NewReader(body))
 	req.Header.Set("X-Gitea-Event", "push")
 	req.Header.Set("X-Gitea-Signature", giteaHexSignature("some-other-secret", body))
 	rec := httptest.NewRecorder()

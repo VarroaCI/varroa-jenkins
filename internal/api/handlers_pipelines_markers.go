@@ -1,5 +1,5 @@
 // Package api: the marker lint surface, design D13. This file implements
-// POST /pipelines/{team}/markers/validate, which varroactl lint marker
+// POST /pipelines/{tenant}/markers/validate, which varroactl lint marker
 // (internal/varroactl) also calls.
 package api
 
@@ -23,9 +23,9 @@ type markerValidateFindingJSON struct {
 	Message  string `json:"message"`
 }
 
-// markerValidateResponseJSON is POST /pipelines/{team}/markers/validate's
+// markerValidateResponseJSON is POST /pipelines/{tenant}/markers/validate's
 // response body. TemplateName and TemplateVersion are present only when
-// the marker resolved against the team's delivered set and its values
+// the marker resolved against the tenant's delivered set and its values
 // validated: an empty Findings list.
 type markerValidateResponseJSON struct {
 	Findings        []markerValidateFindingJSON `json:"findings"`
@@ -46,8 +46,8 @@ func (s *Server) oneFindingResponse(w http.ResponseWriter, f markerValidateFindi
 }
 
 // handleValidatePipelineMarker implements design D13's pre-commit lint
-// surface: it resolves the team's delivered pipeline-template set through
-// the same TenantResolver seam and authorization the team's other
+// surface: it resolves the tenant's delivered pipeline-template set through
+// the same TenantResolver seam and authorization the tenant's other
 // pipeline reads use, then runs the Go marker and schema validator
 // against the posted marker text. It never contacts a cell, so it works
 // while a cell is down, and it reads no record-store data, so a disabled
@@ -55,9 +55,9 @@ func (s *Server) oneFindingResponse(w http.ResponseWriter, f markerValidateFindi
 func (s *Server) handleValidatePipelineMarker(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	claims := auth.ClaimsFromContext(ctx)
-	team := r.PathValue("team")
+	tenant := r.PathValue("tenant")
 
-	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	refs, serr := s.resolveTenantTenants(ctx, claims, tenant)
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return
@@ -77,9 +77,9 @@ func (s *Server) handleValidatePipelineMarker(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	delivered := s.deliveredPipelineTemplatesForTeam(ctx, refs)
+	delivered := s.deliveredPipelineTemplatesForTenant(ctx, refs)
 	if len(delivered) == 0 {
-		s.oneFindingResponse(w, markerFinding("", "team %q delivers no pipeline template", team))
+		s.oneFindingResponse(w, markerFinding("", "tenant %q delivers no pipeline template", tenant))
 		return
 	}
 
@@ -106,12 +106,12 @@ func (s *Server) handleValidatePipelineMarker(w http.ResponseWriter, r *http.Req
 	s.writeJSON(w, http.StatusOK, resp)
 }
 
-// deliveredPipelineTemplatesForTeam unions every admitted tenant's
+// deliveredPipelineTemplatesForTenant unions every admitted tenant's
 // delivered pipeline-template set, de-duplicated by name and version. A
-// team ordinarily resolves to exactly one tenant (design D1 steps 1, 3,
-// and 4); the union matters only for an unplaced Team's multi-controller
+// tenant ordinarily resolves to exactly one tenant (design D1 steps 1, 3,
+// and 4); the union matters only for an unplaced Tenant's multi-controller
 // fan-out (step 2).
-func (s *Server) deliveredPipelineTemplatesForTeam(ctx context.Context, refs []TenantRef) []pipelinetemplate.Document {
+func (s *Server) deliveredPipelineTemplatesForTenant(ctx context.Context, refs []TenantRef) []pipelinetemplate.Document {
 	seen := map[string]bool{}
 	var out []pipelinetemplate.Document
 	for _, ref := range refs {

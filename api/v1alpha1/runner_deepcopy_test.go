@@ -14,7 +14,7 @@ func TestRunnerDeepCopyIsolatesSubObjects(t *testing.T) {
 	lastSeen := metav1.Now()
 	orig := Runner{
 		Spec: RunnerSpec{
-			Team:     "payments",
+			Tenant:   "payments",
 			Launcher: "ssh",
 			Labels:   []string{"windows", "msbuild"},
 			RemoteFS: "/home/jenkins",
@@ -63,14 +63,14 @@ func TestRunnerDeepCopyIsolatesSubObjects(t *testing.T) {
 func TestRunnerListDeepCopyIsolatesItems(t *testing.T) {
 	orig := RunnerList{
 		Items: []Runner{
-			{Spec: RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/home/jenkins"}},
+			{Spec: RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/home/jenkins"}},
 		},
 	}
 
 	cp := orig.DeepCopy()
-	cp.Items[0].Spec.Team = "mutated"
+	cp.Items[0].Spec.Tenant = "mutated"
 
-	if got := orig.Items[0].Spec.Team; got != "payments" {
-		t.Fatalf("items shallow-copied: original Items[0].Spec.Team = %q, want payments", got)
+	if got := orig.Items[0].Spec.Tenant; got != "payments" {
+		t.Fatalf("items shallow-copied: original Items[0].Spec.Tenant = %q, want payments", got)
 	}
 }

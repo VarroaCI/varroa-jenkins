@@ -110,7 +110,7 @@ function grantTenantPipelinesWrite(jobs: string[] = []) {
 }
 
 const mockNavigate = vi.fn();
-const mockUseParams = vi.fn(() => ({ team: "payments", job: "checkout-api/main", run: "run-1" }));
+const mockUseParams = vi.fn(() => ({ tenant: "payments", job: "checkout-api/main", run: "run-1" }));
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
   return {
@@ -159,7 +159,7 @@ function renderPage(entry: InitialEntry = "/pipelines/payments/checkout-api%2Fma
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockUseParams.mockReturnValue({ team: "payments", job: "checkout-api/main", run: "run-1" });
+  mockUseParams.mockReturnValue({ tenant: "payments", job: "checkout-api/main", run: "run-1" });
   grantTenantPipelinesWrite();
   mockListRunArtifacts.mockResolvedValue({ items: [] });
   mockListRunTests.mockResolvedValue({ items: [], totals: { total: 0, failed: 0, skipped: 0 }, cases: [] });
@@ -383,7 +383,7 @@ describe("BuildPage — record and recovery states", () => {
     expect(await screen.findByText("Pipeline history is off")).toBeInTheDocument();
   });
 
-  it("renders the header duration in the format the team table uses", async () => {
+  it("renders the header duration in the format the tenant table uses", async () => {
     mockGetRun.mockResolvedValue(baseRun({ durationMs: 600_000 }));
     renderPage();
     await screen.findByText(/Build #42/);
@@ -599,7 +599,7 @@ describe("BuildPage — pending and not-found states", () => {
 
 describe("BuildPage — log stream resume", () => {
   /** logStreamCall returns the arguments of the last useEventStream call for
-   * the run log stream, which the team run stream does not share. */
+   * the run log stream, which the tenant run stream does not share. */
   function logStreamCall(): Parameters<typeof mockUseEventStream> {
     const calls = mockUseEventStream.mock.calls.filter((args) => args[1] === "run:run-1");
     const args = calls[calls.length - 1];
@@ -764,8 +764,8 @@ describe("BuildPage — folder-relative write authorization", () => {
     expect(screen.queryByRole("button", { name: /Re-run/ })).not.toBeInTheDocument();
   });
 
-  it("renders Cancel and Re-run for a synthetic tenant via a namespace-scoped grant, even though the URL team segment is only the controller name", async () => {
-    mockUseParams.mockReturnValue({ team: "ci", job: "main", run: "run-1" });
+  it("renders Cancel and Re-run for a synthetic tenant via a namespace-scoped grant, even though the URL tenant segment is only the controller name", async () => {
+    mockUseParams.mockReturnValue({ tenant: "ci", job: "main", run: "run-1" });
     vi.mocked(usePermissions).mockReturnValue({
       data: {
         global: {},
@@ -784,7 +784,7 @@ describe("BuildPage — folder-relative write authorization", () => {
   });
 
   it("hides Cancel and Re-run for a run tenanted team-b opened under /pipelines/team-a/..., when the caller writes only team-a", async () => {
-    mockUseParams.mockReturnValue({ team: "team-a", job: "checkout-api/main", run: "run-1" });
+    mockUseParams.mockReturnValue({ tenant: "team-a", job: "checkout-api/main", run: "run-1" });
     vi.mocked(usePermissions).mockReturnValue({
       data: {
         global: {},
@@ -822,8 +822,8 @@ describe("BuildPage — a refused build trigger", () => {
     ["TRIGGER_UNREACHABLE", "The trigger did not reach the controller's Jenkins."],
     ["CLAIM_EXPIRED", "The build did not get a build number in time, so it did not start."],
     ["CLAIM_ABANDONED", "The build got a build number, but it did not start in time."],
-    ["FENCED", "The controller that received the trigger no longer hosts this team."],
-    ["CROSS_TENANT", "Another team may not start this job."],
+    ["FENCED", "The controller that received the trigger no longer hosts this tenant."],
+    ["CROSS_TENANT", "Another tenant may not start this job."],
     ["INVALID_KEY", "The build request was not valid."],
     ["THROTTLED", "The record store refused the build because of a limit."],
     ["NOT_HOME", "The job moved to another cell before the build started, so the build did not run."],
@@ -887,7 +887,7 @@ function renderWithProbe(entry: InitialEntry) {
 }
 
 describe("BuildPage — orientation", () => {
-  it("renders the trail from the team to the build", async () => {
+  it("renders the trail from the tenant to the build", async () => {
     mockGetRun.mockResolvedValue(
       baseRun({ tenantFolder: "payments", jobPath: "payments/checkout-api/main" }),
     );
@@ -1030,7 +1030,7 @@ describe("BuildPage — the header's source facts", () => {
 });
 
 describe("BuildPage — live run events", () => {
-  /** notification builds one frame of the team run stream. */
+  /** notification builds one frame of the tenant run stream. */
   function notification(overrides: Record<string, unknown> = {}) {
     return {
       kind: "run",
@@ -1044,7 +1044,7 @@ describe("BuildPage — live run events", () => {
     };
   }
 
-  /** runStream makes the page read the given frame off the team run stream,
+  /** runStream makes the page read the given frame off the tenant run stream,
    * and holds the run log stream closed. */
   function runStream(frame: { type: string; data: unknown } | null, readyState = "closed") {
     mockUseEventStream.mockImplementation((_baseUrl, scope) =>
@@ -1319,7 +1319,7 @@ describe("BuildPage — pending inputs", () => {
     } as unknown as ReturnType<typeof usePermissions>);
   }
 
-  /** notification builds one frame of the team run stream. */
+  /** notification builds one frame of the tenant run stream. */
   function notification(overrides: Record<string, unknown> = {}) {
     return {
       kind: "run",
@@ -1333,7 +1333,7 @@ describe("BuildPage — pending inputs", () => {
     };
   }
 
-  /** runStream makes the page read the given frame off the team run stream,
+  /** runStream makes the page read the given frame off the tenant run stream,
    * and holds the run log stream closed. */
   function runStream(frame: { type: string; data: unknown } | null, readyState = "closed") {
     mockUseEventStream.mockImplementation((_baseUrl, scope) =>
@@ -1469,8 +1469,8 @@ describe("BuildPage — pending inputs", () => {
     });
 
     expect(mockGetRun.mock.calls.length).toBeGreaterThan(before);
-    const teamStream = mockUseEventStream.mock.calls.find((call) => call[1] === "pipelines:payments");
-    expect(teamStream?.[2]).toContain("input");
+    const tenantStream = mockUseEventStream.mock.calls.find((call) => call[1] === "pipelines:payments");
+    expect(tenantStream?.[2]).toContain("input");
   });
 
   it("sends no value for an untouched control, so the plugin applies the declared default", async () => {

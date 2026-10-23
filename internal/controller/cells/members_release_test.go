@@ -28,7 +28,7 @@ func claimedCells(out Outcome) map[string]bool {
 }
 
 // placedWithMembers builds a placed status carrying a member list.
-func placedWithMembers(members []v1alpha1.TeamMemberStatus) *v1alpha1.TeamStatus {
+func placedWithMembers(members []v1alpha1.TenantMemberStatus) *v1alpha1.TenantStatus {
 	status := placedStatus(3)
 	status.Placement.Members = members
 	return status
@@ -40,13 +40,13 @@ func placedWithMembers(members []v1alpha1.TeamMemberStatus) *v1alpha1.TeamStatus
 // deletes a cell this pass is binding.
 func TestPlaceClaimsEveryMemberCell(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 1)
+	tenant := slotTenant(2, 1)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", team.Name), readyCell("cell-b"), readyCell("cell-c"),
+		appliedCell("cell-a", tenant.Name), readyCell("cell-b"), readyCell("cell-c"),
 	}
 	status := placedStatus(3)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
@@ -55,8 +55,8 @@ func TestPlaceClaimsEveryMemberCell(t *testing.T) {
 		t.Fatalf("claims = %+v, want cell-b and cell-c held", out.CellClaims)
 	}
 	for _, claim := range out.CellClaims {
-		if claim.Tenant != team.Name {
-			t.Fatalf("a claim names the tenant %q, want %q", claim.Tenant, team.Name)
+		if claim.Tenant != tenant.Name {
+			t.Fatalf("a claim names the tenant %q, want %q", claim.Tenant, tenant.Name)
 		}
 	}
 }
@@ -65,12 +65,12 @@ func TestPlaceClaimsEveryMemberCell(t *testing.T) {
 // slot-0 cell beside every member cell it binds.
 func TestPlaceClaimsTheMoveTargetAndEveryMember(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
+	tenant := slotTenant(2, 0)
 	in.Cells = []CellCandidate{readyCell("cell-new"), readyCell("cell-other")}
 	status := placedStatus(3)
 	status.Placement.Cell = "cell-gone"
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
@@ -83,16 +83,16 @@ func TestPlaceClaimsTheMoveTargetAndEveryMember(t *testing.T) {
 // drops the tenant from the released slot's cell.
 func TestPlaceReleasesAScaledDownSlot(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(1, 0)
+	tenant := slotTenant(1, 0)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", team.Name), appliedCell("cell-b", team.Name),
+		appliedCell("cell-a", tenant.Name), appliedCell("cell-b", tenant.Name),
 	}
-	status := placedWithMembers([]v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	})
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestPlaceReleasesAScaledDownSlot(t *testing.T) {
 	if patch == nil {
 		t.Fatalf("the released slot's cell took no patch: %+v", out.CellPatches)
 	}
-	if containsString(patch.Tenants, team.Name) {
+	if containsString(patch.Tenants, tenant.Name) {
 		t.Fatalf("the released cell still names the tenant: %+v", patch.Tenants)
 	}
 	if len(status.Placement.Members) != 1 {
@@ -112,16 +112,16 @@ func TestPlaceReleasesAScaledDownSlot(t *testing.T) {
 // the tenant from the released standby's cell.
 func TestPlaceReleasesAScaledDownStandby(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(1, 0)
+	tenant := slotTenant(1, 0)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", team.Name), appliedCell("cell-c", team.Name),
+		appliedCell("cell-a", tenant.Name), appliedCell("cell-c", tenant.Name),
 	}
-	status := placedWithMembers([]v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-c", v1alpha1.TeamMemberRoleStandby, nil),
+	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-c", v1alpha1.TenantMemberRoleStandby, nil),
 	})
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestPlaceReleasesAScaledDownStandby(t *testing.T) {
 	if patch == nil {
 		t.Fatalf("the released standby's cell took no patch: %+v", out.CellPatches)
 	}
-	if containsString(patch.Tenants, team.Name) {
+	if containsString(patch.Tenants, tenant.Name) {
 		t.Fatalf("the released cell still names the tenant: %+v", patch.Tenants)
 	}
 }
@@ -139,27 +139,27 @@ func TestPlaceReleasesAScaledDownStandby(t *testing.T) {
 // leaves the cell it held.
 func TestPlaceReleasesAReplacedMember(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	evacuating := appliedCell("cell-b", team.Name)
+	tenant := slotTenant(2, 0)
+	evacuating := appliedCell("cell-b", tenant.Name)
 	evacuating.Evacuate = true
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", team.Name), evacuating, readyCell("cell-new"),
+		appliedCell("cell-a", tenant.Name), evacuating, readyCell("cell-new"),
 	}
-	status := placedWithMembers([]v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	})
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	released := patchFor(out, "cell-b")
-	if released == nil || containsString(released.Tenants, team.Name) {
+	if released == nil || containsString(released.Tenants, tenant.Name) {
 		t.Fatalf("the replaced member's cell keeps the tenant: %+v", out.CellPatches)
 	}
 	bound := patchFor(out, "cell-new")
-	if bound == nil || !containsString(bound.Tenants, team.Name) {
+	if bound == nil || !containsString(bound.Tenants, tenant.Name) {
 		t.Fatalf("the new member's cell does not name the tenant: %+v", out.CellPatches)
 	}
 }
@@ -168,18 +168,18 @@ func TestPlaceReleasesAReplacedMember(t *testing.T) {
 // from every member cell, not slot 0's alone.
 func TestPlaceReleasesEveryMemberOnTeardown(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 1)
-	team.Spec.Pipelines = nil
+	tenant := slotTenant(2, 1)
+	tenant.Spec.Pipelines = nil
 	in.Cells = []CellCandidate{
-		readyCell("cell-a", team.Name), readyCell("cell-b", team.Name), readyCell("cell-c", team.Name),
+		readyCell("cell-a", tenant.Name), readyCell("cell-b", tenant.Name), readyCell("cell-c", tenant.Name),
 	}
-	status := placedWithMembers([]v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
-		memberStatus("cell-c", v1alpha1.TeamMemberRoleStandby, nil),
+	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
+		memberStatus("cell-c", v1alpha1.TenantMemberRoleStandby, nil),
 	})
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestPlaceReleasesEveryMemberOnTeardown(t *testing.T) {
 		if patch == nil {
 			t.Fatalf("%s took no teardown patch: %+v", name, out.CellPatches)
 		}
-		if containsString(patch.Tenants, team.Name) {
+		if containsString(patch.Tenants, tenant.Name) {
 			t.Fatalf("%s still names the tenant after teardown: %+v", name, patch.Tenants)
 		}
 	}
@@ -198,18 +198,18 @@ func TestPlaceReleasesEveryMemberOnTeardown(t *testing.T) {
 // member cell still reports the tenant applied.
 func TestTeardownWaitsForEveryMemberToDrain(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	team.Spec.Pipelines = nil
-	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
-	stillApplied := readyCell("cell-b", team.Name)
-	stillApplied.AppliedTenants = []string{team.Name}
-	in.Cells = []CellCandidate{readyCell("cell-a", team.Name), stillApplied}
-	status := placedWithMembers([]v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	tenant := slotTenant(2, 0)
+	tenant.Spec.Pipelines = nil
+	tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
+	stillApplied := readyCell("cell-b", tenant.Name)
+	stillApplied.AppliedTenants = []string{tenant.Name}
+	in.Cells = []CellCandidate{readyCell("cell-a", tenant.Name), stillApplied}
+	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	})
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestTeardownWaitsForEveryMemberToDrain(t *testing.T) {
 		t.Fatal("teardown released the finalizer while a member still holds the tenant")
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonTenantTeardownPending {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonTenantTeardownPending {
 		t.Fatalf("condition = %+v, want TenantTeardownPending", cond)
 	}
 }
@@ -227,21 +227,21 @@ func TestTeardownWaitsForEveryMemberToDrain(t *testing.T) {
 // that cell's rows and every other slot's rows stay.
 func TestPlaceReleasesAMemberWithACellScopedPurge(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(1, 0)
+	tenant := slotTenant(1, 0)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", team.Name), appliedCell("cell-b", team.Name),
+		appliedCell("cell-a", tenant.Name), appliedCell("cell-b", tenant.Name),
 	}
 	var seen []PurgeRequest
 	in.RequestPurge = func(_ context.Context, req PurgeRequest) (bool, error) {
 		seen = append(seen, req)
 		return true, nil
 	}
-	status := placedWithMembers([]v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	})
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	found := false

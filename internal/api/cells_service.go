@@ -191,7 +191,7 @@ type CellGrants struct {
 // 403: that caller already knows the cell exists.
 //
 // A local cell is read on the BFF's own resolver. A member cell is read on
-// its own operator, which holds the Team and binding state the member
+// its own operator, which holds the Tenant and binding state the member
 // renders. That path answers 502 when the member does not answer. The read
 // touches no record store, so it answers no 503.
 func (s *Server) CellGrants(ctx context.Context, claims *auth.Claims, cluster, namespace, name string) (CellGrants, *ServiceError) {

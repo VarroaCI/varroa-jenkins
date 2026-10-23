@@ -143,16 +143,16 @@ func TestGenerate_NoMatch(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "ns-scoped"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
-				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "team-a"}},
+				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "tenant-a"}},
 				RoleRef:  "some-role",
 				Scope: &v1alpha1.VarroaRoleBindingScope{
-					Namespaces: []string{"team-a"},
+					Namespaces: []string{"tenant-a"},
 				},
 			},
 		},
 	}
 	controllers := []*v1alpha1.Controller{
-		{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "team-b"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "tenant-b"}},
 	}
 
 	resolver := testResolver(roles, bindings, controllers, false)

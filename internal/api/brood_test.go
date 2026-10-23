@@ -220,13 +220,15 @@ func (f *fakeBroodClient) GetGroupCRD(_ context.Context, _ string) (*v1alpha1.Gr
 }
 func (f *fakeBroodClient) ApplyGroupCRD(_ context.Context, _ *v1alpha1.Group) error { return nil }
 func (f *fakeBroodClient) DeleteGroupCRD(_ context.Context, _ string) error         { return nil }
-func (f *fakeBroodClient) ListTeamCRDs(_ context.Context) ([]*v1alpha1.Team, error) { return nil, nil }
-func (f *fakeBroodClient) GetTeamCRD(_ context.Context, _ string) (*v1alpha1.Team, error) {
+func (f *fakeBroodClient) ListTenantCRDs(_ context.Context) ([]*v1alpha1.Tenant, error) {
 	return nil, nil
 }
-func (f *fakeBroodClient) ApplyTeamCRD(_ context.Context, _ *v1alpha1.Team) error { return nil }
-func (f *fakeBroodClient) DeleteTeamCRD(_ context.Context, _ string) error        { return nil }
-func (f *fakeBroodClient) PatchTeamStatus(_ context.Context, _ string, _ *v1alpha1.TeamStatus) error {
+func (f *fakeBroodClient) GetTenantCRD(_ context.Context, _ string) (*v1alpha1.Tenant, error) {
+	return nil, nil
+}
+func (f *fakeBroodClient) ApplyTenantCRD(_ context.Context, _ *v1alpha1.Tenant) error { return nil }
+func (f *fakeBroodClient) DeleteTenantCRD(_ context.Context, _ string) error          { return nil }
+func (f *fakeBroodClient) PatchTenantStatus(_ context.Context, _ string, _ *v1alpha1.TenantStatus) error {
 	return nil
 }
 func (f *fakeBroodClient) StreamPodLogs(_ context.Context, _, _, _ string, _ int64, _ bool) (io.ReadCloser, error) {

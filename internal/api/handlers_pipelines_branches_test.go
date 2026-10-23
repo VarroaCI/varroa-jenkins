@@ -43,7 +43,7 @@ func (f *fakeRecordReader) LatestRunsForJobs(_ context.Context, cluster, tenant 
 	return out, nil
 }
 
-// branchTestBinding grants pipelines read on the "payments" team, narrowed
+// branchTestBinding grants pipelines read on the "payments" tenant, narrowed
 // to the job globs. An empty globs list leaves the grant unnarrowed.
 func branchTestBinding(globs ...string) *v1alpha1.VarroaRoleBinding {
 	b := pipelineBinding("b", "payments")
@@ -93,7 +93,7 @@ func TestListJobBranchesFiltersByJobGlobs(t *testing.T) {
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
 	}
-	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
 
 	authz := NewAuthorizer(testResolver(pipelinesRoles(), []*v1alpha1.VarroaRoleBinding{
 		branchTestBinding("mb", "mb/*"),
@@ -103,7 +103,7 @@ func TestListJobBranchesFiltersByJobGlobs(t *testing.T) {
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleListJobBranches, "/pipelines/payments/jobs/payments%2Fmb/branches",
-		map[string]string{"team": "payments", "job": "payments/mb"})
+		map[string]string{"tenant": "payments", "job": "payments/mb"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -124,7 +124,7 @@ func TestListJobBranchesShowsADeletedOrphanedHead(t *testing.T) {
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
 	}
-	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
 
 	authz := NewAuthorizer(testResolver(pipelinesRoles(), []*v1alpha1.VarroaRoleBinding{
 		branchTestBinding("mb", "mb/*"),
@@ -144,7 +144,7 @@ func TestListJobBranchesShowsADeletedOrphanedHead(t *testing.T) {
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleListJobBranches, "/pipelines/payments/jobs/payments%2Fmb/branches",
-		map[string]string{"team": "payments", "job": "payments/mb"})
+		map[string]string{"tenant": "payments", "job": "payments/mb"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -171,12 +171,12 @@ func TestListJobBranchesNoInventoryAnswers200Empty(t *testing.T) {
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
 	}
-	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
 	authz := resolverAuthorizer("payments")
 	srv := pipelinesTestServer(client, authz, newFakeRecordReader(), nil)
 
 	rec := doPipelinesRequest(t, srv.handleListJobBranches, "/pipelines/payments/jobs/payments%2Fmb/branches",
-		map[string]string{"team": "payments", "job": "payments/mb"})
+		map[string]string{"tenant": "payments", "job": "payments/mb"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -193,7 +193,7 @@ func TestListJobBranchesAttachesLatestRun(t *testing.T) {
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
 	}
-	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
 	authz := resolverAuthorizer("payments")
 	reader := newFakeRecordReader()
 	seedBranchInventory(reader, time.Now().UTC())
@@ -206,7 +206,7 @@ func TestListJobBranchesAttachesLatestRun(t *testing.T) {
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleListJobBranches, "/pipelines/payments/jobs/payments%2Fmb/branches",
-		map[string]string{"team": "payments", "job": "payments/mb"})
+		map[string]string{"tenant": "payments", "job": "payments/mb"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -229,7 +229,7 @@ func TestListJobBranchesNilReader503(t *testing.T) {
 	srv := pipelinesTestServer(client, resolverAuthorizer("payments"), nil, nil)
 
 	rec := doPipelinesRequest(t, srv.handleListJobBranches, "/pipelines/payments/jobs/payments%2Fmb/branches",
-		map[string]string{"team": "payments", "job": "payments/mb"})
+		map[string]string{"tenant": "payments", "job": "payments/mb"})
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}

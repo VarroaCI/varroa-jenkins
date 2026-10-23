@@ -56,8 +56,8 @@ spec:
                 secretKeyRef:
                   name: {{ include "varroa.recordStore.dsnSecretName" (dict "root" $ "role" "client") }}
                   key: {{ include "varroa.recordStore.dsnSecretKey" $ }}
-            - name: VARROA_TEAM_AGENT_KEY_FILE
-              value: /etc/varroa/team-agent-key/key
+            - name: VARROA_TENANT_AGENT_KEY_FILE
+              value: /etc/varroa/tenant-agent-key/key
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -76,8 +76,8 @@ spec:
             - name: nats-creds
               mountPath: /etc/nats-creds
               readOnly: true
-            - name: team-agent-key
-              mountPath: /etc/varroa/team-agent-key
+            - name: tenant-agent-key
+              mountPath: /etc/varroa/tenant-agent-key
               readOnly: true
 {{- range $i, $p := .Values.assistant.providers }}
 {{- if $p.secretRef }}
@@ -113,9 +113,9 @@ spec:
         - name: nats-creds
           secret:
             secretName: {{ .Release.Name }}-nats-creds
-        - name: team-agent-key
+        - name: tenant-agent-key
           secret:
-            secretName: varroa-team-agent-signing-key
+            secretName: varroa-tenant-agent-signing-key
             items:
               - key: key
                 path: key

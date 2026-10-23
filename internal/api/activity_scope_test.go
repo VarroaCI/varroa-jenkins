@@ -94,11 +94,11 @@ func activityScopeShapes() []activityScopeShape {
 					ObjectMeta: metav1.ObjectMeta{Name: "selector-scoped"},
 					Spec: v1alpha1.VarroaRoleBindingSpec{
 						Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "user"}}, RoleRef: "viewer",
-						Scope: &v1alpha1.VarroaRoleBindingScope{ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}}},
+						Scope: &v1alpha1.VarroaRoleBindingScope{ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"tenant": "a"}}},
 					},
 				}}
 				controllers := []*v1alpha1.Controller{{
-					ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a", Labels: map[string]string{"team": "a"}},
+					ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a", Labels: map[string]string{"tenant": "a"}},
 				}}
 				return NewAuthorizer(testResolverWithControllers([]*v1alpha1.VarroaRole{readRole}, bindings, controllers), false)
 			},

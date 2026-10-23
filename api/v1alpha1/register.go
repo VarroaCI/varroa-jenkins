@@ -19,7 +19,7 @@ const (
 	JenkinsVersionProfileKind = "JenkinsVersionProfile"
 	UpdateCenterKind          = "UpdateCenter"
 	ControllerClassKind       = "ControllerClass"
-	TeamKind                  = "Team"
+	TenantKind                = "Tenant"
 	CellPoolKind              = "CellPool"
 )
 
@@ -40,6 +40,6 @@ var (
 	JenkinsVersionProfileGVK = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: JenkinsVersionProfileKind}
 	UpdateCenterGVK          = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: UpdateCenterKind}
 	ControllerClassGVK       = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: ControllerClassKind}
-	TeamGVK                  = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: TeamKind}
+	TenantGVK                = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: TenantKind}
 	CellPoolGVK              = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: CellPoolKind}
 )

@@ -25,7 +25,7 @@ func TestRunnersNoun_GetList(t *testing.T) {
 				{
 					"name": "win-1",
 					"spec": map[string]any{
-						"team": "payments", "launcher": "inbound", "remoteFS": "/var/j",
+						"tenant": "payments", "launcher": "inbound", "remoteFS": "/var/j",
 					},
 					"status": map[string]any{
 						"cell": "cell-1", "connected": true, "lastSeen": "2026-09-11T00:00:00Z",
@@ -53,7 +53,7 @@ func TestRunnersNoun_GetSingle(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name": "win-1",
 			"spec": map[string]any{
-				"team": "payments", "launcher": "inbound", "remoteFS": "/var/j",
+				"tenant": "payments", "launcher": "inbound", "remoteFS": "/var/j",
 			},
 			"status": map[string]any{"connected": false},
 		})
@@ -74,7 +74,7 @@ func TestRunnersNoun_GetSingle_NameOutput(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name": "win-1",
 			"spec": map[string]any{
-				"team": "payments", "launcher": "inbound", "remoteFS": "/var/j",
+				"tenant": "payments", "launcher": "inbound", "remoteFS": "/var/j",
 			},
 			"status": map[string]any{"connected": false},
 		})
@@ -103,7 +103,7 @@ func TestRunnersNoun_Describe(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name": "win-1",
 			"spec": map[string]any{
-				"team": "payments", "launcher": "inbound", "remoteFS": "/var/j",
+				"tenant": "payments", "launcher": "inbound", "remoteFS": "/var/j",
 			},
 			"status": map[string]any{"connected": false},
 		})
@@ -137,7 +137,7 @@ func TestRunnersNoun_Create(t *testing.T) {
 	defer srv.Close()
 
 	tmp := tempFile(t, "runner.yaml",
-		"metadata:\n  name: win-1\nspec:\n  team: payments\n  launcher: inbound\n  remoteFS: /var/j\n")
+		"metadata:\n  name: win-1\nspec:\n  tenant: payments\n  launcher: inbound\n  remoteFS: /var/j\n")
 
 	root := newRootCmd()
 	root.SetArgs([]string{"create", "runners", "-f", tmp})
@@ -292,8 +292,8 @@ func TestRunnerList_TenantFilters(t *testing.T) {
 		if r.URL.Path != "/api/v1/runners" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		if got := r.URL.Query().Get("team"); got != "payments" {
-			t.Errorf("expected team=payments, got %q", got)
+		if got := r.URL.Query().Get("tenant"); got != "payments" {
+			t.Errorf("expected tenant=payments, got %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{}})

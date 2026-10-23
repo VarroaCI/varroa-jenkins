@@ -134,7 +134,7 @@ func TestUpdateCellInstance_PodPhase(t *testing.T) {
 // change drops a tenant with an ItemsApplyFailed entry from appliedTenants,
 // and keeps the same pod's entries.
 func TestUpdateCellInstance_ReplacedPodDropsRefusedApplied(t *testing.T) {
-	refused := []v1alpha1.TenantWarning{{Tenant: "refused", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "m"}}
+	refused := []v1alpha1.TenantWarning{{Tenant: "refused", Reason: v1alpha1.TenantReasonItemsApplyFailed, Message: "m"}}
 
 	client := newTestClient()
 	client.controllerPod = &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-uid-1")}}
@@ -160,7 +160,7 @@ func TestUpdateCellInstance_ReplacedPodDropsRefusedApplied(t *testing.T) {
 // change drops a held tenant from appliedTenants, because the new pod has
 // no held folder, and keeps the same pod's entries.
 func TestUpdateCellInstance_ReplacedPodDropsHeldApplied(t *testing.T) {
-	held := []v1alpha1.TenantWarning{{Tenant: "held", Reason: v1alpha1.TeamReasonItemsHeld, Message: "m"}}
+	held := []v1alpha1.TenantWarning{{Tenant: "held", Reason: v1alpha1.TenantReasonItemsHeld, Message: "m"}}
 
 	client := newTestClient()
 	client.controllerPod = &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-uid-1")}}
@@ -197,7 +197,7 @@ func TestUpdateCellInstance_ReplaysParkedResultAfterDrop(t *testing.T) {
 	cr.Status.Cell.Instance = "pod-old"
 	cr.Status.Cell.AppliedTenants = []string{"payments", "search"}
 	cr.Status.Cell.TenantWarnings = []v1alpha1.TenantWarning{{
-		Tenant: "payments", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "create payments/repos: boom",
+		Tenant: "payments", Reason: v1alpha1.TenantReasonItemsApplyFailed, Message: "create payments/repos: boom",
 	}}
 
 	rec.parkCellResult(cr.Namespace+"/"+cr.Name, &mitev1.DesiredStateResult{

@@ -762,17 +762,17 @@ the root AGENTS.md greenfield rule.
   and not the task) and takes its `getFullName()` first path segment as the tenant;
   `hostsTenant(String)` reads the cell's applied role-strategy document (reflective,
   role-strategy is a test-only dependency) and reports true when it carries an
-  item-type role named `varroa:tenant:<team>`. `VarroaQueueItemAuthenticator`
+  item-type role named `varroa:tenant:<tenant>`. `VarroaQueueItemAuthenticator`
   (`QueueItemAuthenticator`, published by `VarroaQueueItemAuthenticatorProvider` at
   `@Extension(ordinal = 1000)`, above core's ordinal 100 and the pinned
   `workflow-durable-task-step`'s `AuthenticationFromBuild` at ordinal 959) answers
-  `svc-<team>` with authorities `authenticated` and `ROLE:varroa:tenant:<team>` for a
+  `svc-<tenant>` with authorities `authenticated` and `ROLE:varroa:tenant:<tenant>` for a
   resolved tenant, else `null`. It answers `null` for a `ComputedFolder` task, so a folder computation runs as SYSTEM. `VarroaQueueTaskDispatcher`
   (`QueueTaskDispatcher.canTake`) blocks a build from a node that carries no reserved
-  `varroa-tenant-<team>` label (the fence fails closed) or carries another tenant's
-  label; it never parses the readability-only `<team>-` node-name prefix, and never
+  `varroa-tenant-<tenant>` label (the fence fails closed) or carries another tenant's
+  label; it never parses the readability-only `<tenant>-` node-name prefix, and never
   overrides `canRun`. `VarroaSecurityRealm.VarroaUserDetailsService.loadUserByUsername`
-  answers a `svc-<team>` identity the same way, with no persisted `User` record, so
+  answers a `svc-<tenant>` identity the same way, with no persisted `User` record, so
   the boundary holds on every `User.impersonate2()` reload path. The plugin carries no
   `authorize-project` dependency: that plugin's global JCasC authenticator holds one
   user id, and its per-job strategy falls back to the anonymous principal with no

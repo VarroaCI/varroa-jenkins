@@ -314,16 +314,16 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   implementation `NewCellTenantResolver` builds, wired by `cmd/gateway`.
   It reads the owning `Controller` (namespace/cell from the mTLS
   identity) to decide `spec.cell.enabled`, and — only for a cell — the
-  named `Team`'s `status.placement`, each cached 30 seconds
+  named `Tenant`'s `status.placement`, each cached 30 seconds
   (`cellTenantResolveTTL`). A non-cell controller always resolves to the
   permanent `<namespace>/<cell>` placeholder. A cell resolves the first
-  path segment of the job path to a `Team` only when **some member of
-  that Team** names this exact `(namespace, cell)`: the entry caches the
+  path segment of the job path to a `Tenant` only when **some member of
+  that Tenant** names this exact `(namespace, cell)`: the entry caches the
   whole `status.placement.members` cell set, so a cell holding slot 1 or
   a standby resolves too. The claim fence, not the gateway, decides a
   job's home and answers `NOT_HOME`. A placement with an empty member
-  list falls back to the scalar `cell`. A Team that holds no member on
-  this cell, an unplaced Team, and a read error all resolve to the empty,
+  list falls back to the scalar `cell`. A Tenant that holds no member on
+  this cell, an unplaced Tenant, and a read error all resolve to the empty,
   unknown tenant, never a guess. `job_schedules.go`'s
   `ResolveJobTenant` calls already existed before this resolver did; they
   needed no change to pick it up.

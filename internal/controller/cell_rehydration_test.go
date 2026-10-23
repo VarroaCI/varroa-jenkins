@@ -17,16 +17,16 @@ import (
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
-// seedRehydrationTeam seeds a placed pipelines Team into client's store.
-func seedRehydrationTeam(client *testClient, name string, generation int64) {
-	team := &v1alpha1.Team{
+// seedRehydrationTenant seeds a placed pipelines Tenant into client's store.
+func seedRehydrationTenant(client *testClient, name string, generation int64) {
+	tenant := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{}},
-		Status: v1alpha1.TeamStatus{
-			Placement: &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell-a", CellNamespace: "cells-ns", Generation: generation},
+		Spec:       v1alpha1.TenantSpec{Pipelines: &v1alpha1.TenantPipelinesSpec{}},
+		Status: v1alpha1.TenantStatus{
+			Placement: &v1alpha1.TenantPlacementStatus{Cluster: "core", Cell: "cell-a", CellNamespace: "cells-ns", Generation: generation},
 		},
 	}
-	crdstore.MustSeed(client.store, team)
+	crdstore.MustSeed(client.store, tenant)
 }
 
 // deliverRehydration stands for a delivered push of plan's bundle on
@@ -59,7 +59,7 @@ func answerRehydration(rec *Reconciler, cr *v1alpha1.Controller, commandID strin
 // the command, and the cell reports no pending tenant.
 func TestAttachCellRehydration_AppliedTenantSendsNoBundle(t *testing.T) {
 	client := newTestClient()
-	seedRehydrationTeam(client, "team-a", 1)
+	seedRehydrationTenant(client, "team-a", 1)
 	rec := newTestReconciler(client)
 	rec.SetRecordsFunc(func(context.Context, cells.RecordsRequest) (cells.RecordsResult, error) {
 		t.Fatal("expected no records fetch for an already-applied tenant")
@@ -94,7 +94,7 @@ func TestAttachCellRehydration_AppliedTenantSendsNoBundle(t *testing.T) {
 // new entry is written with Applied false ahead of any result.
 func TestAttachCellRehydration_PendingTenantSendsBundle(t *testing.T) {
 	client := newTestClient()
-	seedRehydrationTeam(client, "team-a", 1)
+	seedRehydrationTenant(client, "team-a", 1)
 	rec := newTestReconciler(client)
 	rec.SetRecordsFunc(func(_ context.Context, req cells.RecordsRequest) (cells.RecordsResult, error) {
 		if len(req.JobPaths) == 0 {
@@ -140,7 +140,7 @@ func TestAttachCellRehydration_PendingTenantSendsBundle(t *testing.T) {
 // the same tick, with no rehydration field sent.
 func TestAttachCellRehydration_EmptySelectionAppliedAtOnce(t *testing.T) {
 	client := newTestClient()
-	seedRehydrationTeam(client, "team-a", 1)
+	seedRehydrationTenant(client, "team-a", 1)
 	rec := newTestReconciler(client)
 	rec.SetRecordsFunc(func(context.Context, cells.RecordsRequest) (cells.RecordsResult, error) {
 		return cells.RecordsResult{}, nil
@@ -177,7 +177,7 @@ func TestAttachCellRehydration_EmptySelectionAppliedAtOnce(t *testing.T) {
 // sent no further bundle.
 func TestAttachCellRehydration_NumberOnlyProgressesAcrossThreeTicks(t *testing.T) {
 	client := newTestClient()
-	seedRehydrationTeam(client, "team-a", 1)
+	seedRehydrationTenant(client, "team-a", 1)
 	rec := newTestReconciler(client)
 
 	// A very long job-path suffix inflates each job's own serialized
@@ -267,16 +267,16 @@ func TestAttachCellRehydration_NumberOnlyProgressesAcrossThreeTicks(t *testing.T
 // job on the next tick.
 func TestAttachCellRehydration_FailedSeedStaysUnseeded(t *testing.T) {
 	client := newTestClient()
-	seedRehydrationTeam(client, "team-fail", 2)
+	seedRehydrationTenant(client, "tenant-fail", 2)
 	rec := newTestReconciler(client)
 	rec.SetRecordsFunc(func(context.Context, cells.RecordsRequest) (cells.RecordsResult, error) {
 		return cells.RecordsResult{Jobs: []cells.JobRecords{
-			{JobPath: "team-fail/job-ok", NextBuildNumber: 5},
-			{JobPath: "team-fail/job-bad", NextBuildNumber: 3},
+			{JobPath: "tenant-fail/job-ok", NextBuildNumber: 5},
+			{JobPath: "tenant-fail/job-bad", NextBuildNumber: 3},
 		}}, nil
 	})
 	rec.SetBuildJobSeedFunc(func(jr rehydrate.JobRecords, n int, jenkinsHome string, opts rehydrate.Options) (rehydrate.JobSeed, error) {
-		if jr.JobPath == "team-fail/job-bad" {
+		if jr.JobPath == "tenant-fail/job-bad" {
 			return rehydrate.JobSeed{}, fmt.Errorf("simulated render failure for %s", jr.JobPath)
 		}
 		return rehydrate.BuildJobSeed(jr, n, jenkinsHome, opts)
@@ -286,7 +286,7 @@ func TestAttachCellRehydration_FailedSeedStaysUnseeded(t *testing.T) {
 	cr.Name = "cell-a"
 	cr.Namespace = "cells-ns"
 	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
-	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"team-fail"}, Instance: "uid-1"}
+	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"tenant-fail"}, Instance: "uid-1"}
 
 	now := time.Now()
 	desired := &mitev1.DesiredStateCommand{CommandId: "cmd-1"}
@@ -351,7 +351,7 @@ func equalStringSlices(a, b []string) bool {
 // until every block in the progression has its own matched success.
 func TestAttachCellRehydration_NumberOnlyBlockNotCommittedUntilConfirmed(t *testing.T) {
 	client := newTestClient()
-	seedRehydrationTeam(client, "team-a", 1)
+	seedRehydrationTenant(client, "team-a", 1)
 	rec := newTestReconciler(client)
 
 	// Same sizing as the three-block success-path test: a small job
@@ -537,7 +537,7 @@ func TestRehydrationPendingSince_ConcurrentCellsDoNotRace(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			cellKey := fmt.Sprintf("ns/cell-%d", i%3)
-			tenant := fmt.Sprintf("team-%d", i)
+			tenant := fmt.Sprintf("tenant-%d", i)
 			for n := 0; n < 50; n++ {
 				r.rehydrationPendingSinceFor(cellKey, tenant, int64(n), "uid-1", time.Now())
 				r.clearRehydrationPendingSince(cellKey, tenant)

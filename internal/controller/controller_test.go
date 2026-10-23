@@ -193,8 +193,8 @@ type testClient struct {
 	// stsResourcesSource backs the resources-source map returned by
 	// GetStatefulSetContainerSpecs. nil means "no stamp yet".
 	stsResourcesSource map[string]string
-	// teams stores Teams by name for tests.
-	teams map[string]*v1alpha1.Team
+	// tenants stores Tenants by name for tests.
+	tenants map[string]*v1alpha1.Tenant
 	// namespaces records which namespaces exist (for tenancy stubs).
 	namespaces map[string]bool
 	// varroaRoles stores VarroaRoles by name.
@@ -267,7 +267,7 @@ func newTestClient() *testClient {
 		createdSecrets:     make(map[string]map[string][]byte),
 		composedBundles:    make(map[string]*v1alpha1.ComposedBundle),
 		profiles:           make(map[string]*v1alpha1.JenkinsVersionProfile),
-		teams:              make(map[string]*v1alpha1.Team),
+		tenants:            make(map[string]*v1alpha1.Tenant),
 		namespaces:         make(map[string]bool),
 		varroaRoles:        make(map[string]*v1alpha1.VarroaRole),
 		store:              crdstore.NewFake(),
@@ -368,7 +368,7 @@ func seedClientCRDs(c *testClient) {
 	}
 }
 
-// storeGroups lists Groups from the fake store (the team reconciler's write
+// storeGroups lists Groups from the fake store (the tenant reconciler's write
 // surface after the crdstore migration).
 func (t *testClient) storeGroups() []*v1alpha1.Group {
 	gs, err := crdstore.List[v1alpha1.Group](context.Background(), t.store, "", "")

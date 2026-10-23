@@ -4,7 +4,7 @@ import { NotesCard } from "./NotesCard";
 import { TargetApprovalsCard } from "../../components/assistant/TargetApprovalsCard";
 import { useOptionalAuth } from "../../context/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getPipelineJob, listRuns, teamRunStreamUrl, type ListRunsParams } from "../../api/client";
+import { getPipelineJob, listRuns, tenantRunStreamUrl, type ListRunsParams } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
 import { useEventStream } from "../../hooks/useEventStream";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
@@ -32,8 +32,8 @@ import styles from "./PipelinePage.module.css";
 
 const enc = (s: string) => encodeURIComponent(s);
 
-function runHref(team: string, jobPath: string, runId: string): string {
-  return `/pipelines/${enc(team)}/${enc(jobPath)}/${enc(runId)}`;
+function runHref(tenant: string, jobPath: string, runId: string): string {
+  return `/pipelines/${enc(tenant)}/${enc(jobPath)}/${enc(runId)}`;
 }
 
 /** formatDuration renders a millisecond span as the two coarsest non-zero
@@ -232,7 +232,7 @@ function renderSourceInputRow(declaredBy: JobDeclaredBy) {
 }
 
 export default function PipelinePage() {
-  const { team, job } = useParams<{ team: string; job: string }>();
+  const { tenant, job } = useParams<{ tenant: string; job: string }>();
   const viewer = useOptionalAuth()?.user?.subject ?? "";
   const navigate = useNavigate();
   const { data: permissions } = usePermissions();
@@ -253,13 +253,13 @@ export default function PipelinePage() {
     });
 
   const jobQuery = useQuery({
-    queryKey: ["pipelineJob", team, job],
-    queryFn: () => getPipelineJob(team!, job!),
-    enabled: !!team && !!job,
+    queryKey: ["pipelineJob", tenant, job],
+    queryFn: () => getPipelineJob(tenant!, job!),
+    enabled: !!tenant && !!job,
   });
 
   useDocumentTitle(
-    jobQuery.data && team ? jobTitle(team, jobQuery.data.tenantFolder, jobQuery.data.jobPath) : null,
+    jobQuery.data && tenant ? jobTitle(tenant, jobQuery.data.tenantFolder, jobQuery.data.jobPath) : null,
   );
 
   const runsFilter: ListRunsParams = {
@@ -269,17 +269,17 @@ export default function PipelinePage() {
     cause: cause || undefined,
   };
   const runsQuery = useQuery({
-    queryKey: ["pipelineRuns", team, job, runsFilter],
-    queryFn: () => listRuns(team!, job!, runsFilter),
-    enabled: !!team && !!job && !jobQuery.error,
+    queryKey: ["pipelineRuns", tenant, job, runsFilter],
+    queryFn: () => listRuns(tenant!, job!, runsFilter),
+    enabled: !!tenant && !!job && !jobQuery.error,
   });
 
-  // The team's stream carries every job of that team, so the page keeps the
+  // The tenant's stream carries every job of that tenant, so the page keeps the
   // frames of its own job only. A wait frame reaches the Waiting card, which
   // reads the job detail.
   const { lastEvent, readyState } = useEventStream<RunNotification>(
-    team ? teamRunStreamUrl(team) : null,
-    team ? `pipelines:${team}` : null,
+    tenant ? tenantRunStreamUrl(tenant) : null,
+    tenant ? `pipelines:${tenant}` : null,
     ["run", "stage", "wait"],
   );
   const queryClient = useQueryClient();
@@ -290,7 +290,7 @@ export default function PipelinePage() {
     void queryClient.invalidateQueries({
       queryKey: [
         "pipelineRuns",
-        team,
+        tenant,
         job,
         {
           branch: branch || undefined,
@@ -300,11 +300,11 @@ export default function PipelinePage() {
         },
       ],
     });
-  }, [queryClient, team, job, branch, result, actor, cause]);
+  }, [queryClient, tenant, job, branch, result, actor, cause]);
 
   const invalidateJob = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["pipelineJob", team, job] });
-  }, [queryClient, team, job]);
+    void queryClient.invalidateQueries({ queryKey: ["pipelineJob", tenant, job] });
+  }, [queryClient, tenant, job]);
 
   // The stream replays nothing, so an open stream is the page's signal to
   // refetch both reads.
@@ -363,7 +363,7 @@ export default function PipelinePage() {
       <div className={styles.pageHead}>
         <div>
           <div className={styles.pageTitle}>{jobDetail.jobPath}</div>
-          <JobBreadcrumbs team={team!} tenantFolder={jobDetail.tenantFolder} jobPath={jobDetail.jobPath} />
+          <JobBreadcrumbs tenant={tenant!} tenantFolder={jobDetail.tenantFolder} jobPath={jobDetail.jobPath} />
         </div>
         {canRun && jobDetail.kind !== "multibranch" && jobDetail.kind !== "organizationFolder" && (
           <button type="button" className={styles.runBtn} onClick={() => setDrawerOpen(true)}>
@@ -378,9 +378,9 @@ export default function PipelinePage() {
         </p>
       )}
 
-      <NotesCard mode="job" team={team ?? ""} job={job ?? ""} />
+      <NotesCard mode="job" tenant={tenant ?? ""} job={job ?? ""} />
 
-      <TargetApprovalsCard kind="job" targetRef={`${team}/${job}`} viewer={viewer} />
+      <TargetApprovalsCard kind="job" targetRef={`${tenant}/${job}`} viewer={viewer} />
 
       <div className={styles.cardGrid}>
         <Card title="Defined by">
@@ -546,7 +546,7 @@ export default function PipelinePage() {
       </div>
 
       {jobDetail.kind === "multibranch" || jobDetail.kind === "organizationFolder" ? (
-        <MultibranchCard team={team!} jobPath={jobDetail.jobPath} canScan={canRun} />
+        <MultibranchCard tenant={tenant!} jobPath={jobDetail.jobPath} canScan={canRun} />
       ) : runsQuery.isLoading ? (
         <div className={styles.loading}>Loading builds…</div>
       ) : runs.length === 0 ? (
@@ -570,7 +570,7 @@ export default function PipelinePage() {
               {runs.map((run) => (
                 <tr key={run.runId}>
                   <td className={styles.nameCell}>
-                    <Link to={runHref(team!, job!, run.runId)}>#{run.buildNumber ?? "—"}</Link>
+                    <Link to={runHref(tenant!, job!, run.runId)}>#{run.buildNumber ?? "—"}</Link>
                   </td>
                   <td>
                     <ResultBadge result={run.result} />
@@ -578,7 +578,7 @@ export default function PipelinePage() {
                   </td>
                   <td>
                     {run.branch ? (
-                      <Link to={`/pipelines/${enc(team!)}/${enc(job!)}?branch=${enc(run.branch)}`}>{run.branch}</Link>
+                      <Link to={`/pipelines/${enc(tenant!)}/${enc(job!)}?branch=${enc(run.branch)}`}>{run.branch}</Link>
                     ) : (
                       <span className={styles.dim}>—</span>
                     )}
@@ -608,13 +608,13 @@ export default function PipelinePage() {
 
       {drawerOpen && (
         <RunDrawer
-          team={team!}
+          tenant={tenant!}
           jobPath={job!}
           parameters={jobDetail.parameters ?? []}
           onClose={() => setDrawerOpen(false)}
           onSubmitted={(runId) => {
             setDrawerOpen(false);
-            navigate(runHref(team!, job!, runId), { state: { requested: true } });
+            navigate(runHref(tenant!, job!, runId), { state: { requested: true } });
           }}
         />
       )}

@@ -85,11 +85,11 @@ func TestResolveCellCapacity(t *testing.T) {
 }
 
 func TestResolvedPoolName(t *testing.T) {
-	named := &v1alpha1.TeamPipelinesSpec{Profile: testProfileName, CellPool: "big"}
+	named := &v1alpha1.TenantPipelinesSpec{Profile: testProfileName, CellPool: "big"}
 	if got := ResolvedPoolName(named); got != "big" {
 		t.Errorf("ResolvedPoolName(named) = %q, want big", got)
 	}
-	def := &v1alpha1.TeamPipelinesSpec{Profile: testProfileName}
+	def := &v1alpha1.TenantPipelinesSpec{Profile: testProfileName}
 	if got := ResolvedPoolName(def); got != testProfileName {
 		t.Errorf("ResolvedPoolName(default) = %q, want %q", got, testProfileName)
 	}

@@ -23,14 +23,14 @@ func IsCell(cr *Controller) bool {
 // status.cell.tenantWarnings carries an ItemsHeld entry for tenant.
 // A held tenant's declared jobs are not the cell's jobs, so a read
 // of the tenant's definition declares no job while this is true.
-// It answers for one cell. A reader of a Team checks every member cell
+// It answers for one cell. A reader of a Tenant checks every member cell
 // that PlacementCells lists.
 func CellHoldsTenant(cr *Controller, tenant string) bool {
 	if cr == nil || cr.Status.Cell == nil || tenant == "" {
 		return false
 	}
 	for _, w := range cr.Status.Cell.TenantWarnings {
-		if w.Tenant == tenant && w.Reason == TeamReasonItemsHeld {
+		if w.Tenant == tenant && w.Reason == TenantReasonItemsHeld {
 			return true
 		}
 	}
@@ -40,8 +40,8 @@ func CellHoldsTenant(cr *Controller, tenant string) bool {
 // PlacementCells lists the cells that a tenant placement names, in reading
 // order: the scalar slot-0 cell, then the active members by slot, then the
 // standby members by namespace/name. Each cell appears once. Every reader
-// of a Team's member cells uses this order.
-func PlacementCells(p *TeamPlacementStatus) []types.NamespacedName {
+// of a Tenant's member cells uses this order.
+func PlacementCells(p *TenantPlacementStatus) []types.NamespacedName {
 	if p == nil {
 		return nil
 	}
@@ -56,7 +56,7 @@ func PlacementCells(p *TeamPlacementStatus) []types.NamespacedName {
 		out = append(out, types.NamespacedName{Namespace: namespace, Name: name})
 	}
 	add(p.CellNamespace, p.Cell)
-	var active, standby []TeamMemberStatus
+	var active, standby []TenantMemberStatus
 	for _, m := range p.Members {
 		if m.Slot != nil {
 			active = append(active, m)

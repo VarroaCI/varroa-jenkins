@@ -9,24 +9,24 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
-// seedMemberTeam seeds a placed Team whose member list names three cells:
+// seedMemberTenant seeds a placed Tenant whose member list names three cells:
 // slot 0, slot 1, and one standby. The scalar fields describe slot 0.
-func seedMemberTeam(t *testing.T, store *crdstore.Fake) {
+func seedMemberTenant(t *testing.T, store *crdstore.Fake) {
 	t.Helper()
 	slot0, slot1 := int32(0), int32(1)
-	tm := &v1alpha1.Team{
+	tm := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec:       v1alpha1.TeamSpec{Namespaces: []string{testCellNamespace}},
-		Status: v1alpha1.TeamStatus{
-			Placement: &v1alpha1.TeamPlacementStatus{
+		Spec:       v1alpha1.TenantSpec{Namespaces: []string{testCellNamespace}},
+		Status: v1alpha1.TenantStatus{
+			Placement: &v1alpha1.TenantPlacementStatus{
 				Cluster:       testCellCluster,
 				Cell:          "cell-a",
 				CellNamespace: testCellNamespace,
 				Generation:    4,
-				Members: []v1alpha1.TeamMemberStatus{
-					{Cell: "cell-a", CellNamespace: testCellNamespace, Role: v1alpha1.TeamMemberRoleActive, Slot: &slot0, Applied: true},
-					{Cell: "cell-b", CellNamespace: testCellNamespace, Role: v1alpha1.TeamMemberRoleActive, Slot: &slot1, Applied: true},
-					{Cell: "cell-c", CellNamespace: testCellNamespace, Role: v1alpha1.TeamMemberRoleStandby, Applied: true},
+				Members: []v1alpha1.TenantMemberStatus{
+					{Cell: "cell-a", CellNamespace: testCellNamespace, Role: v1alpha1.TenantMemberRoleActive, Slot: &slot0, Applied: true},
+					{Cell: "cell-b", CellNamespace: testCellNamespace, Role: v1alpha1.TenantMemberRoleActive, Slot: &slot1, Applied: true},
+					{Cell: "cell-c", CellNamespace: testCellNamespace, Role: v1alpha1.TenantMemberRoleStandby, Applied: true},
 				},
 			},
 		},
@@ -40,7 +40,7 @@ func seedMemberTeam(t *testing.T, store *crdstore.Fake) {
 func TestCellTenantResolver_SecondSlotResolves(t *testing.T) {
 	store := crdstore.NewFake()
 	seedCellController(t, store, "cell-b", true)
-	seedMemberTeam(t, store)
+	seedMemberTenant(t, store)
 	r := NewCellTenantResolver(store)
 
 	tenant, gen := r.ResolveJobTenant(testCellCluster, testCellNamespace, "cell-b", "payments/build")
@@ -55,7 +55,7 @@ func TestCellTenantResolver_SecondSlotResolves(t *testing.T) {
 func TestCellTenantResolver_StandbyResolves(t *testing.T) {
 	store := crdstore.NewFake()
 	seedCellController(t, store, "cell-c", true)
-	seedMemberTeam(t, store)
+	seedMemberTenant(t, store)
 	r := NewCellTenantResolver(store)
 
 	tenant, gen := r.ResolveJobTenant(testCellCluster, testCellNamespace, "cell-c", "payments/build")
@@ -69,7 +69,7 @@ func TestCellTenantResolver_StandbyResolves(t *testing.T) {
 func TestCellTenantResolver_ACellOfAnotherTenantStillFailsClosed(t *testing.T) {
 	store := crdstore.NewFake()
 	seedCellController(t, store, "cell-z", true)
-	seedMemberTeam(t, store)
+	seedMemberTenant(t, store)
 	r := NewCellTenantResolver(store)
 
 	tenant, gen := r.ResolveJobTenant(testCellCluster, testCellNamespace, "cell-z", "payments/build")
@@ -83,7 +83,7 @@ func TestCellTenantResolver_ACellOfAnotherTenantStillFailsClosed(t *testing.T) {
 func TestCellTenantResolver_ACellInAnotherNamespaceFailsClosed(t *testing.T) {
 	store := crdstore.NewFake()
 	seedCellController(t, store, "cell-b", true)
-	seedMemberTeam(t, store)
+	seedMemberTenant(t, store)
 	r := NewCellTenantResolver(store)
 
 	tenant, _ := r.ResolveJobTenant(testCellCluster, "other-ns", "cell-b", "payments/build")
@@ -99,7 +99,7 @@ func TestCellTenantResolver_EmptyMemberListReadsAsTheScalarCell(t *testing.T) {
 	store := crdstore.NewFake()
 	seedCellController(t, store, "cell1", true)
 	seedCellController(t, store, "cell2", true)
-	seedPlacedTeam(t, store, "payments", testCellNamespace, "cell1", 4)
+	seedPlacedTenant(t, store, "payments", testCellNamespace, "cell1", 4)
 	r := NewCellTenantResolver(store)
 
 	if tenant, _ := r.ResolveJobTenant(testCellCluster, testCellNamespace, "cell1", "payments/build"); tenant != "payments" {

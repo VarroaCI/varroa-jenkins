@@ -2,7 +2,7 @@
 
 **Template, version 1.0.** This is the standard agreement SB Studio LLC
 offers to commercial licensees of Varroa. It is provided here for
-transparency so procurement teams can review terms before contacting
+transparency so procurement tenants can review terms before contacting
 us. It is not legal advice, and it is not an offer that can be accepted
 by anything other than a signed copy countersigned by SB Studio LLC.
 
@@ -19,14 +19,14 @@ This Commercial License Agreement ("Agreement") is entered into as of
   form, including the operator, gateway, BFF, mite, update center,
   varroactl, frontend, Helm chart, and the VarroaSecurityRealm Jenkins
   plugin, together with updates released by Licensor during the Term.
-- **"Team"** means one `Team` custom resource reconciled by any
+- **"Tenant"** means one `Tenant` custom resource reconciled by any
   installation of the Software operated by or for Customer, measured as
-  the count returned by `kubectl get teams` across Customer's clusters.
+  the count returned by `kubectl get tenants` across Customer's clusters.
   A `Controller` custom resource whose namespace is not listed in the
-  `spec.namespaces` of any `Team` counts as one additional Team. A
+  `spec.namespaces` of any `Tenant` counts as one additional Tenant. A
   `Controller` with `spec.cell.enabled` is shared infrastructure and is
   never counted.
-- **"Licensed Count"** means the maximum number of Teams covered by this
+- **"Licensed Count"** means the maximum number of Tenants covered by this
   Agreement, as stated in the Order Form.
 - **"Order Form"** means the ordering document referencing this
   Agreement that states the Licensed Count, fees, and Term.
@@ -67,7 +67,7 @@ holds under the AGPL-3.0.
 
 ## 4. Licensed Count and true-up
 
-Customer self-reports its Team count. Within thirty (30)
+Customer self-reports its Tenant count. Within thirty (30)
 days after each anniversary of the Effective Date, Customer will report
 its then-current count. If the count exceeds the Licensed Count,
 Customer will pay for the excess at the per-band rates stated in the
@@ -76,14 +76,14 @@ is increased accordingly. There are no audits, agents, or telemetry;
 reporting is on the honor system and this Section is the sole true-up
 mechanism.
 
-Within a Team, users, build agents, executors, controllers, cells, and
+Within a Tenant, users, build agents, executors, controllers, cells, and
 builds are unlimited and are not license metrics under this Agreement. A
-`Controller` that belongs to no Team counts as one Team under Section 1.
+`Controller` that belongs to no Tenant counts as one Tenant under Section 1.
 
 ## 5. Fees
 
-Fees are stated in the Order Form, quoted per Team in banded annual
-rates (or as a flat-rate site license covering unlimited Teams). Fees
+Fees are stated in the Order Form, quoted per Tenant in banded annual
+rates (or as a flat-rate site license covering unlimited Tenants). Fees
 are exclusive of taxes and are non-refundable except as stated in
 Section 8.
 

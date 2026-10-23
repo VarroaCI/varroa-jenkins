@@ -284,7 +284,7 @@ func (r *Reconciler) gatewayGRPCPort() int32 {
 
 // cellTenantAgentNamespaces resolves a cell's placed tenants
 // (cr.Status.Cell.Tenants) to their spec.pipelines.agentNamespace,
-// deduplicated and sorted. A tenant whose Team no longer exists, or that
+// deduplicated and sorted. A tenant whose Tenant no longer exists, or that
 // carries no pipelines tenancy, is skipped: the admitted namespace set
 // must never include one a tenant does not actually use.
 func (r *Reconciler) cellTenantAgentNamespaces(ctx context.Context, cr *v1alpha1.Controller) []string {
@@ -294,11 +294,11 @@ func (r *Reconciler) cellTenantAgentNamespaces(ctx context.Context, cr *v1alpha1
 	seen := make(map[string]bool)
 	var namespaces []string
 	for _, tenant := range cr.Status.Cell.Tenants {
-		team, err := crdstore.Get[v1alpha1.Team](ctx, r.store, tenant, "")
-		if err != nil || team == nil || team.Spec.Pipelines == nil {
+		tenant, err := crdstore.Get[v1alpha1.Tenant](ctx, r.store, tenant, "")
+		if err != nil || tenant == nil || tenant.Spec.Pipelines == nil {
 			continue
 		}
-		ns := team.Spec.Pipelines.AgentNamespace
+		ns := tenant.Spec.Pipelines.AgentNamespace
 		if ns == "" || seen[ns] {
 			continue
 		}

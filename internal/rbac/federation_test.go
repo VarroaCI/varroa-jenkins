@@ -11,12 +11,12 @@ import (
 )
 
 func TestDesiredFederatedCRsRefPath(t *testing.T) {
-	scope := &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}}
+	scope := &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"tenant-a"}}
 	roles, bindings, warnings, _ := DesiredFederatedCRs(
 		[]*v1alpha1.VarroaRoleBinding{{
 			ObjectMeta: metav1.ObjectMeta{Name: "bind-admin"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
-				RoleRef:  "team-admin",
+				RoleRef:  "tenant-admin",
 				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}},
 				Scope:    scope,
 			},
@@ -34,7 +34,7 @@ func TestDesiredFederatedCRsRefPath(t *testing.T) {
 	if len(roles) != 1 || roles[0].Name != "jenkins-admin" {
 		t.Fatalf("roles = %#v", roles)
 	}
-	if got := roles[0].Labels[LabelFederatedFrom]; got != "team-admin" {
+	if got := roles[0].Labels[LabelFederatedFrom]; got != "tenant-admin" {
 		t.Fatalf("federated label = %q", got)
 	}
 	if roles[0].Spec.Description != "copied" || roles[0].Spec.Permissions[0] != "Overall/Administer" {
@@ -43,7 +43,7 @@ func TestDesiredFederatedCRsRefPath(t *testing.T) {
 	if len(bindings) != 1 {
 		t.Fatalf("bindings = %#v", bindings)
 	}
-	if !strings.HasPrefix(bindings[0].Name, "varroa-fed-team-admin-") {
+	if !strings.HasPrefix(bindings[0].Name, "varroa-fed-tenant-admin-") {
 		t.Fatalf("binding name = %q", bindings[0].Name)
 	}
 	if bindings[0].Spec.RoleRef != "jenkins-admin" {
@@ -90,8 +90,8 @@ func TestDesiredFederatedCRsSkipsNonGlobalRef(t *testing.T) {
 
 func TestDesiredFederatedCRsDedupsRolesAndSkipsMite(t *testing.T) {
 	vrbs := []*v1alpha1.VarroaRoleBinding{
-		{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}},
-		{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "bob"}}}},
+		{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "tenant-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}},
+		{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "tenant-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "bob"}}}},
 		// A VarroaRole whose Jenkins projection resolves to the reserved
 		// system-mite role must be skipped (guard is on the projected roleName,
 		// not the VarroaRole's own name).
@@ -133,7 +133,7 @@ func TestDesiredFederatedCRsDedupsRolesAndSkipsMite(t *testing.T) {
 // collide with it. Guard is on the projected roleName, not the VarroaRole's name.
 func TestDesiredFederatedCRsSkipsSystemOperator(t *testing.T) {
 	vrbs := []*v1alpha1.VarroaRoleBinding{
-		{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}},
+		{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "tenant-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}},
 		{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "op-ref", Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "attackers"}}}},
 	}
 	roles, bindings, warnings, _ := DesiredFederatedCRs(
@@ -222,17 +222,17 @@ func TestDesiredFederatedCRsSkipsTenantScopedBinding(t *testing.T) {
 	tenantScoped := &v1alpha1.VarroaRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: "bind-tenant"},
 		Spec: v1alpha1.VarroaRoleBindingSpec{
-			RoleRef:  "team-admin",
+			RoleRef:  "tenant-admin",
 			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}},
-			Scope:    &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "team-a"}}},
+			Scope:    &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "tenant-a"}}},
 		},
 	}
 	controllerScoped := &v1alpha1.VarroaRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: "bind-controller"},
 		Spec: v1alpha1.VarroaRoleBindingSpec{
-			RoleRef:  "team-admin",
+			RoleRef:  "tenant-admin",
 			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "bob"}},
-			Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+			Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"tenant-a"}},
 		},
 	}
 	roles, bindings, warnings, _ := DesiredFederatedCRs(
@@ -270,10 +270,10 @@ func TestDesiredFederatedCRsSkipsTenantScopedBinding(t *testing.T) {
 // off the hive.
 func TestDesiredFederatedCRsSkipsEmptySubjects(t *testing.T) {
 	vrbs := []*v1alpha1.VarroaRoleBinding{
-		{ObjectMeta: metav1.ObjectMeta{Name: "team-empty"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "developer", Subjects: []v1alpha1.SubjectRef{}}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "team-nil"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "developer"}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "team-tenant"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "developer", Scope: &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "team-a"}}}}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "bind-admin"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "tenant-empty"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "developer", Subjects: []v1alpha1.SubjectRef{}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "tenant-nil"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "developer"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "tenant-tenant"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "developer", Scope: &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "tenant-a"}}}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "bind-admin"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "tenant-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}},
 	}
 	roles, bindings, warnings, _ := DesiredFederatedCRs(
 		vrbs,
@@ -287,11 +287,11 @@ func TestDesiredFederatedCRsSkipsEmptySubjects(t *testing.T) {
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %v, want none for a binding with no subjects", warnings)
 	}
-	if len(roles) != 1 || roles[0].Name != "jenkins-team-admin" {
-		t.Fatalf("roles = %#v, want only jenkins-team-admin", roles)
+	if len(roles) != 1 || roles[0].Name != "jenkins-tenant-admin" {
+		t.Fatalf("roles = %#v, want only jenkins-tenant-admin", roles)
 	}
-	if len(bindings) != 1 || bindings[0].Spec.RoleRef != "jenkins-team-admin" {
-		t.Fatalf("bindings = %#v, want only the team-admin binding", bindings)
+	if len(bindings) != 1 || bindings[0].Spec.RoleRef != "jenkins-tenant-admin" {
+		t.Fatalf("bindings = %#v, want only the tenant-admin binding", bindings)
 	}
 }
 
@@ -299,7 +299,7 @@ func TestDesiredFederatedCRsSkipsEmptySubjects(t *testing.T) {
 // as null, and the API server treats null as a missing required field.
 func TestDesiredFederatedCRsSubjectsNeverNull(t *testing.T) {
 	_, bindings, _, _ := DesiredFederatedCRs(
-		[]*v1alpha1.VarroaRoleBinding{{ObjectMeta: metav1.ObjectMeta{Name: "bind-admin"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}}},
+		[]*v1alpha1.VarroaRoleBinding{{ObjectMeta: metav1.ObjectMeta{Name: "bind-admin"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "tenant-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}}},
 		func(name string) (*v1alpha1.VarroaRole, bool) {
 			return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsPermissions: []string{"Overall/Read"}}}, true
 		},
@@ -340,10 +340,10 @@ func TestDesiredFederatedCRsAnnotatesOwners(t *testing.T) {
 		vrbs := make([]*v1alpha1.VarroaRoleBinding, 0, 1+len(names))
 		vrbs = append(vrbs, &v1alpha1.VarroaRoleBinding{
 			ObjectMeta: metav1.ObjectMeta{Name: "b-solo"},
-			Spec:       v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "bob"}}},
+			Spec:       v1alpha1.VarroaRoleBindingSpec{RoleRef: "tenant-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "bob"}}},
 		})
 		for _, n := range names {
-			vrbs = append(vrbs, &v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: n}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: subjects}})
+			vrbs = append(vrbs, &v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: n}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "tenant-admin", Subjects: subjects}})
 		}
 		_, bindings, _, _ := DesiredFederatedCRs(vrbs,
 			func(name string) (*v1alpha1.VarroaRole, bool) {
@@ -437,7 +437,7 @@ func tenantWriteBinding(tenants []v1alpha1.TenantScope, subjects ...v1alpha1.Sub
 func noJenkinsRole(string) (*v1alpha1.JenkinsRole, bool) { return nil, false }
 
 func TestDesiredFederatedCRsExpandsTenantSubjects(t *testing.T) {
-	vrb := tenantWriteBinding([]v1alpha1.TenantScope{{Name: "team-a"}},
+	vrb := tenantWriteBinding([]v1alpha1.TenantScope{{Name: "tenant-a"}},
 		v1alpha1.SubjectRef{Kind: "User", Name: "alice"})
 	expand := func(in []v1alpha1.SubjectRef) []v1alpha1.SubjectRef {
 		return append(append([]v1alpha1.SubjectRef(nil), in...),
@@ -455,8 +455,8 @@ func TestDesiredFederatedCRsExpandsTenantSubjects(t *testing.T) {
 
 func TestDesiredFederatedCRsTenantChildNameChangesWithJobs(t *testing.T) {
 	alice := v1alpha1.SubjectRef{Kind: "User", Name: "alice"}
-	narrow := tenantWriteBinding([]v1alpha1.TenantScope{{Name: "team-a", Jobs: []string{"a/*"}}}, alice)
-	wider := tenantWriteBinding([]v1alpha1.TenantScope{{Name: "team-a", Jobs: []string{"a/*", "b/*"}}}, alice)
+	narrow := tenantWriteBinding([]v1alpha1.TenantScope{{Name: "tenant-a", Jobs: []string{"a/*"}}}, alice)
+	wider := tenantWriteBinding([]v1alpha1.TenantScope{{Name: "tenant-a", Jobs: []string{"a/*", "b/*"}}}, alice)
 	_, b1, _, _ := DesiredFederatedCRs([]*v1alpha1.VarroaRoleBinding{narrow}, tenantWriteRoleFixture(), noJenkinsRole, nil)
 	_, b2, _, _ := DesiredFederatedCRs([]*v1alpha1.VarroaRoleBinding{wider}, tenantWriteRoleFixture(), noJenkinsRole, nil)
 	if len(b1) != 1 || len(b2) != 1 || b1[0].Name == b2[0].Name {
@@ -466,13 +466,13 @@ func TestDesiredFederatedCRsTenantChildNameChangesWithJobs(t *testing.T) {
 
 func TestDesiredFederatedCRsKeepsOwnerAnnotationBesideTenantAnnotations(t *testing.T) {
 	alice := v1alpha1.SubjectRef{Kind: "User", Name: "alice"}
-	vrb := tenantWriteBinding([]v1alpha1.TenantScope{{Name: "team-a", Jobs: []string{"a/*"}}}, alice)
+	vrb := tenantWriteBinding([]v1alpha1.TenantScope{{Name: "tenant-a", Jobs: []string{"a/*"}}}, alice)
 	_, bindings, _, outcomes := DesiredFederatedCRs([]*v1alpha1.VarroaRoleBinding{vrb}, tenantWriteRoleFixture(), noJenkinsRole, nil)
 	if len(bindings) != 1 {
 		t.Fatalf("bindings = %d, want 1", len(bindings))
 	}
 	ann := bindings[0].Annotations
-	if ann[AnnotationFederatedBindings] != "tw" || ann[AnnotationFederatedTenant] != "team-a" || ann[AnnotationFederatedTenantJobs] == "" {
+	if ann[AnnotationFederatedBindings] != "tw" || ann[AnnotationFederatedTenant] != "tenant-a" || ann[AnnotationFederatedTenantJobs] == "" {
 		t.Fatalf("annotations = %#v, want owner, tenant, and jobs", ann)
 	}
 	if got := outcomes["tw"].BindingNames; len(got) != 1 || got[0] != bindings[0].Name {

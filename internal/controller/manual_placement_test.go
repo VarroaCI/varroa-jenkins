@@ -200,9 +200,9 @@ func TestReconcileConnected_ManualCellPushesAJobHomeMove(t *testing.T) {
 	rec.homesFunc = func(context.Context, cells.HomesRequest) (cells.HomesResult, error) {
 		return cells.HomesResult{JobHomes: homes}, nil
 	}
-	crdstore.MustSeed(client.store, &v1alpha1.Team{
+	crdstore.MustSeed(client.store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "team-a"},
-		Spec:       v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{}},
+		Spec:       v1alpha1.TenantSpec{Pipelines: &v1alpha1.TenantPipelinesSpec{}},
 	})
 	tr := &scriptedSendTransport{Transport: rec.miteTransport, epoch: 1}
 	rec.miteTransport = tr
@@ -262,11 +262,11 @@ func newRehydrationCell(t *testing.T, name string, records cells.RecordsFunc, co
 		return cells.HomesResult{JobHomes: map[string]int32{"build": 0}}, nil
 	}
 	rec.SetRecordsFunc(records)
-	crdstore.MustSeed(client.store, &v1alpha1.Team{
+	crdstore.MustSeed(client.store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "team-a"},
-		Spec:       v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{}},
-		Status: v1alpha1.TeamStatus{
-			Placement: &v1alpha1.TeamPlacementStatus{Cell: name, CellNamespace: "default", Generation: 1},
+		Spec:       v1alpha1.TenantSpec{Pipelines: &v1alpha1.TenantPipelinesSpec{}},
+		Status: v1alpha1.TenantStatus{
+			Placement: &v1alpha1.TenantPlacementStatus{Cell: name, CellNamespace: "default", Generation: 1},
 		},
 	})
 	if configure != nil {

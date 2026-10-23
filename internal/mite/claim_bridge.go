@@ -73,7 +73,7 @@ type ledgerClaimResponse struct {
 // a claim or a job-schedule row carries. The default resolver returns the
 // single-tenant placeholder "<namespace>/<cell>" and generation 0, which
 // is the permanent contract for a controller with no cell role. A later
-// change replaces the resolver with one that reads the Team custom
+// change replaces the resolver with one that reads the Tenant custom
 // resource.
 type CellTenantResolver interface {
 	ResolveTenant(cluster, ns, cell string) (tenant string, placementGeneration int64)

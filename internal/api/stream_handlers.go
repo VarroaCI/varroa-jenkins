@@ -104,7 +104,7 @@ func (s *Server) handleStreamTicket(w http.ResponseWriter, r *http.Request) {
 
 // validStreamScope accepts the canonical stream scopes: "brood", "activity",
 // "controller:{cluster}/{ns}/{name}", "broodop:{ns}/{name}", "run:{run_id}", or
-// "pipelines:{team}". It mirrors sseScope in the auth middleware. Three-token form
+// "pipelines:{tenant}". It mirrors sseScope in the auth middleware. Three-token form
 // only for "controller:"; two-token form is rejected. "run:" and "pipelines:" each
 // take exactly one token after the prefix.
 func validStreamScope(scope string) bool {
@@ -165,7 +165,7 @@ func (s *Server) mintRunTicketAuthorized(w http.ResponseWriter, r *http.Request,
 
 // mintAssistantTicketAuthorized checks that the caller may view the session
 // before an "assistant:" ticket mints. An assistant session needs its owner or
-// an admin. A Team agent session needs the tenant read check. Any other
+// an admin. A Tenant agent session needs the tenant read check. Any other
 // caller gets not found, so the answer does not reveal the session.
 func (s *Server) mintAssistantTicketAuthorized(w http.ResponseWriter, r *http.Request, claims *auth.Claims, sessionID string) bool {
 	rt, ok := s.assistantOrDisabled(w)
@@ -185,16 +185,16 @@ func (s *Server) mintAssistantTicketAuthorized(w http.ResponseWriter, r *http.Re
 	return true
 }
 
-// mintPipelinesTicketAuthorized resolves team before a "pipelines:" ticket
+// mintPipelinesTicketAuthorized resolves tenant before a "pipelines:" ticket
 // mints. It answers 503 through pipelinesUnavailable when the record store
-// is absent. It writes the resolution error unchanged, so a team the caller
-// may not read answers 404, exactly as the team read does.
-func (s *Server) mintPipelinesTicketAuthorized(w http.ResponseWriter, r *http.Request, claims *auth.Claims, team string) bool {
+// is absent. It writes the resolution error unchanged, so a tenant the caller
+// may not read answers 404, exactly as the tenant read does.
+func (s *Server) mintPipelinesTicketAuthorized(w http.ResponseWriter, r *http.Request, claims *auth.Claims, tenant string) bool {
 	if s.deps.RecordStore == nil {
 		s.pipelinesUnavailable(w)
 		return false
 	}
-	refs, serr := s.resolveTeamTenants(r.Context(), claims, team)
+	refs, serr := s.resolveTenantTenants(r.Context(), claims, tenant)
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return false

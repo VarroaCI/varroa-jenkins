@@ -31,13 +31,13 @@ func seedCellController(t *testing.T, store *crdstore.Fake, name string, isCell 
 	crdstore.MustSeed(store, cr)
 }
 
-func seedPlacedTeam(t *testing.T, store *crdstore.Fake, name, cellNamespace, cell string, generation int64) {
+func seedPlacedTenant(t *testing.T, store *crdstore.Fake, name, cellNamespace, cell string, generation int64) {
 	t.Helper()
-	tm := &v1alpha1.Team{
+	tm := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       v1alpha1.TeamSpec{Namespaces: []string{cellNamespace}},
-		Status: v1alpha1.TeamStatus{
-			Placement: &v1alpha1.TeamPlacementStatus{
+		Spec:       v1alpha1.TenantSpec{Namespaces: []string{cellNamespace}},
+		Status: v1alpha1.TenantStatus{
+			Placement: &v1alpha1.TenantPlacementStatus{
 				Cluster:       testCellCluster,
 				Cell:          cell,
 				CellNamespace: cellNamespace,
@@ -62,7 +62,7 @@ func TestCellTenantResolver_NonCellControllerKeepsCompoundTenant(t *testing.T) {
 func TestCellTenantResolver_CellResolvesPlacedTenant(t *testing.T) {
 	store := crdstore.NewFake()
 	seedCellController(t, store, "cell1", true)
-	seedPlacedTeam(t, store, "payments", "ns1", "cell1", 4)
+	seedPlacedTenant(t, store, "payments", "ns1", "cell1", 4)
 	r := NewCellTenantResolver(store)
 
 	tenant, gen := r.ResolveJobTenant("core", "ns1", "cell1", "payments/build")
@@ -74,13 +74,13 @@ func TestCellTenantResolver_CellResolvesPlacedTenant(t *testing.T) {
 func TestCellTenantResolver_UnknownTenantCases(t *testing.T) {
 	store := crdstore.NewFake()
 	seedCellController(t, store, "cell1", true)
-	// team-nowhere exists but is not placed at all.
-	crdstore.MustSeed(store, &v1alpha1.Team{
-		ObjectMeta: metav1.ObjectMeta{Name: "team-nowhere"},
-		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns1"}},
+	// tenant-nowhere exists but is not placed at all.
+	crdstore.MustSeed(store, &v1alpha1.Tenant{
+		ObjectMeta: metav1.ObjectMeta{Name: "tenant-nowhere"},
+		Spec:       v1alpha1.TenantSpec{Namespaces: []string{"ns1"}},
 	})
-	// team-elsewhere is placed, but on a different cell.
-	seedPlacedTeam(t, store, "team-elsewhere", "ns2", "cell2", 1)
+	// tenant-elsewhere is placed, but on a different cell.
+	seedPlacedTenant(t, store, "tenant-elsewhere", "ns2", "cell2", 1)
 	r := NewCellTenantResolver(store)
 
 	cases := []struct {
@@ -88,9 +88,9 @@ func TestCellTenantResolver_UnknownTenantCases(t *testing.T) {
 		jobPath string
 	}{
 		{"empty job path", ""},
-		{"unregistered team", "no-such-team/build"},
-		{"unplaced team", "team-nowhere/build"},
-		{"placed on a different cell", "team-elsewhere/build"},
+		{"unregistered tenant", "no-such-team/build"},
+		{"unplaced tenant", "tenant-nowhere/build"},
+		{"placed on a different cell", "tenant-elsewhere/build"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -117,7 +117,7 @@ func TestCellTenantResolver_UnreadableControllerResolvesUnknown(t *testing.T) {
 func TestCellTenantResolver_ResolveTenantAlwaysUnknownForACell(t *testing.T) {
 	store := crdstore.NewFake()
 	seedCellController(t, store, "cell1", true)
-	seedPlacedTeam(t, store, "payments", "ns1", "cell1", 4)
+	seedPlacedTenant(t, store, "payments", "ns1", "cell1", 4)
 	r := NewCellTenantResolver(store)
 
 	// ResolveTenant carries no job path, so a cell can never answer with
@@ -131,7 +131,7 @@ func TestCellTenantResolver_ResolveTenantAlwaysUnknownForACell(t *testing.T) {
 func TestCellTenantResolver_CachesAcrossCalls(t *testing.T) {
 	store := crdstore.NewFake()
 	seedCellController(t, store, "cell1", true)
-	seedPlacedTeam(t, store, "payments", "ns1", "cell1", 1)
+	seedPlacedTenant(t, store, "payments", "ns1", "cell1", 1)
 	r := NewCellTenantResolver(store)
 
 	if tenant, _ := r.ResolveJobTenant("core", "ns1", "cell1", "payments/build"); tenant != "payments" {
@@ -147,12 +147,12 @@ func TestCellTenantResolver_CachesAcrossCalls(t *testing.T) {
 	if err := store.DeleteObject(t.Context(), ctrlGVR, "ns1", "cell1"); err != nil {
 		t.Fatalf("delete controller: %v", err)
 	}
-	teamGVR, err := crdstore.GVRFor[v1alpha1.Team]()
+	tenantGVR, err := crdstore.GVRFor[v1alpha1.Tenant]()
 	if err != nil {
-		t.Fatalf("team GVR: %v", err)
+		t.Fatalf("tenant GVR: %v", err)
 	}
-	if err := store.DeleteObject(t.Context(), teamGVR, "", "payments"); err != nil {
-		t.Fatalf("delete team: %v", err)
+	if err := store.DeleteObject(t.Context(), tenantGVR, "", "payments"); err != nil {
+		t.Fatalf("delete tenant: %v", err)
 	}
 
 	tenant, gen := r.ResolveJobTenant("core", "ns1", "cell1", "payments/build")
@@ -169,11 +169,11 @@ func TestCellTenantResolver_CachesAcrossCalls(t *testing.T) {
 // claim whose placement_generation is lower than the stored one with
 // ReasonFenced) is the mechanism that rejects a stale generation, not the
 // gateway's cache. Once the cache entry's TTL passes, the next resolve
-// re-reads the Team and reports the tenant's current placement.
+// re-reads the Tenant and reports the tenant's current placement.
 func TestCellTenantResolver_MoveIsServedStaleWithinTTLThenRefreshesAfterExpiry(t *testing.T) {
 	store := crdstore.NewFake()
 	seedCellController(t, store, "cell1", true)
-	seedPlacedTeam(t, store, "payments", "ns1", "cell1", 1)
+	seedPlacedTenant(t, store, "payments", "ns1", "cell1", 1)
 	crdstore.MustSeed(store, &v1alpha1.Controller{
 		ObjectMeta: metav1.ObjectMeta{Name: "cell2", Namespace: "ns2"},
 		Spec:       v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
@@ -188,7 +188,7 @@ func TestCellTenantResolver_MoveIsServedStaleWithinTTLThenRefreshesAfterExpiry(t
 
 	// The tenant moves: the backing store now names a new cell and a
 	// higher generation while the resolver's cache entry is still live.
-	seedPlacedTeam(t, store, "payments", "ns2", "cell2", 2)
+	seedPlacedTenant(t, store, "payments", "ns2", "cell2", 2)
 
 	// Within the TTL, the resolver still answers from its cache: it
 	// keeps reporting the tenant's old generation against its old cell.
@@ -200,9 +200,9 @@ func TestCellTenantResolver_MoveIsServedStaleWithinTTLThenRefreshesAfterExpiry(t
 	// Force the cache entry past cellTenantResolveTTL, standing in for
 	// the passage of 30 real seconds.
 	r.mu.Lock()
-	entry := r.teams["payments"]
+	entry := r.tenants["payments"]
 	entry.expires = time.Now().Add(-time.Second)
-	r.teams["payments"] = entry
+	r.tenants["payments"] = entry
 	r.mu.Unlock()
 
 	// After expiry, the resolver re-reads: the old cell no longer hosts

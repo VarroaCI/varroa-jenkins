@@ -234,8 +234,8 @@ the packaged CRDs. Does not own the Go source it packages
   `varroa.dev_updatecenters.yaml`). Generated from
   `api/v1alpha1/types.go` — never hand-edit. `make generate-crds` regenerates;
   `make check-crds` (CI `pr.yaml`) fails the build on drift.
-  `varroa.dev_teams.yaml` carries `spec.pipelines.exports`
-  (`TeamExport{Job, Locks, Callers}`, at most 64 entries), the tenant's
+  `varroa.dev_tenants.yaml` carries `spec.pipelines.exports`
+  (`TenantExport{Job, Locks, Callers}`, at most 64 entries), the tenant's
   outward cross-tenant grants, with its CEL rules bundled in.
 - **`templates/updatecenter/`** — the opt-in update-center component (everything
   gated on `updateCenter.enabled` EXCEPT the CRD manifest, which always ships):
@@ -444,12 +444,12 @@ the packaged CRDs. Does not own the Go source it packages
   placeholders that the session driver fills via `helm --set-string` at
   install time.
 
-- **Team agent runner (`agentRunner`)** — `templates/agentrunner/` renders the `varroa-agent`
-  Deployment, its ClusterRole (read `teamagents`, `teams`, `catalogsources`; patch
-  `teamagents/status`), its Role (status lease, read own pod), and the signing-key Secret
-  `varroa-team-agent-signing-key` (key `key`, 32 bytes, reused on upgrade through `lookup`).
+- **Tenant agent runner (`agentRunner`)** — `templates/agentrunner/` renders the `varroa-agent`
+  Deployment, its ClusterRole (read `tenantagents`, `tenants`, `catalogsources`; patch
+  `tenantagents/status`), its Role (status lease, read own pod), and the signing-key Secret
+  `varroa-tenant-agent-signing-key` (key `key`, 32 bytes, reused on upgrade through `lookup`).
   Enabling it fails the render unless `assistant`, `recordStore`, and `bff` are enabled. It
-  adds the `agentrunner` NATS user, the `-team-agents` operator flag, the BFF key mount, and the
+  adds the `agentrunner` NATS user, the `-tenant-agents` operator flag, the BFF key mount, and the
   `varroa-np-agentrunner` policy. The NATS `recorder` user gains `activity.>` publish whenever
   `recordStore` is enabled, regardless of `agentRunner`. `test-agentrunner-*.sh` assert these.
 

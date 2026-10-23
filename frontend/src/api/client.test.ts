@@ -103,11 +103,11 @@ import {
   listRunChanges,
   cancelRun,
   rerunRun,
-  listTeams,
-  getTeam,
-  createTeam,
-  updateTeam,
-  deleteTeam,
+  listTenants,
+  getTenant,
+  createTenant,
+  updateTenant,
+  deleteTenant,
   listRunners,
 } from "./client";
 
@@ -804,9 +804,9 @@ describe("Brood operations API", () => {
   });
 
   it("getBroodOperation encodes namespace and name", async () => {
-    await getBroodOperation("broodop-restart-abc", "team a");
+    await getBroodOperation("broodop-restart-abc", "tenant a");
     const [url] = mockBffFetch.mock.calls[0];
-    expect(url).toBe("/brood-operations/team%20a/broodop-restart-abc");
+    expect(url).toBe("/brood-operations/tenant%20a/broodop-restart-abc");
   });
 
   it("createBroodOperation POSTs the request body", async () => {
@@ -843,8 +843,8 @@ describe("Brood operations API", () => {
   });
 
   it("broodStreamUrl builds the per-run SSE path with encoding", () => {
-    const url = broodStreamUrl("broodop-restart-abc", "team a");
-    expect(url).toContain("/brood-operations/team%20a/broodop-restart-abc/stream");
+    const url = broodStreamUrl("broodop-restart-abc", "tenant a");
+    expect(url).toContain("/brood-operations/tenant%20a/broodop-restart-abc/stream");
   });
 });
 
@@ -957,7 +957,7 @@ describe("Brood operations (restored)", () => {
 // ---- Pipelines ----
 
 describe("Pipelines API", () => {
-  it("listPipelines GETs /pipelines/{team}", async () => {
+  it("listPipelines GETs /pipelines/{tenant}", async () => {
     mockBffFetch.mockResolvedValue({ items: [], runningNow: [], truncated: false });
     await listPipelines("payments");
     const [url] = mockBffFetch.mock.calls[0];
@@ -1118,18 +1118,18 @@ describe("Pipelines API", () => {
   });
 });
 
-// ---- Teams ----
+// ---- Tenants ----
 
-describe("Teams API", () => {
-  it("listTeams GETs /teams and unwraps items", async () => {
+describe("Tenants API", () => {
+  it("listTenants GETs /tenants and unwraps items", async () => {
     mockBffFetch.mockResolvedValue({ items: [{ name: "payments", namespaces: ["ns1"] }] });
-    const result = await listTeams();
+    const result = await listTenants();
     const [url] = mockBffFetch.mock.calls[0];
-    expect(url).toBe("/teams");
+    expect(url).toBe("/tenants");
     expect(result).toEqual([{ name: "payments", namespaces: ["ns1"] }]);
   });
 
-  it("getTeam GETs /teams/{name} and reports the seven pipelines ledger settings and status.rehydration", async () => {
+  it("getTenant GETs /tenants/{name} and reports the seven pipelines ledger settings and status.rehydration", async () => {
     mockBffFetch.mockResolvedValue({
       name: "payments",
       namespaces: ["ns1"],
@@ -1155,9 +1155,9 @@ describe("Teams API", () => {
         lastAttempt: "2026-09-10T12:00:00Z",
       },
     });
-    const result = await getTeam("payments");
+    const result = await getTenant("payments");
     const [url] = mockBffFetch.mock.calls[0];
-    expect(url).toBe("/teams/payments");
+    expect(url).toBe("/tenants/payments");
     expect(result.pipelines).toEqual({
       profile: "lts",
       agentNamespace: "ns1",
@@ -1181,9 +1181,9 @@ describe("Teams API", () => {
     });
   });
 
-  it("createTeam POSTs the seven pipelines ledger settings in the request body", async () => {
+  it("createTenant POSTs the seven pipelines ledger settings in the request body", async () => {
     mockBffFetch.mockResolvedValue({ name: "payments" });
-    await createTeam({
+    await createTenant({
       name: "payments",
       namespaces: ["ns1"],
       members: ["alice"],
@@ -1200,7 +1200,7 @@ describe("Teams API", () => {
       },
     });
     const [url, opts] = mockBffFetch.mock.calls[0];
-    expect(url).toBe("/teams");
+    expect(url).toBe("/tenants");
     expect(opts.method).toBe("POST");
     expect(JSON.parse(opts.body).pipelines).toEqual({
       profile: "lts",
@@ -1215,16 +1215,16 @@ describe("Teams API", () => {
     });
   });
 
-  it("updateTeam PUTs to /teams/{name} with a JSON body", async () => {
+  it("updateTenant PUTs to /tenants/{name} with a JSON body", async () => {
     mockBffFetch.mockResolvedValue({ name: "payments" });
-    await updateTeam("payments", {
+    await updateTenant("payments", {
       name: "payments",
       namespaces: ["ns1"],
       members: ["alice"],
       pipelines: { profile: "lts", agentNamespace: "ns1", concurrency: "allow" },
     });
     const [url, opts] = mockBffFetch.mock.calls[0];
-    expect(url).toBe("/teams/payments");
+    expect(url).toBe("/tenants/payments");
     expect(opts.method).toBe("PUT");
     expect(JSON.parse(opts.body).pipelines).toEqual({
       profile: "lts",
@@ -1233,15 +1233,15 @@ describe("Teams API", () => {
     });
   });
 
-  it("deleteTeam DELETEs /teams/{name}", async () => {
+  it("deleteTenant DELETEs /tenants/{name}", async () => {
     mockBffFetch.mockResolvedValue(undefined);
-    await deleteTeam("payments");
+    await deleteTenant("payments");
     const [url, opts] = mockBffFetch.mock.calls[0];
-    expect(url).toBe("/teams/payments");
+    expect(url).toBe("/tenants/payments");
     expect(opts.method).toBe("DELETE");
   });
 
-  it("getTeam reports pipelines.exports with both a job grant and a locks grant", async () => {
+  it("getTenant reports pipelines.exports with both a job grant and a locks grant", async () => {
     mockBffFetch.mockResolvedValue({
       name: "payments",
       namespaces: ["ns1"],
@@ -1253,16 +1253,16 @@ describe("Teams API", () => {
         ],
       },
     });
-    const result = await getTeam("payments");
+    const result = await getTenant("payments");
     expect(result.pipelines?.exports).toEqual([
       { job: "release/*", callers: ["payments", "search"] },
       { locks: ["deploy-prod", "staging/*"], callers: ["payments"] },
     ]);
   });
 
-  it("updateTeam PUTs pipelines.exports in the request body unchanged", async () => {
+  it("updateTenant PUTs pipelines.exports in the request body unchanged", async () => {
     mockBffFetch.mockResolvedValue({ name: "payments" });
-    await updateTeam("payments", {
+    await updateTenant("payments", {
       name: "payments",
       namespaces: ["ns1"],
       members: ["alice"],
@@ -1287,7 +1287,7 @@ describe("Runners API", () => {
       items: [
         {
           name: "win-1",
-          spec: { team: "payments", launcher: "ssh", remoteFS: "C:\\J" },
+          spec: { tenant: "payments", launcher: "ssh", remoteFS: "C:\\J" },
           status: { connected: true },
         },
       ],
@@ -1298,17 +1298,17 @@ describe("Runners API", () => {
     expect(result).toEqual([
       {
         name: "win-1",
-        spec: { team: "payments", launcher: "ssh", remoteFS: "C:\\J" },
+        spec: { tenant: "payments", launcher: "ssh", remoteFS: "C:\\J" },
         status: { connected: true },
       },
     ]);
   });
 
-  it("listRunners GETs /runners?team=<name> when given a team", async () => {
+  it("listRunners GETs /runners?tenant=<name> when given a tenant", async () => {
     mockBffFetch.mockResolvedValue({ items: [] });
     await listRunners("payments");
     const [url] = mockBffFetch.mock.calls[0];
-    expect(url).toBe("/runners?team=payments");
+    expect(url).toBe("/runners?tenant=payments");
   });
 
   it("listRunners never reads status.token off the result it returns to a caller", async () => {
@@ -1316,7 +1316,7 @@ describe("Runners API", () => {
       items: [
         {
           name: "agent-1",
-          spec: { team: "payments", launcher: "inbound", remoteFS: "/home/jenkins" },
+          spec: { tenant: "payments", launcher: "inbound", remoteFS: "/home/jenkins" },
           status: { connected: false },
         },
       ],

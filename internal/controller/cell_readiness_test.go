@@ -669,8 +669,8 @@ func TestHibernationIgnoredOnCell(t *testing.T) {
 			t.Errorf("missing tenantWarnings entry for %q", tenant)
 			continue
 		}
-		if w.Reason != v1alpha1.TeamReasonHibernationIgnored {
-			t.Errorf("tenant %q reason = %q, want %q", tenant, w.Reason, v1alpha1.TeamReasonHibernationIgnored)
+		if w.Reason != v1alpha1.TenantReasonHibernationIgnored {
+			t.Errorf("tenant %q reason = %q, want %q", tenant, w.Reason, v1alpha1.TenantReasonHibernationIgnored)
 		}
 	}
 }

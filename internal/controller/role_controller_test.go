@@ -158,9 +158,9 @@ func TestRoleReconciler_RewritesDriftedPipelinesRule(t *testing.T) {
 // TestBuiltinRoles_CellPoolVerbMatrix proves the cell-pool verbs: operator
 // holds read and update, admin holds both through its wildcard and carries
 // no cellpools rule, and developer and viewer carry no rule at all.
-// CellPool.status.tenants lists every tenant of the pool, and the Teams API
+// CellPool.status.tenants lists every tenant of the pool, and the Tenants API
 // is admin-only, so a read verb for a developer or a viewer would disclose
-// the tenant list to a caller who may not list Teams.
+// the tenant list to a caller who may not list Tenants.
 func TestBuiltinRoles_CellPoolVerbMatrix(t *testing.T) {
 	roles := make(map[string]*v1alpha1.VarroaRole)
 	for _, role := range builtinRoles() {

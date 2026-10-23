@@ -6,7 +6,7 @@ an endpoint the operator can repoint. Read [Cells and pipelines tenants](cells.m
 
 ## The Service
 
-The name is `varroa-agents-<team>-<slot>`. A tenant holds one Service for each active slot, and
+The name is `varroa-agents-<tenant>-<slot>`. A tenant holds one Service for each active slot, and
 none for a standby: a standby takes the Service of the slot it is promoted into. Read
 [Tenant slots](tenant-slots.md).
 
@@ -14,21 +14,21 @@ The Service is a `ClusterIP` in the slot holder's namespace, carrying `http` on 
 on 50000. Its selector is `app: <pod label of the slot holder>`, which the cell's StatefulSet
 stamps.
 
-A Service name is an RFC 1035 label, so the `Team` CRD refuses `spec.pipelines` on a name over 47
+A Service name is an RFC 1035 label, so the `Tenant` CRD refuses `spec.pipelines` on a name over 47
 characters or carrying a dot.
 
 ## The selector follows the placement
 
-`TeamReconciler` converges every slot's Service on each tick, so a deleted Service and a drifted
+`TenantReconciler` converges every slot's Service on each tick, so a deleted Service and a drifted
 selector both repair themselves. A move repoints the selector, and the name and ports stay. A
 scale-down deletes the Service of each slot it removes.
 
 A move across namespaces leaves a Service of the same name behind. The operator lists each such
 namespace in `status.staleAgentServiceNamespaces`, and drops one only after its delete succeeds.
-Teardown adds its own namespace, and the `Team` holds its placement finalizer until the list
+Teardown adds its own namespace, and the `Tenant` holds its placement finalizer until the list
 empties, so no Service outlives its tenant.
 
-A failed write or delete sets `Placed=False` with `AgentServiceFailed`, and retries. A `Team` left
+A failed write or delete sets `Placed=False` with `AgentServiceFailed`, and retries. A `Tenant` left
 in `Terminating` with that reason awaits one delete: read the condition message.
 
 ## Agent traffic never crosses the BFF
@@ -39,7 +39,7 @@ is the one exception.
 **Verify:**
 
 ```bash
-kubectl get svc -n varroa-system varroa-agents-<team>-0 -o yaml
+kubectl get svc -n varroa-system varroa-agents-<tenant>-0 -o yaml
 ```
 
 Expect two ports and a selector naming the tenant's cell.

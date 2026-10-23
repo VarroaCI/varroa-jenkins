@@ -36,7 +36,7 @@ type RunNote struct {
 	RunID        *uuid.UUID `json:"run_id"`
 	RunCreatedAt *time.Time `json:"run_created_at"`
 	Cluster      string     `json:"cluster"`
-	Team         string     `json:"team"`
+	Tenant       string     `json:"tenant"`
 	JobPath      string     `json:"job_path"`
 	Principal    string     `json:"principal"`
 	SessionID    *uuid.UUID `json:"session_id"`
@@ -47,7 +47,7 @@ type RunNote struct {
 
 // runNoteColumns lists varroa.run_notes' columns in the order scanRunNotes
 // expects.
-const runNoteColumns = `id, run_id, run_created_at, cluster, team, job_path, principal,
+const runNoteColumns = `id, run_id, run_created_at, cluster, tenant, job_path, principal,
 	session_id, body, created_at`
 
 // ErrRunNotesMissing reports that the run_notes table is absent. The
@@ -97,7 +97,7 @@ func (r *pgReader) ListRunNotes(ctx context.Context, runID uuid.UUID, runCreated
 // outside 1 to runNotesJobMax falls back to runNotesJobDefault or the
 // maximum. Each row carries the build number of its run when that run is
 // still stored.
-func (r *pgReader) ListJobNotes(ctx context.Context, cluster, team, jobPath string, limit int) ([]RunNote, error) {
+func (r *pgReader) ListJobNotes(ctx context.Context, cluster, tenant, jobPath string, limit int) ([]RunNote, error) {
 	if err := r.checkSchema(ctx); err != nil {
 		return nil, err
 	}
@@ -108,14 +108,14 @@ func (r *pgReader) ListJobNotes(ctx context.Context, cluster, team, jobPath stri
 		limit = runNotesJobMax
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT n.id, n.run_id, n.run_created_at, n.cluster, n.team, n.job_path, n.principal,
+		SELECT n.id, n.run_id, n.run_created_at, n.cluster, n.tenant, n.job_path, n.principal,
 			n.session_id, n.body, n.created_at, x.build_number
 		FROM varroa.run_notes n
 		LEFT JOIN varroa.runs x ON x.run_id = n.run_id AND x.created_at = n.run_created_at
-		WHERE n.cluster = $1 AND n.team = $2 AND n.job_path = $3
+		WHERE n.cluster = $1 AND n.tenant = $2 AND n.job_path = $3
 		ORDER BY n.created_at DESC, n.id DESC
 		LIMIT $4
-	`, cluster, team, jobPath, limit)
+	`, cluster, tenant, jobPath, limit)
 	if err != nil {
 		if isUndefinedTable(err) {
 			return nil, ErrRunNotesMissing
@@ -136,7 +136,7 @@ func scanRunNotes(rows pgx.Rows, withBuild bool) ([]RunNote, error) {
 	notes := []RunNote{}
 	for rows.Next() {
 		var n RunNote
-		dest := []any{&n.ID, &n.RunID, &n.RunCreatedAt, &n.Cluster, &n.Team, &n.JobPath,
+		dest := []any{&n.ID, &n.RunID, &n.RunCreatedAt, &n.Cluster, &n.Tenant, &n.JobPath,
 			&n.Principal, &n.SessionID, &n.Body, &n.CreatedAt}
 		if withBuild {
 			dest = append(dest, &n.BuildNumber)

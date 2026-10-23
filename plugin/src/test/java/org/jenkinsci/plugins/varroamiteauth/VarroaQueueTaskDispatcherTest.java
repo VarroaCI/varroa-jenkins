@@ -18,7 +18,7 @@ import org.jvnet.hudson.test.MockFolder;
 
 /**
  * Tests for {@link VarroaQueueTaskDispatcher} (task 10.4): the reserved
- * {@code varroa-tenant-<team>} node label is the only signal the fence
+ * {@code varroa-tenant-<tenant>} node label is the only signal the fence
  * reads.
  */
 public class VarroaQueueTaskDispatcherTest {
@@ -145,7 +145,7 @@ public class VarroaQueueTaskDispatcherTest {
 
     /**
      * Task 4.5: the reserved token decides the owner by exact whole-token
-     * match, not by a {@code <team>-} prefix test. A node carrying
+     * match, not by a {@code <tenant>-} prefix test. A node carrying
      * {@code varroa-tenant-pay-prod} grants the {@code pay-prod} build and
      * still refuses the {@code pay} build, even though {@code pay} is a
      * prefix of {@code pay-prod}.
@@ -175,10 +175,10 @@ public class VarroaQueueTaskDispatcherTest {
     }
 
     /**
-     * Task 4.5: a node label that merely embeds a team name is not the
+     * Task 4.5: a node label that merely embeds a tenant name is not the
      * reserved token. {@code search-linux} carries no
      * {@code varroa-tenant-} token, so the node resolves no owner and the
-     * fence blocks the build, even though the team is named {@code search}.
+     * fence blocks the build, even though the tenant is named {@code search}.
      */
     @Test
     public void aNodeCarryingOnlyANonReservedLabelResolvesNoOwner() throws Exception {
@@ -231,15 +231,15 @@ public class VarroaQueueTaskDispatcherTest {
     }
 
     /**
-     * Task 4.6: a node rendered from a {@code Runner} for team alpha
+     * Task 4.6: a node rendered from a {@code Runner} for tenant alpha
      * carries the labels D3 renders — the reserved token first, then the
-     * mandatory {@code <team>-runner} label, then a prefixed declared
+     * mandatory {@code <tenant>-runner} label, then a prefixed declared
      * label. That node takes only alpha's builds and refuses bravo's,
      * naming both tenants in the blockage. A node with no reserved token
-     * refuses both teams.
+     * refuses both tenants.
      */
     @Test
-    public void aRunnerRenderedNodeFencesByTeamAndAnUnstampedNodeBlocksBoth() throws Exception {
+    public void aRunnerRenderedNodeFencesByTenantAndAnUnstampedNodeBlocksBoth() throws Exception {
         VarroaTenantResolverTest.hostTenants(j, "alpha", "bravo");
 
         DumbSlave runnerA = j.createSlave(
@@ -258,7 +258,7 @@ public class VarroaQueueTaskDispatcherTest {
         Queue.WaitingItem bravoWaiting = j.jenkins.getQueue().schedule(bravoApi, 0);
         assertNotNull("the bravo build must be queued", bravoWaiting);
         CauseOfBlockage bravoCob = waitForBlockage(bravoWaiting);
-        assertNotNull("team alpha's runner must refuse team bravo's build", bravoCob);
+        assertNotNull("tenant alpha's runner must refuse tenant bravo's build", bravoCob);
         assertTrue(bravoCob.getShortDescription().contains("alpha"));
         assertTrue(bravoCob.getShortDescription().contains("bravo"));
         j.jenkins.getQueue().cancel(bravoWaiting);
@@ -272,7 +272,7 @@ public class VarroaQueueTaskDispatcherTest {
         assertNotNull("the alpha build must be queued", alphaSharedWaiting);
         CauseOfBlockage alphaSharedCob = waitForBlockage(alphaSharedWaiting);
         assertNotNull(
-            "an unstamped node has no proven owner, so team alpha must stay blocked too",
+            "an unstamped node has no proven owner, so tenant alpha must stay blocked too",
             alphaSharedCob);
         j.jenkins.getQueue().cancel(alphaSharedWaiting);
 
@@ -282,7 +282,7 @@ public class VarroaQueueTaskDispatcherTest {
         assertNotNull("the bravo build must be queued", bravoSharedWaiting);
         CauseOfBlockage bravoSharedCob = waitForBlockage(bravoSharedWaiting);
         assertNotNull(
-            "an unstamped node has no proven owner, so team bravo must stay blocked too",
+            "an unstamped node has no proven owner, so tenant bravo must stay blocked too",
             bravoSharedCob);
         j.jenkins.getQueue().cancel(bravoSharedWaiting);
     }

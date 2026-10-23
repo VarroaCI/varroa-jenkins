@@ -44,12 +44,12 @@ public class VarroaSecurityRealmCascTest {
     @Test
     public void dataBoundConstructorRoundTrip() {
         VarroaSecurityRealm realm = new VarroaSecurityRealm(
-                "https://issuer.example/", "login,sub", "team");
+                "https://issuer.example/", "login,sub", "tenant");
 
         // JWTValidator normalises trailing slashes; getter reflects that.
         assertEquals("https://issuer.example", realm.getOidcIssuer());
         assertEquals("login,sub", realm.getUserClaimNames());
-        assertEquals("team", realm.getGroupClaimNames());
+        assertEquals("tenant", realm.getGroupClaimNames());
         assertEquals(Arrays.asList("login", "sub"), realm.userClaimNamesList());
     }
 

@@ -1954,7 +1954,7 @@ func TestClientsetClient_ApplyControllerSpecSSA_MetadataNeverInManifest(t *testi
 		"metadata": map[string]any{
 			"name":      "ctrl1",
 			"namespace": "ns1",
-			"labels":    map[string]any{"team": "platform"},
+			"labels":    map[string]any{"tenant": "platform"},
 			"managedFields": []any{
 				managedFieldEntry("varroa-ui", "Apply", "varroa.dev/v1alpha1", map[string]any{
 					"f:version": map[string]any{},

@@ -27,7 +27,7 @@ func init() {
 			WantStatus: http.StatusServiceUnavailable,
 		},
 		contractCase{
-			Name:       "getTeamCell-recordStoreDisabled",
+			Name:       "getTenantCell-recordStoreDisabled",
 			Method:     "GET",
 			Path:       "/api/v1/pipelines/payments/cell",
 			Claims:     adminClaims,

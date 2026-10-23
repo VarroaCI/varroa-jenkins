@@ -10,10 +10,10 @@ federation, activity persistence, and SSE fanout.
 ## Ownership
 
 - Owns: HTTP handler implementations for every BFF resource (controllers, groups,
-  teams, users, VarroaRole/VarroaRoleBinding, apikeys, brood operations/schedules,
+  tenants, users, VarroaRole/VarroaRoleBinding, apikeys, brood operations/schedules,
   activity feed + SSE, provisioning defaults/version profiles/catalog/composed-bundles
   under `/clusters/{cluster}/...`, observability, hibernation, pipelines and runs under
-  `/pipelines/{team}/...` and `/runs/{run}/...`), the `Authorizer`
+  `/pipelines/{tenant}/...` and `/runs/{run}/...`), the `Authorizer`
   (per-request RBAC capability checks), the `Brood`/`BroodOps`/`ConfigBrood`/
   `RBACFederationReconciler` multi-cluster abstractions, the activity read/publish
   seam (`internal/api/activity/`) over `internal/recordstore`, the pipelines
@@ -59,7 +59,7 @@ federation, activity persistence, and SSE fanout.
   `ActivityStore` field: the in-memory ring is gone, and `Backfill` is nil, not a ring
   fallback, when `VARROA_RECORDSTORE_DSN` is unset. `BlobStore` (`blob.Store`) reads a
   run's console log and artifact bytes, nil when `VARROA_BLOBSTORE_URL` is unset.
-  `TenantResolver` maps a pipelines `{team}` URL segment onto record-store tenants, nil
+  `TenantResolver` maps a pipelines `{tenant}` URL segment onto record-store tenants, nil
   in tests that do not exercise the pipelines surface. A handler on the log, artifact,
   or pipelines path must check its dependency for nil before use, matching every other
   optional field on `Dependencies`.
@@ -162,25 +162,25 @@ federation, activity persistence, and SSE fanout.
   operator) and is never capped. It is never `null`.
   The BFF wires the `User` directory (`SetUserDirectory`), so it resolves
   the same principals as the operator.
-- **Retention** (`handlers_pipelines_retention.go`): `GET /pipelines/{team}`
+- **Retention** (`handlers_pipelines_retention.go`): `GET /pipelines/{tenant}`
   carries a required `retention` block (store, tenant, and effective days,
   plus the job rules). It reads `Reader.TenantRetention` for the first
   resolved tenant. The store window comes from `VARROA_RETENTION_RUNS`
   (`deps.RecordStoreRunRetention`, default 365d). `spec.pipelines.retention`
-  round-trips through `teamPipelinesEntry`. Validation rejects a bad window.
-- **Fleet locks** (`handleListTeamFleetLocks`/`handleListAllFleetLocks`,
+  round-trips through `tenantPipelinesEntry`. Validation rejects a bad window.
+- **Fleet locks** (`handleListTenantFleetLocks`/`handleListAllFleetLocks`,
   `handlers_pipelines.go`; `Server.ListFleetLocks`, `pipelines_service.go`)
-  serves `GET /pipelines/{team}/locks` and `GET /locks` over
+  serves `GET /pipelines/{tenant}/locks` and `GET /locks` over
   `Reader.ListFleetLocks`/`ListAllFleetLocks`. `GET /locks` is the fleet-wide
   read: it requires a cluster-wide `CanReadFleetLocks`, takes no `cluster`
   parameter, and reads every cluster in one list. A holder and its waiters
   can run on different clusters, so a read of one cluster would show a
   waiter with no holder. Every row of both routes carries its `cluster`.
-  `Server.ListFleetLocks` is the one implementation the team route and the
+  `Server.ListFleetLocks` is the one implementation the tenant route and the
   `list_fleet_locks` MCP tool share, so both authorize a caller and shape a
   row identically. Every row always carries `tenant` and `jobPath`, and
   carries `runLink` only when the caller's own grant reads that row's run,
-  through the same `tenantGrants`/`grantsAllow` pair the team listing uses.
+  through the same `tenantGrants`/`grantsAllow` pair the tenant listing uses.
   The row shape carries no holder and no queue position: a consumer that
   wants a lock's holder groups the rows it already has by name.
 - **Fleet lock force release** (`fleetlock_release.go`) serves
@@ -206,20 +206,20 @@ federation, activity persistence, and SSE fanout.
   reply the recorder marks `unknown` (a failed commit). No responder
   (`ErrFleetLockReleaseNotDelivered`) and any other error reply
   (`ErrFleetLockReleaseFailed`) change no row and write nothing.
-- **The team cell read** (`TeamCell`, `handlers_pipelines.go`; the HTTP handler and the
-  `get_team_cell` MCP tool both call it) serves
-  `GET /pipelines/{team}/cell`. It carries the Team's `TenantWarnings` condition as
-  `warning` while that condition is True. It reads the `Team` object first and falls
-  back to `TenantResolver`, so a pipelines Team awaiting its first cell
+- **The tenant cell read** (`TenantCell`, `handlers_pipelines.go`; the HTTP handler and the
+  `get_tenant_cell` MCP tool both call it) serves
+  `GET /pipelines/{tenant}/cell`. It carries the Tenant's `TenantWarnings` condition as
+  `warning` while that condition is True. It reads the `Tenant` object first and falls
+  back to `TenantResolver`, so a pipelines Tenant awaiting its first cell
   answers 200 with `unplaced` instead of 404. A resolved tenant whose tenant
-  value equals the team name, with no local Team, is a member-placed Team: it
+  value equals the tenant name, with no local Tenant, is a member-placed Tenant: it
   answers the placed body with no Placed reason and one slot-0 member. The state ladder is
   `notCellHosted` → `unplaced` → `moving` → `rehydrating` → `placed`, tested in
   that order; rule four reads `status.cell.appliedTenants` and never
   `status.cell.rehydration`, which stays internal to the operator.
   The four counts come from `CellTenantUsage`'s per-job rows, summed by
   `admittedJobCounts` over the job paths `grantsAllow` admits for this
-  caller — the same helpers the team listing uses. The tenant check admits
+  caller — the same helpers the tenant listing uses. The tenant check admits
   the empty job path for a grant narrowed by `jobs` globs, so the gate
   alone cannot scope a number; a whole-tenant count here would disclose
   the load of jobs the caller may not see. Every other field stays
@@ -342,17 +342,17 @@ federation, activity persistence, and SSE fanout.
   serves two shapes at the host root, outside `/api/v1` and outside auth. The controller shape
   (`/hibernation/{token}/clusters/{cluster}/ns/{ns}/{queue,redirect,status}/{ctrl}/...`) wakes a
   hibernated controller and buffers its webhook on `webhook.<cluster>.<ns>.<ctrl>`. The tenant
-  shape (`/hibernation/{token}/teams/{team}/queue/{path...}`) is the pipelines tenant's own door:
-  it verifies the token against `Team.status.pipelines.webhookToken`, verifies the forge signature
-  against `Team.status.pipelines.webhookSecret` (`identifyForge`/`verifyForgeSignature`), then
+  shape (`/hibernation/{token}/tenants/{tenant}/queue/{path...}`) is the pipelines tenant's own door:
+  it verifies the token against `Tenant.status.pipelines.webhookToken`, verifies the forge signature
+  against `Tenant.status.pipelines.webhookSecret` (`identifyForge`/`verifyForgeSignature`), then
   checks the path fence (`tenantPathServes`): a `github-webhook/` path needs a GitHub delivery,
   a `gitea-webhook/` path needs a Gitea or Forgejo delivery, and a `generic-webhook-trigger/invoke`
-  path needs a `?token=` that starts with `<team>:` and has a name after the colon, else `400`.
+  path needs a `?token=` that starts with `<tenant>:` and has a name after the colon, else `400`.
   The fence keeps one tenant from firing another tenant's jobs, because the generic trigger
   searches every job on a shared cell. A Gitea or Forgejo delivery (`X-Gitea-Event` or
   `X-Forgejo-Event`, checked before `X-GitHub-Event`) verifies an HMAC-SHA256 `X-Gitea-Signature`,
   or `X-Forgejo-Signature`, over the bare hex digest. It strips
-  `X-Gitlab-Token` from the envelope, and buffers on `webhook.<cluster>.tenant.<team>` — a cell
+  `X-Gitlab-Token` from the envelope, and buffers on `webhook.<cluster>.tenant.<tenant>` — a cell
   never hibernates, so it publishes no wake. Both shapes share the JetStream `varroa_webhooks`
   stream and its existing `webhook.>` capture; the door never resolves placement, only the
   operator's replay consumer does, at delivery time.
@@ -363,7 +363,7 @@ federation, activity persistence, and SSE fanout.
   (`runner_token_index.go`) narrows a token to a candidate `Runner` by SHA-256 digest;
   the door still re-fetches that CRD and re-verifies `status.token` with
   `constantTimeEqual` before trusting it. The door resolves a `Runner`'s cell through
-  its `Team.status.placement` and `deps.Brood.Get(ctx, placement.cluster, ...)` — never
+  its `Tenant.status.placement` and `deps.Brood.Get(ctx, placement.cluster, ...)` — never
   the local store by name/namespace alone, since a cell name is unique only within one
   cluster. It answers 503 on an empty placement (including an empty
   `placement.cluster`) so the agent's own retry loop backs off. The websocket upgrade
@@ -374,23 +374,23 @@ federation, activity persistence, and SSE fanout.
   never trusts a client-supplied `Node-Name`; it always sets the runner's own
   `status.nodeName` and a freshly-fetched Jenkins agent secret toward the cell.
   `cmd/bff/main.go` feeds `RunnerTokenIndex` from a `runners` informer built the same
-  way as the existing RBAC/Team informers.
+  way as the existing RBAC/Tenant informers.
 - Pipeline proposals (`handlers_pipelines_propose.go`, `open_pull_request.go`): the route runs the refusals in order and starts its session through `createAssistantSession`; the level rule is `sessionLevel`, shared with the assistant start. The tool body calls `OpenPullRequest`, which answers errors that start with a tool code. A request that no operator receives answers 503 `operator_unavailable`. A relay timeout or an expired caller context answers 504 `operator_timeout`, not `forge_unreachable`. The route's `forge.check`, `OpenPullRequest`, and `OpenIssue` use the same rule.
 - Pipelines and runs (`handlers_pipelines.go`, `handlers_pipelines_write.go`,
   `handlers_pipelines_auth.go`, `handlers_runs.go`, `handlers_runlog.go`,
   `runlog_events.go`, `runlog_manifest.go`, `runlog_live.go`, `runlog_poll.go`,
   `runlog_tail.go`, `runlog_notes.go`, `tenantresolver.go`, `pipelines_service.go`):
-  serves the `/pipelines/{team}/...` and `/runs/{run}/...` paths over
+  serves the `/pipelines/{tenant}/...` and `/runs/{run}/...` paths over
   `internal/recordstore`. The run log manifest (`computeRunLogManifest`) serves each
   log part that `readRunLogUnattributed` names through `blob.UnindexedLogParts` (passing the
   highest index entry's `writer`; an index reservation at the next slot overrides it) as one
   unattributed chunk, never a missing sequence. `readRunLogIndex` skips a reservation line
   (`reserved`). `readRunLogObject` is the only console reader; it serves
   no byte past those accepted parts, so a lost cell's late part never reaches a viewer. `TenantResolver` (`tenantresolver.go`, `deps.TenantResolver`)
-  is the one seam that maps a `{team}` URL segment onto record-store tenants: a placed
-  Team resolves to one tenant, an unplaced Team fans out over its namespaces, a name
-  matching no local Team resolves from the record store's placement rows of another
-  cluster (`WithMemberPlacements`, `Reader.ListTenantPlacements`: a Team a member
+  is the one seam that maps a `{tenant}` URL segment onto record-store tenants: a placed
+  Tenant resolves to one tenant, an unplaced Tenant fans out over its namespaces, a name
+  matching no local Tenant resolves from the record store's placement rows of another
+  cluster (`WithMemberPlacements`, `Reader.ListTenantPlacements`: a Tenant a member
   cluster places lives only on that member's API server; `livePlacementRow` skips a row
   of the local cluster, a row with no cell, and a generation-0 row a teardown leaves), and otherwise falls back to a
   same-named controller as a synthetic single-controller tenant, ambiguous across
@@ -401,16 +401,16 @@ federation, activity persistence, and SSE fanout.
   `canReadPipeline`, `canWritePipeline`, `canReadRun` — never a controller-scoped
   check. `canReadRun` builds its `RunTenantRow` from the run row's own `tenant` and
   `job_path` columns, so a run whose cell was deleted still resolves for a permitted
-  caller. **`GET /pipelines` (`handlers_pipelines_list.go`) is the landing-page team
-  list**: every local Team with `spec.pipelines`, every live placement row of
+  caller. **`GET /pipelines` (`handlers_pipelines_list.go`) is the landing-page tenant
+  list**: every local Tenant with `spec.pipelines`, every live placement row of
   another cluster (`Reader.ListAllTenantPlacements`), each filtered per name by
-  `CanReadPipeline`, and each local Team without `spec.pipelines` whose
-  `spec.namespaces` resolve to a readable controller tenant (`teamNamespaceTenants`,
+  `CanReadPipeline`, and each local Tenant without `spec.pipelines` whose
+  `spec.namespaces` resolve to a readable controller tenant (`tenantNamespaceTenants`,
   the design D1 step 2 core, with the same 20-tenant ceiling). A failed controller
   list leaves the third source out and does not fail the read. The route has no
   gate of its own. It is the one pipelines path that does not
   answer `503` without a record store: it answers the local rows with
-  `recordStore: false`. **`GET /pipelines/{team}` filters every row of its response by the
+  `recordStore: false`. **`GET /pipelines/{tenant}` filters every row of its response by the
   caller's `jobs` globs**: `handleListPipelines` calls
   `(*Authorizer).tenantGrants` once per `TenantRef` and then `grantsAllow` per job
   summary, per declared job path, and per running run, dropping a refused row
@@ -421,7 +421,7 @@ federation, activity persistence, and SSE fanout.
   denies on a nil receiver, so the listing keeps the nil-authorizer rule. The
   response reports no count of the removed rows, and `truncated` keeps reporting
   the running-now page the store answered, not the filter. The envelope carries
-  `tenantFolder` (the first admitted ref's `Folder`; every ref of one team shares
+  `tenantFolder` (the first admitted ref's `Folder`; every ref of one tenant shares
   it) and each item carries `kind`, merged through `kindByJob` rather than on the
   row: a record summary writes no kind, a declared item sets it when unset,
   `multibranch` replaces a stored `pipeline`, and the assembly loop defaults an
@@ -450,7 +450,7 @@ federation, activity persistence, and SSE fanout.
   page alike. A refused run answers an empty `script` and an empty `loadedScripts`. The replay
   answers `409` with `run does not replay: <reason>`, `413` over 256 KiB, mints a UUIDv7,
   keys it `replay:<source>:<new>`, reads no intent, and publishes one `REPLAY_BUILD` to the
-  job's `homeRef`. `POST /pipelines/{team}/jobs/{job}/scan` (`scanMultibranch`, tenant write
+  job's `homeRef`. `POST /pipelines/{tenant}/jobs/{job}/scan` (`scanMultibranch`, tenant write
   check, body `{cluster}` optional) answers `409` before it publishes for a job that is not a
   multibranch project or an organization folder (a declared `pipeline` is refused; a declared
   `multibranch` or `organizationFolder`, or a path the inventory reports as a project, passes;
@@ -479,7 +479,7 @@ federation, activity persistence, and SSE fanout.
   reconnects with `from`. The finalizing poll reads the blob once more before `end`, because a
   lost last chunk shows no gap. `pipelines_service.go`
   (`internal/mcp`'s non-HTTP entry point) wraps the same unexported handler logic —
-  `listRunsMerged`, `resolveTeamTenants`, `createRun`, `runByID`, `answerRunInput` — so the
+  `listRunsMerged`, `resolveTenantTenants`, `createRun`, `runByID`, `answerRunInput` — so the
   MCP tools and the REST paths share one implementation of every rule.
   The run detail carries `triggerError`, `triggerReasonCode`,
   `interruptedReason`, and `commandRefusal` (the recorder's
@@ -500,22 +500,22 @@ federation, activity persistence, and SSE fanout.
   The run summary, the running row, and the run detail carry `changeRequest`, read from
   `run.started.payload.change_request` by `changeRequestOf` (`run_change_request.go`).
   A branch run carries no `changeRequest`.
-- **Item manifest source** (`controllerItemManifest`) — a placed Team
+- **Item manifest source** (`controllerItemManifest`) — a placed Tenant
   (`TenantRef.Folder` set) reads its own tenant bundle's `items.yaml`
-  (`teamPipelineBundleContent`) and runs `bundle.TenantItemsManifest` (dropped-key,
+  (`tenantPipelineBundleContent`) and runs `bundle.TenantItemsManifest` (dropped-key,
   strict-parse, re-root, and `lint.CellRules` checks, as the cell does), then the
   template lint (`bundle.LintTenantTemplates`). A manifest the cell holds yields no
-  definition. The read also declares no job while a member cell of the Team holds it.
-  For a local Team, `teamPipelineBundleSource` computes `held` through `controller.TeamHeld`
-  over every member cell. For a member Team it is the `held` value of `GetTeamBundleContent`. The plugin-set, template fragment, and
+  definition. The read also declares no job while a member cell of the Tenant holds it.
+  For a local Tenant, `tenantPipelineBundleSource` computes `held` through `controller.TenantHeld`
+  over every member cell. For a member Tenant it is the `held` value of `GetTenantBundleContent`. The plugin-set, template fragment, and
   credential checks run only on the cell, and the read follows them through that hold.
   The cell's bundle holds the cell's
   own items and never a tenant job, so reading it lists the starter bundle's
   jobs under a tenant. A single-controller tenant (empty `Folder`) reads its
   controller's bundle with the lenient `items.Parse`. Job paths on this surface
   are Jenkins full names, the same shape the record store stores.
-  A member-placed Team (local NotFound, non-local `ref.Cluster`) reads through
-  `ConfigBrood.GetTeamBundleContent` on `operator.<cluster>.bundles.teamcontent`.
+  A member-placed Tenant (local NotFound, non-local `ref.Cluster`) reads through
+  `ConfigBrood.GetTenantBundleContent` on `operator.<cluster>.bundles.tenantcontent`.
   That read is live, with the same strict parse. A member NotFound yields no
   definition.
   The job detail reads the itemRef CatalogItem for `declaredBy` through `ConfigBrood.GetCatalogItem`, on that member.
@@ -541,12 +541,12 @@ federation, activity persistence, and SSE fanout.
   not read keeps its tenant alone. A run the reader may not read answers `404` on the
   downstream route too. `get_run` (MCP) and `GET /runs/{run}` share `Server.GetRun`, so they
   return the same links. A dependency edge's `lastRun` uses the same redaction.
-- `GET /pipelines/{team}/jobs/{job}/branches` (`handlers_pipelines_branches.go`) lists the
+- `GET /pipelines/{tenant}/jobs/{job}/branches` (`handlers_pipelines_branches.go`) lists the
   branch and change-request inventory. A job with no export answers 200 with empty lists. Each
   head is filtered by its own job path, and it carries its newest run. Each scan head in
   `lastScan` is filtered by its own stored job path. The job detail carries
   `kind` (`pipeline`, `multibranch`, or `unknown`).
-- The job detail (`GET /pipelines/{team}/jobs/{job}`) carries a `dependencies` object
+- The job detail (`GET /pipelines/{tenant}/jobs/{job}`) carries a `dependencies` object
   (`upstream`/`downstream` edge lists, `buildPipelineDependencies` in
   `handlers_pipelines.go`), read from `RecordStore.JobDependencies` and always present
   as `[]`/`[]` for a job with no edge, never omitted. Each edge names the other
@@ -554,7 +554,7 @@ federation, activity persistence, and SSE fanout.
   (`granted`); an ungranted edge stays visible rather than being dropped. It uses the
   same `tenantForJob` authorization gate every other pipelines path uses — no separate
   check for this field.
-- The case history (`GET /pipelines/{team}/jobs/{job}/tests/{case}`,
+- The case history (`GET /pipelines/{tenant}/jobs/{job}/tests/{case}`,
   `handleListJobTestCaseHistory`) applies `canReadPipeline` to each resolved tenant with
   the decoded job path, reads each admitted tenant, and merges the rows newest first.
   `{case}` is the opaque key `TestCaseKey` mints and `ParseTestCaseKey` splits; an
@@ -562,7 +562,7 @@ federation, activity persistence, and SSE fanout.
   never `404`: the case rows hold no job inventory. `limit` defaults to 50 and is clamped
   at 200.
 - **Marker lint** (`handlers_pipelines_markers.go`, design D13) — `POST
-  /pipelines/{team}/markers/validate` resolves the team's delivered
+  /pipelines/{tenant}/markers/validate` resolves the tenant's delivered
   templates through the same `TenantResolver`/authorization seam as every
   other pipelines path, parses the posted marker with
   `pipelinetemplate.ParseMarker`, resolves and validates its values with the
@@ -591,16 +591,16 @@ federation, activity persistence, and SSE fanout.
   `/clusters/{cluster}/...`; the old flat routes are **removed, not redirected**
   (greenfield break-and-move — see `router.go`'s comments listing the dead routes).
 - Per-resource handlers follow a `handlers_<resource>.go` naming convention (groups,
-  teams, users, apikeys, broodops, broodschedules, clusters, hibernation, namespaces,
+  tenants, users, apikeys, broodops, broodschedules, clusters, hibernation, namespaces,
   provisioning, banner, builtin, identity, fleetplugins). `deprovision.go` holds `DeleteUser`,
   the one user-delete path that the REST route and the MCP tool share; `preview_util.go`
   holds overlay-preview-diff helpers; `observability.go`/
   `observability_backends.go` normalize a pluggable observability-links integration.
   `user_activity.go` holds `UserActivityEvent`, the one builder of `user.*` activity events, and `UserPasswordSetEvent`, the builder of `user.password_set`. The REST user handlers and the MCP user tools call it.
-  `handlers_teams.go` maps `spec.pipelines` and `status.placement` by hand, in both
+  `handlers_tenants.go` maps `spec.pipelines` and `status.placement` by hand, in both
   directions; it never maps `status.pipelines.webhookToken` or `.webhookSecret` on any
   read path, because both are the tenant webhook door's credentials.
-  `validateTeamPipelines` refuses a pipelines block without `profile`, `agentNamespace`, or
+  `validateTenantPipelines` refuses a pipelines block without `profile`, `agentNamespace`, or
   export `callers` with `400` before the write. An apiserver validation refusal also answers `400`.
 - `access_activity.go` holds `AccessActivityEvent`, the one builder of `group.*`, `varroarole.*`, `varroarolebinding.*`, `jenkinsrole.*`, and `jenkinsrolebinding.*` events. The REST handlers and the MCP tools call it. The message holds no actor.
 - **Controller diff read** — `handleControllerDiff` passes the `jcasc` and `items`
@@ -728,7 +728,7 @@ go test -race -count=1 ./internal/api/...
 make check-client   # if any route/payload shape changed
 ```
 
-- **Team agent routes** (`handlers_teamagents.go`): `GET /pipelines/{team}/agent`, `.../agent/sessions`, `.../agent/capabilities`, `POST .../agent/run`, `GET /agents`, and `PUT /agents/{namespace}/{name}/unattended`. The tenant read or write check decides each `{team}` route; `GET /agents` needs `agentsessions:read`, and the unattended grant needs `teamagents:unattended`. `TeamAgentSource` (the cache in `internal/teamagent/cache`) is nil when the runner is off, and then no Team agent is accepted. The record-store spend row comes from `Reader.TeamAgentSpend`.
-- **Assistant session access** (`assistant_access.go`): every A1 session route calls `sessionFor` or `sessionAllowed`. An assistant session keeps the owner rules. A `team_agent` session follows the tenant table. A team_agent approval runs through `AssistantRuntime.HostForOrigin` with origin `team_agent`, and it does not resume the session. `transcriptFull` decides tool result content. The session principal sees it, and so does a tenant reader of a `team_agent` session. Every other reader gets an empty `content` with `withheld` true on the stream, and `resultWithheld` with a null `result` on the detail. The model's assistant text stays visible to every reader.
-- **Run notes** (`handlers_run_notes.go`, `run_notes.go`): `GET`/`POST /runs/{run}/notes` and `GET /pipelines/{team}/jobs/{job}/notes`. Reads go to `deps.RecordStore`. Writes go through `deps.RunNotePoster` to the recorder; nil means 503. A session note reads `deps.Assistant.Store` and copies the newest final answer of a completed session the caller owns. Refusals carry `code` `note_too_long` or `note_session_invalid`.
+- **Tenant agent routes** (`handlers_tenantagents.go`): `GET /pipelines/{tenant}/agent`, `.../agent/sessions`, `.../agent/capabilities`, `POST .../agent/run`, `GET /agents`, and `PUT /agents/{namespace}/{name}/unattended`. The tenant read or write check decides each `{tenant}` route; `GET /agents` needs `agentsessions:read`, and the unattended grant needs `tenantagents:unattended`. `TenantAgentSource` (the cache in `internal/tenantagent/cache`) is nil when the runner is off, and then no Tenant agent is accepted. The record-store spend row comes from `Reader.TenantAgentSpend`.
+- **Assistant session access** (`assistant_access.go`): every A1 session route calls `sessionFor` or `sessionAllowed`. An assistant session keeps the owner rules. A `tenant_agent` session follows the tenant table. A tenant_agent approval runs through `AssistantRuntime.HostForOrigin` with origin `tenant_agent`, and it does not resume the session. `transcriptFull` decides tool result content. The session principal sees it, and so does a tenant reader of a `tenant_agent` session. Every other reader gets an empty `content` with `withheld` true on the stream, and `resultWithheld` with a null `result` on the detail. The model's assistant text stays visible to every reader.
+- **Run notes** (`handlers_run_notes.go`, `run_notes.go`): `GET`/`POST /runs/{run}/notes` and `GET /pipelines/{tenant}/jobs/{job}/notes`. Reads go to `deps.RecordStore`. Writes go through `deps.RunNotePoster` to the recorder; nil means 503. A session note reads `deps.Assistant.Store` and copies the newest final answer of a completed session the caller owns. Refusals carry `code` `note_too_long` or `note_session_invalid`.
 

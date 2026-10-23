@@ -10,8 +10,8 @@ machine holds no Varroa credential of its own.
 ## What the token is for
 
 The token names a runner and proves the holder is that runner. The door reads it from the URL
-path, `https://<door host>/runners/<token>/`, and resolves it to the owning `Team`, then to that
-team's current cell. On every connection attempt the door fetches a fresh Jenkins agent secret
+path, `https://<door host>/runners/<token>/`, and resolves it to the owning `Tenant`, then to that
+tenant's current cell. On every connection attempt the door fetches a fresh Jenkins agent secret
 from the cell and injects it into the handshake. The machine never sees that secret, and it
 never needs to: the token in the printed launch command is the only value the launch command
 carries.
@@ -47,7 +47,7 @@ as soon as the old object is gone.
 |---|---|
 | `401` | The token names no runner, the runner has no token yet, or the token belongs to an `ssh` runner. |
 | `404` | The request does not match one of the door's three paths. |
-| `503` | The runner's team has no current cell placement. Retry; the agent's own retry loop handles this. |
+| `503` | The runner's tenant has no current cell placement. Retry; the agent's own retry loop handles this. |
 
 A `401` carries the same body for every cause, so it reveals nothing about which runners exist.
 The door never contacts a cell before it has resolved and checked the token.

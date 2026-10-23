@@ -32,10 +32,10 @@ func (e Endpoint) DefaultModel() string {
 
 // Budgets are the spend limits of the assistant. Each limit is above zero.
 type Budgets struct {
-	Session int64 `json:"session"`
-	UserDay int64 `json:"userDay"`
-	TeamDay int64 `json:"teamDay"`
-	Steps   int   `json:"steps"`
+	Session   int64 `json:"session"`
+	UserDay   int64 `json:"userDay"`
+	TenantDay int64 `json:"tenantDay"`
+	Steps     int   `json:"steps"`
 }
 
 // Egress describes the network path of the assistant.
@@ -108,8 +108,8 @@ func Decode(raw []byte) (Config, error) {
 	if c.Budgets.UserDay <= 0 {
 		return Config{}, fmt.Errorf("assistant config: budgets.userDay must be above zero")
 	}
-	if c.Budgets.TeamDay <= 0 {
-		return Config{}, fmt.Errorf("assistant config: budgets.teamDay must be above zero")
+	if c.Budgets.TenantDay <= 0 {
+		return Config{}, fmt.Errorf("assistant config: budgets.tenantDay must be above zero")
 	}
 	if c.Budgets.Steps <= 0 {
 		return Config{}, fmt.Errorf("assistant config: budgets.steps must be above zero")

@@ -124,7 +124,7 @@ const (
 	RunNotePostSubject = "varroa.recordstore.notes.post"
 
 	// WebhookEnqueueSubject is the core-NATS request-reply subject that the
-	// BFF or the agent runner asks the recorder to enqueue one Team agent
+	// BFF or the agent runner asks the recorder to enqueue one Tenant agent
 	// message on a tenant webhook. The recorder is the responder, served by
 	// queue group recorder. The body names the tenant, so the subject needs
 	// no cluster token.
@@ -139,7 +139,7 @@ const (
 	BuildsWildcard = "builds.>"
 
 	// RunNotifyWildcard is the wildcard subject capturing every live run
-	// notification for the BFF's per-team run stream.
+	// notification for the BFF's per-tenant run stream.
 	RunNotifyWildcard = "runs.>"
 )
 
@@ -203,9 +203,9 @@ func WebhookSubject(cluster, ns, ctrl string) string {
 // ("webhook.>") and WebhookClusterWildcard ("webhook.<cluster>.>") already
 // capture this subject, so no stream or consumer change is needed to add
 // it.
-// Format: webhook.<cluster>.tenant.<team>
-func WebhookTenantSubject(cluster, team string) string {
-	return fmt.Sprintf("webhook.%s.tenant.%s", cluster, team)
+// Format: webhook.<cluster>.tenant.<tenant>
+func WebhookTenantSubject(cluster, tenant string) string {
+	return fmt.Sprintf("webhook.%s.tenant.%s", cluster, tenant)
 }
 
 // WebhookClusterWildcard returns the subject an operator leader filters its

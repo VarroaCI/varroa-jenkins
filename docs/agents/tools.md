@@ -57,7 +57,7 @@ A cluster with `ok: false` returned incomplete results.
 
 The MCP server also exposes thirteen pipeline tools: `run_pipeline`, `list_runs`,
 `get_run`, `get_run_log`, `list_job_branches`, `list_fleet_locks`, `release_fleet_lock`,
-`proceed_run_input`, `abort_run_input`, `replay_run`, `restart_run`, `scan_multibranch`, and `get_team_cell`. They operate on the
+`proceed_run_input`, `abort_run_input`, `replay_run`, `restart_run`, `scan_multibranch`, and `get_tenant_cell`. They operate on the
 build record store. The `scan_multibranch` tool starts a scan of a multibranch job or an organization folder and returns
 a `scanId` and the state `requested`. A job that is neither answers an error. Read the result with `list_job_branches`, in `lastScan`. The `run_pipeline` tool starts a build and returns a
 `runId`, an `intentKey`, and the state `requested`. A refused trigger ends the run with status `COMPLETED`
@@ -67,9 +67,9 @@ maximum of 200 as `list_activity`. The `get_run` tool returns one run's
 detail, with the run's `upstream` link and the first page of its `downstream` links. The `get_run_log` tool returns a bounded tail of the run's console
 log, never a stream; `tailLines` defaults to 100 and clamps between 1 and
 500. An agent that needs live output calls `get_run_log` again. The
-`list_fleet_locks` tool takes `team` and answers the locks that team's
+`list_fleet_locks` tool takes `tenant` and answers the locks that tenant's
 tenants own, hold, or wait on, with the same rows
-`GET /pipelines/{team}/locks` answers.
+`GET /pipelines/{tenant}/locks` answers.
 
 The `proceed_run_input` tool answers a paused input step of a run. It takes
 `run`, `input`, and an optional `parameters` object of name to string value.
@@ -77,7 +77,7 @@ The `abort_run_input` tool rejects that step, and takes `run` and `input`. An
 agent reads the run's `inputs` array with `get_run` first. Both tools answer
 that the request was sent, so the agent reads the run again for the outcome.
 
-The `get_team_cell` tool takes `team` and returns the cell that hosts the team's tenant. It carries the Team's tenant warning when one holds. It gives the same answer as `GET /api/v1/pipelines/{team}/cell`.
+The `get_tenant_cell` tool takes `tenant` and returns the cell that hosts the tenant's tenant. It carries the Tenant's tenant warning when one holds. It gives the same answer as `GET /api/v1/pipelines/{tenant}/cell`.
 
 The server also exposes one cell read tool, `get_cell_usage`. It takes
 `namespace`, `name`, and an optional `cluster` that defaults to the local
@@ -128,7 +128,7 @@ its wildcard. `varroa:developer` and `varroa:viewer` hold neither, because a
 pool's status lists every tenant on it.
 
 Each tool applies the same authorization as its REST counterpart. Triggering
-a run checks the write grant on the resolved team and job. Listing runs
+a run checks the write grant on the resolved tenant and job. Listing runs
 checks the read grant on the same pair. Reading a run or its log checks the
 read grant on the run's own tenant and job path. Answering a run input checks
 the write grant on the run's own tenant and job path. A caller who may not
@@ -141,7 +141,7 @@ always needs approval.
 
 | Argument | Rule |
 |---|---|
-| `team` | A pipelines team that the caller may write. |
+| `tenant` | A pipelines tenant that the caller may write. |
 | `repo` | An `https` repository URL. In a session, the session repository. |
 | `branch` | A new branch name, at most 200 characters. |
 | `title` | One line, 1 to 200 characters. Also the commit message. |
@@ -150,7 +150,7 @@ always needs approval.
 
 The operator tries each tenant credential that may push. A forge 403 deletes the new branch. When the delete succeeds, the operator moves to the next credential. When the delete fails, the call stops and names the branch for manual removal. When every credential answers 403, the call answers `forge_write_denied` and names each credential. A forge rate limit is not a 403. The call deletes the branch, stops, and answers `forge_unreachable`, with the retry time when the forge states one.
 
-A session call adds a `Varroa-Session` trailer to the commit. A failed call starts its error text with a code. On `proposal_base_moved`, start over. On `request_expired`, call again. No pull request opened. On `pull_request_busy`, another pull request for the Team runs. Call again after it ends. No pull request opened. On `operator_unavailable`, no operator received the call. No pull request opened. Call again later. On `operator_timeout`, the branch or the pull request can exist. Look in the repository before you call again. Any other relay error answers `forge_unreachable`. A success logs a
+A session call adds a `Varroa-Session` trailer to the commit. A failed call starts its error text with a code. On `proposal_base_moved`, start over. On `request_expired`, call again. No pull request opened. On `pull_request_busy`, another pull request for the Tenant runs. Call again after it ends. No pull request opened. On `operator_unavailable`, no operator received the call. No pull request opened. Call again later. On `operator_timeout`, the branch or the pull request can exist. Look in the repository before you call again. Any other relay error answers `forge_unreachable`. A success logs a
 `pipeline.proposal.opened` event.
 
 ## Account for redaction
@@ -175,23 +175,23 @@ Do not build workflows that expect these fields from MCP.
 | Oversized list | Use filters or `get_*` |
 | Jenkins tool failure | Re-discover the controller tools |
 
-## Team agent tools
+## Tenant agent tools
 
-A Team agent calls four tools. A person can call them too, with the same grants
-that the tool checks. See [Team agents](team-agents.md).
+A Tenant agent calls four tools. A person can call them too, with the same grants
+that the tool checks. See [Tenant agents](tenant-agents.md).
 
 | Tool | Kind | Arguments | Effect |
 |---|---|---|---|
-| `read_repo_file` | read | `team`, `path`, optional `repo` | Reads a file from the instructions repository at the tracked revision. With `repo`, it reads that repository's default branch. A file is at most 256 KiB. A directory answers its entry names. |
-| `post_note` | create | `run` or `team` with `job`, and `body` | Writes one note on a run or a job. A session writes one note only. |
-| `open_issue` | create | `team`, `title`, `body`, `labels` | Opens one issue in the repository of `spec.outputs.issues`. Each label must be in `spec.outputs.issues.labels`. The operator chooses the credential. |
-| `send_webhook` | action | `team`, `body` | Sends one signed message to the Team's completion webhook. |
+| `read_repo_file` | read | `tenant`, `path`, optional `repo` | Reads a file from the instructions repository at the tracked revision. With `repo`, it reads that repository's default branch. A file is at most 256 KiB. A directory answers its entry names. |
+| `post_note` | create | `run` or `tenant` with `job`, and `body` | Writes one note on a run or a job. A session writes one note only. |
+| `open_issue` | create | `tenant`, `title`, `body`, `labels` | Opens one issue in the repository of `spec.outputs.issues`. Each label must be in `spec.outputs.issues.labels`. The operator chooses the credential. |
+| `send_webhook` | action | `tenant`, `body` | Sends one signed message to the Tenant's completion webhook. |
 
 An output tool answers `disabled` when the object does not enable its output.
 
 `open_issue` answers `request_expired` when too little time is left. No issue opened. Call again.
 It answers `operator_unavailable` when no operator receives the request. No issue opened. Call again. It answers `operator_timeout` when the operator does not answer in time. The issue can exist. Look in the repository before you call again. Any other relay error answers `forge_unreachable`.
-On a member-placed Team, the instructions read and `open_issue` answer
+On a member-placed Tenant, the instructions read and `open_issue` answer
 `no_matching_credential` on the core cluster.
 
 ## Related pages

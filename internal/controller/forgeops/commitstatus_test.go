@@ -17,7 +17,7 @@ const (
 
 func endReq() forgeapi.CommitStatusRequest {
 	return forgeapi.CommitStatusRequest{
-		Team:        "payments",
+		Tenant:      "payments",
 		Repo:        testRepoURL,
 		SHA:         testSHA,
 		JobPath:     "payments/app/main",
@@ -96,7 +96,7 @@ func TestEndPendingStatus_NoStatusesWritesNothing(t *testing.T) {
 	}
 }
 
-// TestEndPendingStatus_NoMatchingCredential checks a Team without a credential
+// TestEndPendingStatus_NoMatchingCredential checks a Tenant without a credential
 // for the host. The call refuses and never reaches the forge.
 func TestEndPendingStatus_NoMatchingCredential(t *testing.T) {
 	fx := newFixture(t, "agents-payments")
@@ -110,7 +110,7 @@ func TestEndPendingStatus_NoMatchingCredential(t *testing.T) {
 func TestEndPendingStatus_InvalidRequest(t *testing.T) {
 	fx := newFixture(t, "agents-payments")
 	cases := map[string]func(*forgeapi.CommitStatusRequest){
-		"no team":        func(r *forgeapi.CommitStatusRequest) { r.Team = "" },
+		"no tenant":      func(r *forgeapi.CommitStatusRequest) { r.Tenant = "" },
 		"no sha":         func(r *forgeapi.CommitStatusRequest) { r.SHA = "" },
 		"no job":         func(r *forgeapi.CommitStatusRequest) { r.JobPath = "" },
 		"no reason":      func(r *forgeapi.CommitStatusRequest) { r.Reason = "" },

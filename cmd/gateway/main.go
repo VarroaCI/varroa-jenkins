@@ -293,7 +293,7 @@ func main() {
 		// *ClientsetClient implements crdstore.Backend, so the same client
 		// that backs the verify endpoint also backs the real CellTenantResolver
 		// (design.md D14) — replacing the single-tenant placeholder with one
-		// that reads Controller and Team placement.
+		// that reads Controller and Tenant placement.
 		handler.SetCellTenantResolver(mitesrv.NewCellTenantResolver(kclient))
 
 		verifier := apikey.NewVerifier(gatewayKeyStore{kclient, kclient}, operatorNamespace)

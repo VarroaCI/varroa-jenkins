@@ -16,10 +16,10 @@ vi.mock("../../api/client", () => ({
   listJobBranches: (...args: unknown[]) => mockListJobBranches(...args),
   listRuns: (...args: unknown[]) => mockListRuns(...args),
   createRun: (...args: unknown[]) => mockCreateRun(...args),
-  teamRunStreamUrl: (team: string) => `/api/v1/pipelines/${encodeURIComponent(team)}/stream`,
+  tenantRunStreamUrl: (tenant: string) => `/api/v1/pipelines/${encodeURIComponent(tenant)}/stream`,
 }));
 
-/** RunEvent holds one frame the page reads off the team stream. */
+/** RunEvent holds one frame the page reads off the tenant stream. */
 type RunEvent = { type: string; data: RunNotification };
 
 const mockUseEventStream = vi.fn(
@@ -81,11 +81,11 @@ function renderPage(route = "/pipelines/acme/payments%2Fcheckout-api%2Fmain") {
     <MemoryRouter initialEntries={[route]}>
       <QueryClientProvider client={queryClient}>
         <Routes>
-          <Route path="/pipelines/:team/:job" element={<PipelinePage />} />
+          <Route path="/pipelines/:tenant/:job" element={<PipelinePage />} />
           {/* Matches the run URL PipelinePage navigates to on submit, so
               that navigation resolves instead of falling through to no
               route. */}
-          <Route path="/pipelines/:team/:job/:run" element={<div data-testid="run-page" />} />
+          <Route path="/pipelines/:tenant/:job/:run" element={<div data-testid="run-page" />} />
         </Routes>
         <LocationProbe />
       </QueryClientProvider>
@@ -365,7 +365,7 @@ describe("PipelinePage", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument());
   });
 
-  it("offers the Run control for a synthetic tenant via a namespace-scoped grant, even though the URL team segment is only the controller name", async () => {
+  it("offers the Run control for a synthetic tenant via a namespace-scoped grant, even though the URL tenant segment is only the controller name", async () => {
     vi.mocked(usePermissions).mockReturnValue({
       data: {
         global: {},
@@ -527,7 +527,7 @@ describe("PipelinePage — dependency edges", () => {
     expect(link.getAttribute("href")).toBe("/pipelines/alpha/alpha%2Frelease");
   });
 
-  it("links a downstream edge to the same URL the team home uses for that job", async () => {
+  it("links a downstream edge to the same URL the tenant home uses for that job", async () => {
     mockGetPipelineJob.mockResolvedValue(
       jobDetail({
         dependencies: {
@@ -613,7 +613,7 @@ describe("PipelinePage — live run events", () => {
   });
 
   /** runStream makes the job page read one frame of its own job off the
-   * team stream. */
+   * tenant stream. */
   function runStream(frame: RunEvent | null, readyState = "closed") {
     mockUseEventStream.mockImplementation((_baseUrl, scope) =>
       (scope ?? "").startsWith("pipelines:")
@@ -681,8 +681,8 @@ describe("PipelinePage — wait events", () => {
   it("subscribes to wait frames", async () => {
     renderPage();
     await waitFor(() => expect(mockUseEventStream).toHaveBeenCalled());
-    const teamCall = mockUseEventStream.mock.calls.find(([, scope]) => (scope ?? "").startsWith("pipelines:"));
-    expect(teamCall?.[2]).toContain("wait");
+    const tenantCall = mockUseEventStream.mock.calls.find(([, scope]) => (scope ?? "").startsWith("pipelines:"));
+    expect(tenantCall?.[2]).toContain("wait");
   });
 
   it("refetches the job read and the builds table for a wait event of its own job", async () => {

@@ -343,7 +343,7 @@ describe("Permissions panel", () => {
 
   it("states that no binding reaches a tenant instead of a blank block", () => {
     renderTab();
-    expect(screen.getByText(/No binding and no Team membership reaches this tenant/)).toBeInTheDocument();
+    expect(screen.getByText(/No binding and no Tenant membership reaches this tenant/)).toBeInTheDocument();
   });
 
   it("lists each member role with its pattern and subjects", () => {

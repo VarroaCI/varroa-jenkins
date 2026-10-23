@@ -37,12 +37,12 @@ const (
 
 // RunNotePostRequest is the request body on bus.RunNotePostSubject. A
 // run note sets RunID and leaves the job fields empty. A job note sets
-// Cluster, Team, and JobPath and leaves RunID empty. SessionID is set
+// Cluster, Tenant, and JobPath and leaves RunID empty. SessionID is set
 // only for an assistant note.
 type RunNotePostRequest struct {
 	RunID     string `json:"run_id,omitempty"`
 	Cluster   string `json:"cluster,omitempty"`
-	Team      string `json:"team,omitempty"`
+	Tenant    string `json:"tenant,omitempty"`
 	JobPath   string `json:"job_path,omitempty"`
 	Principal string `json:"principal"`
 	SessionID string `json:"session_id,omitempty"`
@@ -87,7 +87,7 @@ func handleRunNotePost(pool *pgxpool.Pool, logger *slog.Logger, data []byte) []b
 		logger.Error("run note write failed", "run_id", req.RunID, "session_id", req.SessionID, "error", err)
 		return marshalRunNote(logger, RunNotePostResponse{Error: RunNoteErrInternal})
 	}
-	logger.Info("run note written", "run_id", req.RunID, "cluster", req.Cluster, "team", req.Team,
+	logger.Info("run note written", "run_id", req.RunID, "cluster", req.Cluster, "tenant", req.Tenant,
 		"session_id", req.SessionID, "principal", req.Principal, "created", resp.Created, "error", resp.Error)
 	return marshalRunNote(logger, resp)
 }
@@ -99,11 +99,11 @@ func validateRunNotePost(req RunNotePostRequest) string {
 		return RunNoteErrInvalidRequest
 	}
 	hasRun := req.RunID != ""
-	hasJob := req.Cluster != "" || req.Team != "" || req.JobPath != ""
+	hasJob := req.Cluster != "" || req.Tenant != "" || req.JobPath != ""
 	if hasRun && hasJob {
 		return RunNoteErrInvalidRequest
 	}
-	if !hasRun && (req.Cluster == "" || req.Team == "" || req.JobPath == "") {
+	if !hasRun && (req.Cluster == "" || req.Tenant == "" || req.JobPath == "") {
 		return RunNoteErrInvalidRequest
 	}
 	if hasRun {
@@ -135,14 +135,14 @@ func PostRunNote(ctx context.Context, pool *pgxpool.Pool, req RunNotePostRequest
 
 	var runID *uuid.UUID
 	var runCreatedAt *time.Time
-	var cluster, team, jobPath string
+	var cluster, tenant, jobPath string
 	if req.RunID != "" {
 		id := uuid.MustParse(req.RunID)
 		var createdAt time.Time
 		err := tx.QueryRow(ctx, `
 			SELECT created_at, cluster, tenant, job_path FROM varroa.runs
 			WHERE run_id = $1 ORDER BY created_at DESC LIMIT 1
-		`, id).Scan(&createdAt, &cluster, &team, &jobPath)
+		`, id).Scan(&createdAt, &cluster, &tenant, &jobPath)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return RunNotePostResponse{Error: RunNoteErrNotFound}, nil
 		}
@@ -152,7 +152,7 @@ func PostRunNote(ctx context.Context, pool *pgxpool.Pool, req RunNotePostRequest
 		runID = &id
 		runCreatedAt = &createdAt
 	} else {
-		cluster, team, jobPath = req.Cluster, req.Team, req.JobPath
+		cluster, tenant, jobPath = req.Cluster, req.Tenant, req.JobPath
 	}
 
 	var sessionID *uuid.UUID
@@ -163,11 +163,11 @@ func PostRunNote(ctx context.Context, pool *pgxpool.Pool, req RunNotePostRequest
 
 	row := tx.QueryRow(ctx, `
 		INSERT INTO varroa.run_notes
-			(id, run_id, run_created_at, cluster, team, job_path, principal, session_id, body)
+			(id, run_id, run_created_at, cluster, tenant, job_path, principal, session_id, body)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (session_id) WHERE session_id IS NOT NULL DO NOTHING
 		RETURNING `+runNoteColumns,
-		uuid.Must(uuid.NewV7()), runID, runCreatedAt, cluster, team, jobPath,
+		uuid.Must(uuid.NewV7()), runID, runCreatedAt, cluster, tenant, jobPath,
 		req.Principal, sessionID, req.Body)
 	note, err := scanOneRunNote(row)
 	created := true
@@ -202,7 +202,7 @@ func sameRun(a, b *uuid.UUID) bool {
 // scanOneRunNote reads one note row from a single-row query.
 func scanOneRunNote(row pgx.Row) (RunNote, error) {
 	var n RunNote
-	err := row.Scan(&n.ID, &n.RunID, &n.RunCreatedAt, &n.Cluster, &n.Team, &n.JobPath,
+	err := row.Scan(&n.ID, &n.RunID, &n.RunCreatedAt, &n.Cluster, &n.Tenant, &n.JobPath,
 		&n.Principal, &n.SessionID, &n.Body, &n.CreatedAt)
 	return n, err
 }

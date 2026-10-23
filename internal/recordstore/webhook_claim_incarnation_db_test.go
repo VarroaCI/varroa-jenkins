@@ -11,7 +11,7 @@ import (
 
 // TestRunCompleted_StampsTheClaimIncarnation asserts an owner completion
 // stamps the incarnation that owned the run at claim time. A replacement
-// Team takes the name afterwards, so the delivery is dropped, not sent.
+// Tenant takes the name afterwards, so the delivery is dropped, not sent.
 func TestRunCompleted_StampsTheClaimIncarnation(t *testing.T) {
 	t.Parallel()
 

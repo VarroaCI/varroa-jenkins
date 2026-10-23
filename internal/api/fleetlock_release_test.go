@@ -37,7 +37,7 @@ func releaseTestServer(t *testing.T, releaser *fakeFleetLockReleaser, rules ...v
 	reader.allLocks = []recordstore.FleetLock{
 		lockRow("acme/deploy-prod", "run-1", "acme", "acme/release", "releasing", lockTestBase),
 	}
-	srv := pipelinesTestServer(lockTeamClient(t), fleetLockAuthorizer(rules...), reader, nil)
+	srv := pipelinesTestServer(lockTenantClient(t), fleetLockAuthorizer(rules...), reader, nil)
 	if releaser != nil {
 		srv.deps.FleetLockReleaser = releaser
 	}

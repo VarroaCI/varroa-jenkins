@@ -15,31 +15,31 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
-// Team agent webhook errors. The responder answers them in the reply body.
+// Tenant agent webhook errors. The responder answers them in the reply body.
 const (
-	teamAgentWebhookErrInvalid   = "invalid_request"
-	teamAgentWebhookErrNoWebhook = "no webhook"
-	teamAgentWebhookErrInternal  = "internal"
+	tenantAgentWebhookErrInvalid   = "invalid_request"
+	tenantAgentWebhookErrNoWebhook = "no webhook"
+	tenantAgentWebhookErrInternal  = "internal"
 )
 
-// teamAgentWebhookMaxBody bounds the message body of one call.
-const teamAgentWebhookMaxBody = 16 << 10
+// tenantAgentWebhookMaxBody bounds the message body of one call.
+const tenantAgentWebhookMaxBody = 16 << 10
 
-// teamAgentWebhookTimeout bounds one enqueue's database work.
-const teamAgentWebhookTimeout = 5 * time.Second
+// tenantAgentWebhookTimeout bounds one enqueue's database work.
+const tenantAgentWebhookTimeout = 5 * time.Second
 
-// teamAgentWebhookEvent names the payload of a Team agent message.
-const teamAgentWebhookEvent = "team_agent.message"
+// tenantAgentWebhookEvent names the payload of a Tenant agent message.
+const tenantAgentWebhookEvent = "tenant_agent.message"
 
-// teamAgentWebhookKeyPrefix starts the delivery key of a Team agent message.
-const teamAgentWebhookKeyPrefix = teamAgentWebhookEvent + ":"
+// tenantAgentWebhookKeyPrefix starts the delivery key of a Tenant agent message.
+const tenantAgentWebhookKeyPrefix = tenantAgentWebhookEvent + ":"
 
-// teamAgentWebhookQueueGroup is the queue group the responder subscribes with.
-const teamAgentWebhookQueueGroup = "recorder"
+// tenantAgentWebhookQueueGroup is the queue group the responder subscribes with.
+const tenantAgentWebhookQueueGroup = "recorder"
 
-// TeamAgentWebhookRequest asks the recorder to enqueue one message to a
+// TenantAgentWebhookRequest asks the recorder to enqueue one message to a
 // tenant webhook. The key is session and call: a retried call enqueues once.
-type TeamAgentWebhookRequest struct {
+type TenantAgentWebhookRequest struct {
 	Cluster   string          `json:"cluster"`
 	Tenant    string          `json:"tenant"`
 	SessionID string          `json:"session_id"`
@@ -49,15 +49,15 @@ type TeamAgentWebhookRequest struct {
 	Body      json.RawMessage `json:"body"`
 }
 
-// TeamAgentWebhookResponse answers one enqueue request.
-type TeamAgentWebhookResponse struct {
+// TenantAgentWebhookResponse answers one enqueue request.
+type TenantAgentWebhookResponse struct {
 	OK         bool   `json:"ok"`
 	DeliveryID string `json:"delivery_id,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
 
-// teamAgentWebhookPayload is the JSON body that the tenant webhook receives.
-type teamAgentWebhookPayload struct {
+// tenantAgentWebhookPayload is the JSON body that the tenant webhook receives.
+type tenantAgentWebhookPayload struct {
 	Event     string          `json:"event"`
 	Tenant    string          `json:"tenant"`
 	SessionID string          `json:"session_id"`
@@ -75,18 +75,18 @@ func RegisterWebhookEnqueueResponder(conn *bus.Conn, pool *pgxpool.Pool, nudge f
 		logger = slog.Default()
 	}
 	handler := func(data []byte) []byte {
-		var req TeamAgentWebhookRequest
-		resp := TeamAgentWebhookResponse{}
+		var req TenantAgentWebhookRequest
+		resp := TenantAgentWebhookResponse{}
 		if err := json.Unmarshal(data, &req); err != nil {
-			resp.Error = teamAgentWebhookErrInvalid
+			resp.Error = tenantAgentWebhookErrInvalid
 		} else {
-			ctx, cancel := context.WithTimeout(context.Background(), teamAgentWebhookTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), tenantAgentWebhookTimeout)
 			defer cancel()
 			var err error
-			resp, err = EnqueueTeamAgentWebhook(ctx, pool, req, time.Now().UTC())
+			resp, err = EnqueueTenantAgentWebhook(ctx, pool, req, time.Now().UTC())
 			if err != nil {
-				logger.Error("team agent webhook enqueue failed", "session_id", req.SessionID, "error", err)
-				resp = TeamAgentWebhookResponse{Error: teamAgentWebhookErrInternal}
+				logger.Error("tenant agent webhook enqueue failed", "session_id", req.SessionID, "error", err)
+				resp = TenantAgentWebhookResponse{Error: tenantAgentWebhookErrInternal}
 			}
 			if resp.OK && nudge != nil && resp.DeliveryID != "" {
 				nudge()
@@ -98,20 +98,20 @@ func RegisterWebhookEnqueueResponder(conn *bus.Conn, pool *pgxpool.Pool, nudge f
 		}
 		return out
 	}
-	return conn.ServeRequests(bus.WebhookEnqueueSubject, teamAgentWebhookQueueGroup, handler)
+	return conn.ServeRequests(bus.WebhookEnqueueSubject, tenantAgentWebhookQueueGroup, handler)
 }
 
-// EnqueueTeamAgentWebhook writes one outbox row for a Team agent message. The
+// EnqueueTenantAgentWebhook writes one outbox row for a Tenant agent message. The
 // row carries the incarnation of the tenant placement, so the dispatcher sends
 // it to the live tenant. A repeat of the same session and call returns the
 // row that already exists and writes nothing more.
-func EnqueueTeamAgentWebhook(ctx context.Context, pool *pgxpool.Pool, req TeamAgentWebhookRequest, now time.Time) (TeamAgentWebhookResponse, error) {
+func EnqueueTenantAgentWebhook(ctx context.Context, pool *pgxpool.Pool, req TenantAgentWebhookRequest, now time.Time) (TenantAgentWebhookResponse, error) {
 	sessionID, err := uuid.Parse(req.SessionID)
 	if err != nil || req.Cluster == "" || req.Tenant == "" || req.CallID == "" || req.Principal == "" {
-		return TeamAgentWebhookResponse{Error: teamAgentWebhookErrInvalid}, nil
+		return TenantAgentWebhookResponse{Error: tenantAgentWebhookErrInvalid}, nil
 	}
-	if len(req.Body) == 0 || len(req.Body) > teamAgentWebhookMaxBody || !isJSONObject(req.Body) {
-		return TeamAgentWebhookResponse{Error: teamAgentWebhookErrInvalid}, nil
+	if len(req.Body) == 0 || len(req.Body) > tenantAgentWebhookMaxBody || !isJSONObject(req.Body) {
+		return TenantAgentWebhookResponse{Error: tenantAgentWebhookErrInvalid}, nil
 	}
 	// The run id names the run that the call belongs to. A call without a run
 	// keys its delivery by the session id, which is a uuid as well.
@@ -120,7 +120,7 @@ func EnqueueTeamAgentWebhook(ctx context.Context, pool *pgxpool.Pool, req TeamAg
 	if req.RunID != "" {
 		parsed, err := uuid.Parse(req.RunID)
 		if err != nil {
-			return TeamAgentWebhookResponse{Error: teamAgentWebhookErrInvalid}, nil
+			return TenantAgentWebhookResponse{Error: tenantAgentWebhookErrInvalid}, nil
 		}
 		runID = parsed
 		runName = req.RunID
@@ -128,7 +128,7 @@ func EnqueueTeamAgentWebhook(ctx context.Context, pool *pgxpool.Pool, req TeamAg
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return TeamAgentWebhookResponse{}, fmt.Errorf("begin team agent webhook: %w", err)
+		return TenantAgentWebhookResponse{}, fmt.Errorf("begin tenant agent webhook: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -140,14 +140,14 @@ func EnqueueTeamAgentWebhook(ctx context.Context, pool *pgxpool.Pool, req TeamAg
 		WHERE cluster = $1 AND tenant = $2
 	`, req.Cluster, req.Tenant).Scan(&hasWebhook, &incarnation)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !hasWebhook) {
-		return TeamAgentWebhookResponse{Error: teamAgentWebhookErrNoWebhook}, nil
+		return TenantAgentWebhookResponse{Error: tenantAgentWebhookErrNoWebhook}, nil
 	}
 	if err != nil {
-		return TeamAgentWebhookResponse{}, fmt.Errorf("read tenant webhook: %w", err)
+		return TenantAgentWebhookResponse{}, fmt.Errorf("read tenant webhook: %w", err)
 	}
 
-	payload, err := json.Marshal(teamAgentWebhookPayload{
-		Event:     teamAgentWebhookEvent,
+	payload, err := json.Marshal(tenantAgentWebhookPayload{
+		Event:     tenantAgentWebhookEvent,
 		Tenant:    req.Tenant,
 		SessionID: req.SessionID,
 		Principal: req.Principal,
@@ -156,17 +156,17 @@ func EnqueueTeamAgentWebhook(ctx context.Context, pool *pgxpool.Pool, req TeamAg
 		SentAt:    now,
 	})
 	if err != nil {
-		return TeamAgentWebhookResponse{}, fmt.Errorf("marshal team agent webhook: %w", err)
+		return TenantAgentWebhookResponse{}, fmt.Errorf("marshal tenant agent webhook: %w", err)
 	}
 
 	deliveryID, err := uuid.NewV7()
 	if err != nil {
-		return TeamAgentWebhookResponse{}, fmt.Errorf("new delivery id: %w", err)
+		return TenantAgentWebhookResponse{}, fmt.Errorf("new delivery id: %w", err)
 	}
-	key := teamAgentWebhookKeyPrefix + req.SessionID + ":" + req.CallID
+	key := tenantAgentWebhookKeyPrefix + req.SessionID + ":" + req.CallID
 	inserted, err := insertWebhookDelivery(ctx, tx, deliveryID, runID, req.Cluster, req.Tenant, incarnation, key, payload)
 	if err != nil {
-		return TeamAgentWebhookResponse{}, err
+		return TenantAgentWebhookResponse{}, err
 	}
 	if !inserted {
 		var existing uuid.UUID
@@ -174,14 +174,14 @@ func EnqueueTeamAgentWebhook(ctx context.Context, pool *pgxpool.Pool, req TeamAg
 			SELECT delivery_id FROM varroa.webhook_deliveries
 			WHERE run_id = $1 AND delivery_key = $2
 		`, runID, key).Scan(&existing); err != nil {
-			return TeamAgentWebhookResponse{}, fmt.Errorf("read existing team agent delivery: %w", err)
+			return TenantAgentWebhookResponse{}, fmt.Errorf("read existing tenant agent delivery: %w", err)
 		}
-		return TeamAgentWebhookResponse{OK: true, DeliveryID: existing.String()}, nil
+		return TenantAgentWebhookResponse{OK: true, DeliveryID: existing.String()}, nil
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return TeamAgentWebhookResponse{}, fmt.Errorf("commit team agent webhook: %w", err)
+		return TenantAgentWebhookResponse{}, fmt.Errorf("commit tenant agent webhook: %w", err)
 	}
-	return TeamAgentWebhookResponse{OK: true, DeliveryID: deliveryID.String()}, nil
+	return TenantAgentWebhookResponse{OK: true, DeliveryID: deliveryID.String()}, nil
 }
 
 // isJSONObject reports whether raw is a JSON object.

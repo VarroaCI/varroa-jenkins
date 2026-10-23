@@ -441,7 +441,7 @@ function PermissionsPanel({
             </p>
             {entry.grants.length === 0 ? (
               <p className={styles.empty}>
-                No binding and no Team membership reaches this tenant. Nobody may build on it.
+                No binding and no Tenant membership reaches this tenant. Nobody may build on it.
               </p>
             ) : (
               <table className={styles.table}>
@@ -458,7 +458,7 @@ function PermissionsPanel({
                 </thead>
                 <tbody>
                   {entry.grants.map((g, i) => (
-                    <tr key={`${g.binding ?? "team"}-${i}`}>
+                    <tr key={`${g.binding ?? "tenant"}-${i}`}>
                       <td>{g.source}</td>
                       <td className={styles.mono}>{g.binding || DASH}</td>
                       <td>{g.roleRef}</td>

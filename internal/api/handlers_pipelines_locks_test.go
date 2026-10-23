@@ -30,17 +30,17 @@ var lockRouteKeySet = map[string]bool{
 	"acquiredAt":   true,
 }
 
-// lockTeamClient seeds an unplaced Team "ops" whose two namespaces hold
-// one controller each, so the team resolves to the tenants ns-a/ctrl-a
+// lockTenantClient seeds an unplaced Tenant "ops" whose two namespaces hold
+// one controller each, so the tenant resolves to the tenants ns-a/ctrl-a
 // and ns-b/ctrl-b.
-func lockTeamClient(t *testing.T) *fakeResourceClient {
+func lockTenantClient(t *testing.T) *fakeResourceClient {
 	t.Helper()
 	client := newFakeResourceClient()
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a"}},
 		"ctrl-b": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "ns-b"}},
 	}
-	seedTeam(t, client.crdStore, unplacedTeamObject("ops", "ns-a", "ns-b"))
+	seedTenant(t, client.crdStore, unplacedTenantObject("ops", "ns-a", "ns-b"))
 	return client
 }
 
@@ -90,15 +90,15 @@ func decodeLockItems(t *testing.T, body []byte) []fleetLockJSON {
 	return resp.Items
 }
 
-// TestHandleListTeamFleetLocks_TwoTenantMerge asserts a team that
+// TestHandleListTenantFleetLocks_TwoTenantMerge asserts a tenant that
 // resolves to two tenants answers both tenants' locks in one items
 // list, each row carrying the link of the run's own page, as a run
-// search result carries it: /pipelines/{team}/{jobPath}/{runId}, with
-// the team and the job path's own slashes escaped. The team segment is
-// the resolved ref's team, which for an unplaced team's controller
+// search result carries it: /pipelines/{tenant}/{jobPath}/{runId}, with
+// the tenant and the job path's own slashes escaped. The tenant segment is
+// the resolved ref's tenant, which for an unplaced tenant's controller
 // tenant is the controller name.
-func TestHandleListTeamFleetLocks_TwoTenantMerge(t *testing.T) {
-	client := lockTeamClient(t)
+func TestHandleListTenantFleetLocks_TwoTenantMerge(t *testing.T) {
+	client := lockTenantClient(t)
 	reader := newFakeRecordReader()
 	reader.locksByTenant["core/ns-a/ctrl-a"] = []recordstore.FleetLock{
 		lockRow("ns-a/ctrl-a/deploy", "run-a", "ns-a/ctrl-a", "ns-a/ctrl-a/main", "held", lockTestBase),
@@ -108,7 +108,7 @@ func TestHandleListTeamFleetLocks_TwoTenantMerge(t *testing.T) {
 	}
 	srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, "ns-a/ctrl-a", "ns-b/ctrl-b"), reader, nil)
 
-	rec := doPipelinesRequest(t, srv.handleListTeamFleetLocks, "/pipelines/ops/locks", map[string]string{"team": "ops"})
+	rec := doPipelinesRequest(t, srv.handleListTenantFleetLocks, "/pipelines/ops/locks", map[string]string{"tenant": "ops"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -146,12 +146,12 @@ func TestHandleListTeamFleetLocks_TwoTenantMerge(t *testing.T) {
 	}
 }
 
-// TestHandleListTeamFleetLocks_ForeignRunLinkFollowsTheGrant asserts a
+// TestHandleListTenantFleetLocks_ForeignRunLinkFollowsTheGrant asserts a
 // lock row of another tenant always carries its tenant and job path, and
 // carries its run link only when the caller's own grant reads that
 // tenant. A granted link is the run's own page path, built from the
-// granted tenant's own team.
-func TestHandleListTeamFleetLocks_ForeignRunLinkFollowsTheGrant(t *testing.T) {
+// granted tenant's own tenant.
+func TestHandleListTenantFleetLocks_ForeignRunLinkFollowsTheGrant(t *testing.T) {
 	own := lockRow("ns-a/ctrl-a/deploy", "run-own", "ns-a/ctrl-a", "ns-a/ctrl-a/main", "held", lockTestBase)
 	foreign := lockRow("ns-a/ctrl-a/gate", "run-foreign", "ns-z/ctrl-z", "ns-z/ctrl-z/release", "held", lockTestBase.Add(time.Minute))
 
@@ -169,12 +169,12 @@ func TestHandleListTeamFleetLocks_ForeignRunLinkFollowsTheGrant(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			client := lockTeamClient(t)
+			client := lockTenantClient(t)
 			reader := newFakeRecordReader()
 			reader.locksByTenant["core/ns-a/ctrl-a"] = []recordstore.FleetLock{own, foreign}
 			srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, tc.tenants...), reader, nil)
 
-			rec := doPipelinesRequest(t, srv.handleListTeamFleetLocks, "/pipelines/ops/locks", map[string]string{"team": "ops"})
+			rec := doPipelinesRequest(t, srv.handleListTenantFleetLocks, "/pipelines/ops/locks", map[string]string{"tenant": "ops"})
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 			}
@@ -219,7 +219,7 @@ func TestHandleListAllFleetLocks_OperatorRoute(t *testing.T) {
 	}
 
 	t.Run("a caller without the fleet-lock read is denied", func(t *testing.T) {
-		client := lockTeamClient(t)
+		client := lockTenantClient(t)
 		reader := newFakeRecordReader()
 		reader.allLocks = rows
 		srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, "ns-a/ctrl-a", "ns-b/ctrl-b"), reader, nil)
@@ -231,7 +231,7 @@ func TestHandleListAllFleetLocks_OperatorRoute(t *testing.T) {
 	})
 
 	t.Run("an operator reads every tenant's rows of every cluster", func(t *testing.T) {
-		client := lockTeamClient(t)
+		client := lockTenantClient(t)
 		reader := newFakeRecordReader()
 		reader.allLocks = rows
 		auth := fleetLockAuthorizer(
@@ -265,7 +265,7 @@ func TestHandleListAllFleetLocks_OperatorRoute(t *testing.T) {
 	})
 
 	t.Run("an empty store answers an empty items list", func(t *testing.T) {
-		client := lockTeamClient(t)
+		client := lockTenantClient(t)
 		srv := pipelinesTestServer(client, fleetLockAuthorizer(
 			v1alpha1.APIRule{Resources: []string{"fleetlocks"}, Verbs: []string{"read"}},
 		), newFakeRecordReader(), nil)
@@ -290,7 +290,7 @@ func TestHandleListAllFleetLocks_GroupsHolderAcrossClusters(t *testing.T) {
 	waiter := lockRow("ns-a/ctrl-a/deploy", "run-waiter", "ns-b/ctrl-b", "ns-b/ctrl-b/main", "waiting", lockTestBase.Add(time.Minute))
 	reader := newFakeRecordReader()
 	reader.allLocks = []recordstore.FleetLock{holder, waiter}
-	srv := pipelinesTestServer(lockTeamClient(t), fleetLockAuthorizer(
+	srv := pipelinesTestServer(lockTenantClient(t), fleetLockAuthorizer(
 		v1alpha1.APIRule{Resources: []string{"fleetlocks"}, Verbs: []string{"read"}},
 	), reader, nil)
 
@@ -313,11 +313,11 @@ func TestHandleListAllFleetLocks_GroupsHolderAcrossClusters(t *testing.T) {
 	}
 }
 
-// TestHandleListTeamFleetLocks_EmptyJobPathCarriesNoRunLink asserts a
+// TestHandleListTenantFleetLocks_EmptyJobPathCarriesNoRunLink asserts a
 // row whose jobPath is empty carries no runLink, even under a grant that
 // reads its tenant and would carry the link of a named job path.
-func TestHandleListTeamFleetLocks_EmptyJobPathCarriesNoRunLink(t *testing.T) {
-	client := lockTeamClient(t)
+func TestHandleListTenantFleetLocks_EmptyJobPathCarriesNoRunLink(t *testing.T) {
+	client := lockTenantClient(t)
 	reader := newFakeRecordReader()
 	reader.locksByTenant["core/ns-a/ctrl-a"] = []recordstore.FleetLock{
 		lockRow("ns-a/ctrl-a/deploy", "run-empty", "ns-a/ctrl-a", "", "held", lockTestBase),
@@ -325,7 +325,7 @@ func TestHandleListTeamFleetLocks_EmptyJobPathCarriesNoRunLink(t *testing.T) {
 	}
 	srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, "ns-a/ctrl-a"), reader, nil)
 
-	rec := doPipelinesRequest(t, srv.handleListTeamFleetLocks, "/pipelines/ops/locks", map[string]string{"team": "ops"})
+	rec := doPipelinesRequest(t, srv.handleListTenantFleetLocks, "/pipelines/ops/locks", map[string]string{"tenant": "ops"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -377,10 +377,10 @@ func TestLockRoutes_CarryNoQueuePositionOrHolderField(t *testing.T) {
 		auth    *Authorizer
 	}{
 		{
-			name:    "team",
+			name:    "tenant",
 			path:    "/pipelines/ops/locks",
-			pick:    func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListTeamFleetLocks },
-			pathVal: map[string]string{"team": "ops"},
+			pick:    func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListTenantFleetLocks },
+			pathVal: map[string]string{"tenant": "ops"},
 			auth:    pipelineGrantAuthorizer([]string{"read"}, "ns-a/ctrl-a", "ns-b/ctrl-b"),
 		},
 		{
@@ -393,7 +393,7 @@ func TestLockRoutes_CarryNoQueuePositionOrHolderField(t *testing.T) {
 
 	for _, route := range routes {
 		t.Run(route.name, func(t *testing.T) {
-			client := lockTeamClient(t)
+			client := lockTenantClient(t)
 			reader := newFakeRecordReader()
 			reader.locksByTenant["core/ns-a/ctrl-a"] = rows
 			reader.allLocks = rows

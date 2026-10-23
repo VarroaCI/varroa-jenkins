@@ -15,26 +15,26 @@ export function indexTitle(): string {
   return "Pipelines";
 }
 
-export function teamTitle(team: string): string {
-  return `${team} · Pipelines`;
+export function tenantTitle(tenant: string): string {
+  return `${tenant} · Pipelines`;
 }
 
-export function jobTitle(team: string, tenantFolder: string, jobPath: string): string {
-  return `${relativeJob(tenantFolder, jobPath)} · ${team}`;
+export function jobTitle(tenant: string, tenantFolder: string, jobPath: string): string {
+  return `${relativeJob(tenantFolder, jobPath)} · ${tenant}`;
 }
 
 export function buildTitle(
-  team: string,
+  tenant: string,
   run: { buildNumber?: number; tenantFolder: string; jobPath: string },
   stateLabel: string,
 ): string {
-  return `${stateLabel} · #${run.buildNumber ?? "?"} ${relativeJob(run.tenantFolder, run.jobPath)} · ${team}`;
+  return `${stateLabel} · #${run.buildNumber ?? "?"} ${relativeJob(run.tenantFolder, run.jobPath)} · ${tenant}`;
 }
 
-export function notStartedTitle(team: string, tenantFolder: string, jobPath: string): string {
-  return `Not started · ${relativeJob(tenantFolder, jobPath)} · ${team}`;
+export function notStartedTitle(tenant: string, tenantFolder: string, jobPath: string): string {
+  return `Not started · ${relativeJob(tenantFolder, jobPath)} · ${tenant}`;
 }
 
-export function testCaseTitle(team: string, job: string, testName: string): string {
-  return `${testName} · ${job} · ${team}`;
+export function testCaseTitle(tenant: string, job: string, testName: string): string {
+  return `${testName} · ${job} · ${tenant}`;
 }

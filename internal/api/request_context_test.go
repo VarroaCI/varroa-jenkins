@@ -195,55 +195,55 @@ func TestRequestHandlersPassRequestContext(t *testing.T) {
 			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleUpdatePreferences(w, r) },
 		},
 		{
-			name: "teams list", method: http.MethodGet, path: "/teams",
-			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleTeams(w, r) },
+			name: "tenants list", method: http.MethodGet, path: "/tenants",
+			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleTenants(w, r) },
 		},
 		{
-			name: "teams create", method: http.MethodPost, path: "/teams",
-			body: `{"name":"new-team","members":["alice"],"namespaces":["ns1"]}`,
-			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleTeams(w, r) },
+			name: "tenants create", method: http.MethodPost, path: "/tenants",
+			body: `{"name":"new-tenant","members":["alice"],"namespaces":["ns1"]}`,
+			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleTenants(w, r) },
 		},
 		{
-			name: "team get", method: http.MethodGet, path: "/teams/t1",
-			seed: []any{&v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "t1"}, Spec: v1alpha1.TeamSpec{Members: []string{"alice"}, Namespaces: []string{"ns1"}}}},
-			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleTeamDispatch(w, r) },
+			name: "tenant get", method: http.MethodGet, path: "/tenants/t1",
+			seed: []any{&v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "t1"}, Spec: v1alpha1.TenantSpec{Members: []string{"alice"}, Namespaces: []string{"ns1"}}}},
+			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleTenantDispatch(w, r) },
 		},
 		{
-			name: "team update", method: http.MethodPut, path: "/teams/t1",
-			seed: []any{&v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "t1"}, Spec: v1alpha1.TeamSpec{Members: []string{"alice"}, Namespaces: []string{"ns1"}}}},
+			name: "tenant update", method: http.MethodPut, path: "/tenants/t1",
+			seed: []any{&v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "t1"}, Spec: v1alpha1.TenantSpec{Members: []string{"alice"}, Namespaces: []string{"ns1"}}}},
 			body: `{"members":["alice"],"namespaces":["ns1"]}`,
-			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleTeamDispatch(w, r) },
+			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleTenantDispatch(w, r) },
 		},
 		{
-			name: "team delete", method: http.MethodDelete, path: "/teams/t1",
-			seed: []any{&v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "t1"}, Spec: v1alpha1.TeamSpec{Members: []string{"alice"}, Namespaces: []string{"ns1"}}}},
-			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleTeamDispatch(w, r) },
+			name: "tenant delete", method: http.MethodDelete, path: "/tenants/t1",
+			seed: []any{&v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "t1"}, Spec: v1alpha1.TenantSpec{Members: []string{"alice"}, Namespaces: []string{"ns1"}}}},
+			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleTenantDispatch(w, r) },
 		},
 		{
 			name: "runners list", method: http.MethodGet, path: "/runners",
-			seed: []any{&v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "payments"}, Spec: v1alpha1.TeamSpec{Members: []string{"someone"}, Namespaces: []string{"payments"}}}},
+			seed: []any{&v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "payments"}, Spec: v1alpha1.TenantSpec{Members: []string{"someone"}, Namespaces: []string{"payments"}}}},
 			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleRunners(w, r) },
 		},
 		{
 			name: "runner create", method: http.MethodPost, path: "/runners",
-			seed: []any{&v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "payments"}, Spec: v1alpha1.TeamSpec{Members: []string{"someone"}, Namespaces: []string{"payments"}}}},
-			body: `{"name":"win-1","spec":{"team":"payments","launcher":"inbound","remoteFS":"/var/j"}}`,
+			seed: []any{&v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "payments"}, Spec: v1alpha1.TenantSpec{Members: []string{"someone"}, Namespaces: []string{"payments"}}}},
+			body: `{"name":"win-1","spec":{"tenant":"payments","launcher":"inbound","remoteFS":"/var/j"}}`,
 			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleRunners(w, r) },
 		},
 		{
 			name: "runner get", method: http.MethodGet, path: "/runners/r1",
-			seed: []any{&v1alpha1.Runner{ObjectMeta: metav1.ObjectMeta{Name: "r1"}, Spec: v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/x"}}},
+			seed: []any{&v1alpha1.Runner{ObjectMeta: metav1.ObjectMeta{Name: "r1"}, Spec: v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/x"}}},
 			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleRunnerDispatch(w, r) },
 		},
 		{
 			name: "runner patch", method: http.MethodPatch, path: "/runners/r1",
-			seed: []any{&v1alpha1.Runner{ObjectMeta: metav1.ObjectMeta{Name: "r1"}, Spec: v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/x"}}},
+			seed: []any{&v1alpha1.Runner{ObjectMeta: metav1.ObjectMeta{Name: "r1"}, Spec: v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/x"}}},
 			body: `{"spec":{"numExecutors":3}}`,
 			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleRunnerDispatch(w, r) },
 		},
 		{
 			name: "runner delete", method: http.MethodDelete, path: "/runners/r1",
-			seed: []any{&v1alpha1.Runner{ObjectMeta: metav1.ObjectMeta{Name: "r1"}, Spec: v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/x"}}},
+			seed: []any{&v1alpha1.Runner{ObjectMeta: metav1.ObjectMeta{Name: "r1"}, Spec: v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/x"}}},
 			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleRunnerDispatch(w, r) },
 		},
 	}
@@ -267,10 +267,10 @@ func TestRequestHandlersPassRequestContext(t *testing.T) {
 
 func TestRunnerDoorPassesRequestContext(t *testing.T) {
 	srv, store, idx := newDoorTestServer(t, newDoorFakeBrood())
-	seedDoorTeam(t, store, &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell1", CellNamespace: "team-ns"})
+	seedDoorTenant(t, store, &v1alpha1.TenantPlacementStatus{Cluster: "core", Cell: "cell1", CellNamespace: "team-ns"})
 	seedDoorRunner(t, store, idx, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "r1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/x"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/x"},
 		Status:     v1alpha1.RunnerStatus{Token: "tok"},
 	})
 	spy := &reqCtxStore{Backend: store}

@@ -38,8 +38,8 @@ func TestCheck_Codes(t *testing.T) {
 		req   forgeapi.CheckRequest
 		want  string
 	}{
-		{"empty team", func(*fixture) {}, forgeapi.CheckRequest{Repo: testRepoURL}, forgeapi.CodeInvalidRequest},
-		{"bad repo", func(*fixture) {}, forgeapi.CheckRequest{Team: "payments", Repo: "http://x/y/z"}, forgeapi.CodeRepoURLInvalid},
+		{"empty tenant", func(*fixture) {}, forgeapi.CheckRequest{Repo: testRepoURL}, forgeapi.CodeInvalidRequest},
+		{"bad repo", func(*fixture) {}, forgeapi.CheckRequest{Tenant: "payments", Repo: "http://x/y/z"}, forgeapi.CodeRepoURLInvalid},
 		{"no credential", func(*fixture) {}, checkReq(), forgeapi.CodeNoMatchingCredential},
 		{"unsupported", func(fx *fixture) {
 			fx.secrets.addCred("sa", "a", "tok-a")

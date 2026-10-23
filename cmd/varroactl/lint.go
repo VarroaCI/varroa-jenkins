@@ -1,8 +1,8 @@
 // Package main: the lint commands (design D13, delta varroa-cli).
 //
-// `lint marker` checks a pipeline marker file against a team's delivered
+// `lint marker` checks a pipeline marker file against a tenant's delivered
 // pipeline templates before it is committed. The BFF endpoint it calls
-// (POST /pipelines/{team}/markers/validate) has no generated client method
+// (POST /pipelines/{tenant}/markers/validate) has no generated client method
 // yet, so this file posts the request directly, the same way activity.go
 // does for a path the generated client does not cover.
 package main
@@ -37,11 +37,11 @@ func registerLintCommands(root *cobra.Command) {
 
 	markerCmd := &cobra.Command{
 		Use:   "marker",
-		Short: "Lint a pipeline marker file against a team's delivered templates",
+		Short: "Lint a pipeline marker file against a tenant's delivered templates",
 		Long: `Lint a pipeline marker file.
 
-Reads the marker file and posts it to the team's markers/validate
-endpoint, which resolves it against the team's delivered pipeline
+Reads the marker file and posts it to the tenant's markers/validate
+endpoint, which resolves it against the tenant's delivered pipeline
 templates and runs the Go validator. It contacts no cell and no record
 store, so it works while a cell is down and while the record store is
 disabled.
@@ -50,7 +50,7 @@ Exits zero when the findings list is empty. Exits non-zero when the
 list holds any finding.`,
 		RunE: runLintMarker,
 	}
-	markerCmd.Flags().String("team", "", "team the marker belongs to (required)")
+	markerCmd.Flags().String("tenant", "", "tenant the marker belongs to (required)")
 	markerCmd.Flags().String("marker", defaultMarkerPath, "path to the marker file")
 	lintCmd.AddCommand(markerCmd)
 }
@@ -74,9 +74,9 @@ type markerValidateResponse struct {
 var errMarkerFindings = errors.New("marker failed validation")
 
 func runLintMarker(cmd *cobra.Command, args []string) error {
-	team, _ := cmd.Flags().GetString("team")
-	if team == "" {
-		return usagef("--team is required")
+	tenant, _ := cmd.Flags().GetString("tenant")
+	if tenant == "" {
+		return usagef("--tenant is required")
 	}
 	markerPath, _ := cmd.Flags().GetString("marker")
 
@@ -101,7 +101,7 @@ func runLintMarker(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fullURL := strings.TrimRight(rc.server, "/") + "/api/v1/pipelines/" + team + "/markers/validate"
+	fullURL := strings.TrimRight(rc.server, "/") + "/api/v1/pipelines/" + tenant + "/markers/validate"
 	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, fullURL, bytes.NewReader(reqBody))
 	if err != nil {
 		return err

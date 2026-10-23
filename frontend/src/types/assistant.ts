@@ -23,7 +23,7 @@ export type AssistantErrorCode =
   | "prompt_not_startable"
   | "kill_switch"
   | "approval_expired"
-  | "team_agent_session";
+  | "tenant_agent_session";
 
 /** The codes a note refusal carries. */
 export type RunNoteErrorCode = "note_too_long" | "note_session_invalid";
@@ -51,7 +51,7 @@ export type AssistantEventType =
 /** The context a session carries, as the client names it. */
 export interface AssistantSessionContext {
   route?: string;
-  team?: string;
+  tenant?: string;
   job?: string;
   run?: string;
   controller?: string;
@@ -64,9 +64,9 @@ export interface AssistantSessionContext {
 /** One assistant session. */
 export interface AssistantSession {
   id: string;
-  kind: "assistant" | "team_agent";
+  kind: "assistant" | "tenant_agent";
   principal: string;
-  team: string;
+  tenant: string;
   cluster: string;
   trigger: string;
   context: AssistantSessionContext;
@@ -129,7 +129,7 @@ export interface AssistantAcceptedState {
 }
 
 export interface AssistantLimits {
-  budgets: { session: number; userDay: number; teamDay: number; steps: number };
+  budgets: { session: number; userDay: number; tenantDay: number; steps: number };
   externalDataSharing: DataSharingLevel;
   approvalExpiry: string;
   egress: { networkPolicy: boolean; cidrs: string[]; ports: number[] };
@@ -201,7 +201,7 @@ export interface RunNote {
   id: string;
   runId: string | null;
   cluster: string;
-  team: string;
+  tenant: string;
   jobPath: string;
   principal: string;
   sessionId: string | null;

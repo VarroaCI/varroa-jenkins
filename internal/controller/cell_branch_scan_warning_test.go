@@ -22,13 +22,13 @@ func TestBranchScanFailedWarnings(t *testing.T) {
 	want := []v1alpha1.TenantWarning{
 		{
 			Tenant: "payments",
-			Reason: v1alpha1.TeamReasonBranchScanFailed,
+			Reason: v1alpha1.TenantReasonBranchScanFailed,
 			Message: "the last branch scan of payments/mb ended with FAILURE; 2 branch job(s) were deferred until a scan succeeds or rehydrateDeadline passes; " +
 				"the last branch scan of payments/repos ended with ABORTED; 1 branch job(s) were deferred until a scan succeeds or rehydrateDeadline passes",
 		},
 		{
 			Tenant:  "search",
-			Reason:  v1alpha1.TeamReasonBranchScanFailed,
+			Reason:  v1alpha1.TenantReasonBranchScanFailed,
 			Message: "the last branch scan of search/app ended with FAILURE; 1 branch job(s) were deferred until a scan succeeds or rehydrateDeadline passes",
 		},
 	}
@@ -42,9 +42,9 @@ func TestBranchScanFailedWarnings(t *testing.T) {
 
 func TestBranchScanFailedAfter(t *testing.T) {
 	cell := &v1alpha1.CellStatus{Tenants: []string{"payments", "search"}}
-	stale := v1alpha1.TenantWarning{Tenant: "payments", Reason: v1alpha1.TeamReasonBranchScanFailed, Message: "old"}
-	other := v1alpha1.TenantWarning{Tenant: "payments", Reason: v1alpha1.TeamReasonItemsHeld, Message: "held"}
-	searchOld := v1alpha1.TenantWarning{Tenant: "search", Reason: v1alpha1.TeamReasonBranchScanFailed, Message: "search old"}
+	stale := v1alpha1.TenantWarning{Tenant: "payments", Reason: v1alpha1.TenantReasonBranchScanFailed, Message: "old"}
+	other := v1alpha1.TenantWarning{Tenant: "payments", Reason: v1alpha1.TenantReasonItemsHeld, Message: "held"}
+	searchOld := v1alpha1.TenantWarning{Tenant: "search", Reason: v1alpha1.TenantReasonBranchScanFailed, Message: "search old"}
 	existing := []v1alpha1.TenantWarning{stale, other, searchOld}
 	matched := map[string]bool{"payments": true}
 	ok := &mitev1.DesiredStateResult{RehydrationSuccess: true}
@@ -66,7 +66,7 @@ func TestBranchScanFailedAfter(t *testing.T) {
 		if got[1] != searchOld {
 			t.Errorf("search warning changed: %+v", got[1])
 		}
-		if got[2].Tenant != "payments" || got[2].Reason != v1alpha1.TeamReasonBranchScanFailed || got[2].Message == "old" {
+		if got[2].Tenant != "payments" || got[2].Reason != v1alpha1.TenantReasonBranchScanFailed || got[2].Message == "old" {
 			t.Errorf("payments warning not replaced: %+v", got[2])
 		}
 	})
@@ -103,10 +103,10 @@ func TestBranchScanFailedAfter(t *testing.T) {
 func TestPruneBranchScanFailedWarnings(t *testing.T) {
 	cell := &v1alpha1.CellStatus{
 		TenantWarnings: []v1alpha1.TenantWarning{
-			{Tenant: "gone", Reason: v1alpha1.TeamReasonBranchScanFailed, Message: "no entry"},
-			{Tenant: "idle", Reason: v1alpha1.TeamReasonBranchScanFailed, Message: "empty deferred"},
-			{Tenant: "deadline", Reason: v1alpha1.TeamReasonBranchScanFailed, Message: "deadline give-up"},
-			{Tenant: "gone", Reason: v1alpha1.TeamReasonItemsHeld, Message: "other reason stays"},
+			{Tenant: "gone", Reason: v1alpha1.TenantReasonBranchScanFailed, Message: "no entry"},
+			{Tenant: "idle", Reason: v1alpha1.TenantReasonBranchScanFailed, Message: "empty deferred"},
+			{Tenant: "deadline", Reason: v1alpha1.TenantReasonBranchScanFailed, Message: "deadline give-up"},
+			{Tenant: "gone", Reason: v1alpha1.TenantReasonItemsHeld, Message: "other reason stays"},
 		},
 		Rehydration: []v1alpha1.CellRehydrationEntry{
 			{Tenant: "idle"},
@@ -117,8 +117,8 @@ func TestPruneBranchScanFailedWarnings(t *testing.T) {
 	pruneBranchScanFailedWarnings(cell)
 
 	want := []v1alpha1.TenantWarning{
-		{Tenant: "deadline", Reason: v1alpha1.TeamReasonBranchScanFailed, Message: "deadline give-up"},
-		{Tenant: "gone", Reason: v1alpha1.TeamReasonItemsHeld, Message: "other reason stays"},
+		{Tenant: "deadline", Reason: v1alpha1.TenantReasonBranchScanFailed, Message: "deadline give-up"},
+		{Tenant: "gone", Reason: v1alpha1.TenantReasonItemsHeld, Message: "other reason stays"},
 	}
 	if !reflect.DeepEqual(cell.TenantWarnings, want) {
 		t.Errorf("pruned warnings = %+v, want %+v", cell.TenantWarnings, want)

@@ -94,13 +94,13 @@ func TestEffectiveAPICapabilities_ClusterWide(t *testing.T) {
 		},
 	}
 	controllers := []*v1alpha1.Controller{
-		{ObjectMeta: metav1.ObjectMeta{Name: "test-ctrl", Namespace: "team-a"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "test-ctrl", Namespace: "tenant-a"}},
 	}
 
 	r := testResolver(roles, bindings, controllers, false)
 	claims := &auth.Claims{Subject: "user1", Groups: []string{"platform-eng"}}
 
-	caps := r.EffectiveAPICapabilities(claims, "team-a", "test-ctrl")
+	caps := r.EffectiveAPICapabilities(claims, "tenant-a", "test-ctrl")
 
 	if !caps["controllers"]["read"] {
 		t.Error("expected controllers:read to be true")
@@ -131,30 +131,30 @@ func TestEffectiveAPICapabilities_NamespaceScoped(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "dev-team-a"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
-				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "team-a"}},
+				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "tenant-a"}},
 				RoleRef:  "developer",
 				Scope: &v1alpha1.VarroaRoleBindingScope{
-					Namespaces: []string{"team-a"},
+					Namespaces: []string{"tenant-a"},
 				},
 			},
 		},
 	}
 	controllers := []*v1alpha1.Controller{
-		{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "team-a"}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "team-b"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "tenant-a"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "tenant-b"}},
 	}
 
 	r := testResolver(roles, bindings, controllers, false)
-	claims := &auth.Claims{Subject: "user1", Groups: []string{"team-a"}}
+	claims := &auth.Claims{Subject: "user1", Groups: []string{"tenant-a"}}
 
 	// Should match in team-a
-	capsA := r.EffectiveAPICapabilities(claims, "team-a", "ctrl-a")
+	capsA := r.EffectiveAPICapabilities(claims, "tenant-a", "ctrl-a")
 	if !capsA["controllers"]["read"] {
 		t.Error("expected controllers:read to be true in team-a")
 	}
 
 	// Should NOT match in team-b
-	capsB := r.EffectiveAPICapabilities(claims, "team-b", "ctrl-b")
+	capsB := r.EffectiveAPICapabilities(claims, "tenant-b", "ctrl-b")
 	if len(capsB) > 0 {
 		t.Errorf("expected no capabilities in team-b, got %v", capsB)
 	}
@@ -175,7 +175,7 @@ func TestEffectiveAPICapabilities_LabelSelector(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "prod-binding"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
-				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "prod-team"}},
+				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "prod-tenant"}},
 				RoleRef:  "prod-access",
 				Scope: &v1alpha1.VarroaRoleBindingScope{
 					ControllerSelector: &metav1.LabelSelector{
@@ -195,7 +195,7 @@ func TestEffectiveAPICapabilities_LabelSelector(t *testing.T) {
 	}
 
 	r := testResolver(roles, bindings, controllers, false)
-	claims := &auth.Claims{Subject: "user1", Groups: []string{"prod-team"}}
+	claims := &auth.Claims{Subject: "user1", Groups: []string{"prod-tenant"}}
 
 	// Should match prod controller
 	capsProd := r.EffectiveAPICapabilities(claims, "infra", "prod-ctrl")
@@ -548,7 +548,7 @@ func TestEffectiveClusterAPICapabilities_ControllerScopedBinding(t *testing.T) {
 				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "ctrl-user"}},
 				RoleRef:  "ctrl-viewer",
 				Scope: &v1alpha1.VarroaRoleBindingScope{
-					Namespaces: []string{"team-a"},
+					Namespaces: []string{"tenant-a"},
 				},
 			},
 		},
@@ -586,7 +586,7 @@ func TestEffectiveClusterAPICapabilities_NamespaceScopedBinding(t *testing.T) {
 				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "ns-user"}},
 				RoleRef:  "ns-reader",
 				Scope: &v1alpha1.VarroaRoleBindingScope{
-					Namespaces: []string{"team-a"},
+					Namespaces: []string{"tenant-a"},
 				},
 			},
 		},
@@ -734,7 +734,7 @@ func TestEffectiveClusterAPICapabilities_SkipsScopedWhenAlsoHasClusterWide(t *te
 				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "mixed-user"}},
 				RoleRef:  "ctrl-writer",
 				Scope: &v1alpha1.VarroaRoleBindingScope{
-					Namespaces: []string{"team-a"},
+					Namespaces: []string{"tenant-a"},
 				},
 			},
 		},
@@ -786,7 +786,7 @@ func TestJenkinsAssignments(t *testing.T) {
 				},
 				RoleRef: "jenkins-admin",
 				Scope: &v1alpha1.VarroaRoleBindingScope{
-					Namespaces: []string{"team-a"},
+					Namespaces: []string{"tenant-a"},
 				},
 			},
 		},
@@ -802,8 +802,8 @@ func TestJenkinsAssignments(t *testing.T) {
 		},
 	}
 	controllers := []*v1alpha1.Controller{
-		{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "team-a"}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "team-b"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "tenant-a"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "tenant-b"}},
 	}
 
 	r := testResolver(roles, bindings, controllers, false)
@@ -862,16 +862,16 @@ func TestJenkinsAssignments_NoMatch(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "ns-scoped"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
-				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "team-a"}},
+				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "tenant-a"}},
 				RoleRef:  "some-role",
 				Scope: &v1alpha1.VarroaRoleBindingScope{
-					Namespaces: []string{"team-a"},
+					Namespaces: []string{"tenant-a"},
 				},
 			},
 		},
 	}
 	controllers := []*v1alpha1.Controller{
-		{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "team-b"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "tenant-b"}},
 	}
 
 	r := testResolver(roles, bindings, controllers, false)
@@ -1005,10 +1005,10 @@ func TestJenkinsAssignments_ScopeMatchWithLabelSelector(t *testing.T) {
 	}
 	controllers := []*v1alpha1.Controller{
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "staging-ctrl", Namespace: "team-a", Labels: map[string]string{"environment": "staging"}},
+			ObjectMeta: metav1.ObjectMeta{Name: "staging-ctrl", Namespace: "tenant-a", Labels: map[string]string{"environment": "staging"}},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "prod-ctrl", Namespace: "team-a", Labels: map[string]string{"environment": "production"}},
+			ObjectMeta: metav1.ObjectMeta{Name: "prod-ctrl", Namespace: "tenant-a", Labels: map[string]string{"environment": "production"}},
 		},
 	}
 
@@ -1051,8 +1051,8 @@ func TestJenkinsAssignments_MultipleSubjectsPerBinding(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "multi-binding"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
 				Subjects: []v1alpha1.SubjectRef{
-					{Kind: "Group", Name: "team-alpha"},
-					{Kind: "Group", Name: "team-beta"},
+					{Kind: "Group", Name: "tenant-alpha"},
+					{Kind: "Group", Name: "tenant-beta"},
 					{Kind: "User", Name: "lead-user"},
 				},
 				RoleRef: "multi-subject-role",
@@ -1253,55 +1253,55 @@ func TestJenkinsRoleAssignments_TenantSynthesis(t *testing.T) {
 		"com.cloudbees.plugins.credentials.CredentialsProvider.UseItem",
 	}
 
-	for _, team := range []string{"payments", "search"} {
+	for _, tenant := range []string{"payments", "search"} {
 		var item, agent *RoleAssignment
 		for i := range assignments {
 			switch assignments[i].RoleName {
-			case "varroa:tenant:" + team:
+			case "varroa:tenant:" + tenant:
 				item = &assignments[i]
-			case "varroa:tenant-agent:" + team:
+			case "varroa:tenant-agent:" + tenant:
 				agent = &assignments[i]
 			}
 		}
 
 		if item == nil {
-			t.Fatalf("expected synthesized varroa:tenant:%s assignment, got: %+v", team, assignments)
+			t.Fatalf("expected synthesized varroa:tenant:%s assignment, got: %+v", tenant, assignments)
 		}
 		if item.RoleType != "Item" {
-			t.Errorf("%s: expected RoleType Item, got %s", team, item.RoleType)
+			t.Errorf("%s: expected RoleType Item, got %s", tenant, item.RoleType)
 		}
-		wantPattern := "^" + team + "($|/.*)$"
+		wantPattern := "^" + tenant + "($|/.*)$"
 		if item.Pattern != wantPattern {
-			t.Errorf("%s: expected pattern %q, got %q", team, wantPattern, item.Pattern)
+			t.Errorf("%s: expected pattern %q, got %q", tenant, wantPattern, item.Pattern)
 		}
 		if len(item.Permissions) == 0 {
-			t.Errorf("%s: item role permission set must not be empty", team)
+			t.Errorf("%s: item role permission set must not be empty", tenant)
 		}
 		if !equalStringSets(item.Permissions, wantItemPerms) {
-			t.Errorf("%s: expected item permissions %v, got %v", team, wantItemPerms, item.Permissions)
+			t.Errorf("%s: expected item permissions %v, got %v", tenant, wantItemPerms, item.Permissions)
 		}
-		if len(item.Subjects) != 1 || item.Subjects[0].Kind != "Group" || item.Subjects[0].Name != "ROLE:varroa:tenant:"+team {
-			t.Errorf("%s: expected single subject Group:ROLE:varroa:tenant:%s, got %+v", team, team, item.Subjects)
+		if len(item.Subjects) != 1 || item.Subjects[0].Kind != "Group" || item.Subjects[0].Name != "ROLE:varroa:tenant:"+tenant {
+			t.Errorf("%s: expected single subject Group:ROLE:varroa:tenant:%s, got %+v", tenant, tenant, item.Subjects)
 		}
 
 		if agent == nil {
-			t.Fatalf("expected synthesized varroa:tenant-agent:%s assignment, got: %+v", team, assignments)
+			t.Fatalf("expected synthesized varroa:tenant-agent:%s assignment, got: %+v", tenant, assignments)
 		}
 		if agent.RoleType != "Agent" {
-			t.Errorf("%s: expected RoleType Agent, got %s", team, agent.RoleType)
+			t.Errorf("%s: expected RoleType Agent, got %s", tenant, agent.RoleType)
 		}
 		// A role-strategy agent pattern matches node names, never labels,
 		// so the role covers every node and the plugin's fence owns the
 		// per-tenant check.
 		wantAgentPattern := ".*"
 		if agent.Pattern != wantAgentPattern {
-			t.Errorf("%s: expected agent pattern %q, got %q", team, wantAgentPattern, agent.Pattern)
+			t.Errorf("%s: expected agent pattern %q, got %q", tenant, wantAgentPattern, agent.Pattern)
 		}
 		if len(agent.Permissions) != 1 || agent.Permissions[0] != "hudson.model.Computer.Build" {
-			t.Errorf("%s: expected exactly [hudson.model.Computer.Build], got %v", team, agent.Permissions)
+			t.Errorf("%s: expected exactly [hudson.model.Computer.Build], got %v", tenant, agent.Permissions)
 		}
-		if len(agent.Subjects) != 1 || agent.Subjects[0].Kind != "Group" || agent.Subjects[0].Name != "ROLE:varroa:tenant:"+team {
-			t.Errorf("%s: expected single subject Group:ROLE:varroa:tenant:%s, got %+v", team, team, agent.Subjects)
+		if len(agent.Subjects) != 1 || agent.Subjects[0].Kind != "Group" || agent.Subjects[0].Name != "ROLE:varroa:tenant:"+tenant {
+			t.Errorf("%s: expected single subject Group:ROLE:varroa:tenant:%s, got %+v", tenant, tenant, agent.Subjects)
 		}
 	}
 }
@@ -1347,15 +1347,15 @@ func TestGenerate_TenantSynthesisTwoTenants(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	for _, team := range []string{"payments", "search"} {
-		if !strings.Contains(yamlOut, "varroa:tenant:"+team) {
-			t.Errorf("expected YAML to contain 'varroa:tenant:%s', got:\n%s", team, yamlOut)
+	for _, tenant := range []string{"payments", "search"} {
+		if !strings.Contains(yamlOut, "varroa:tenant:"+tenant) {
+			t.Errorf("expected YAML to contain 'varroa:tenant:%s', got:\n%s", tenant, yamlOut)
 		}
-		if !strings.Contains(yamlOut, "varroa:tenant-agent:"+team) {
-			t.Errorf("expected YAML to contain 'varroa:tenant-agent:%s', got:\n%s", team, yamlOut)
+		if !strings.Contains(yamlOut, "varroa:tenant-agent:"+tenant) {
+			t.Errorf("expected YAML to contain 'varroa:tenant-agent:%s', got:\n%s", tenant, yamlOut)
 		}
-		if !strings.Contains(yamlOut, "ROLE:varroa:tenant:"+team) {
-			t.Errorf("expected YAML to contain 'ROLE:varroa:tenant:%s', got:\n%s", team, yamlOut)
+		if !strings.Contains(yamlOut, "ROLE:varroa:tenant:"+tenant) {
+			t.Errorf("expected YAML to contain 'ROLE:varroa:tenant:%s', got:\n%s", tenant, yamlOut)
 		}
 	}
 	if !strings.Contains(yamlOut, "Credentials/UseItem") {
@@ -1509,14 +1509,14 @@ func TestEffectivePermissionScopes_NamespaceScopedOnly(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "ns-binding"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
-				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "team-a"}},
+				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "tenant-a"}},
 				RoleRef:  "developer",
-				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"tenant-a"}},
 			},
 		},
 	}
 	r := testResolver(roles, bindings, nil, false)
-	claims := &auth.Claims{Subject: "user1", Groups: []string{"team-a"}}
+	claims := &auth.Claims{Subject: "user1", Groups: []string{"tenant-a"}}
 	ps := r.EffectivePermissionScopes(claims)
 
 	if len(ps.Global) != 0 {
@@ -1526,7 +1526,7 @@ func TestEffectivePermissionScopes_NamespaceScopedOnly(t *testing.T) {
 		t.Fatalf("expected 1 Scopes entry, got %d", len(ps.Scopes))
 	}
 	s := ps.Scopes[0]
-	if len(s.Namespaces) != 1 || s.Namespaces[0] != "team-a" {
+	if len(s.Namespaces) != 1 || s.Namespaces[0] != "tenant-a" {
 		t.Errorf("expected Namespaces=[team-a], got %v", s.Namespaces)
 	}
 	if s.HasControllerSelector {
@@ -1559,7 +1559,7 @@ func TestEffectivePermissionScopes_SelectorOnlyScope(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "sel-binding"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
-				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "prod-team"}},
+				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "prod-tenant"}},
 				RoleRef:  "prod-access",
 				Scope: &v1alpha1.VarroaRoleBindingScope{
 					ControllerSelector: &metav1.LabelSelector{
@@ -1570,7 +1570,7 @@ func TestEffectivePermissionScopes_SelectorOnlyScope(t *testing.T) {
 		},
 	}
 	r := testResolver(roles, bindings, nil, false)
-	claims := &auth.Claims{Subject: "user1", Groups: []string{"prod-team"}}
+	claims := &auth.Claims{Subject: "user1", Groups: []string{"prod-tenant"}}
 	ps := r.EffectivePermissionScopes(claims)
 
 	if len(ps.Scopes) != 1 {
@@ -1620,7 +1620,7 @@ func TestEffectivePermissionScopes_ClusterAndScopedBinding(t *testing.T) {
 			Spec: v1alpha1.VarroaRoleBindingSpec{
 				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "devs"}},
 				RoleRef:  "operator",
-				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"tenant-a"}},
 			},
 		},
 	}
@@ -1683,7 +1683,7 @@ func TestEffectivePermissionScopes_SameScopeDifferentRolesMerge(t *testing.T) {
 			Spec: v1alpha1.VarroaRoleBindingSpec{
 				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "user"}},
 				RoleRef:  "can-read",
-				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"tenant-a"}},
 			},
 		},
 		{
@@ -1691,7 +1691,7 @@ func TestEffectivePermissionScopes_SameScopeDifferentRolesMerge(t *testing.T) {
 			Spec: v1alpha1.VarroaRoleBindingSpec{
 				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "user"}},
 				RoleRef:  "can-write-bundles",
-				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"tenant-a"}},
 			},
 		},
 	}
@@ -1724,19 +1724,19 @@ func TestEffectivePermissionScopes_DifferentScopesTwoEntries(t *testing.T) {
 	}
 	bindings := []*v1alpha1.VarroaRoleBinding{
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "team-a-binding"},
+			ObjectMeta: metav1.ObjectMeta{Name: "tenant-a-binding"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
 				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "user"}},
 				RoleRef:  "viewer",
-				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"tenant-a"}},
 			},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "team-b-binding"},
+			ObjectMeta: metav1.ObjectMeta{Name: "tenant-b-binding"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
 				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "user"}},
 				RoleRef:  "viewer",
-				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-b"}},
+				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"tenant-b"}},
 			},
 		},
 	}
@@ -1747,11 +1747,11 @@ func TestEffectivePermissionScopes_DifferentScopesTwoEntries(t *testing.T) {
 	if len(ps.Scopes) != 2 {
 		t.Fatalf("expected 2 Scopes entries, got %d", len(ps.Scopes))
 	}
-	// Deterministic order: "team-a" sorts before "team-b".
-	if len(ps.Scopes[0].Namespaces) != 1 || ps.Scopes[0].Namespaces[0] != "team-a" {
+	// Deterministic order: "tenant-a" sorts before "tenant-b".
+	if len(ps.Scopes[0].Namespaces) != 1 || ps.Scopes[0].Namespaces[0] != "tenant-a" {
 		t.Errorf("expected first entry Namespaces=[team-a], got %v", ps.Scopes[0].Namespaces)
 	}
-	if len(ps.Scopes[1].Namespaces) != 1 || ps.Scopes[1].Namespaces[0] != "team-b" {
+	if len(ps.Scopes[1].Namespaces) != 1 || ps.Scopes[1].Namespaces[0] != "tenant-b" {
 		t.Errorf("expected second entry Namespaces=[team-b], got %v", ps.Scopes[1].Namespaces)
 	}
 }
@@ -1773,14 +1773,14 @@ func TestEffectivePermissionScopes_OperatorRoleScoped(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "ns-operator"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
-				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "team-a"}},
+				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "tenant-a"}},
 				RoleRef:  "operator",
-				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"tenant-a"}},
 			},
 		},
 	}
 	r := testResolver(roles, bindings, nil, false)
-	claims := &auth.Claims{Subject: "user1", Groups: []string{"team-a"}}
+	claims := &auth.Claims{Subject: "user1", Groups: []string{"tenant-a"}}
 	ps := r.EffectivePermissionScopes(claims)
 
 	// These caps must NOT appear in Global.
@@ -1818,14 +1818,14 @@ func TestEffectivePermissionScopes_DefaultReadNotFiredWhenScoped(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "ns-binding"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
-				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "team-a"}},
+				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "tenant-a"}},
 				RoleRef:  "viewer",
-				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"tenant-a"}},
 			},
 		},
 	}
 	r := testResolver(roles, bindings, nil, true) // defaultRead=true
-	claims := &auth.Claims{Subject: "user1", Groups: []string{"team-a"}}
+	claims := &auth.Claims{Subject: "user1", Groups: []string{"tenant-a"}}
 	ps := r.EffectivePermissionScopes(claims)
 
 	// Global should be empty — defaultRead fallback must NOT fire when buckets is non-empty.
@@ -1891,8 +1891,8 @@ func TestEffectivePermissionScopes_TenantScopesLandInDistinctBuckets(t *testing.
 // glob holding a byte the old \x1e/\x1f separator encoding relied on cannot
 // make two different tenant lists produce the same bucket key.
 func TestTenantScopesKey_NoSeparatorCollision(t *testing.T) {
-	a := []v1alpha1.TenantScope{{Name: "team-a", Jobs: []string{"x\x1fy"}}}
-	b := []v1alpha1.TenantScope{{Name: "team-a\x1fx", Jobs: []string{"y"}}}
+	a := []v1alpha1.TenantScope{{Name: "tenant-a", Jobs: []string{"x\x1fy"}}}
+	b := []v1alpha1.TenantScope{{Name: "tenant-a\x1fx", Jobs: []string{"y"}}}
 
 	ka := tenantScopesKey(a)
 	kb := tenantScopesKey(b)

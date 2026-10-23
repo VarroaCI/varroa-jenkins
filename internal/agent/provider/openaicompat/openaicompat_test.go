@@ -36,7 +36,7 @@ func TestToolCallsJoinedByIndex(t *testing.T) {
 	ts, _ := fakeServer(t, providertest.Turn{
 		Text: "checking",
 		ToolCalls: []providertest.ScriptCall{
-			{ID: "c1", Name: "list_runs", Arguments: json.RawMessage(`{"team":"acme"}`)},
+			{ID: "c1", Name: "list_runs", Arguments: json.RawMessage(`{"tenant":"acme"}`)},
 			{ID: "c2", Name: "get_run", Arguments: json.RawMessage(`{"run":"r1"}`)},
 		},
 	})
@@ -47,7 +47,7 @@ func TestToolCallsJoinedByIndex(t *testing.T) {
 	if len(resp.ToolCalls) != 2 || resp.ToolCalls[0].ID != "c1" || resp.ToolCalls[1].Name != "get_run" {
 		t.Fatalf("tool calls = %+v", resp.ToolCalls)
 	}
-	if string(resp.ToolCalls[0].Arguments) != `{"team":"acme"}` {
+	if string(resp.ToolCalls[0].Arguments) != `{"tenant":"acme"}` {
 		t.Fatalf("arguments = %s", resp.ToolCalls[0].Arguments)
 	}
 	if resp.Stop != provider.StopToolUse {

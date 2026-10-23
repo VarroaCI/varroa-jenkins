@@ -82,7 +82,7 @@ func writeTestServerWithVerbs(reader recordstore.Reader, mt transport.Transport,
 		Brood:             brood,
 		Authorizer:        authz,
 		RecordStore:       reader,
-		TenantResolver:    NewTeamTenantResolver(store, brood, authz),
+		TenantResolver:    NewTenantTenantResolver(store, brood, authz),
 		MiteRegistry:      mt,
 		Logger:            slog.Default(),
 		OperatorNamespace: "test-ns",
@@ -114,7 +114,7 @@ func doWriteRequest(path string, pathValues map[string]string, claims *auth.Clai
 func postCreateRun(t *testing.T, srv *Server, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	req := doWriteRequest("/pipelines/ci/jobs/svc/main/runs",
-		map[string]string{"team": "ci", "job": "svc/main"}, testClaims(), body)
+		map[string]string{"tenant": "ci", "job": "svc/main"}, testClaims(), body)
 	rec := httptest.NewRecorder()
 	srv.handleCreateRun(rec, req)
 	return rec
@@ -143,15 +143,15 @@ func uuidv7At(t time.Time) string {
 // --- Task 4.1: tenant narrowing for a write ---
 
 func TestSelectWriteTenant(t *testing.T) {
-	teamA := TenantRef{Cluster: "core", Tenant: "team-a", Folder: "team-a"}
-	teamB := TenantRef{Cluster: "hive", Tenant: "team-b", Folder: "team-b"}
+	tenantA := TenantRef{Cluster: "core", Tenant: "team-a", Folder: "team-a"}
+	tenantB := TenantRef{Cluster: "hive", Tenant: "team-b", Folder: "team-b"}
 	openA := TenantRef{Cluster: "core", Tenant: "open-a", Folder: ""}
 	openB := TenantRef{Cluster: "hive", Tenant: "open-b", Folder: ""}
 
 	cases := []struct {
 		name        string
 		refs        []TenantRef
-		team        string
+		tenant      string
 		jobPath     string
 		cluster     string
 		wantRef     TenantRef
@@ -161,26 +161,26 @@ func TestSelectWriteTenant(t *testing.T) {
 	}{
 		{
 			name:     "the long form already carries the tenant folder",
-			refs:     []TenantRef{teamA, teamB},
-			team:     "team-a",
+			refs:     []TenantRef{tenantA, tenantB},
+			tenant:   "team-a",
 			jobPath:  "team-a/checkout",
-			wantRef:  teamA,
+			wantRef:  tenantA,
 			wantPath: "team-a/checkout",
 		},
 		{
 			name:     "the short form omits the tenant folder",
-			refs:     []TenantRef{teamA},
-			team:     "team-a",
+			refs:     []TenantRef{tenantA},
+			tenant:   "team-a",
 			jobPath:  "checkout",
-			wantRef:  teamA,
+			wantRef:  tenantA,
 			wantPath: "team-a/checkout",
 		},
 		{
-			name:     "the short form picks the candidate matching team, not the first one",
-			refs:     []TenantRef{teamA, teamB},
-			team:     "team-b",
+			name:     "the short form picks the candidate matching tenant, not the first one",
+			refs:     []TenantRef{tenantA, tenantB},
+			tenant:   "team-b",
 			jobPath:  "checkout",
-			wantRef:  teamB,
+			wantRef:  tenantB,
 			wantPath: "team-b/checkout",
 		},
 		{
@@ -198,17 +198,17 @@ func TestSelectWriteTenant(t *testing.T) {
 		},
 		{
 			name:        "no surviving tenant answers 404 naming the expected shape",
-			refs:        []TenantRef{teamA, teamB},
-			team:        "team-c",
+			refs:        []TenantRef{tenantA, tenantB},
+			tenant:      "team-c",
 			jobPath:     "team-c/checkout",
 			wantStatus:  http.StatusNotFound,
-			wantMessage: `no tenant hosts job path "team-c/checkout"; expected <team>/<job path below the tenant folder>`,
+			wantMessage: `no tenant hosts job path "team-c/checkout"; expected <tenant>/<job path below the tenant folder>`,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ref, jobPath, serr := selectWriteTenant(tc.refs, tc.team, tc.jobPath, tc.cluster)
+			ref, jobPath, serr := selectWriteTenant(tc.refs, tc.tenant, tc.jobPath, tc.cluster)
 			if tc.wantStatus != 0 {
 				if serr == nil {
 					t.Fatalf("want status %d, got a resolved ref %+v", tc.wantStatus, ref)
@@ -264,7 +264,7 @@ func TestParseClientToken(t *testing.T) {
 	}
 }
 
-// --- Task 4.3: POST /pipelines/{team}/jobs/{job}/runs ---
+// --- Task 4.3: POST /pipelines/{tenant}/jobs/{job}/runs ---
 
 func TestHandleCreateRun_PublishesTheSuppliedToken(t *testing.T) {
 	mt := &fakeTriggerTransport{}
@@ -306,19 +306,19 @@ func TestHandleCreateRun_PublishesTheSuppliedToken(t *testing.T) {
 	}
 }
 
-// placedTeamWriteServer assembles a *Server wired for a placed pipelines
-// Team named "payments" whose folder is "payments", granted read and
+// placedTenantWriteServer assembles a *Server wired for a placed pipelines
+// Tenant named "payments" whose folder is "payments", granted read and
 // write, over the caller's mite transport. It mirrors writeTestServer
-// but exercises the placed-Team path selectWriteTenant's short-form fix
+// but exercises the placed-Tenant path selectWriteTenant's short-form fix
 // covers, rather than a folder-less synthetic controller tenant.
-func placedTeamWriteServer(t *testing.T, mt transport.Transport) *Server {
+func placedTenantWriteServer(t *testing.T, mt transport.Transport) *Server {
 	t.Helper()
 	client := newFakeResourceClient()
 	client.controllers = map[string]*v1alpha1.Controller{
 		"cell-a": {ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "varroa-cells"}},
 	}
 	store := storeFromFake(client)
-	seedTeam(t, store, placedTeamObject("payments", "core", "varroa-cells", "cell-a"))
+	seedTenant(t, store, placedTenantObject("payments", "core", "varroa-cells", "cell-a"))
 	authz := pipelineGrantAuthorizer([]string{"read", "write"}, "payments")
 	brood := newFakeBrood(client)
 	deps := &Dependencies{
@@ -327,7 +327,7 @@ func placedTeamWriteServer(t *testing.T, mt transport.Transport) *Server {
 		Brood:             brood,
 		Authorizer:        authz,
 		RecordStore:       newFakeRecordReader(),
-		TenantResolver:    NewTeamTenantResolver(store, brood, authz),
+		TenantResolver:    NewTenantTenantResolver(store, brood, authz),
 		MiteRegistry:      mt,
 		Logger:            slog.Default(),
 		OperatorNamespace: "test-ns",
@@ -336,7 +336,7 @@ func placedTeamWriteServer(t *testing.T, mt transport.Transport) *Server {
 }
 
 // TestHandleCreateRun_AcceptsBothJobPathForms asserts POST
-// /pipelines/{team}/jobs/{job}/runs resolves a placed Team's tenant, and
+// /pipelines/{tenant}/jobs/{job}/runs resolves a placed Tenant's tenant, and
 // publishes the same folder-qualified job path, whether the caller
 // repeats the tenant folder (the long form) or omits it (the short
 // form).
@@ -351,9 +351,9 @@ func TestHandleCreateRun_AcceptsBothJobPathForms(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			mt := &fakeTriggerTransport{}
-			srv := placedTeamWriteServer(t, mt)
+			srv := placedTenantWriteServer(t, mt)
 			req := doWriteRequest("/pipelines/payments/jobs/"+tc.job+"/runs",
-				map[string]string{"team": "payments", "job": tc.job}, testClaims(), createRunRequest{})
+				map[string]string{"tenant": "payments", "job": tc.job}, testClaims(), createRunRequest{})
 			rec := httptest.NewRecorder()
 			srv.handleCreateRun(rec, req)
 			if rec.Code != http.StatusAccepted {
@@ -372,9 +372,9 @@ func TestHandleCreateRun_AcceptsBothJobPathForms(t *testing.T) {
 }
 
 // fixedTenantResolver answers Resolve with a fixed ref list for any
-// team, so a handler test can drive selectWriteTenant's own decisions
+// tenant, so a handler test can drive selectWriteTenant's own decisions
 // (including the 404 no candidate can reach) without depending on
-// TeamTenantResolver's folder-equals-team invariant.
+// TenantTenantResolver's folder-equals-tenant invariant.
 type fixedTenantResolver struct {
 	refs []TenantRef
 }
@@ -402,7 +402,7 @@ func TestHandleCreateRun_UnresolvedJobPathNamesTheExpectedShape(t *testing.T) {
 	srv := NewServer(deps)
 
 	req := doWriteRequest("/pipelines/payments/jobs/other-team/checkout/runs",
-		map[string]string{"team": "payments", "job": "other-team/checkout"}, testClaims(), createRunRequest{})
+		map[string]string{"tenant": "payments", "job": "other-team/checkout"}, testClaims(), createRunRequest{})
 	rec := httptest.NewRecorder()
 	srv.handleCreateRun(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -414,7 +414,7 @@ func TestHandleCreateRun_UnresolvedJobPathNamesTheExpectedShape(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	const wantSubstring = "expected <team>/<job path below the tenant folder>"
+	const wantSubstring = "expected <tenant>/<job path below the tenant folder>"
 	if !strings.Contains(body.Error, wantSubstring) {
 		t.Fatalf("error = %q, want it to contain %q", body.Error, wantSubstring)
 	}

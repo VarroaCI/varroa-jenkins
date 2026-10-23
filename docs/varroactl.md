@@ -65,7 +65,7 @@ A context stores the server, API key, default namespace, and default cluster. It
 
 ```bash
 varroactl config set-context production \
-  --server https://varroa.example.com --namespace team-a --cluster core
+  --server https://varroa.example.com --namespace tenant-a --cluster core
 varroactl config use-context production
 varroactl config get-contexts
 varroactl config current-context
@@ -77,37 +77,37 @@ Use `--context`, `--server`, `--namespace`, or `--cluster` for one command witho
 
 ```bash
 # Inspect controllers.
-varroactl get controllers -n team-a
-varroactl describe controller team-a/controller-a
+varroactl get controllers -n tenant-a
+varroactl describe controller tenant-a/controller-a
 
 # Apply a controller definition and observe it.
 varroactl create controller -f controller.yaml
-varroactl watch -n team-a
+varroactl watch -n tenant-a
 
 # Perform lifecycle work.
-varroactl restart controller team-a/controller-a
-varroactl power controller team-a/controller-a stopped
+varroactl restart controller tenant-a/controller-a
+varroactl power controller tenant-a/controller-a stopped
 
 # Preview a fleet operation before creating it.
 varroactl broodop run restart --selector tier=canary --dry-run
 
 # Trigger a pipeline run and list its builds.
-varroactl run team-a/checkout-api --param ENVIRONMENT=staging
-varroactl builds team-a/checkout-api
+varroactl run tenant-a/checkout-api --param ENVIRONMENT=staging
+varroactl builds tenant-a/checkout-api
 
 # Check a pipeline template marker before it is committed.
-varroactl lint marker --team team-a --marker .varroa/pipeline.yaml
+varroactl lint marker --tenant tenant-a --marker .varroa/pipeline.yaml
 
 # List the fleet locks, then force-release a releasing lock that no live pod holds.
-varroactl locks list --team team-a -o wide
-varroactl locks release team-a/deploy-prod --run <run id> --reason "<why>"
+varroactl locks list --tenant tenant-a -o wide
+varroactl locks release tenant-a/deploy-prod --run <run id> --reason "<why>"
 ```
 
 Use [Controller lifecycle operations](operations/lifecycle.md) for state changes, [Brood operations](operations/brood-operations.md) for fleet actions, [Brood schedules](operations/brood-schedules.md) for recurring work, and the [pipelines tutorial](tutorials/pipelines.md) to trigger a run, read a log, and download an artifact.
 
-`run` splits `<team>/<job>` on the first slash. `<job>` may omit or repeat the team's folder segment; both forms reach the same job. It percent-encodes the job path, so slashes reach the server intact. `--param` is repeatable and takes `key=value`. A repeated key is a usage error. `run` mints one client token per invocation, so a retried request runs one build. It prints the run identifier on success. Add `--follow` to wait for the run to appear and stream its log until the run ends. The command exits non-zero when the run's result is not a success.
+`run` splits `<tenant>/<job>` on the first slash. `<job>` may omit or repeat the tenant's folder segment; both forms reach the same job. It percent-encodes the job path, so slashes reach the server intact. `--param` is repeatable and takes `key=value`. A repeated key is a usage error. `run` mints one client token per invocation, so a retried request runs one build. It prints the run identifier on success. Add `--follow` to wait for the run to appear and stream its log until the run ends. The command exits non-zero when the run's result is not a success.
 
-`lint marker` reads a [pipeline template](config/pipeline-templates.md) marker file, resolves it against the named team's delivered templates, and prints each finding's severity, path, and message. `--marker` defaults to `.varroa/pipeline.yaml`. The command exits zero when the marker is valid and non-zero otherwise, so a pre-commit hook or a pipeline step can gate on it.
+`lint marker` reads a [pipeline template](config/pipeline-templates.md) marker file, resolves it against the named tenant's delivered templates, and prints each finding's severity, path, and message. `--marker` defaults to `.varroa/pipeline.yaml`. The command exits zero when the marker is valid and non-zero otherwise, so a pre-commit hook or a pipeline step can gate on it.
 
 ## Work across clusters
 
@@ -215,8 +215,8 @@ The `runner` command group adds the registration workflow: `runner register` cre
 and `runner delete` are thin aliases over the noun verbs.
 
 ```bash
-varroactl runner register win-1 --tenant team-a --remote-fs /var/j
-varroactl runner list --tenant team-a
+varroactl runner register win-1 --tenant tenant-a --remote-fs /var/j
+varroactl runner list --tenant tenant-a
 varroactl runner delete win-1
 ```
 

@@ -33,7 +33,7 @@ func jenkinsRoleBindingDeps(t *testing.T) *api.Dependencies {
 					Type:      "Folder",
 					Folder:    "team-a/project-x",
 					Propagate: "Subtree",
-					Pattern:   "team-.*",
+					Pattern:   "tenant-.*",
 				},
 			},
 		},
@@ -117,7 +117,7 @@ func TestSummarizeJenkinsRoleBinding_DropsSubjectsKeepsCount(t *testing.T) {
 				Type:      "Folder",
 				Folder:    "team-a/project-x",
 				Propagate: "Subtree",
-				Pattern:   "team-.*",
+				Pattern:   "tenant-.*",
 			},
 		},
 	})
@@ -128,7 +128,7 @@ func TestSummarizeJenkinsRoleBinding_DropsSubjectsKeepsCount(t *testing.T) {
 		t.Errorf("scope not projected: type=%q folder=%q", got.ScopeType, got.ScopeFolder)
 	}
 	b, _ := json.Marshal(got)
-	for _, dropped := range []string{"alice", "devs", "jenkins", "Subtree", "team-.*"} {
+	for _, dropped := range []string{"alice", "devs", "jenkins", "Subtree", "tenant-.*"} {
 		if strings.Contains(string(b), dropped) {
 			t.Errorf("summary still carries dropped %q: %s", dropped, b)
 		}
@@ -187,7 +187,7 @@ func TestListJenkinsRoleBindings_DefaultsToSummary(t *testing.T) {
 	}
 
 	b, _ := json.Marshal(items)
-	for _, dropped := range []string{"alice", "devs", "jenkins", "Subtree", "team-.*"} {
+	for _, dropped := range []string{"alice", "devs", "jenkins", "Subtree", "tenant-.*"} {
 		if strings.Contains(string(b), dropped) {
 			t.Errorf("list summary still carries dropped %q: %s", dropped, b)
 		}

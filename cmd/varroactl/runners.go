@@ -39,7 +39,7 @@ var runnersNounOpts = crdNounOpts{
 
 // addRunnerNoun registers the "runners" CRD noun (get/describe/create/edit/
 // patch/delete) through the generated client. runners is cluster-scoped
-// with no cluster segment: the BFF path is /api/v1/runners, like Teams.
+// with no cluster segment: the BFF path is /api/v1/runners, like Tenants.
 func addRunnerNoun(v *verbCommands) {
 	addCRDNoun(v, runnersNounOpts)
 }
@@ -54,7 +54,7 @@ func runnerColumns(item map[string]any) []string {
 	tenant := ""
 	launcher := ""
 	if spec, ok := item["spec"].(map[string]any); ok {
-		if t, ok := spec["team"].(string); ok {
+		if t, ok := spec["tenant"].(string); ok {
 			tenant = t
 		}
 		if l, ok := spec["launcher"].(string); ok {
@@ -92,7 +92,7 @@ func runnerColumns(item map[string]any) []string {
 func runnerNounList(c *client.ClientWithResponses, cmd *cobra.Command) ([]map[string]any, error) {
 	params := &client.ListRunnersParams{}
 	if tenant, _ := cmd.Flags().GetString("tenant"); tenant != "" {
-		params.Team = &tenant
+		params.Tenant = &tenant
 	}
 
 	resp, err := c.ListRunnersWithResponse(cmd.Context(), params)

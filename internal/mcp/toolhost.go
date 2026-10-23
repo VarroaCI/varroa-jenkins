@@ -29,7 +29,7 @@ func NewInProcessHost(s *server.MCPServer, claims *auth.Claims) *InProcessHost {
 }
 
 // NewInProcessHostWithOrigin is NewInProcessHost for a caller that stamps its
-// own origin, such as a Team agent session.
+// own origin, such as a Tenant agent session.
 func NewInProcessHostWithOrigin(s *server.MCPServer, claims *auth.Claims, origin string) *InProcessHost {
 	return &InProcessHost{srv: s, claims: claims, origin: origin}
 }

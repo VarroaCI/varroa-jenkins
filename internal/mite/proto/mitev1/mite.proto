@@ -449,7 +449,7 @@ message JenkinsActivityEvent {
   string type         = 1;
   string actor        = 2;   // Jenkins user id/email that triggered the event ("" if system/anonymous)
   string message      = 3;   // human-readable summary
-  string item_path    = 4;   // full job/folder path, e.g. "team-a/folder/job"
+  string item_path    = 4;   // full job/folder path, e.g. "tenant-a/folder/job"
   int64  build_number = 5;   // 0 when not a build event
   string result       = 6;   // SUCCESS|FAILURE|UNSTABLE|ABORTED|NOT_BUILT; "" unless build.completed
   string url          = 7;   // Jenkins job/build URL (may be relative to the controller root)

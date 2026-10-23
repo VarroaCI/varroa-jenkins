@@ -13,7 +13,7 @@ import (
 // cluster-wide binding for each built-in role. operator holds both verbs,
 // admin holds both through its wildcard, and developer and viewer hold
 // neither: CellPool.status.tenants lists every tenant of the pool, and the
-// Teams API is admin-only.
+// Tenants API is admin-only.
 func TestCanCellPools_BuiltinRoleMatrix(t *testing.T) {
 	cases := []struct {
 		role       string

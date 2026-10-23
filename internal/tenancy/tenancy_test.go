@@ -214,7 +214,7 @@ func TestEnsure(t *testing.T) {
 	t.Run("create absent", func(t *testing.T) {
 		f := newFakeNS()
 		c := NewClassifier(f, NewManagedSet("ns-a", ""))
-		r, err := c.Ensure(ctx, "ns-a", map[string]string{"team": "alpha"})
+		r, err := c.Ensure(ctx, "ns-a", map[string]string{"tenant": "alpha"})
 		if err != nil {
 			t.Fatalf("Ensure: %v", err)
 		}
@@ -229,8 +229,8 @@ func TestEnsure(t *testing.T) {
 		}
 		// Verify label was set.
 		ns, _ := f.GetNamespace(ctx, "ns-a")
-		if ns.Labels["team"] != "alpha" {
-			t.Errorf("expected label team=alpha, got %v", ns.Labels)
+		if ns.Labels["tenant"] != "alpha" {
+			t.Errorf("expected label tenant=alpha, got %v", ns.Labels)
 		}
 	})
 
@@ -238,7 +238,7 @@ func TestEnsure(t *testing.T) {
 		f := newFakeNS()
 		f.store["ns-a"] = map[string]string{"existing": "keep"}
 		c := NewClassifier(f, NewManagedSet("ns-a", ""))
-		r, err := c.Ensure(ctx, "ns-a", map[string]string{"team": "alpha"})
+		r, err := c.Ensure(ctx, "ns-a", map[string]string{"tenant": "alpha"})
 		if err != nil {
 			t.Fatalf("Ensure: %v", err)
 		}
@@ -249,8 +249,8 @@ func TestEnsure(t *testing.T) {
 		if ns.Labels["existing"] != "keep" {
 			t.Errorf("expected pre-existing label 'existing=keep' preserved, got %v", ns.Labels)
 		}
-		if ns.Labels["team"] != "alpha" {
-			t.Errorf("expected label team=alpha, got %v", ns.Labels)
+		if ns.Labels["tenant"] != "alpha" {
+			t.Errorf("expected label tenant=alpha, got %v", ns.Labels)
 		}
 	})
 
@@ -258,7 +258,7 @@ func TestEnsure(t *testing.T) {
 		f := newFakeNS()
 		f.store["ns-other"] = map[string]string{"env": "prod"}
 		c := NewClassifier(f, NewManagedSet("ns-a", ""))
-		r, err := c.Ensure(ctx, "ns-other", map[string]string{"team": "beta"})
+		r, err := c.Ensure(ctx, "ns-other", map[string]string{"tenant": "beta"})
 		if err != nil {
 			t.Fatalf("Ensure: %v", err)
 		}
@@ -278,7 +278,7 @@ func TestEnsure(t *testing.T) {
 		f.store["ns-race"] = map[string]string{"existing": "keep"}
 		f.raceNS = "ns-race" // CreateNamespace will return AlreadyExists once
 		c := NewClassifier(f, NewManagedSet("ns-race", ""))
-		r, err := c.Ensure(ctx, "ns-race", map[string]string{"team": "gamma"})
+		r, err := c.Ensure(ctx, "ns-race", map[string]string{"tenant": "gamma"})
 		if err != nil {
 			t.Fatalf("Ensure race: %v", err)
 		}
@@ -289,8 +289,8 @@ func TestEnsure(t *testing.T) {
 		if ns.Labels["existing"] != "keep" {
 			t.Errorf("expected pre-existing label preserved in race, got %v", ns.Labels)
 		}
-		if ns.Labels["team"] != "gamma" {
-			t.Errorf("expected team=gamma merged in race, got %v", ns.Labels)
+		if ns.Labels["tenant"] != "gamma" {
+			t.Errorf("expected tenant=gamma merged in race, got %v", ns.Labels)
 		}
 	})
 
@@ -304,7 +304,7 @@ func TestEnsure(t *testing.T) {
 		// This test documents that coverage is in Classify's general contract.
 		f := newFakeNS()
 		c := NewClassifier(f, NewManagedSet("new-ns", ""))
-		r, err := c.Ensure(ctx, "new-ns", map[string]string{"team": "delta"})
+		r, err := c.Ensure(ctx, "new-ns", map[string]string{"tenant": "delta"})
 		if err != nil {
 			t.Fatalf("Ensure: %v", err)
 		}

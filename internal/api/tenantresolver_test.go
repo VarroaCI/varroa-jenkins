@@ -36,7 +36,7 @@ func pipelineBinding(name string, tenants ...string) *v1alpha1.VarroaRoleBinding
 }
 
 // resolverAuthorizer builds an Authorizer granting pipelines read+write on
-// the named placed-Team tenants (rbac.TenantTeam kind).
+// the named placed-Tenant tenants (rbac.TenantTenant kind).
 func resolverAuthorizer(tenants ...string) *Authorizer {
 	bindings := []*v1alpha1.VarroaRoleBinding{pipelineBinding("b", tenants...)}
 	return NewAuthorizer(testResolver(pipelinesRoles(), bindings), false)
@@ -58,12 +58,12 @@ func namespaceAuthorizer(namespaces ...string) *Authorizer {
 	return NewAuthorizer(testResolver(pipelinesRoles(), []*v1alpha1.VarroaRoleBinding{binding}), false)
 }
 
-// placedTeamObject builds the unstructured Team object design D1 step 1
+// placedTenantObject builds the unstructured Tenant object design D1 step 1
 // reads: spec.pipelines present, and status.placement naming the cell.
-func placedTeamObject(name, cluster, cellNamespace, cell string) *unstructured.Unstructured {
+func placedTenantObject(name, cluster, cellNamespace, cell string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "varroa.dev/v1alpha1",
-		"kind":       "Team",
+		"kind":       "Tenant",
 		"metadata":   map[string]any{"name": name},
 		"spec": map[string]any{
 			"namespaces": []any{cellNamespace},
@@ -79,44 +79,44 @@ func placedTeamObject(name, cluster, cellNamespace, cell string) *unstructured.U
 	}}
 }
 
-// placedTeamObjectWithBundle extends placedTeamObject with
-// spec.pipelines.composedBundleRef, for a placed Team whose own tenant
+// placedTenantObjectWithBundle extends placedTenantObject with
+// spec.pipelines.composedBundleRef, for a placed Tenant whose own tenant
 // bundle, not the cell's, delivers its pipeline templates (design D13).
-func placedTeamObjectWithBundle(name, cluster, cellNamespace, cell, bundleName, bundleNamespace string) *unstructured.Unstructured {
-	obj := placedTeamObject(name, cluster, cellNamespace, cell)
+func placedTenantObjectWithBundle(name, cluster, cellNamespace, cell, bundleNamespace string) *unstructured.Unstructured {
+	obj := placedTenantObject(name, cluster, cellNamespace, cell)
 	_ = unstructured.SetNestedMap(obj.Object, map[string]any{
-		"name":      bundleName,
+		"name":      "bundle-tenant",
 		"namespace": bundleNamespace,
 	}, "spec", "pipelines", "composedBundleRef")
 	return obj
 }
 
-// unplacedTeamObject builds a Team object carrying neither spec.pipelines
+// unplacedTenantObject builds a Tenant object carrying neither spec.pipelines
 // nor status.placement.cell, so step 2 fans out over spec.namespaces.
-func unplacedTeamObject(name string, namespaces ...string) *unstructured.Unstructured {
+func unplacedTenantObject(name string, namespaces ...string) *unstructured.Unstructured {
 	nsIface := make([]any, len(namespaces))
 	for i, ns := range namespaces {
 		nsIface[i] = ns
 	}
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "varroa.dev/v1alpha1",
-		"kind":       "Team",
+		"kind":       "Tenant",
 		"metadata":   map[string]any{"name": name},
 		"spec":       map[string]any{"namespaces": nsIface},
 	}}
 }
 
-// seedTeam stores a Team object as given, status included, through the
+// seedTenant stores a Tenant object as given, status included, through the
 // unstructured seam. The typed Seed helper is not used, because it cannot
 // carry the raw spec.pipelines and status.placement fixtures these tests need.
-func seedTeam(t *testing.T, store *crdstore.Fake, obj *unstructured.Unstructured) {
+func seedTenant(t *testing.T, store *crdstore.Fake, obj *unstructured.Unstructured) {
 	t.Helper()
-	gvr, err := crdstore.GVRFor[v1alpha1.Team]()
+	gvr, err := crdstore.GVRFor[v1alpha1.Tenant]()
 	if err != nil {
-		t.Fatalf("GVRFor[Team]: %v", err)
+		t.Fatalf("GVRFor[Tenant]: %v", err)
 	}
 	if err := store.SeedObject(gvr, obj); err != nil {
-		t.Fatalf("seed team %q: %v", obj.GetName(), err)
+		t.Fatalf("seed tenant %q: %v", obj.GetName(), err)
 	}
 }
 
@@ -139,7 +139,7 @@ func (f fakeResolverBrood) ListAll(context.Context, string, string) ([]ClusterCo
 }
 
 // failListAllBrood fails the test if ListAll is called. Step 1 (a placed
-// Team) SHALL run no brood-index lookup.
+// Tenant) SHALL run no brood-index lookup.
 type failListAllBrood struct {
 	Brood
 	t *testing.T
@@ -147,19 +147,19 @@ type failListAllBrood struct {
 
 func (f failListAllBrood) ListAll(context.Context, string, string) ([]ClusterController, []ClusterFanoutStatus, error) {
 	f.t.Helper()
-	f.t.Fatal("ListAll must not be called resolving a placed Team")
+	f.t.Fatal("ListAll must not be called resolving a placed Tenant")
 	return nil, nil, nil
 }
 
 // --------------------------------------------------------------------------
-// Step 1: a placed Team resolves to one tenant, with no brood-index lookup.
+// Step 1: a placed Tenant resolves to one tenant, with no brood-index lookup.
 // --------------------------------------------------------------------------
 
-func TestTenantResolver_Step1_PlacedTeamResolvesToOneTenant(t *testing.T) {
+func TestTenantResolver_Step1_PlacedTenantResolvesToOneTenant(t *testing.T) {
 	store := crdstore.NewFake()
-	seedTeam(t, store, placedTeamObject("payments", "core", "varroa-cells", "cell-a"))
+	seedTenant(t, store, placedTenantObject("payments", "core", "varroa-cells", "cell-a"))
 
-	resolver := NewTeamTenantResolver(store, failListAllBrood{t: t}, resolverAuthorizer("payments"))
+	resolver := NewTenantTenantResolver(store, failListAllBrood{t: t}, resolverAuthorizer("payments"))
 
 	refs, err := resolver.Resolve(context.Background(), resolverClaims, "payments")
 	if err != nil {
@@ -168,27 +168,27 @@ func TestTenantResolver_Step1_PlacedTeamResolvesToOneTenant(t *testing.T) {
 	if len(refs) != 1 {
 		t.Fatalf("got %d refs, want 1", len(refs))
 	}
-	want := TenantRef{Cluster: "core", Namespace: "varroa-cells", Controller: "cell-a", Tenant: "payments", Team: "payments", Folder: "payments"}
+	want := TenantRef{Cluster: "core", Namespace: "varroa-cells", Controller: "cell-a", Tenant: "payments", TenantName: "payments", Folder: "payments"}
 	if refs[0] != want {
 		t.Errorf("got %+v, want %+v", refs[0], want)
 	}
 }
 
 // --------------------------------------------------------------------------
-// Step 2: a Team with no placement fans out over its namespaces' controllers.
-// This also covers "a Team object that carries neither placement path".
+// Step 2: a Tenant with no placement fans out over its namespaces' controllers.
+// This also covers "a Tenant object that carries neither placement path".
 // --------------------------------------------------------------------------
 
-func TestTenantResolver_Step2_UnplacedTeamFansOutOverNamespaces(t *testing.T) {
+func TestTenantResolver_Step2_UnplacedTenantFansOutOverNamespaces(t *testing.T) {
 	store := crdstore.NewFake()
-	seedTeam(t, store, unplacedTeamObject("payments", "team-pay"))
+	seedTenant(t, store, unplacedTenantObject("payments", "team-pay"))
 
 	brood := fakeResolverBrood{controllers: []ClusterController{
 		clusterController("core", "team-pay", "svc-a"),
 		clusterController("core", "team-pay", "svc-b"),
 		clusterController("core", "other-ns", "svc-c"), // outside spec.namespaces
 	}}
-	resolver := NewTeamTenantResolver(store, brood, namespaceAuthorizer("team-pay"))
+	resolver := NewTenantTenantResolver(store, brood, namespaceAuthorizer("team-pay"))
 
 	refs, err := resolver.Resolve(context.Background(), resolverClaims, "payments")
 	if err != nil {
@@ -210,15 +210,15 @@ func TestTenantResolver_Step2_UnplacedTeamFansOutOverNamespaces(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// Step 3: a controller with no Team is its own tenant.
+// Step 3: a controller with no Tenant is its own tenant.
 // --------------------------------------------------------------------------
 
-func TestTenantResolver_Step3_ControllerWithNoTeamIsItsOwnTenant(t *testing.T) {
+func TestTenantResolver_Step3_ControllerWithNoTenantIsItsOwnTenant(t *testing.T) {
 	store := crdstore.NewFake()
 	brood := fakeResolverBrood{controllers: []ClusterController{
 		clusterController("core", "default", "ci"),
 	}}
-	resolver := NewTeamTenantResolver(store, brood, namespaceAuthorizer("default"))
+	resolver := NewTenantTenantResolver(store, brood, namespaceAuthorizer("default"))
 
 	refs, err := resolver.Resolve(context.Background(), resolverClaims, "ci")
 	if err != nil {
@@ -227,7 +227,7 @@ func TestTenantResolver_Step3_ControllerWithNoTeamIsItsOwnTenant(t *testing.T) {
 	if len(refs) != 1 {
 		t.Fatalf("got %d refs, want 1", len(refs))
 	}
-	want := TenantRef{Cluster: "core", Namespace: "default", Controller: "ci", Tenant: "default/ci", Team: "ci", Folder: ""}
+	want := TenantRef{Cluster: "core", Namespace: "default", Controller: "ci", Tenant: "default/ci", TenantName: "ci", Folder: ""}
 	if refs[0] != want {
 		t.Errorf("got %+v, want %+v", refs[0], want)
 	}
@@ -243,7 +243,7 @@ func TestTenantResolver_Step4_AmbiguousControllerNameIs409(t *testing.T) {
 		clusterController("core", "default", "ci"),
 		clusterController("hive-b", "default", "ci"),
 	}}
-	resolver := NewTeamTenantResolver(store, brood, namespaceAuthorizer("default"))
+	resolver := NewTenantTenantResolver(store, brood, namespaceAuthorizer("default"))
 
 	_, err := resolver.Resolve(context.Background(), resolverClaims, "ci")
 	var serr *ServiceError
@@ -259,46 +259,46 @@ func TestTenantResolver_Step4_AmbiguousControllerNameIs409(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// Step 5: the merged 404, for an absent team and for an unreadable one.
+// Step 5: the merged 404, for an absent tenant and for an unreadable one.
 // --------------------------------------------------------------------------
 
-func TestTenantResolver_Step5_AbsentTeamIs404(t *testing.T) {
+func TestTenantResolver_Step5_AbsentTenantIs404(t *testing.T) {
 	store := crdstore.NewFake()
 	brood := fakeResolverBrood{}
-	resolver := NewTeamTenantResolver(store, brood, namespaceAuthorizer())
+	resolver := NewTenantTenantResolver(store, brood, namespaceAuthorizer())
 
 	_, err := resolver.Resolve(context.Background(), resolverClaims, "ghost")
 	assertNotFound(t, err)
 }
 
-func TestTenantResolver_Step5_UnreadableTeamIs404(t *testing.T) {
+func TestTenantResolver_Step5_UnreadableTenantIs404(t *testing.T) {
 	store := crdstore.NewFake()
 	brood := fakeResolverBrood{controllers: []ClusterController{
 		clusterController("core", "default", "ci"),
 	}}
 	// No tenant read grant: the candidate resolves, but the read check
-	// admits nothing, and this must read exactly like an absent team.
-	resolver := NewTeamTenantResolver(store, brood, namespaceAuthorizer())
+	// admits nothing, and this must read exactly like an absent tenant.
+	resolver := NewTenantTenantResolver(store, brood, namespaceAuthorizer())
 
 	_, err := resolver.Resolve(context.Background(), resolverClaims, "ci")
 	assertNotFound(t, err)
 }
 
-func TestTenantResolver_Step5_UnreadableTeamObjectIs404(t *testing.T) {
+func TestTenantResolver_Step5_UnreadableTenantObjectIs404(t *testing.T) {
 	store := crdstore.NewFake()
-	gvr, err := crdstore.GVRFor[v1alpha1.Team]()
+	gvr, err := crdstore.GVRFor[v1alpha1.Tenant]()
 	if err != nil {
-		t.Fatalf("GVRFor[Team]: %v", err)
+		t.Fatalf("GVRFor[Tenant]: %v", err)
 	}
 	// A non-NotFound GetObject error must not fall through to the
 	// synthetic-controller path: it merges into the same 404 an absent
-	// team gets, so a caller cannot tell a Team it may not read from one
+	// tenant gets, so a caller cannot tell a Tenant it may not read from one
 	// that does not exist.
 	store.FailNext("get", gvr, errors.New("forbidden"))
 	brood := fakeResolverBrood{controllers: []ClusterController{
 		clusterController("core", "default", "payments"),
 	}}
-	resolver := NewTeamTenantResolver(store, brood, namespaceAuthorizer("default"))
+	resolver := NewTenantTenantResolver(store, brood, namespaceAuthorizer("default"))
 
 	_, rerr := resolver.Resolve(context.Background(), resolverClaims, "payments")
 	assertNotFound(t, rerr)
@@ -308,17 +308,17 @@ func TestTenantResolver_Step5_UnreadableTeamObjectIs404(t *testing.T) {
 // The 20-tenant ceiling.
 // --------------------------------------------------------------------------
 
-func TestTenantResolver_TeamOverTheCeilingIs422(t *testing.T) {
+func TestTenantResolver_TenantOverTheCeilingIs422(t *testing.T) {
 	store := crdstore.NewFake()
-	seedTeam(t, store, unplacedTeamObject("big", "team-big"))
+	seedTenant(t, store, unplacedTenantObject("big", "tenant-big"))
 
 	controllers := make([]ClusterController, 21)
 	for i := range controllers {
 		name := "svc" + string(rune('a'+i))
-		controllers[i] = clusterController("core", "team-big", name)
+		controllers[i] = clusterController("core", "tenant-big", name)
 	}
 	brood := fakeResolverBrood{controllers: controllers}
-	resolver := NewTeamTenantResolver(store, brood, namespaceAuthorizer("team-big"))
+	resolver := NewTenantTenantResolver(store, brood, namespaceAuthorizer("tenant-big"))
 
 	_, err := resolver.Resolve(context.Background(), resolverClaims, "big")
 	var serr *ServiceError
@@ -334,32 +334,32 @@ func TestTenantResolver_TeamOverTheCeilingIs422(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// ResolveRun's team-segment rule.
+// ResolveRun's tenant-segment rule.
 // --------------------------------------------------------------------------
 
 func TestTenantResolver_ResolveRun_ControllerTenantYieldsControllerName(t *testing.T) {
-	resolver := NewTeamTenantResolver(crdstore.NewFake(), fakeResolverBrood{}, resolverAuthorizer())
+	resolver := NewTenantTenantResolver(crdstore.NewFake(), fakeResolverBrood{}, resolverAuthorizer())
 	run := recordstore.Run{Cluster: "core", Namespace: "team-pay", Cell: "ci", Tenant: "team-pay/ci"}
 
 	ref, err := resolver.ResolveRun(context.Background(), resolverClaims, run)
 	if err != nil {
 		t.Fatalf("ResolveRun: %v", err)
 	}
-	want := TenantRef{Cluster: "core", Namespace: "team-pay", Controller: "ci", Tenant: "team-pay/ci", Team: "ci", Folder: ""}
+	want := TenantRef{Cluster: "core", Namespace: "team-pay", Controller: "ci", Tenant: "team-pay/ci", TenantName: "ci", Folder: ""}
 	if ref != want {
 		t.Errorf("got %+v, want %+v", ref, want)
 	}
 }
 
-func TestTenantResolver_ResolveRun_PlacedTenantYieldsTeamName(t *testing.T) {
-	resolver := NewTeamTenantResolver(crdstore.NewFake(), fakeResolverBrood{}, resolverAuthorizer())
+func TestTenantResolver_ResolveRun_PlacedTenantYieldsTenantName(t *testing.T) {
+	resolver := NewTenantTenantResolver(crdstore.NewFake(), fakeResolverBrood{}, resolverAuthorizer())
 	run := recordstore.Run{Cluster: "core", Namespace: "varroa-cells", Cell: "cell-a", Tenant: "payments"}
 
 	ref, err := resolver.ResolveRun(context.Background(), resolverClaims, run)
 	if err != nil {
 		t.Fatalf("ResolveRun: %v", err)
 	}
-	want := TenantRef{Cluster: "core", Namespace: "varroa-cells", Controller: "cell-a", Tenant: "payments", Team: "payments", Folder: "payments"}
+	want := TenantRef{Cluster: "core", Namespace: "varroa-cells", Controller: "cell-a", Tenant: "payments", TenantName: "payments", Folder: "payments"}
 	if ref != want {
 		t.Errorf("got %+v, want %+v", ref, want)
 	}

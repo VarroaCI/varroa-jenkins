@@ -18,7 +18,7 @@ var expectedToolKinds = map[string]toolKind{
 	// Controllers
 	"list_controllers":     kindRead,
 	"get_controller":       kindRead,
-	"get_team_cell":        kindRead,
+	"get_tenant_cell":      kindRead,
 	"read_repo_file":       kindRead,
 	"post_note":            kindCreate,
 	"open_issue":           kindCreate,

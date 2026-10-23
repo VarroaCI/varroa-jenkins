@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Golden render test: the default render is unchanged by the Team agent runner
+# Golden render test: the default render is unchanged by the Tenant agent runner
 # =============================================================================
 # With agentRunner.enabled false, the render holds no agent runner object,
 # NATS user, grant, or mount. When BASE_CHART names another chart directory
@@ -39,10 +39,10 @@ rc=0; grep -q 'varroa-agent' <<< "$MASKED" && rc=1 || true
 check "no varroa-agent string in the masked default render" "$rc"
 rc=0; grep -q 'agentrunner' <<< "$MASKED" && rc=1 || true
 check "no agentrunner string in the masked default render" "$rc"
-rc=0; grep -q 'team-agent' <<< "$MASKED" && rc=1 || true
-check "no team-agent string in the masked default render" "$rc"
-rc=0; grep -q 'team-agents' <<< "$MASKED" && rc=1 || true
-check "no -team-agents flag in the masked default render" "$rc"
+rc=0; grep -q 'tenant-agent' <<< "$MASKED" && rc=1 || true
+check "no tenant-agent string in the masked default render" "$rc"
+rc=0; grep -q 'tenant-agents' <<< "$MASKED" && rc=1 || true
+check "no -tenant-agents flag in the masked default render" "$rc"
 
 if [[ -n "${BASE_CHART:-}" ]]; then
   echo ""

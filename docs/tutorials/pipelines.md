@@ -1,6 +1,6 @@
 # Read and Run Pipelines
 
-Open a team's pipelines, read a build's log, download an artifact, and start a build with
+Open a tenant's pipelines, read a build's log, download an artifact, and start a build with
 parameters.
 
 ## Prerequisite
@@ -9,25 +9,25 @@ The pipelines pages need the [build record store](../operations/build-records.md
 `recordStore.enabled: true` in your Helm values before you start. With the store off, the
 **Pipelines** row still shows, and every page says so instead of listing builds.
 
-## Open a team
+## Open a tenant
 
-Sign in and select **Pipelines** in the sidebar. You see the pipelines of every [Team](../security/varroa-rbac.md#grant-pipelines-access) that grants you a `pipelines`
-verb. `/pipelines` lists only the teams that hold pipelines you can read, including member-cluster
-teams. A team with no pipelines and no controllers in its namespaces does not show. It opens your
-only team automatically. With more than one, pick one.
+Sign in and select **Pipelines** in the sidebar. You see the pipelines of every [Tenant](../security/varroa-rbac.md#grant-pipelines-access) that grants you a `pipelines`
+verb. `/pipelines` lists only the tenants that hold pipelines you can read, including member-cluster
+tenants. A tenant with no pipelines and no controllers in its namespaces does not show. It opens your
+only tenant automatically. With more than one, pick one.
 
-A team on a member cluster shows its definition, parameters, declared jobs, source input, and version profile. Varroa reads them from the member at each request.
+A tenant on a member cluster shows its definition, parameters, declared jobs, source input, and version profile. Varroa reads them from the member at each request.
 
 ## Your cell card
 
-A team on a [cell](../operations/cells.md) shows a placement pill under the page title. The pill
+A tenant on a [cell](../operations/cells.md) shows a placement pill under the page title. The pill
 names the state and the cell. The **Your cell** card sits behind the pill and starts closed.
 
 Select the pill to open the card. The card names the cell, its pool, its version profile, and its
 Jenkins version. It also reports the free tenant slots on the cell, the length of the cell's build
 queue, and your own running builds.
 
-One line counts the other teams on the cell without naming them, and shows none of their jobs,
+One line counts the other tenants on the cell without naming them, and shows none of their jobs,
 builds, or counts.
 
 **Cell details** opens the cell's controller page, if your access covers it. Otherwise you still
@@ -38,12 +38,12 @@ The card reports one of five states.
 | State | What the card shows |
 |---|---|
 | Placed | the whole card |
-| Moving | the whole card, plus a note that Varroa is moving the team |
-| Rehydrating | the whole card, plus a note that the cell is rebuilding the team's folders |
-| Not placed | the badge and the reason only. The team waits for its first cell |
-| No card | the team runs on its own controller, so no cell hosts it |
+| Moving | the whole card, plus a note that Varroa is moving the tenant |
+| Rehydrating | the whole card, plus a note that the cell is rebuilding the tenant's folders |
+| Not placed | the badge and the reason only. The tenant waits for its first cell |
+| No card | the tenant runs on its own controller, so no cell hosts it |
 
-Callers who can read a team with no pipelines see No pipelines. Other callers see Not found.
+Callers who can read a tenant with no pipelines see No pipelines. Other callers see Not found.
 
 **Reason** carries the operator's text, such as `CellNotReady`.
 
@@ -51,7 +51,7 @@ A cell in another cluster reports no queue length. The **Queue** figure then rea
 which is not an empty queue.
 
 **Free slots** counts the free tenant slots of this cell alone. The cell's pool can hold a lower
-cap, which stops a new team from landing even while the cell reports a free slot.
+cap, which stops a new tenant from landing even while the cell reports a free slot.
 
 ## Read the pipelines tree
 
@@ -62,7 +62,7 @@ current stage, the branch, and a progress bar against the job's usual duration. 
 names the run's top-level stage in progress. A running build with no stage in progress reads
 `Starting`, and a build that has not started reads `Queued`.
 
-**Pipelines** holds the team's folder tree. A job row carries its health, its last build, its
+**Pipelines** holds the tenant's folder tree. A job row carries its health, its last build, its
 branch, its last eight build durations, and when it last ran. **Queue wait** shows the job's
 median wait from queue entry to start over the last 30 days. Health is a weather glyph: clear when the last five runs passed, cloudy when one or two failed, and rain when three
 or more failed. A job that never ran shows no glyph and an empty last build.
@@ -90,7 +90,7 @@ The fold state lives in the page URL, as one `open` value per unfolded folder:
 Copy that URL to share the view. A reload keeps the folds. `?open=` with no value folds
 everything.
 
-**Runners** lists the [external runners](../operations/runners.md) bound to the team. Each row
+**Runners** lists the [external runners](../operations/runners.md) bound to the tenant. Each row
 shows the launcher, the labels, the cell, the connection state, and the last contact time.
 
 A caller whose grant carries `jobs` globs reads only the matching jobs and running builds. A
@@ -100,7 +100,7 @@ administrator writes those globs.
 
 ## Open a build
 
-Breadcrumbs name the team, folders, and job. A folder crumb opens the team page with that folder unfolded. On build and test pages, the job crumb links to the pipeline page.
+Breadcrumbs name the tenant, folders, and job. A folder crumb opens the tenant page with that folder unfolded. On build and test pages, the job crumb links to the pipeline page.
 
 A pull-request run shows a PR chip beside its branch and a **Pull request** row.
 
@@ -208,7 +208,7 @@ that build exists, because Varroa allows one retry per build.
 ## Concurrent runs of the same job
 
 A job can start a new build before an older one finishes. The
-`Team.spec.pipelines.concurrency` setting controls this: `allow` (the default) runs both, and
+`Tenant.spec.pipelines.concurrency` setting controls this: `allow` (the default) runs both, and
 `cancelInProgress` cancels the older run fleet-wide once the new run claims a
 build number.
 

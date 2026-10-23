@@ -42,7 +42,7 @@ func TestRenderBuildXML_GoldenFixtures(t *testing.T) {
 		},
 	}
 	const jenkinsHome = "/var/jenkins_home"
-	changelogPath := ChangelogAbsolutePath(jenkinsHome, "team/api", rec.BuildNumber)
+	changelogPath := ChangelogAbsolutePath(jenkinsHome, "tenant/api", rec.BuildNumber)
 
 	for _, seed := range seeds {
 		t.Run(seed.Version, func(t *testing.T) {

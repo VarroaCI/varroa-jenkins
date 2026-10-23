@@ -15,8 +15,8 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.team
-      name: TEAM
+    - jsonPath: .spec.tenant
+      name: TENANT
       type: string
     - jsonPath: .spec.launcher
       name: LAUNCHER
@@ -59,7 +59,7 @@ spec:
             properties:
               credentialRef:
                 description: |-
-                  CredentialRef names a Secret in the Team's agent namespace. A flat name
+                  CredentialRef names a Secret in the Tenant's agent namespace. A flat name
                   only: a namespace field would let one tenant read another's Secret.
                 type: string
               host:
@@ -75,7 +75,7 @@ spec:
               labels:
                 description: |-
                   Labels lists unprefixed label suffixes. The operator prefixes each
-                  one with <team>-. Bounded so the label-token CEL rule stays under the
+                  one with <tenant>-. Bounded so the label-token CEL rule stays under the
                   apiserver's estimated cost budget.
                 items:
                   maxLength: 63
@@ -105,19 +105,19 @@ spec:
               remoteFS:
                 description: RemoteFS is the agent work directory on the node.
                 type: string
-              team:
+              tenant:
                 description: |-
-                  Team names the pipelines Team that owns this runner. Immutable: the
+                  Tenant names the pipelines Tenant that owns this runner. Immutable: the
                   rendered node name and every label derive from it.
                 type: string
             required:
             - launcher
             - remoteFS
-            - team
+            - tenant
             type: object
             x-kubernetes-validations:
-            - message: spec.team is immutable
-              rule: self.team == oldSelf.team
+            - message: spec.tenant is immutable
+              rule: self.tenant == oldSelf.tenant
             - message: spec.launcher is immutable
               rule: self.launcher == oldSelf.launcher
             - message: remoteFS, host, and javaPath must not contain a ${ substitution
@@ -140,7 +140,7 @@ spec:
               cell:
                 description: |-
                   Cell names the Controller that hosts this runner's node. Written from
-                  the owning Team's status.placement.
+                  the owning Tenant's status.placement.
                 type: string
               cellNamespace:
                 description: CellNamespace is the namespace of the cell named by Cell.
@@ -179,7 +179,7 @@ spec:
                 format: date-time
                 type: string
               nodeName:
-                description: NodeName is the rendered Jenkins node name, <team>-<runner
+                description: NodeName is the rendered Jenkins node name, <tenant>-<runner
                   name>.
                 type: string
               observedGeneration:

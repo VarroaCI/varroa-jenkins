@@ -156,20 +156,20 @@ func (s *Server) resolveRunnerDoorToken(w http.ResponseWriter, r *http.Request, 
 	return runner, true
 }
 
-// resolveRunnerDoorPlacement reads the owning Team's status.placement and
+// resolveRunnerDoorPlacement reads the owning Tenant's status.placement and
 // answers 503 when it is empty, so the agent's own retry loop backs off
 // rather than the door failing the connection outright. The door reads no
 // placement.generation: that field fences a ledger claim in C6, where a
 // stale cell can still submit one; the door holds no long-lived placement
 // copy and simply re-reads on every attempt.
-func (s *Server) resolveRunnerDoorPlacement(w http.ResponseWriter, r *http.Request, runner *v1alpha1.Runner) (*v1alpha1.TeamPlacementStatus, bool) {
+func (s *Server) resolveRunnerDoorPlacement(w http.ResponseWriter, r *http.Request, runner *v1alpha1.Runner) (*v1alpha1.TenantPlacementStatus, bool) {
 	ctx := r.Context()
-	team, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, runner.Spec.Team, "")
+	tenant, err := crdstore.Get[v1alpha1.Tenant](ctx, s.deps.Store, runner.Spec.Tenant, "")
 	if err != nil {
 		http.Error(w, "503 service unavailable", http.StatusServiceUnavailable)
 		return nil, false
 	}
-	placement := team.Status.Placement
+	placement := tenant.Status.Placement
 	if placement == nil || placement.Cluster == "" || placement.Cell == "" || placement.CellNamespace == "" {
 		http.Error(w, "503 service unavailable", http.StatusServiceUnavailable)
 		return nil, false
@@ -181,7 +181,7 @@ func (s *Server) resolveRunnerDoorPlacement(w http.ResponseWriter, r *http.Reque
 // through the BFF's cross-cluster reader. A cell name is unique only
 // within one cluster, so the door reads placement.cluster and never reads
 // the local store by name and namespace alone (task 8.3a).
-func (s *Server) resolveRunnerDoorCell(w http.ResponseWriter, r *http.Request, placement *v1alpha1.TeamPlacementStatus) (*v1alpha1.Controller, bool) {
+func (s *Server) resolveRunnerDoorCell(w http.ResponseWriter, r *http.Request, placement *v1alpha1.TenantPlacementStatus) (*v1alpha1.Controller, bool) {
 	if s.deps.Brood == nil {
 		http.Error(w, "503 service unavailable", http.StatusServiceUnavailable)
 		return nil, false

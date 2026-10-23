@@ -26,7 +26,7 @@ stringData:
               "$JS.API.INFO"
               "_INBOX_bff.>"
 {{- if .Values.agentRunner.enabled }}
-              // Team agent: the forge and role replies go to the runner's inbox.
+              // Tenant agent: the forge and role replies go to the runner's inbox.
               "_INBOX_agentrunner.>"
 {{- end }}
               "$JS.API.STREAM.*.KV_mite_snapshots"
@@ -187,7 +187,7 @@ stringData:
 {{- end }}
               "operator.>"
 {{- if .Values.agentRunner.enabled }}
-              // Team agent: ask the recorder to queue a signed webhook delivery.
+              // Tenant agent: ask the recorder to queue a signed webhook delivery.
               "varroa.recordstore.webhook.enqueue"
 {{- end }}
               "$JS.API.INFO"
@@ -254,7 +254,7 @@ stringData:
               // while a tail lease is active.
               "logs.>"
               // Live run notifications: the recorder's per-run changes,
-              // which the team run stream forwards to a reader.
+              // which the tenant run stream forwards to a reader.
               "runs.>"
 {{- end }}
             ]
@@ -266,7 +266,7 @@ stringData:
           password: "{{ htpasswd "ignored" (include "varroa.nats.agentrunnerPassword" .) | trimPrefix "ignored:" }}"
           permissions: {
             publish: [
-              // Team agent sessions: session notices, and the forge and note
+              // Tenant agent sessions: session notices, and the forge and note
               // requests the runner sends.
               "agentsessions.>"
               "operator.*.forge.read"
@@ -309,7 +309,7 @@ stringData:
               // Live run notifications: tell the BFF that a run changed,
               // so a reader refetches the record without a reload.
               "runs.>"
-              // Team agent triggers: the recorder's audit producers publish
+              // Tenant agent triggers: the recorder's audit producers publish
               // on activity.>. The varroa-agent consumer reads them.
               "activity.>"
               "$JS.API.STREAM.CREATE.varroa_builds"
@@ -350,7 +350,7 @@ stringData:
               // Run notes: answer the BFF's note post.
               "varroa.recordstore.notes.post"
 {{- if .Values.agentRunner.enabled }}
-              // Team agent: queue a signed webhook delivery for a session.
+              // Tenant agent: queue a signed webhook delivery for a session.
               "varroa.recordstore.webhook.enqueue"
 {{- end }}
               "_INBOX_recorder.>"

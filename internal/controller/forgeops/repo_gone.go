@@ -16,24 +16,24 @@ import (
 // host always answers false, because its 404 also answers for a private
 // repository the credential cannot see. No credential, an unsupported forge,
 // a refused URL, and every error answer false too.
-func (o *Ops) RepositoryGone(ctx context.Context, team, repoURL string) bool {
+func (o *Ops) RepositoryGone(ctx context.Context, tenant, repoURL string) bool {
 	repo, err := forgeurl.NormalizeRepoURL(repoURL)
 	if err != nil {
-		o.logger.Debug("repository probe skipped: repo URL refused", "team", team, "error", err)
+		o.logger.Debug("repository probe skipped: repo URL refused", "tenant", tenant, "error", err)
 		return false
 	}
-	creds, err := o.chooseCredential(ctx, team, repo.Host)
+	creds, err := o.chooseCredential(ctx, tenant, repo.Host)
 	if err != nil {
-		o.logger.Debug("repository probe skipped: no tenant credential", "team", team, "host", repo.Host)
+		o.logger.Debug("repository probe skipped: no tenant credential", "tenant", tenant, "host", repo.Host)
 		return false
 	}
 	kind, err := o.detect(ctx, o.http, repo.Host)
 	if err != nil {
-		o.logger.Debug("repository probe skipped: forge not detected", "team", team, "host", repo.Host)
+		o.logger.Debug("repository probe skipped: forge not detected", "tenant", tenant, "host", repo.Host)
 		return false
 	}
 	if kind != forge.KindGitea {
-		o.logger.Debug("repository probe unknown: forge kind cannot confirm a gone repository", "team", team, "host", repo.Host, "kind", string(kind))
+		o.logger.Debug("repository probe unknown: forge kind cannot confirm a gone repository", "tenant", tenant, "host", repo.Host, "kind", string(kind))
 		return false
 	}
 	fr := forge.Repo{Owner: repo.Owner, Name: repo.Name}
@@ -45,7 +45,7 @@ func (o *Ops) RepositoryGone(ctx context.Context, team, repoURL string) bool {
 		_, err := cl.Repository(ctx, fr)
 		switch {
 		case err == nil:
-			o.logger.Debug("repository probe: repository present", "team", team, "host", repo.Host, "credential", c.ID)
+			o.logger.Debug("repository probe: repository present", "tenant", tenant, "host", repo.Host, "credential", c.ID)
 			return false
 		case errors.Is(err, forge.ErrNotFound):
 			scope, ok := cl.(forge.OwnerScope)
@@ -54,13 +54,13 @@ func (o *Ops) RepositoryGone(ctx context.Context, team, repoURL string) bool {
 			}
 			all, err := scope.SeesAllOwnerRepos(ctx, repo.Owner)
 			if err != nil || !all {
-				o.logger.Debug("repository probe: 404 without owner scope", "team", team, "host", repo.Host, "credential", c.ID)
+				o.logger.Debug("repository probe: 404 without owner scope", "tenant", tenant, "host", repo.Host, "credential", c.ID)
 				continue
 			}
-			o.logger.Info("repository probe: repository gone", "team", team, "host", repo.Host, "credential", c.ID)
+			o.logger.Info("repository probe: repository gone", "tenant", tenant, "host", repo.Host, "credential", c.ID)
 			return true
 		default:
-			o.logger.Debug("repository probe: credential could not answer", "team", team, "host", repo.Host, "credential", c.ID)
+			o.logger.Debug("repository probe: credential could not answer", "tenant", tenant, "host", repo.Host, "credential", c.ID)
 		}
 	}
 	return false

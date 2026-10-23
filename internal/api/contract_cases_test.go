@@ -57,20 +57,20 @@ func init() {
 		contractCase{Name: "zz-deleteGroup", Method: "DELETE", Path: "/api/v1/groups/any-group", Claims: adminClaims, WantStatus: http.StatusNoContent},
 	)
 
-	// ── teams (5 cases) ──────────────────────────────────────────────────
+	// ── tenants (5 cases) ──────────────────────────────────────────────────
 	registerContractCases(
-		contractCase{Name: "listTeams", Method: "GET", Path: "/api/v1/teams", Claims: adminClaims, WantStatus: http.StatusOK},
-		contractCase{Name: "listTeams-403-nonadmin", Method: "GET", Path: "/api/v1/teams", Claims: operatorClaims, WantStatus: http.StatusForbidden},
-		contractCase{Name: "createTeam-400-validation", Method: "POST", Path: "/api/v1/teams", Claims: adminClaims, Body: map[string]interface{}{"name": "test-team", "namespaces": []string{"ns1"}}, WantStatus: http.StatusBadRequest},
-		contractCase{Name: "zz-deleteTeam", Method: "DELETE", Path: "/api/v1/teams/any-team", Claims: adminClaims, WantStatus: http.StatusNoContent},
-		contractCase{Name: "getTeam-404", Method: "GET", Path: "/api/v1/teams/nonexistent", Claims: adminClaims, WantStatus: http.StatusNotFound},
-		contractCase{Name: "updateTeam", Method: "PUT", Path: "/api/v1/teams/new-team", Claims: adminClaims, Body: map[string]interface{}{"name": "new-team", "members": []string{"user"}, "namespaces": []string{"ns"}}, WantStatus: http.StatusOK},
+		contractCase{Name: "listTenants", Method: "GET", Path: "/api/v1/tenants", Claims: adminClaims, WantStatus: http.StatusOK},
+		contractCase{Name: "listTenants-403-nonadmin", Method: "GET", Path: "/api/v1/tenants", Claims: operatorClaims, WantStatus: http.StatusForbidden},
+		contractCase{Name: "createTenant-400-validation", Method: "POST", Path: "/api/v1/tenants", Claims: adminClaims, Body: map[string]interface{}{"name": "test-tenant", "namespaces": []string{"ns1"}}, WantStatus: http.StatusBadRequest},
+		contractCase{Name: "zz-deleteTenant", Method: "DELETE", Path: "/api/v1/tenants/any-tenant", Claims: adminClaims, WantStatus: http.StatusNoContent},
+		contractCase{Name: "getTenant-404", Method: "GET", Path: "/api/v1/tenants/nonexistent", Claims: adminClaims, WantStatus: http.StatusNotFound},
+		contractCase{Name: "updateTenant", Method: "PUT", Path: "/api/v1/tenants/new-tenant", Claims: adminClaims, Body: map[string]interface{}{"name": "new-tenant", "members": []string{"user"}, "namespaces": []string{"ns"}}, WantStatus: http.StatusOK},
 	)
 
 	// ── runners (5 cases) ────────────────────────────────────────────────
 	registerContractCases(
 		contractCase{Name: "listRunners", Method: "GET", Path: "/api/v1/runners", Claims: adminClaims, WantStatus: http.StatusOK},
-		contractCase{Name: "createRunner-400-unknown-team", Method: "POST", Path: "/api/v1/runners", Claims: adminClaims, Body: map[string]interface{}{"name": "new-runner", "spec": map[string]interface{}{"team": "nonexistent-team", "launcher": "inbound", "remoteFS": "/var/j"}}, WantStatus: http.StatusBadRequest},
+		contractCase{Name: "createRunner-400-unknown-tenant", Method: "POST", Path: "/api/v1/runners", Claims: adminClaims, Body: map[string]interface{}{"name": "new-runner", "spec": map[string]interface{}{"tenant": "nonexistent-tenant", "launcher": "inbound", "remoteFS": "/var/j"}}, WantStatus: http.StatusBadRequest},
 		contractCase{Name: "getRunner", Method: "GET", Path: "/api/v1/runners/test-runner", Claims: adminClaims, WantStatus: http.StatusOK},
 		contractCase{Name: "patchRunner", Method: "PATCH", Path: "/api/v1/runners/test-runner", Claims: adminClaims, RawBody: []byte(`{"spec":{"numExecutors":2}}`), ContentType: "application/merge-patch+json", WantStatus: http.StatusOK},
 		contractCase{Name: "zz-deleteRunner", Method: "DELETE", Path: "/api/v1/runners/test-runner", Claims: adminClaims, WantStatus: http.StatusNoContent},

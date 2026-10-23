@@ -247,10 +247,10 @@ func TestAuthMiddleware_OIDCAuthEndpoints(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_PipelinesTicketBoundToOneTeam proves the middleware
+// TestAuthMiddleware_PipelinesTicketBoundToOneTenant proves the middleware
 // verifies a stream ticket against the path's own scope, so a ticket for
-// one team cannot open another team's stream.
-func TestAuthMiddleware_PipelinesTicketBoundToOneTeam(t *testing.T) {
+// one tenant cannot open another tenant's stream.
+func TestAuthMiddleware_PipelinesTicketBoundToOneTenant(t *testing.T) {
 	mp := &mockProvider{}
 	mkv := &mockKeyVerifier{}
 	logger := slog.Default()
@@ -265,8 +265,8 @@ func TestAuthMiddleware_PipelinesTicketBoundToOneTeam(t *testing.T) {
 		path string
 		want int
 	}{
-		{"the ticket's own team", "/api/v1/pipelines/team-a/stream", http.StatusOK},
-		{"another team", "/api/v1/pipelines/team-b/stream", http.StatusUnauthorized},
+		{"the ticket's own tenant", "/api/v1/pipelines/team-a/stream", http.StatusOK},
+		{"another tenant", "/api/v1/pipelines/team-b/stream", http.StatusUnauthorized},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

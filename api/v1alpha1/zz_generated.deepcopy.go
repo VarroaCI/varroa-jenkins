@@ -782,8 +782,8 @@ func (in *GroupStatus) DeepCopyInto(out *GroupStatus) {
 	*out = *in
 }
 
-// DeepCopyInto for Team.
-func (in *Team) DeepCopyInto(out *Team) {
+// DeepCopyInto for Tenant.
+func (in *Tenant) DeepCopyInto(out *Tenant) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
@@ -791,58 +791,58 @@ func (in *Team) DeepCopyInto(out *Team) {
 	in.Status.DeepCopyInto(&out.Status)
 }
 
-// DeepCopy creates a deep copy of Team.
-func (in *Team) DeepCopy() *Team {
+// DeepCopy creates a deep copy of Tenant.
+func (in *Tenant) DeepCopy() *Tenant {
 	if in == nil {
 		return nil
 	}
-	out := new(Team)
+	out := new(Tenant)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyObject implements runtime.Object.
-func (in *Team) DeepCopyObject() runtime.Object {
+func (in *Tenant) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}
 	return nil
 }
 
-// DeepCopyInto for TeamList.
-func (in *TeamList) DeepCopyInto(out *TeamList) {
+// DeepCopyInto for TenantList.
+func (in *TenantList) DeepCopyInto(out *TenantList) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ListMeta.DeepCopyInto(&out.ListMeta)
 	if in.Items != nil {
 		in, out := &in.Items, &out.Items
-		*out = make([]Team, len(*in))
+		*out = make([]Tenant, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
 }
 
-// DeepCopy creates a deep copy of TeamList.
-func (in *TeamList) DeepCopy() *TeamList {
+// DeepCopy creates a deep copy of TenantList.
+func (in *TenantList) DeepCopy() *TenantList {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamList)
+	out := new(TenantList)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyObject implements runtime.Object.
-func (in *TeamList) DeepCopyObject() runtime.Object {
+func (in *TenantList) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}
 	return nil
 }
 
-// DeepCopyInto for TeamSpec.
-func (in *TeamSpec) DeepCopyInto(out *TeamSpec) {
+// DeepCopyInto for TenantSpec.
+func (in *TenantSpec) DeepCopyInto(out *TenantSpec) {
 	*out = *in
 	if in.Members != nil {
 		in, out := &in.Members, &out.Members
@@ -861,13 +861,13 @@ func (in *TeamSpec) DeepCopyInto(out *TeamSpec) {
 	}
 	if in.Pipelines != nil {
 		in, out := &in.Pipelines, &out.Pipelines
-		*out = new(TeamPipelinesSpec)
+		*out = new(TenantPipelinesSpec)
 		(*in).DeepCopyInto(*out)
 	}
 }
 
-// DeepCopyInto for TeamPipelinesSpec.
-func (in *TeamPipelinesSpec) DeepCopyInto(out *TeamPipelinesSpec) {
+// DeepCopyInto for TenantPipelinesSpec.
+func (in *TenantPipelinesSpec) DeepCopyInto(out *TenantPipelinesSpec) {
 	*out = *in
 	if in.ComposedBundleRef != nil {
 		in, out := &in.ComposedBundleRef, &out.ComposedBundleRef
@@ -896,19 +896,19 @@ func (in *TeamPipelinesSpec) DeepCopyInto(out *TeamPipelinesSpec) {
 	}
 	if in.Exports != nil {
 		in, out := &in.Exports, &out.Exports
-		*out = make([]TeamExport, len(*in))
+		*out = make([]TenantExport, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
 	if in.Retention != nil {
 		in, out := &in.Retention, &out.Retention
-		*out = new(TeamPipelinesRetention)
+		*out = new(TenantPipelinesRetention)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.ConcurrencyLimits != nil {
 		in, out := &in.ConcurrencyLimits, &out.ConcurrencyLimits
-		*out = make([]TeamConcurrencyLimit, len(*in))
+		*out = make([]TenantConcurrencyLimit, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
@@ -925,74 +925,74 @@ func (in *TeamPipelinesSpec) DeepCopyInto(out *TeamPipelinesSpec) {
 	}
 	if in.Notifications != nil {
 		in, out := &in.Notifications, &out.Notifications
-		*out = new(TeamNotificationsSpec)
+		*out = new(TenantNotificationsSpec)
 		(*in).DeepCopyInto(*out)
 	}
 }
 
-// DeepCopy creates a deep copy of TeamPipelinesSpec.
-func (in *TeamPipelinesSpec) DeepCopy() *TeamPipelinesSpec {
+// DeepCopy creates a deep copy of TenantPipelinesSpec.
+func (in *TenantPipelinesSpec) DeepCopy() *TenantPipelinesSpec {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamPipelinesSpec)
+	out := new(TenantPipelinesSpec)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyInto for TeamNotificationsSpec.
-func (in *TeamNotificationsSpec) DeepCopyInto(out *TeamNotificationsSpec) {
+// DeepCopyInto for TenantNotificationsSpec.
+func (in *TenantNotificationsSpec) DeepCopyInto(out *TenantNotificationsSpec) {
 	*out = *in
 	if in.Webhook != nil {
 		in, out := &in.Webhook, &out.Webhook
-		*out = new(TeamWebhookSpec)
+		*out = new(TenantWebhookSpec)
 		**out = **in
 	}
 }
 
-// DeepCopy creates a deep copy of TeamNotificationsSpec.
-func (in *TeamNotificationsSpec) DeepCopy() *TeamNotificationsSpec {
+// DeepCopy creates a deep copy of TenantNotificationsSpec.
+func (in *TenantNotificationsSpec) DeepCopy() *TenantNotificationsSpec {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamNotificationsSpec)
+	out := new(TenantNotificationsSpec)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyInto for TeamWebhookSpec.
-func (in *TeamWebhookSpec) DeepCopyInto(out *TeamWebhookSpec) {
+// DeepCopyInto for TenantWebhookSpec.
+func (in *TenantWebhookSpec) DeepCopyInto(out *TenantWebhookSpec) {
 	*out = *in
 	out.SecretRef = in.SecretRef
 }
 
-// DeepCopy creates a deep copy of TeamWebhookSpec.
-func (in *TeamWebhookSpec) DeepCopy() *TeamWebhookSpec {
+// DeepCopy creates a deep copy of TenantWebhookSpec.
+func (in *TenantWebhookSpec) DeepCopy() *TenantWebhookSpec {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamWebhookSpec)
+	out := new(TenantWebhookSpec)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyInto for TeamWebhookSecretRef.
-func (in *TeamWebhookSecretRef) DeepCopyInto(out *TeamWebhookSecretRef) {
+// DeepCopyInto for TenantWebhookSecretRef.
+func (in *TenantWebhookSecretRef) DeepCopyInto(out *TenantWebhookSecretRef) {
 	*out = *in
 }
 
-// DeepCopy creates a deep copy of TeamWebhookSecretRef.
-func (in *TeamWebhookSecretRef) DeepCopy() *TeamWebhookSecretRef {
+// DeepCopy creates a deep copy of TenantWebhookSecretRef.
+func (in *TenantWebhookSecretRef) DeepCopy() *TenantWebhookSecretRef {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamWebhookSecretRef)
+	out := new(TenantWebhookSecretRef)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyInto for TeamExport.
-func (in *TeamExport) DeepCopyInto(out *TeamExport) {
+// DeepCopyInto for TenantExport.
+func (in *TenantExport) DeepCopyInto(out *TenantExport) {
 	*out = *in
 	if in.Locks != nil {
 		in, out := &in.Locks, &out.Locks
@@ -1006,18 +1006,18 @@ func (in *TeamExport) DeepCopyInto(out *TeamExport) {
 	}
 }
 
-// DeepCopy creates a deep copy of TeamExport.
-func (in *TeamExport) DeepCopy() *TeamExport {
+// DeepCopy creates a deep copy of TenantExport.
+func (in *TenantExport) DeepCopy() *TenantExport {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamExport)
+	out := new(TenantExport)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyInto for TeamConcurrencyLimit.
-func (in *TeamConcurrencyLimit) DeepCopyInto(out *TeamConcurrencyLimit) {
+// DeepCopyInto for TenantConcurrencyLimit.
+func (in *TenantConcurrencyLimit) DeepCopyInto(out *TenantConcurrencyLimit) {
 	*out = *in
 	if in.Jobs != nil {
 		in, out := &in.Jobs, &out.Jobs
@@ -1026,79 +1026,79 @@ func (in *TeamConcurrencyLimit) DeepCopyInto(out *TeamConcurrencyLimit) {
 	}
 }
 
-// DeepCopy creates a deep copy of TeamConcurrencyLimit.
-func (in *TeamConcurrencyLimit) DeepCopy() *TeamConcurrencyLimit {
+// DeepCopy creates a deep copy of TenantConcurrencyLimit.
+func (in *TenantConcurrencyLimit) DeepCopy() *TenantConcurrencyLimit {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamConcurrencyLimit)
+	out := new(TenantConcurrencyLimit)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyInto for TeamPipelinesRetention.
-func (in *TeamPipelinesRetention) DeepCopyInto(out *TeamPipelinesRetention) {
+// DeepCopyInto for TenantPipelinesRetention.
+func (in *TenantPipelinesRetention) DeepCopyInto(out *TenantPipelinesRetention) {
 	*out = *in
 	if in.Jobs != nil {
 		in, out := &in.Jobs, &out.Jobs
-		*out = make([]TeamJobRetention, len(*in))
+		*out = make([]TenantJobRetention, len(*in))
 		copy(*out, *in)
 	}
 }
 
-// DeepCopy creates a deep copy of TeamPipelinesRetention.
-func (in *TeamPipelinesRetention) DeepCopy() *TeamPipelinesRetention {
+// DeepCopy creates a deep copy of TenantPipelinesRetention.
+func (in *TenantPipelinesRetention) DeepCopy() *TenantPipelinesRetention {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamPipelinesRetention)
+	out := new(TenantPipelinesRetention)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyInto for TeamJobRetention.
-func (in *TeamJobRetention) DeepCopyInto(out *TeamJobRetention) {
+// DeepCopyInto for TenantJobRetention.
+func (in *TenantJobRetention) DeepCopyInto(out *TenantJobRetention) {
 	*out = *in
 }
 
-// DeepCopy creates a deep copy of TeamJobRetention.
-func (in *TeamJobRetention) DeepCopy() *TeamJobRetention {
+// DeepCopy creates a deep copy of TenantJobRetention.
+func (in *TenantJobRetention) DeepCopy() *TenantJobRetention {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamJobRetention)
+	out := new(TenantJobRetention)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyInto for TeamStatus.
-func (in *TeamStatus) DeepCopyInto(out *TeamStatus) {
+// DeepCopyInto for TenantStatus.
+func (in *TenantStatus) DeepCopyInto(out *TenantStatus) {
 	*out = *in
 	if in.NamespaceStates != nil {
 		in, out := &in.NamespaceStates, &out.NamespaceStates
-		*out = make([]TeamNamespaceState, len(*in))
+		*out = make([]TenantNamespaceState, len(*in))
 		copy(*out, *in)
 	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
-		*out = make([]TeamCondition, len(*in))
+		*out = make([]TenantCondition, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
 	if in.Placement != nil {
 		in, out := &in.Placement, &out.Placement
-		*out = new(TeamPlacementStatus)
+		*out = new(TenantPlacementStatus)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.Pipelines != nil {
 		in, out := &in.Pipelines, &out.Pipelines
-		*out = new(TeamPipelinesStatus)
+		*out = new(TenantPipelinesStatus)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.Rehydration != nil {
 		in, out := &in.Rehydration, &out.Rehydration
-		*out = new(TeamRehydrationStatus)
+		*out = new(TenantRehydrationStatus)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.StaleAgentServiceNamespaces != nil {
@@ -1108,8 +1108,8 @@ func (in *TeamStatus) DeepCopyInto(out *TeamStatus) {
 	}
 }
 
-// DeepCopyInto for TeamRehydrationStatus.
-func (in *TeamRehydrationStatus) DeepCopyInto(out *TeamRehydrationStatus) {
+// DeepCopyInto for TenantRehydrationStatus.
+func (in *TenantRehydrationStatus) DeepCopyInto(out *TenantRehydrationStatus) {
 	*out = *in
 	if in.Deferred != nil {
 		in, out := &in.Deferred, &out.Deferred
@@ -1122,40 +1122,40 @@ func (in *TeamRehydrationStatus) DeepCopyInto(out *TeamRehydrationStatus) {
 	}
 }
 
-// DeepCopy creates a deep copy of TeamRehydrationStatus.
-func (in *TeamRehydrationStatus) DeepCopy() *TeamRehydrationStatus {
+// DeepCopy creates a deep copy of TenantRehydrationStatus.
+func (in *TenantRehydrationStatus) DeepCopy() *TenantRehydrationStatus {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamRehydrationStatus)
+	out := new(TenantRehydrationStatus)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyInto for TeamPlacementStatus.
-func (in *TeamPlacementStatus) DeepCopyInto(out *TeamPlacementStatus) {
+// DeepCopyInto for TenantPlacementStatus.
+func (in *TenantPlacementStatus) DeepCopyInto(out *TenantPlacementStatus) {
 	*out = *in
 	if in.Members != nil {
 		in, out := &in.Members, &out.Members
-		*out = make([]TeamMemberStatus, len(*in))
+		*out = make([]TenantMemberStatus, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
 }
 
-// DeepCopy creates a deep copy of TeamPlacementStatus.
-func (in *TeamPlacementStatus) DeepCopy() *TeamPlacementStatus {
+// DeepCopy creates a deep copy of TenantPlacementStatus.
+func (in *TenantPlacementStatus) DeepCopy() *TenantPlacementStatus {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamPlacementStatus)
+	out := new(TenantPlacementStatus)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyInto for TeamMemberStatus.
-func (in *TeamMemberStatus) DeepCopyInto(out *TeamMemberStatus) {
+// DeepCopyInto for TenantMemberStatus.
+func (in *TenantMemberStatus) DeepCopyInto(out *TenantMemberStatus) {
 	*out = *in
 	if in.Slot != nil {
 		in, out := &in.Slot, &out.Slot
@@ -1164,18 +1164,18 @@ func (in *TeamMemberStatus) DeepCopyInto(out *TeamMemberStatus) {
 	}
 }
 
-// DeepCopy creates a deep copy of TeamMemberStatus.
-func (in *TeamMemberStatus) DeepCopy() *TeamMemberStatus {
+// DeepCopy creates a deep copy of TenantMemberStatus.
+func (in *TenantMemberStatus) DeepCopy() *TenantMemberStatus {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamMemberStatus)
+	out := new(TenantMemberStatus)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyInto for TeamPipelinesStatus.
-func (in *TeamPipelinesStatus) DeepCopyInto(out *TeamPipelinesStatus) {
+// DeepCopyInto for TenantPipelinesStatus.
+func (in *TenantPipelinesStatus) DeepCopyInto(out *TenantPipelinesStatus) {
 	*out = *in
 	if in.PendingPurgeGeneration != nil {
 		in, out := &in.PendingPurgeGeneration, &out.PendingPurgeGeneration
@@ -1184,23 +1184,23 @@ func (in *TeamPipelinesStatus) DeepCopyInto(out *TeamPipelinesStatus) {
 	}
 }
 
-// DeepCopy creates a deep copy of TeamPipelinesStatus.
-func (in *TeamPipelinesStatus) DeepCopy() *TeamPipelinesStatus {
+// DeepCopy creates a deep copy of TenantPipelinesStatus.
+func (in *TenantPipelinesStatus) DeepCopy() *TenantPipelinesStatus {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamPipelinesStatus)
+	out := new(TenantPipelinesStatus)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyInto for TeamNamespaceState.
-func (in *TeamNamespaceState) DeepCopyInto(out *TeamNamespaceState) {
+// DeepCopyInto for TenantNamespaceState.
+func (in *TenantNamespaceState) DeepCopyInto(out *TenantNamespaceState) {
 	*out = *in
 }
 
-// DeepCopyInto for TeamCondition.
-func (in *TeamCondition) DeepCopyInto(out *TeamCondition) {
+// DeepCopyInto for TenantCondition.
+func (in *TenantCondition) DeepCopyInto(out *TenantCondition) {
 	*out = *in
 	in.LastTransitionTime.DeepCopyInto(&out.LastTransitionTime)
 }
@@ -4130,7 +4130,7 @@ func (in *PendingCollect) DeepCopy() *PendingCollect {
 }
 
 // DeepCopyInto copies the receiver into out. in must be non-nil.
-func (in *TeamAgent) DeepCopyInto(out *TeamAgent) {
+func (in *TenantAgent) DeepCopyInto(out *TenantAgent) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
@@ -4138,18 +4138,18 @@ func (in *TeamAgent) DeepCopyInto(out *TeamAgent) {
 	in.Status.DeepCopyInto(&out.Status)
 }
 
-// DeepCopy creates a new TeamAgent, copied from the receiver.
-func (in *TeamAgent) DeepCopy() *TeamAgent {
+// DeepCopy creates a new TenantAgent, copied from the receiver.
+func (in *TenantAgent) DeepCopy() *TenantAgent {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamAgent)
+	out := new(TenantAgent)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyObject implements runtime.Object.
-func (in *TeamAgent) DeepCopyObject() runtime.Object {
+func (in *TenantAgent) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}
@@ -4157,30 +4157,30 @@ func (in *TeamAgent) DeepCopyObject() runtime.Object {
 }
 
 // DeepCopyInto copies the receiver into out. in must be non-nil.
-func (in *TeamAgentList) DeepCopyInto(out *TeamAgentList) {
+func (in *TenantAgentList) DeepCopyInto(out *TenantAgentList) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ListMeta.DeepCopyInto(&out.ListMeta)
 	if in.Items != nil {
-		out.Items = make([]TeamAgent, len(in.Items))
+		out.Items = make([]TenantAgent, len(in.Items))
 		for i := range in.Items {
 			in.Items[i].DeepCopyInto(&out.Items[i])
 		}
 	}
 }
 
-// DeepCopy creates a new TeamAgentList, copied from the receiver.
-func (in *TeamAgentList) DeepCopy() *TeamAgentList {
+// DeepCopy creates a new TenantAgentList, copied from the receiver.
+func (in *TenantAgentList) DeepCopy() *TenantAgentList {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamAgentList)
+	out := new(TenantAgentList)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyObject implements runtime.Object.
-func (in *TeamAgentList) DeepCopyObject() runtime.Object {
+func (in *TenantAgentList) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}
@@ -4188,9 +4188,9 @@ func (in *TeamAgentList) DeepCopyObject() runtime.Object {
 }
 
 // DeepCopyInto copies the receiver into out. in must be non-nil.
-func (in *TeamAgentSpec) DeepCopyInto(out *TeamAgentSpec) {
+func (in *TenantAgentSpec) DeepCopyInto(out *TenantAgentSpec) {
 	*out = *in
-	out.TeamRef = in.TeamRef
+	out.TenantRef = in.TenantRef
 	if in.Enabled != nil {
 		v := *in.Enabled
 		out.Enabled = &v
@@ -4200,7 +4200,7 @@ func (in *TeamAgentSpec) DeepCopyInto(out *TeamAgentSpec) {
 		out.Instructions = &v
 	}
 	if in.Triggers != nil {
-		out.Triggers = make([]TeamAgentTrigger, len(in.Triggers))
+		out.Triggers = make([]TenantAgentTrigger, len(in.Triggers))
 		for i := range in.Triggers {
 			in.Triggers[i].DeepCopyInto(&out.Triggers[i])
 		}
@@ -4224,18 +4224,18 @@ func (in *TeamAgentSpec) DeepCopyInto(out *TeamAgentSpec) {
 	}
 }
 
-// DeepCopy creates a new TeamAgentSpec, copied from the receiver.
-func (in *TeamAgentSpec) DeepCopy() *TeamAgentSpec {
+// DeepCopy creates a new TenantAgentSpec, copied from the receiver.
+func (in *TenantAgentSpec) DeepCopy() *TenantAgentSpec {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamAgentSpec)
+	out := new(TenantAgentSpec)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyInto copies the receiver into out. in must be non-nil.
-func (in *TeamAgentStatus) DeepCopyInto(out *TeamAgentStatus) {
+func (in *TenantAgentStatus) DeepCopyInto(out *TenantAgentStatus) {
 	*out = *in
 	if in.Conditions != nil {
 		out.Conditions = make([]metav1.Condition, len(in.Conditions))
@@ -4250,33 +4250,33 @@ func (in *TeamAgentStatus) DeepCopyInto(out *TeamAgentStatus) {
 	}
 }
 
-// DeepCopy creates a new TeamAgentStatus, copied from the receiver.
-func (in *TeamAgentStatus) DeepCopy() *TeamAgentStatus {
+// DeepCopy creates a new TenantAgentStatus, copied from the receiver.
+func (in *TenantAgentStatus) DeepCopy() *TenantAgentStatus {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamAgentStatus)
+	out := new(TenantAgentStatus)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyInto copies the receiver into out. in must be non-nil.
-func (in *TeamAgentInstructions) DeepCopyInto(out *TeamAgentInstructions) {
+func (in *TenantAgentInstructions) DeepCopyInto(out *TenantAgentInstructions) {
 	*out = *in
 }
 
-// DeepCopy creates a new TeamAgentInstructions, copied from the receiver.
-func (in *TeamAgentInstructions) DeepCopy() *TeamAgentInstructions {
+// DeepCopy creates a new TenantAgentInstructions, copied from the receiver.
+func (in *TenantAgentInstructions) DeepCopy() *TenantAgentInstructions {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamAgentInstructions)
+	out := new(TenantAgentInstructions)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyInto copies the receiver into out. in must be non-nil.
-func (in *TeamAgentTrigger) DeepCopyInto(out *TeamAgentTrigger) {
+func (in *TenantAgentTrigger) DeepCopyInto(out *TenantAgentTrigger) {
 	*out = *in
 	if in.Debounce != nil {
 		v := *in.Debounce
@@ -4284,18 +4284,18 @@ func (in *TeamAgentTrigger) DeepCopyInto(out *TeamAgentTrigger) {
 	}
 }
 
-// DeepCopy creates a new TeamAgentTrigger, copied from the receiver.
-func (in *TeamAgentTrigger) DeepCopy() *TeamAgentTrigger {
+// DeepCopy creates a new TenantAgentTrigger, copied from the receiver.
+func (in *TenantAgentTrigger) DeepCopy() *TenantAgentTrigger {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamAgentTrigger)
+	out := new(TenantAgentTrigger)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyInto copies the receiver into out. in must be non-nil.
-func (in *TeamAgentOutputs) DeepCopyInto(out *TeamAgentOutputs) {
+func (in *TenantAgentOutputs) DeepCopyInto(out *TenantAgentOutputs) {
 	*out = *in
 	if in.Issues != nil {
 		v := *in.Issues
@@ -4307,18 +4307,18 @@ func (in *TeamAgentOutputs) DeepCopyInto(out *TeamAgentOutputs) {
 	}
 }
 
-// DeepCopy creates a new TeamAgentOutputs, copied from the receiver.
-func (in *TeamAgentOutputs) DeepCopy() *TeamAgentOutputs {
+// DeepCopy creates a new TenantAgentOutputs, copied from the receiver.
+func (in *TenantAgentOutputs) DeepCopy() *TenantAgentOutputs {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamAgentOutputs)
+	out := new(TenantAgentOutputs)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyInto copies the receiver into out. in must be non-nil.
-func (in *TeamAgentIssueOutput) DeepCopyInto(out *TeamAgentIssueOutput) {
+func (in *TenantAgentIssueOutput) DeepCopyInto(out *TenantAgentIssueOutput) {
 	*out = *in
 	if in.Labels != nil {
 		out.Labels = make([]string, len(in.Labels))
@@ -4326,18 +4326,18 @@ func (in *TeamAgentIssueOutput) DeepCopyInto(out *TeamAgentIssueOutput) {
 	}
 }
 
-// DeepCopy creates a new TeamAgentIssueOutput, copied from the receiver.
-func (in *TeamAgentIssueOutput) DeepCopy() *TeamAgentIssueOutput {
+// DeepCopy creates a new TenantAgentIssueOutput, copied from the receiver.
+func (in *TenantAgentIssueOutput) DeepCopy() *TenantAgentIssueOutput {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamAgentIssueOutput)
+	out := new(TenantAgentIssueOutput)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyInto copies the receiver into out. in must be non-nil.
-func (in *TeamAgentBudgets) DeepCopyInto(out *TeamAgentBudgets) {
+func (in *TenantAgentBudgets) DeepCopyInto(out *TenantAgentBudgets) {
 	*out = *in
 	if in.Session != nil {
 		v := *in.Session
@@ -4349,28 +4349,28 @@ func (in *TeamAgentBudgets) DeepCopyInto(out *TeamAgentBudgets) {
 	}
 }
 
-// DeepCopy creates a new TeamAgentBudgets, copied from the receiver.
-func (in *TeamAgentBudgets) DeepCopy() *TeamAgentBudgets {
+// DeepCopy creates a new TenantAgentBudgets, copied from the receiver.
+func (in *TenantAgentBudgets) DeepCopy() *TenantAgentBudgets {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamAgentBudgets)
+	out := new(TenantAgentBudgets)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyInto copies the receiver into out. in must be non-nil.
-func (in *TeamAgentLastSession) DeepCopyInto(out *TeamAgentLastSession) {
+func (in *TenantAgentLastSession) DeepCopyInto(out *TenantAgentLastSession) {
 	*out = *in
 	in.At.DeepCopyInto(&out.At)
 }
 
-// DeepCopy creates a new TeamAgentLastSession, copied from the receiver.
-func (in *TeamAgentLastSession) DeepCopy() *TeamAgentLastSession {
+// DeepCopy creates a new TenantAgentLastSession, copied from the receiver.
+func (in *TenantAgentLastSession) DeepCopy() *TenantAgentLastSession {
 	if in == nil {
 		return nil
 	}
-	out := new(TeamAgentLastSession)
+	out := new(TenantAgentLastSession)
 	in.DeepCopyInto(out)
 	return out
 }

@@ -771,7 +771,7 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	mat.JenkinsYAML = ownTemplatesMerged
 
 	// Merge each placed tenant's pipeline-template fragment. applyCellContent
-	// above already stamped folder with the Team name. This waits for the
+	// above already stamped folder with the Tenant name. This waits for the
 	// same reason: no tenant template body may reach ResolveVars or the
 	// unresolved-variable check above. A no-op for a controller that is not
 	// a cell.
@@ -2347,7 +2347,7 @@ func (r *Reconciler) assembleApproveState(ctx context.Context, cr *v1alpha1.Cont
 	// The mite replaces its tenant set from every cell push, so a push
 	// without tenant_homes holds back every tenant's triggers. The entries
 	// are also inside the full hash.
-	r.attachTenantHomes(ctx, cr, r.listPlacedTeams(ctx, cr), desired)
+	r.attachTenantHomes(ctx, cr, r.listPlacedTenants(ctx, cr), desired)
 	return desired, resolvedBundle.CellDrainingTenants, nil
 }
 
@@ -4491,7 +4491,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		// tenant_homes is inside the composite hash, so it is stamped
 		// before the hash is computed. A home change therefore pushes a
 		// new desired state.
-		r.attachTenantHomes(ctx, cr, r.listPlacedTeams(ctx, cr), d)
+		r.attachTenantHomes(ctx, cr, r.listPlacedTenants(ctx, cr), d)
 		h := computeDesiredStateHash(d)
 		d.DesiredStateHash = h
 		span.SetAttributes(attribute.String("hash", h))

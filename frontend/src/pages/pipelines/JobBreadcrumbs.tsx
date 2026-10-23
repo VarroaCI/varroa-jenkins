@@ -5,13 +5,13 @@ import styles from "./JobBreadcrumbs.module.css";
 const enc = (s: string) => encodeURIComponent(s);
 
 /**
- * teamHomeHref builds the team home link for one folder crumb. The link
+ * tenantHomeHref builds the tenant home link for one folder crumb. The link
  * carries one "open" parameter per ancestor folder and one for the crumb's
- * own folder, so the team home opens unfolded at that folder. The tenant
+ * own folder, so the tenant home opens unfolded at that folder. The tenant
  * crumb carries none.
  */
-function teamHomeHref(team: string, openPaths: string[]): string {
-  const base = `/pipelines/${enc(team)}`;
+function tenantHomeHref(tenant: string, openPaths: string[]): string {
+  const base = `/pipelines/${enc(tenant)}`;
   if (openPaths.length === 0) return base;
   const query = openPaths.map((value) => `open=${enc(value)}`).join("&");
   return `${base}?${query}`;
@@ -24,17 +24,17 @@ function teamHomeHref(team: string, openPaths: string[]): string {
  * links to the job page, and the label is the last crumb and the current
  * page. The label names a build or a test case.
  *
- * The first crumb carries the {team} URL segment, never the response's
+ * The first crumb carries the {tenant} URL segment, never the response's
  * tenant value: a controller tenant reports "<namespace>/<controller>"
- * there, and the crumb link needs the team segment.
+ * there, and the crumb link needs the tenant segment.
  */
 export default function JobBreadcrumbs({
-  team,
+  tenant,
   tenantFolder,
   jobPath,
   current,
 }: {
-  team: string;
+  tenant: string;
   tenantFolder: string;
   jobPath: string;
   current?: string;
@@ -48,7 +48,7 @@ export default function JobBreadcrumbs({
     <nav aria-label="Job path" className={styles.trail}>
       <ol className={styles.list}>
         <li className={styles.crumb}>
-          <Link to={teamHomeHref(team, [])}>{team}</Link>
+          <Link to={tenantHomeHref(tenant, [])}>{tenant}</Link>
         </li>
         {folders.map((segment, index) => {
           const openPaths = folders.slice(0, index + 1).map((_, i) => folders.slice(0, i + 1).join("/"));
@@ -57,7 +57,7 @@ export default function JobBreadcrumbs({
               <span aria-hidden="true" className={styles.separator}>
                 /
               </span>
-              <Link to={teamHomeHref(team, openPaths)}>{segment}</Link>
+              <Link to={tenantHomeHref(tenant, openPaths)}>{segment}</Link>
             </li>
           );
         })}
@@ -70,7 +70,7 @@ export default function JobBreadcrumbs({
               {jobName}
             </span>
           ) : (
-            <Link to={`/pipelines/${enc(team)}/${enc(jobPath)}`}>{jobName}</Link>
+            <Link to={`/pipelines/${enc(tenant)}/${enc(jobPath)}`}>{jobName}</Link>
           )}
         </li>
         {current !== undefined && (

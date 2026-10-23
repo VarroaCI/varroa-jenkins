@@ -54,7 +54,7 @@ func newTestReconciler(backend crdstore.Backend) *Reconciler {
 	}
 }
 
-// runnerWithCredentialRef returns an ssh Runner on the "payments" team
+// runnerWithCredentialRef returns an ssh Runner on the "payments" tenant
 // naming credentialRef, overriding sshRunner's fixture "ssh-key" reference
 // for a test that needs a specific credential fault.
 func runnerWithCredentialRef(name, credentialRef string) *v1alpha1.Runner {
@@ -88,7 +88,7 @@ func getRunner(t *testing.T, backend crdstore.Backend, name string) *v1alpha1.Ru
 
 func TestTick_CellWrites_FirstPlacement(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 
 	rec := newTestReconciler(f)
@@ -103,18 +103,18 @@ func TestTick_CellWrites_FirstPlacement(t *testing.T) {
 
 func TestTick_CellWrites_MovedPlacement(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 
 	rec := newTestReconciler(f)
 	rec.probeOffline(t)
 	rec.Tick(context.Background())
 
-	// Move the team to a new cell.
-	moved := placedTeam("payments", "cell-b", "varroa-system-2")
+	// Move the tenant to a new cell.
+	moved := placedTenant("payments", "cell-b", "varroa-system-2")
 	moved.ResourceVersion = ""
 	if err := f.Seed(moved); err != nil {
-		t.Fatalf("move team: %v", err)
+		t.Fatalf("move tenant: %v", err)
 	}
 	rec.Tick(context.Background())
 
@@ -125,22 +125,22 @@ func TestTick_CellWrites_MovedPlacement(t *testing.T) {
 }
 
 // TestTick_CellWrites_PlacedToUnplaced proves the reconciler clears the
-// cell and cellNamespace of a Runner once a Team's placement clears.
+// cell and cellNamespace of a Runner once a Tenant's placement clears.
 func TestTick_CellWrites_PlacedToUnplaced(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 
 	rec := newTestReconciler(f)
 	rec.probeOffline(t)
 	rec.Tick(context.Background())
 
-	unplaced := &v1alpha1.Team{
+	unplaced := &v1alpha1.Tenant{
 		ObjectMeta: metaObj("payments"),
-		Spec:       v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{AgentNamespace: "agents"}},
+		Spec:       v1alpha1.TenantSpec{Pipelines: &v1alpha1.TenantPipelinesSpec{AgentNamespace: "agents"}},
 	}
 	if err := f.Seed(unplaced); err != nil {
-		t.Fatalf("unplace team: %v", err)
+		t.Fatalf("unplace tenant: %v", err)
 	}
 	rec.Tick(context.Background())
 
@@ -154,7 +154,7 @@ func TestTick_CellWrites_PlacedToUnplaced(t *testing.T) {
 
 func TestTick_DeliveredRunner_ObservedGenerationAdvances(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 
 	rec := newTestReconciler(f)
@@ -179,61 +179,61 @@ func TestTick_UndeliveredReasons_ObservedGenerationStillAdvances(t *testing.T) {
 	tests := []struct {
 		name       string
 		runner     *v1alpha1.Runner
-		team       *v1alpha1.Team // nil: seed no Team
+		tenant     *v1alpha1.Tenant // nil: seed no Tenant
 		secrets    *fakeSecretReader
 		wantReason string
 	}{
 		{
-			name:       "team not found",
+			name:       "tenant not found",
 			runner:     sshRunner("orphan", "ghost"),
-			wantReason: ReasonTeamNotFound,
+			wantReason: ReasonTenantNotFound,
 		},
 		{
-			name:   "team not pipelines",
+			name:   "tenant not pipelines",
 			runner: sshRunner("orphan", "search"),
-			team: &v1alpha1.Team{
+			tenant: &v1alpha1.Tenant{
 				ObjectMeta: metaObj("search"),
-				Spec:       v1alpha1.TeamSpec{},
+				Spec:       v1alpha1.TenantSpec{},
 			},
-			wantReason: ReasonTeamNotPipelines,
+			wantReason: ReasonTenantNotPipelines,
 		},
 		{
 			name: "launcher unsupported",
 			runner: &v1alpha1.Runner{
 				ObjectMeta: metaObj("orphan"),
-				Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "winrm", RemoteFS: "/x"},
+				Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "winrm", RemoteFS: "/x"},
 			},
-			team:       placedTeam("payments", "cell-a", "varroa-system"),
+			tenant:     placedTenant("payments", "cell-a", "varroa-system"),
 			wantReason: ReasonLauncherUnsupported,
 		},
 		{
-			name:       "team name unsupported",
+			name:       "tenant name unsupported",
 			runner:     sshRunner("orphan", "pay.roll"),
-			team:       placedTeam("pay.roll", "cell-a", "varroa-system"),
-			wantReason: ReasonTeamNameUnsupported,
+			tenant:     placedTenant("pay.roll", "cell-a", "varroa-system"),
+			wantReason: ReasonTenantNameUnsupported,
 		},
 		{
 			name:       "runner name unsupported",
 			runner:     sshRunner("win.1", "payments"),
-			team:       placedTeam("payments", "cell-a", "varroa-system"),
+			tenant:     placedTenant("payments", "cell-a", "varroa-system"),
 			wantReason: ReasonRunnerNameUnsupported,
 		},
 		{
 			name:       "awaiting placement",
 			runner:     sshRunner("orphan", "payments"),
-			team:       &v1alpha1.Team{ObjectMeta: metaObj("payments"), Spec: v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{}}},
+			tenant:     &v1alpha1.Tenant{ObjectMeta: metaObj("payments"), Spec: v1alpha1.TenantSpec{Pipelines: &v1alpha1.TenantPipelinesSpec{}}},
 			wantReason: ReasonAwaitingPlacement,
 		},
 		{
 			name:       "credential missing",
 			runner:     runnerWithCredentialRef("orphan", "no-such-key"),
-			team:       placedTeam("payments", "cell-a", "varroa-system"),
+			tenant:     placedTenant("payments", "cell-a", "varroa-system"),
 			wantReason: ReasonCredentialMissing,
 		},
 		{
 			name:       "credential malformed",
 			runner:     runnerWithCredentialRef("orphan", "ssh-key"),
-			team:       placedTeam("payments", "cell-a", "varroa-system"),
+			tenant:     placedTenant("payments", "cell-a", "varroa-system"),
 			secrets:    malformedSSHSecrets(),
 			wantReason: ReasonCredentialMalformed,
 		},
@@ -242,8 +242,8 @@ func TestTick_UndeliveredReasons_ObservedGenerationStillAdvances(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := crdstore.NewFake()
-			if tt.team != nil {
-				crdstore.MustSeed(f, tt.team)
+			if tt.tenant != nil {
+				crdstore.MustSeed(f, tt.tenant)
 			}
 			crdstore.MustSeed(f, tt.runner)
 
@@ -270,7 +270,7 @@ func TestTick_UndeliveredReasons_ObservedGenerationStillAdvances(t *testing.T) {
 // no status patch happens and observedGeneration is left exactly as it was.
 func TestTick_EarlyFault_ObservedGenerationUnchanged(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 
 	rec := newTestReconciler(f)
@@ -299,7 +299,7 @@ func TestTick_EarlyFault_ObservedGenerationUnchanged(t *testing.T) {
 
 func TestTick_TokenMint_InboundOnce(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, inboundRunner())
 
 	rec := newTestReconciler(f)
@@ -317,7 +317,7 @@ func TestTick_TokenMint_InboundOnce(t *testing.T) {
 
 func TestTick_TokenMint_SSHNever(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 
 	rec := newTestReconciler(f)
@@ -332,7 +332,7 @@ func TestTick_TokenMint_SSHNever(t *testing.T) {
 
 func TestTick_TokenMint_NeverReplaced(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, inboundRunner())
 
 	rec := newTestReconciler(f)
@@ -359,7 +359,7 @@ func newProbeServer(t *testing.T, handler http.HandlerFunc) func(cr *v1alpha1.Co
 
 func TestTick_Liveness_Online(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 	seedCell(t, f, "cell-a", "varroa-system")
 
@@ -389,7 +389,7 @@ func TestTick_Liveness_Online(t *testing.T) {
 
 func TestTick_Liveness_Offline(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 	seedCell(t, f, "cell-a", "varroa-system")
 
@@ -416,7 +416,7 @@ func TestTick_Liveness_Offline(t *testing.T) {
 
 func TestTick_Liveness_NonOKLeavesLastSeenUnchanged(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 	seedCell(t, f, "cell-a", "varroa-system")
 
@@ -443,7 +443,7 @@ func TestTick_Liveness_NonOKLeavesLastSeenUnchanged(t *testing.T) {
 
 func TestTick_Liveness_TransportErrorLeavesLastSeenUnchanged(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 	seedCell(t, f, "cell-a", "varroa-system")
 
@@ -469,7 +469,7 @@ func TestTick_Liveness_TransportErrorLeavesLastSeenUnchanged(t *testing.T) {
 // offline answer sends no further status patch.
 func TestTick_PatchOnlyWhenChanged(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, sshRunner("orphan", "ghost")) // stable TeamNotFound fault, no probe
+	crdstore.MustSeed(f, sshRunner("orphan", "ghost")) // stable TenantNotFound fault, no probe
 
 	rec := newTestReconciler(f)
 	rec.Tick(context.Background())
@@ -494,7 +494,7 @@ func TestTick_PatchOnlyWhenChanged(t *testing.T) {
 
 func TestTick_RunnerDeletionEnqueuesTheCellItLeft(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 
 	rec := newTestReconciler(f)
@@ -554,7 +554,7 @@ func (r *Reconciler) probeOffline(t *testing.T) {
 // real fault.
 func TestTick_CredentialFault_SkipsProbe(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, runnerWithCredentialRef("win-1", "no-such-key"))
 	seedCell(t, f, "cell-a", "varroa-system")
 
@@ -589,7 +589,7 @@ func TestTick_CredentialFault_SkipsProbe(t *testing.T) {
 // gets no node from the same tick's desired-state read either.
 func TestTick_CredentialFault_AgreesWithContribution(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, runnerWithCredentialRef("win-1", "no-such-key"))
 
 	rec := newTestReconciler(f)
@@ -618,7 +618,7 @@ func TestTick_CredentialFault_AgreesWithContribution(t *testing.T) {
 // needs to reconnect.
 func TestTick_OfflineRunner_StillInContribution(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, sshRunner("win-1", "payments"))
 	seedCell(t, f, "cell-a", "varroa-system")
 
@@ -650,7 +650,7 @@ func TestTick_OfflineRunner_StillInContribution(t *testing.T) {
 // undelivered runner never carries a connected value forward (design D10).
 func TestTick_CredentialFault_ClearsConnected(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	runner := runnerWithCredentialRef("win-1", "no-such-key")
 	runner.Status.Connected = true
 	crdstore.MustSeed(f, runner)

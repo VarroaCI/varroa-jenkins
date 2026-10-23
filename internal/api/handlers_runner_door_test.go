@@ -124,11 +124,11 @@ func newDoorTestServer(t *testing.T, brood Brood) (*Server, *crdstore.Fake, *Run
 	return srv, store, idx
 }
 
-func seedDoorTeam(t *testing.T, store *crdstore.Fake, placement *v1alpha1.TeamPlacementStatus) {
+func seedDoorTenant(t *testing.T, store *crdstore.Fake, placement *v1alpha1.TenantPlacementStatus) {
 	t.Helper()
-	crdstore.MustSeed(store, &v1alpha1.Team{
+	crdstore.MustSeed(store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Status:     v1alpha1.TeamStatus{Placement: placement},
+		Status:     v1alpha1.TenantStatus{Placement: placement},
 	})
 }
 
@@ -190,7 +190,7 @@ func TestRunnerDoor_EmptyStoredTokenUnauthorized(t *testing.T) {
 	srv, store, idx := newDoorTestServer(t, newDoorFakeBrood())
 	crdstore.MustSeed(store, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "r1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/home/jenkins"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/home/jenkins"},
 		Status:     v1alpha1.RunnerStatus{Token: ""},
 	})
 	idx.Put("r1", "stale-token")
@@ -208,7 +208,7 @@ func TestRunnerDoor_SSHRunnerRefused(t *testing.T) {
 	seedDoorRunner(t, store, idx, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "r1"},
 		Spec: v1alpha1.RunnerSpec{
-			Team: "payments", Launcher: "ssh", RemoteFS: "/x",
+			Tenant: "payments", Launcher: "ssh", RemoteFS: "/x",
 			Host: "1.2.3.4", CredentialRef: "cred",
 		},
 		Status: v1alpha1.RunnerStatus{Token: "tok"},
@@ -224,10 +224,10 @@ func TestRunnerDoor_SSHRunnerRefused(t *testing.T) {
 
 func TestRunnerDoor_NilPlacementServiceUnavailable(t *testing.T) {
 	srv, store, idx := newDoorTestServer(t, newDoorFakeBrood())
-	crdstore.MustSeed(store, &v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
+	crdstore.MustSeed(store, &v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
 	seedDoorRunner(t, store, idx, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "r1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/x"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/x"},
 		Status:     v1alpha1.RunnerStatus{Token: "tok", NodeName: "payments-r1"},
 	})
 
@@ -244,10 +244,10 @@ func TestRunnerDoor_NilPlacementServiceUnavailable(t *testing.T) {
 // are both set.
 func TestRunnerDoor_EmptyPlacementClusterServiceUnavailable(t *testing.T) {
 	srv, store, idx := newDoorTestServer(t, newDoorFakeBrood())
-	seedDoorTeam(t, store, &v1alpha1.TeamPlacementStatus{Cluster: "", Cell: "cell1", CellNamespace: "team-ns"})
+	seedDoorTenant(t, store, &v1alpha1.TenantPlacementStatus{Cluster: "", Cell: "cell1", CellNamespace: "team-ns"})
 	seedDoorRunner(t, store, idx, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "r1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/x"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/x"},
 		Status:     v1alpha1.RunnerStatus{Token: "tok", NodeName: "payments-r1"},
 	})
 
@@ -288,10 +288,10 @@ func TestRunnerDoor_ResolvesCellByPlacementCluster(t *testing.T) {
 		}
 		return coreSrv.URL
 	}
-	seedDoorTeam(t, store, &v1alpha1.TeamPlacementStatus{Cluster: "hive-b", Cell: "cell1", CellNamespace: "team-ns"})
+	seedDoorTenant(t, store, &v1alpha1.TenantPlacementStatus{Cluster: "hive-b", Cell: "cell1", CellNamespace: "team-ns"})
 	seedDoorRunner(t, store, idx, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "r1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/x"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/x"},
 		Status:     v1alpha1.RunnerStatus{Token: "tok", NodeName: "payments-r1"},
 	})
 
@@ -311,10 +311,10 @@ func TestRunnerDoor_ResolvesCellByPlacementCluster(t *testing.T) {
 
 func TestRunnerDoor_LoginSucceeds(t *testing.T) {
 	srv, store, idx := newDoorTestServer(t, newDoorFakeBrood())
-	seedDoorTeam(t, store, &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell1", CellNamespace: "team-ns"})
+	seedDoorTenant(t, store, &v1alpha1.TenantPlacementStatus{Cluster: "core", Cell: "cell1", CellNamespace: "team-ns"})
 	seedDoorRunner(t, store, idx, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "r1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/x"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/x"},
 		Status:     v1alpha1.RunnerStatus{Token: "tok"},
 	})
 
@@ -421,10 +421,10 @@ func TestRunnerDoorUpgrade_EmptySecretAnswers503(t *testing.T) {
 	brood.seed("core", &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "cell1", Namespace: "team-ns"}})
 	srv, store, idx := newDoorTestServer(t, brood)
 	srv.runnerDoorServiceURL = func(*v1alpha1.Controller) string { return jnlpSrv.URL }
-	seedDoorTeam(t, store, &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell1", CellNamespace: "team-ns"})
+	seedDoorTenant(t, store, &v1alpha1.TenantPlacementStatus{Cluster: "core", Cell: "cell1", CellNamespace: "team-ns"})
 	seedDoorRunner(t, store, idx, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "r1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/x"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/x"},
 		Status:     v1alpha1.RunnerStatus{Token: "tok", NodeName: "payments-r1"},
 	})
 
@@ -459,10 +459,10 @@ func TestRunnerDoorAgentJar_StreamsBody(t *testing.T) {
 	brood.seed("core", &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "cell1", Namespace: "team-ns"}})
 	srv, store, idx := newDoorTestServer(t, brood)
 	srv.runnerDoorServiceURL = func(*v1alpha1.Controller) string { return cellSrv.URL }
-	seedDoorTeam(t, store, &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell1", CellNamespace: "team-ns"})
+	seedDoorTenant(t, store, &v1alpha1.TenantPlacementStatus{Cluster: "core", Cell: "cell1", CellNamespace: "team-ns"})
 	seedDoorRunner(t, store, idx, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "r1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/x"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/x"},
 		Status:     v1alpha1.RunnerStatus{Token: "tok", NodeName: "payments-r1"},
 	})
 
@@ -531,10 +531,10 @@ func TestRunnerDoorUpgrade_HeaderContract(t *testing.T) {
 	brood.seed("core", &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "cell1", Namespace: "team-ns"}})
 	srv, store, idx := newDoorTestServer(t, brood)
 	srv.runnerDoorServiceURL = func(*v1alpha1.Controller) string { return cellSrv.URL }
-	seedDoorTeam(t, store, &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell1", CellNamespace: "team-ns"})
+	seedDoorTenant(t, store, &v1alpha1.TenantPlacementStatus{Cluster: "core", Cell: "cell1", CellNamespace: "team-ns"})
 	seedDoorRunner(t, store, idx, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "r1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/x"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/x"},
 		Status:     v1alpha1.RunnerStatus{Token: "tok", NodeName: wantNodeName},
 	})
 
@@ -701,10 +701,10 @@ func (denyAllProvider) Discovery() ([]byte, []byte, bool) { return nil, nil, fal
 
 func TestRunnerDoor_BypassesAuthMiddleware(t *testing.T) {
 	srv, store, idx := newDoorTestServer(t, newDoorFakeBrood())
-	seedDoorTeam(t, store, &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell1", CellNamespace: "team-ns"})
+	seedDoorTenant(t, store, &v1alpha1.TenantPlacementStatus{Cluster: "core", Cell: "cell1", CellNamespace: "team-ns"})
 	seedDoorRunner(t, store, idx, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "r1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/x"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/x"},
 		Status:     v1alpha1.RunnerStatus{Token: "tok"},
 	})
 

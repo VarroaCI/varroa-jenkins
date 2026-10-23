@@ -13,25 +13,25 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
 )
 
-// chooseCredential returns the Team's tenant credentials that may reach host,
+// chooseCredential returns the Tenant's tenant credentials that may reach host,
 // sorted by id. A credential qualifies when it has a known kind, a token value,
 // and a varroa.dev/allowed-hosts annotation that lists host.
-func (o *Ops) chooseCredential(ctx context.Context, team, host string) ([]Credential, error) {
-	t, err := crdstore.Get[v1alpha1.Team](ctx, o.store, team, "")
+func (o *Ops) chooseCredential(ctx context.Context, tenant, host string) ([]Credential, error) {
+	t, err := crdstore.Get[v1alpha1.Tenant](ctx, o.store, tenant, "")
 	if apierrors.IsNotFound(err) {
-		return nil, replyErr(forgeapi.CodeNoMatchingCredential, "team %q has no pipelines agent namespace", team)
+		return nil, replyErr(forgeapi.CodeNoMatchingCredential, "tenant %q has no pipelines agent namespace", tenant)
 	}
 	if err != nil {
-		return nil, replyErr(forgeapi.CodeInternal, "read team %q failed", team)
+		return nil, replyErr(forgeapi.CodeInternal, "read tenant %q failed", tenant)
 	}
 	if t.Spec.Pipelines == nil || t.Spec.Pipelines.AgentNamespace == "" {
-		return nil, replyErr(forgeapi.CodeNoMatchingCredential, "team %q has no pipelines agent namespace", team)
+		return nil, replyErr(forgeapi.CodeNoMatchingCredential, "tenant %q has no pipelines agent namespace", tenant)
 	}
 	ns := t.Spec.Pipelines.AgentNamespace
 
 	records, err := o.secrets.ListSecrets(ctx, ns, v1alpha1.TenantCredentialSelector)
 	if err != nil {
-		return nil, replyErr(forgeapi.CodeInternal, "list tenant credentials of team %q failed", team)
+		return nil, replyErr(forgeapi.CodeInternal, "list tenant credentials of tenant %q failed", tenant)
 	}
 	var out []Credential
 	for _, rec := range records {
@@ -49,7 +49,7 @@ func (o *Ops) chooseCredential(ctx context.Context, team, host string) ([]Creden
 		}
 	}
 	if len(out) == 0 {
-		return nil, replyErr(forgeapi.CodeNoMatchingCredential, "no tenant credential of team %q lists host %q", team, host)
+		return nil, replyErr(forgeapi.CodeNoMatchingCredential, "no tenant credential of tenant %q lists host %q", tenant, host)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].ID != out[j].ID {

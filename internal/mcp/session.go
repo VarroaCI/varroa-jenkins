@@ -10,7 +10,7 @@ import (
 )
 
 // SessionFrom returns the agent session id of a tool call. The loop sets it
-// through agent.WithSessionContext. A Team agent token sets it through
+// through agent.WithSessionContext. A Tenant agent token sets it through
 // auth.ContextWithAgentSession. It returns false when neither is set.
 func SessionFrom(ctx context.Context) (string, bool) {
 	if sc, ok := agent.SessionContextFrom(ctx); ok && sc.SessionID != uuid.Nil {

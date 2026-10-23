@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { listPipelines, listTeams } from "../api/client";
+import { listPipelines, listTenants } from "../api/client";
 import { jobGlobMatches } from "../lib/jobglob";
 import { stripTenantFolder } from "../pages/pipelines/jobPath";
 import type { TenantScope } from "../types/auth";
@@ -16,11 +16,11 @@ export function validateTenantScope(tenants: TenantScope[] | undefined): string[
   if (tenants === undefined) return [];
   const errors: string[] = [];
   if (tenants.length === 0) {
-    errors.push("A tenants list must name at least one team. Remove the list to leave the scope wide.");
+    errors.push("A tenants list must name at least one tenant. Remove the list to leave the scope wide.");
   }
   for (const entry of tenants) {
-    if (entry.name.trim() === "") errors.push("A tenant entry must name a team.");
-    else if (entry.name.includes("/")) errors.push(`The team name ${entry.name} must not hold "/".`);
+    if (entry.name.trim() === "") errors.push("A tenant entry must name a tenant.");
+    else if (entry.name.includes("/")) errors.push(`The tenant name ${entry.name} must not hold "/".`);
     if (entry.jobs === undefined) continue;
     if (entry.jobs.length === 0) {
       errors.push("An omitted jobs list covers every job. Add a pattern, or remove the list.");
@@ -46,16 +46,16 @@ function entryErrors(entry: TenantScope): string[] {
  * caller's grants, never by the subject's. A read the server refuses states
  * that the job list is not available and blocks nothing.
  */
-function JobMatchPreview({ teamName, patterns }: { teamName: string; patterns: string[] }) {
+function JobMatchPreview({ tenantName, patterns }: { tenantName: string; patterns: string[] }) {
   const usable = patterns.filter((pattern) => pattern.trim() !== "");
   const { data, isError, isLoading } = useQuery({
-    queryKey: ["pipelines", teamName],
-    queryFn: () => listPipelines(teamName),
-    enabled: teamName.trim() !== "" && usable.length > 0,
+    queryKey: ["pipelines", tenantName],
+    queryFn: () => listPipelines(tenantName),
+    enabled: tenantName.trim() !== "" && usable.length > 0,
     retry: false,
   });
 
-  if (teamName.trim() === "" || usable.length === 0) return null;
+  if (tenantName.trim() === "" || usable.length === 0) return null;
   if (isError) return <p className={styles.previewUnavailable}>The job list is not available.</p>;
   if (isLoading || !data) return <p className={styles.previewUnavailable}>Counting the matching jobs…</p>;
 
@@ -74,7 +74,7 @@ function JobMatchPreview({ teamName, patterns }: { teamName: string; patterns: s
 
 /**
  * TenantScopeEditor owns the whole tenants dimension of a role binding
- * scope: the entry list, the team name control, the job pattern list, the
+ * scope: the entry list, the tenant name control, the job pattern list, the
  * grammar help, the refusals, and the match preview.
  */
 export default function TenantScopeEditor({
@@ -89,7 +89,7 @@ export default function TenantScopeEditor({
   disabledReason?: string;
 }) {
   const listId = useId();
-  const teamsQuery = useQuery({ queryKey: ["teams"], queryFn: listTeams, retry: false });
+  const tenantsQuery = useQuery({ queryKey: ["tenants"], queryFn: listTenants, retry: false });
   const entries = value ?? [];
 
   const replace = (index: number, entry: TenantScope) => {
@@ -106,14 +106,14 @@ export default function TenantScopeEditor({
   return (
     <div className={styles.editor}>
       <p className={styles.hint}>
-        A tenant scope narrows a binding to one pipelines team. A job pattern is a Varroa rule. It
+        A tenant scope narrows a binding to one pipelines tenant. A job pattern is a Varroa rule. It
         narrows what Varroa shows and what Varroa starts. It changes nothing inside Jenkins.
       </p>
       {disabled && disabledReason && <p className={styles.disabledNote}>{disabledReason}</p>}
 
       <datalist id={listId}>
-        {(teamsQuery.data ?? []).map((team) => (
-          <option key={team.name} value={team.name} />
+        {(tenantsQuery.data ?? []).map((tenant) => (
+          <option key={tenant.name} value={tenant.name} />
         ))}
       </datalist>
 
@@ -121,7 +121,7 @@ export default function TenantScopeEditor({
         <div key={index} className={styles.entry}>
           <div>
             <label className={styles.label} htmlFor={`${listId}-name-${index}`}>
-              Team
+              Tenant
             </label>
             <div className={styles.entryHead}>
               <input
@@ -143,12 +143,12 @@ export default function TenantScopeEditor({
                 &times;
               </button>
             </div>
-            <p className={styles.hint}>A team that does not exist yet is accepted.</p>
+            <p className={styles.hint}>A tenant that does not exist yet is accepted.</p>
           </div>
 
           {entry.jobs === undefined ? (
             <>
-              <p className={styles.hint}>Every job of this team is covered.</p>
+              <p className={styles.hint}>Every job of this tenant is covered.</p>
               <button
                 type="button"
                 className={styles.addBtn}
@@ -205,7 +205,7 @@ export default function TenantScopeEditor({
                 <code>**</code> matches a run across <code>/</code>. <code>?</code> matches one
                 character. A pattern is folder-relative, and never starts with <code>/</code>.
               </p>
-              <JobMatchPreview teamName={entry.name} patterns={entry.jobs} />
+              <JobMatchPreview tenantName={entry.name} patterns={entry.jobs} />
             </div>
           )}
 
@@ -219,7 +219,7 @@ export default function TenantScopeEditor({
 
       {entries.length === 0 && value !== undefined && (
         <p className={styles.error}>
-          A tenants list must name at least one team. Remove the list to leave the scope wide.
+          A tenants list must name at least one tenant. Remove the list to leave the scope wide.
         </p>
       )}
 

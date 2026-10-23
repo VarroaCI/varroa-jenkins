@@ -19,7 +19,7 @@ const proposeErrDataSharingTooLow = "data_sharing_too_low"
 // proposeMaxBody bounds the body of a proposal request.
 const proposeMaxBody = 4 << 10
 
-// proposePipelineRequest is the body of POST /pipelines/{team}/propose.
+// proposePipelineRequest is the body of POST /pipelines/{tenant}/propose.
 type proposePipelineRequest struct {
 	Repo string `json:"repo"`
 }
@@ -34,10 +34,10 @@ type proposePipelineResponse struct {
 	CredentialID string `json:"credentialId"`
 }
 
-// teamPipelinesTenant returns the Team pipelines tenant of team among refs.
-func teamPipelinesTenant(refs []TenantRef, team string) (TenantRef, bool) {
+// tenantPipelinesTenant returns the Tenant pipelines tenant of tenant among refs.
+func tenantPipelinesTenant(refs []TenantRef, tenant string) (TenantRef, bool) {
 	for _, ref := range refs {
-		if ref.Tenant == team {
+		if ref.Tenant == tenant {
 			return ref, true
 		}
 	}
@@ -78,7 +78,7 @@ func readRepoFileVisible(level agent.DataSharing) bool {
 	return datashare.Rank(level) == 2
 }
 
-// handleProposePipeline serves POST /pipelines/{team}/propose. It runs the
+// handleProposePipeline serves POST /pipelines/{tenant}/propose. It runs the
 // refusals of proposal section 5.5 in order. Nothing is written before the
 // session starts, so a refusal creates no session row.
 func (s *Server) handleProposePipeline(w http.ResponseWriter, r *http.Request) {
@@ -110,15 +110,15 @@ func (s *Server) handleProposePipeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	team := r.PathValue("team")
-	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	tenant := r.PathValue("tenant")
+	refs, serr := s.resolveTenantTenants(ctx, claims, tenant)
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return
 	}
-	ref, ok := teamPipelinesTenant(refs, team)
+	ref, ok := tenantPipelinesTenant(refs, tenant)
 	if !ok || !s.canReadPipeline(claims, ref, "") {
-		s.writeJSONError(w, http.StatusNotFound, "team not found")
+		s.writeJSONError(w, http.StatusNotFound, "tenant not found")
 		return
 	}
 	if !s.canWritePipeline(claims, ref, "") {
@@ -156,7 +156,7 @@ func (s *Server) handleProposePipeline(w http.ResponseWriter, r *http.Request) {
 	if cluster == "" {
 		cluster = s.deps.CoreCluster
 	}
-	check, err := s.deps.ForgeRelay.Check(ctx, cluster, forgeapi.CheckRequest{Team: team, Repo: u.String()})
+	check, err := s.deps.ForgeRelay.Check(ctx, cluster, forgeapi.CheckRequest{Tenant: tenant, Repo: u.String()})
 	if err != nil && isOperatorUnavailable(err) {
 		writeAssistantError(s, w, http.StatusServiceUnavailable, codeOperatorUnavailable, "no operator received the forge check")
 		return
@@ -181,8 +181,8 @@ func (s *Server) handleProposePipeline(w http.ResponseWriter, r *http.Request) {
 	prompt, _ := prompts.Get(prompts.ProposePipeline)
 	sess, err := s.createAssistantSession(ctx, rt, claims, sessionStart{
 		Values: map[string]any{
-			agent.CtxTeam:   team,
-			agent.CtxRoute:  "/pipelines/" + team,
+			agent.CtxTenant: tenant,
+			agent.CtxRoute:  "/pipelines/" + tenant,
 			agent.CtxRepo:   u.String(),
 			agent.CtxPrompt: prompts.ProposePipeline,
 			// The session reads and proposes against the commit that the check read.

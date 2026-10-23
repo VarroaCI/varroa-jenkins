@@ -94,7 +94,7 @@ func TestBusFanout_RecoversAfterDeniedSubscribe(t *testing.T) {
 }
 
 // TestRunFanout_RecoversAfterDeniedSubscribe starts the run fan-out while
-// NATS denies its subject. Run notifications reach a team subscriber after
+// NATS denies its subject. Run notifications reach a tenant subscriber after
 // the reload adds the grant, without a restart.
 func TestRunFanout_RecoversAfterDeniedSubscribe(t *testing.T) {
 	d := bustest.StartDenyServer(t, bus.RunNotifyWildcard)

@@ -94,7 +94,7 @@ describe("AreaShell", () => {
     expect(screen.queryByText("Varroa Role Bindings")).not.toBeInTheDocument();
     expect(screen.queryByText("Jenkins Roles")).not.toBeInTheDocument();
     expect(screen.queryByText("Jenkins Role Bindings")).not.toBeInTheDocument();
-    expect(screen.queryByText("Teams")).not.toBeInTheDocument();
+    expect(screen.queryByText("Tenants")).not.toBeInTheDocument();
   });
 
   it("shows all 11 settings items for a global *:* user", () => {
@@ -108,7 +108,7 @@ describe("AreaShell", () => {
       "Users", "Groups", "Built-in Roles",
       "Varroa Roles", "Varroa Role Bindings",
       "Jenkins Roles", "Jenkins Role Bindings",
-      "Teams", "Provisioning", "Versions", "Identity",
+      "Tenants", "Provisioning", "Versions", "Identity",
     ];
 
     for (const label of expectedLabels) {
@@ -131,7 +131,7 @@ describe("AreaShell", () => {
       { label: "Varroa Role Bindings", href: "/access/role-bindings" },
       { label: "Jenkins Roles", href: "/access/jenkins-roles" },
       { label: "Jenkins Role Bindings", href: "/access/jenkins-role-bindings" },
-      { label: "Teams", href: "/access/teams" },
+      { label: "Tenants", href: "/access/tenants" },
       { label: "Provisioning", href: "/administration/provisioning" },
       { label: "Versions", href: "/administration/versions" },
       { label: "Identity", href: "/administration/identity" },

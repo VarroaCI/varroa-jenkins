@@ -67,7 +67,7 @@ func TestDeclaredJobPending(t *testing.T) {
 	}
 }
 
-// newPendingServer builds the single-controller team ctrl-a, which
+// newPendingServer builds the single-controller tenant ctrl-a, which
 // declares acme/app-a and acme/checkout-api, with a read grant.
 func newPendingServer(reader *fakeRecordReader) *Server {
 	client := newMultibranchControllerFixture()
@@ -157,7 +157,7 @@ func TestHandleListPipelines_RecordOnlyJobIsNeverPending(t *testing.T) {
 func TestHandleListPipelines_InventoryReadErrorMarksNothingPending(t *testing.T) {
 	reader := newFakeRecordReader()
 	reader.jobInventoryErr = http.ErrAbortHandler
-	rec := doPipelinesRequest(t, newPendingServer(reader).handleListPipelines, "/pipelines/ctrl-a", map[string]string{"team": "ctrl-a"})
+	rec := doPipelinesRequest(t, newPendingServer(reader).handleListPipelines, "/pipelines/ctrl-a", map[string]string{"tenant": "ctrl-a"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -170,7 +170,7 @@ func TestHandleListPipelines_InventoryReadErrorMarksNothingPending(t *testing.T)
 	}
 }
 
-// pendingTwoTenantServer builds team payments over ctrl-pipe (pipeline
+// pendingTwoTenantServer builds tenant payments over ctrl-pipe (pipeline
 // declaration, ns-a) and ctrl-multi (multibranch declaration, ns-b), both
 // declaring shared/api. The reader's inventories are set by the caller.
 func pendingTwoTenantServer(t *testing.T, reader *fakeRecordReader) *Server {
@@ -199,7 +199,7 @@ func pendingTwoTenantServer(t *testing.T, reader *fakeRecordReader) *Server {
 		"content-pipe":  {"items.yaml": sharedPathItemsYAML("pipeline")},
 		"content-multi": {"items.yaml": sharedPathItemsYAML("multibranch")},
 	}
-	seedTeam(t, client.crdStore, unplacedTeamObject("payments", "ns-a", "ns-b"))
+	seedTenant(t, client.crdStore, unplacedTenantObject("payments", "ns-a", "ns-b"))
 	return pipelinesTestServer(client, namespaceAuthorizer("ns-a", "ns-b"), reader, nil)
 }
 
@@ -243,7 +243,7 @@ func TestHandleGetPipelineJob_DeclaredJobIsPending(t *testing.T) {
 	reader.jobInventory = map[string]recordstore.JobInventory{
 		"core/test-ns/ctrl-a": pendingInventory(nil, []string{"acme/checkout-api"}, true, true),
 	}
-	rec := doPipelinesRequest(t, newPendingServer(reader).handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fapp-a", map[string]string{"team": "ctrl-a", "job": "acme/app-a"})
+	rec := doPipelinesRequest(t, newPendingServer(reader).handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fapp-a", map[string]string{"tenant": "ctrl-a", "job": "acme/app-a"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -265,7 +265,7 @@ func TestHandleGetPipelineJob_JobWithRunIsNotPending(t *testing.T) {
 	reader.jobSummaries["core/test-ns/ctrl-a"] = []recordstore.JobSummary{
 		{JobPath: "acme/app-a", LastRun: &lastRun},
 	}
-	rec := doPipelinesRequest(t, newPendingServer(reader).handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fapp-a", map[string]string{"team": "ctrl-a", "job": "acme/app-a"})
+	rec := doPipelinesRequest(t, newPendingServer(reader).handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fapp-a", map[string]string{"tenant": "ctrl-a", "job": "acme/app-a"})
 	var detail pipelineJobDetailJSON
 	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -280,7 +280,7 @@ func TestHandleGetPipelineJob_UnknownInventoryIsNotPending(t *testing.T) {
 	reader.jobInventory = map[string]recordstore.JobInventory{
 		"core/test-ns/ctrl-a": pendingInventory(nil, nil, false, false),
 	}
-	rec := doPipelinesRequest(t, newPendingServer(reader).handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fapp-a", map[string]string{"team": "ctrl-a", "job": "acme/app-a"})
+	rec := doPipelinesRequest(t, newPendingServer(reader).handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fapp-a", map[string]string{"tenant": "ctrl-a", "job": "acme/app-a"})
 	var detail pipelineJobDetailJSON
 	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -295,7 +295,7 @@ func TestHandleGetPipelineJob_UndeclaredJobIsNotPending(t *testing.T) {
 	reader.jobInventory = map[string]recordstore.JobInventory{
 		"core/test-ns/ctrl-a": pendingInventory(nil, nil, true, true),
 	}
-	rec := doPipelinesRequest(t, newPendingServer(reader).handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fundeclared", map[string]string{"team": "ctrl-a", "job": "acme/undeclared"})
+	rec := doPipelinesRequest(t, newPendingServer(reader).handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fundeclared", map[string]string{"tenant": "ctrl-a", "job": "acme/undeclared"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -308,10 +308,10 @@ func TestHandleGetPipelineJob_UndeclaredJobIsNotPending(t *testing.T) {
 	}
 }
 
-// detailPendingOf reads the job detail of shared/api for team payments.
+// detailPendingOf reads the job detail of shared/api for tenant payments.
 func detailPendingOf(t *testing.T, srv *Server) pipelineJobDetailJSON {
 	t.Helper()
-	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/shared%2Fapi", map[string]string{"team": "payments", "job": "shared/api"})
+	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/shared%2Fapi", map[string]string{"tenant": "payments", "job": "shared/api"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -354,7 +354,7 @@ func TestHandleGetPipelineJob_AnyTenantNotPendingWins(t *testing.T) {
 func TestHandleGetPipelineJob_InventoryReadErrorIsNotPending(t *testing.T) {
 	reader := newFakeRecordReader()
 	reader.jobInventoryErr = http.ErrAbortHandler
-	rec := doPipelinesRequest(t, newPendingServer(reader).handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fapp-a", map[string]string{"team": "ctrl-a", "job": "acme/app-a"})
+	rec := doPipelinesRequest(t, newPendingServer(reader).handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fapp-a", map[string]string{"tenant": "ctrl-a", "job": "acme/app-a"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -406,7 +406,7 @@ items:
           script: "pipeline {}"
 `},
 	}
-	seedTeam(t, client.crdStore, unplacedTeamObject("payments", "ns-a", "ns-b"))
+	seedTenant(t, client.crdStore, unplacedTenantObject("payments", "ns-a", "ns-b"))
 
 	reader := newFakeRecordReader()
 	reader.jobInventory = map[string]recordstore.JobInventory{

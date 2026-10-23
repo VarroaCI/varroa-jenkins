@@ -225,7 +225,7 @@ func TestApplyControllerSpecSSA_SkipsUpdateEntryWithNonSpecFields(t *testing.T) 
 	c, dyn := newIfExistsTestClient(t, specClaimSeed(
 		map[string]any{"version": "1.0", "powerState": "Running"},
 		specClaimEntry("varroa-ui", metav1.ManagedFieldsOperationUpdate,
-			`{"f:metadata":{"f:labels":{"f:team":{}}},"f:spec":{"f:version":{}}}`),
+			`{"f:metadata":{"f:labels":{"f:tenant":{}}},"f:spec":{"f:version":{}}}`),
 	))
 	log := &claimLog{}
 	installClaimReactors(dyn, log)

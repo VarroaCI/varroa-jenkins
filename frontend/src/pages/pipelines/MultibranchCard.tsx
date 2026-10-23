@@ -17,12 +17,12 @@ function enc(value: string): string {
   return encodeURIComponent(value);
 }
 
-function jobHref(team: string, jobPath: string): string {
-  return `/pipelines/${enc(team)}/${enc(jobPath)}`;
+function jobHref(tenant: string, jobPath: string): string {
+  return `/pipelines/${enc(tenant)}/${enc(jobPath)}`;
 }
 
-function runHref(team: string, jobPath: string, runId: string): string {
-  return `${jobHref(team, jobPath)}/${enc(runId)}`;
+function runHref(tenant: string, jobPath: string, runId: string): string {
+  return `${jobHref(tenant, jobPath)}/${enc(runId)}`;
 }
 
 /** shortRevision shortens an SCM revision for a table cell. */
@@ -31,13 +31,13 @@ function shortRevision(revision?: string): string {
 }
 
 /** RunResult shows the latest run of a head, linked to its build page. */
-function RunResult({ team, head }: { team: string; head: JobBranchHead }) {
+function RunResult({ tenant, head }: { tenant: string; head: JobBranchHead }) {
   if (!head.lastRun) {
     return <span className={styles.dim}>No builds</span>;
   }
   const label = head.lastRun.result ?? head.lastRun.status;
   return (
-    <Link to={runHref(team, head.jobPath, head.lastRun.runId)} className={styles.result}>
+    <Link to={runHref(tenant, head.jobPath, head.lastRun.runId)} className={styles.result}>
       {label}
     </Link>
   );
@@ -45,12 +45,12 @@ function RunResult({ team, head }: { team: string; head: JobBranchHead }) {
 
 /** HeadTable lists one kind of head: branches, tags, or change requests. */
 function HeadTable({
-  team,
+  tenant,
   heads,
   empty,
   showChangeRequest,
 }: {
-  team: string;
+  tenant: string;
   heads: JobBranchHead[];
   empty: string;
   showChangeRequest: boolean;
@@ -71,7 +71,7 @@ function HeadTable({
         {heads.map((head) => (
           <tr key={head.jobPath}>
             <td>
-              <Link to={jobHref(team, head.jobPath)}>
+              <Link to={jobHref(tenant, head.jobPath)}>
                 {showChangeRequest && head.changeRequest
                   ? `#${head.changeRequest.id} ${head.changeRequest.title ?? ""}`.trim()
                   : head.name}
@@ -79,7 +79,7 @@ function HeadTable({
               {head.orphaned && <span className={styles.tag}>orphaned</span>}
             </td>
             <td>
-              <RunResult team={team} head={head} />
+              <RunResult tenant={tenant} head={head} />
             </td>
             <td className={styles.mono}>{shortRevision(head.revision)}</td>
           </tr>
@@ -94,7 +94,7 @@ function HeadTable({
  * repository builds through its own branch jobs, so the table has no run
  * column.
  */
-function RepositoryTable({ team, repositories }: { team: string; repositories: JobBranchHead[] }) {
+function RepositoryTable({ tenant, repositories }: { tenant: string; repositories: JobBranchHead[] }) {
   return (
     <table className={styles.table}>
       <thead>
@@ -106,7 +106,7 @@ function RepositoryTable({ team, repositories }: { team: string; repositories: J
         {repositories.map((repository) => (
           <tr key={repository.jobPath}>
             <td>
-              <Link to={jobHref(team, repository.jobPath)}>{repository.name}</Link>
+              <Link to={jobHref(tenant, repository.jobPath)}>{repository.name}</Link>
             </td>
           </tr>
         ))}
@@ -182,11 +182,11 @@ function scanPending(lastScan: BranchScan | undefined, scanId: string, startedAt
  * refreshes the inventory every few seconds until the scan reports.
  */
 export function MultibranchCard({
-  team,
+  tenant,
   jobPath,
   canScan = false,
 }: {
-  team: string;
+  tenant: string;
   jobPath: string;
   canScan?: boolean;
 }) {
@@ -195,9 +195,9 @@ export function MultibranchCard({
   const [scanError, setScanError] = useState<string | null>(null);
 
   const query = useQuery({
-    queryKey: ["jobBranches", team, jobPath],
-    queryFn: () => listJobBranches(team, jobPath),
-    enabled: !!team && !!jobPath,
+    queryKey: ["jobBranches", tenant, jobPath],
+    queryFn: () => listJobBranches(tenant, jobPath),
+    enabled: !!tenant && !!jobPath,
     // The page holds no run stream for this query, so the latest-run cells
     // refresh on a timer while the card stays open. A pending scan shortens
     // the timer until its result arrives.
@@ -211,11 +211,11 @@ export function MultibranchCard({
   });
 
   const start = useMutation({
-    mutationFn: () => scanMultibranch(team, jobPath),
+    mutationFn: () => scanMultibranch(tenant, jobPath),
     onMutate: () => setScanError(null),
     onSuccess: (accepted) => {
       setScan({ scanId: accepted.scanId, startedAt: Date.now() });
-      void queryClient.invalidateQueries({ queryKey: ["jobBranches", team, jobPath] });
+      void queryClient.invalidateQueries({ queryKey: ["jobBranches", tenant, jobPath] });
     },
     onError: () => setScanError("The scan could not be requested."),
   });
@@ -275,12 +275,12 @@ export function MultibranchCard({
       )}
       {list.repositories.length > 0 && (
         <Card title="Repositories">
-          <RepositoryTable team={team} repositories={list.repositories} />
+          <RepositoryTable tenant={tenant} repositories={list.repositories} />
         </Card>
       )}
       <Card title="Branches">
         <HeadTable
-          team={team}
+          tenant={tenant}
           heads={[...list.branches, ...list.tags]}
           empty="No branches discovered."
           showChangeRequest={false}
@@ -288,7 +288,7 @@ export function MultibranchCard({
       </Card>
       <Card title="Pull requests">
         <HeadTable
-          team={team}
+          tenant={tenant}
           heads={list.changeRequests}
           empty="No pull requests discovered."
           showChangeRequest

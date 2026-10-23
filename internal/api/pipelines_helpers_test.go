@@ -531,7 +531,7 @@ func (f *fakeBlobStore) NewRangeReader(_ context.Context, key string, offset, le
 
 // pipelineGrantAuthorizer grants verbs on "pipelines" for every tenant
 // string listed, with no job-path glob restriction. A tenant with no "/"
-// parses as a Team tenant and is granted through a Tenants-scoped
+// parses as a Tenant tenant and is granted through a Tenants-scoped
 // binding; a tenant of the form "<namespace>/<controller>" parses as a
 // controller tenant and is granted through a Namespaces-scoped binding,
 // because rbac.Resolver.effectiveControllerTenantGrants reads only
@@ -544,22 +544,22 @@ func pipelineGrantAuthorizer(verbs []string, tenants ...string) *Authorizer {
 		},
 	}
 	var bindings []*v1alpha1.VarroaRoleBinding
-	var teamScope v1alpha1.VarroaRoleBindingScope
+	var tenantScope v1alpha1.VarroaRoleBindingScope
 	var namespaces []string
 	for _, t := range tenants {
 		if idx := strings.Index(t, "/"); idx >= 0 {
 			namespaces = append(namespaces, t[:idx])
 			continue
 		}
-		teamScope.Tenants = append(teamScope.Tenants, v1alpha1.TenantScope{Name: t})
+		tenantScope.Tenants = append(tenantScope.Tenants, v1alpha1.TenantScope{Name: t})
 	}
-	if len(teamScope.Tenants) > 0 {
+	if len(tenantScope.Tenants) > 0 {
 		bindings = append(bindings, &v1alpha1.VarroaRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: "team-binding"},
+			ObjectMeta: metav1.ObjectMeta{Name: "tenant-binding"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
 				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "u"}},
 				RoleRef:  "pl",
-				Scope:    &teamScope,
+				Scope:    &tenantScope,
 			},
 		})
 	}
@@ -590,7 +590,7 @@ func pipelinesTestServer(client *fakeResourceClient, authorizer *Authorizer, rea
 		Authorizer:        authorizer,
 		RecordStore:       reader,
 		BlobStore:         blobStore,
-		TenantResolver:    NewTeamTenantResolver(store, brood, authorizer),
+		TenantResolver:    NewTenantTenantResolver(store, brood, authorizer),
 		Logger:            slog.Default(),
 		OperatorNamespace: "test-ns",
 	}

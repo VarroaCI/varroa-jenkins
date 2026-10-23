@@ -15,14 +15,14 @@ import (
 
 var rehydrationTestNow = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// TestMemberSeedReader_AnswersAppliedInstance pins the Team-side read: an
+// TestMemberSeedReader_AnswersAppliedInstance pins the Tenant-side read: an
 // applied entry answers its cell instance, and a pending or missing entry
 // answers none.
 func TestMemberSeedReader_AnswersAppliedInstance(t *testing.T) {
 	at := metav1.NewTime(rehydrationTestNow)
 	entry := v1alpha1.CellRehydrationEntry{Tenant: "team-a", CellInstance: "uid-1", At: &at}
 	cell := cellWithSeeds(entry)
-	cells := map[string]*v1alpha1.Controller{teamCellKey("ns", "cell"): cell}
+	cells := map[string]*v1alpha1.Controller{tenantCellKey("ns", "cell"): cell}
 	read := memberSeedReader(cells, "team-a")
 
 	if inst, _ := read("ns", "cell"); inst != "" {
@@ -145,18 +145,18 @@ func TestEmptySelectionEntry_AppliedNoRehydrationField(t *testing.T) {
 // entry is written.
 func TestEmptySelectionEntry_RehydratedBecomesTrue(t *testing.T) {
 	entry := emptySelectionEntry("team-a", 1, "uid-1", rehydrationTestNow)
-	status := &v1alpha1.TeamStatus{
-		Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
+	status := &v1alpha1.TenantStatus{
+		Placement: &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
 	}
 	cells.RehydrationPass(status, cells.RehydrationInputs{CellInstance: "uid-1", Entry: &entry})
 
-	var cond *v1alpha1.TeamCondition
+	var cond *v1alpha1.TenantCondition
 	for i := range status.Conditions {
-		if status.Conditions[i].Type == v1alpha1.TeamConditionRehydrated {
+		if status.Conditions[i].Type == v1alpha1.TenantConditionRehydrated {
 			cond = &status.Conditions[i]
 		}
 	}
-	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != v1alpha1.TeamReasonTenantRehydrated {
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != v1alpha1.TenantReasonTenantRehydrated {
 		t.Fatalf("expected Rehydrated=True/TenantRehydrated, got %+v", cond)
 	}
 }
@@ -231,7 +231,7 @@ func TestApplyRehydrationResult_PerTenantDeferred(t *testing.T) {
 	}
 }
 
-// TestSeedAnswerOf pins what the Team reconciler reads from one entry.
+// TestSeedAnswerOf pins what the Tenant reconciler reads from one entry.
 func TestSeedAnswerOf(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -288,7 +288,7 @@ func TestCarryAppliedSeed(t *testing.T) {
 // generation and instance.
 func TestExpiredEntry_ReleasesOnlyAfterAnApply(t *testing.T) {
 	st := rehydrationTenantState{
-		team:      &v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "t"}},
+		tenant:    &v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "t"}},
 		placement: rehydrationPlacement{Generation: 1, CellInstance: "uid-1"},
 	}
 	st.existing = &v1alpha1.CellRehydrationEntry{Tenant: "t", Generation: 1, CellInstance: "uid-1", Applied: true, Deferred: []string{"t/x"}}
@@ -314,8 +314,8 @@ func TestExpiredEntry_ReleasesOnlyAfterAnApply(t *testing.T) {
 // deferred list of a released give-up: none.
 func TestCellRehydrationEntryDeferred_GiveUpAnswersNone(t *testing.T) {
 	cell := cellWithSeeds(v1alpha1.CellRehydrationEntry{Tenant: "team-a", CellInstance: "uid-1", Applied: true, Deferred: []string{"team-a/x"}, Error: "rehydration deadline exceeded", DeadlineExceeded: true})
-	cells := map[string]*v1alpha1.Controller{teamCellKey("ns", "cell"): cell}
-	status := &v1alpha1.TeamStatus{Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell", CellNamespace: "ns"}}
+	cells := map[string]*v1alpha1.Controller{tenantCellKey("ns", "cell"): cell}
+	status := &v1alpha1.TenantStatus{Placement: &v1alpha1.TenantPlacementStatus{Cell: "cell", CellNamespace: "ns"}}
 	if got := cellRehydrationEntryPending(status, cells, "team-a"); len(got) != 0 {
 		t.Fatalf("released give-up announced deferred %v, want none", got)
 	}
@@ -368,7 +368,7 @@ func TestBoundUnseeded(t *testing.T) {
 }
 
 // TestCellSeedStateChanged_UnseededListChange pins that a change of the
-// unseeded list alone wakes the Team ticker.
+// unseeded list alone wakes the Tenant ticker.
 func TestCellSeedStateChanged_UnseededListChange(t *testing.T) {
 	at := metav1.NewTime(rehydrationTestNow)
 	before := v1alpha1.CellRehydrationEntry{Tenant: "t", CellInstance: "uid-1", Applied: true, At: &at, Unseeded: []string{"t/a"}}
@@ -416,23 +416,23 @@ func TestCapCellUnseeded(t *testing.T) {
 	// paths.
 	long := []string{"team-x/" + strings.Repeat("p", 293)}
 	few := []v1alpha1.CellRehydrationEntry{
-		{Tenant: "team-y", Applied: true, Unseeded: []string{"team-y/a", "team-y/b"}},
+		{Tenant: "tenant-y", Applied: true, Unseeded: []string{"tenant-y/a", "tenant-y/b"}},
 		{Tenant: "team-x", Applied: true, Unseeded: long},
 	}
 	capCellUnseeded(few, 300)
 	if few[1].Applied || few[1].Unseeded != nil || !few[0].Applied || len(few[0].Unseeded) != 2 {
-		t.Fatalf("few long paths: want team-x dropped, team-y kept, got %+v", few)
+		t.Fatalf("few long paths: want team-x dropped, tenant-y kept, got %+v", few)
 	}
 
 	// Two 140 KiB paths exceed the 256 KiB budget together. The tie drops
 	// by name, and one entry alone fits.
 	big := []v1alpha1.CellRehydrationEntry{
-		{Tenant: "team-q", Applied: true, Unseeded: []string{"team-q/" + strings.Repeat("q", 140<<10)}},
-		{Tenant: "team-p", Applied: true, Unseeded: []string{"team-p/" + strings.Repeat("p", 140<<10)}},
+		{Tenant: "tenant-q", Applied: true, Unseeded: []string{"tenant-q/" + strings.Repeat("q", 140<<10)}},
+		{Tenant: "tenant-p", Applied: true, Unseeded: []string{"tenant-p/" + strings.Repeat("p", 140<<10)}},
 	}
 	capCellUnseeded(big, maxUnseededBytesPerCell)
 	if big[1].Applied || big[1].Unseeded != nil || !big[0].Applied || len(big[0].Unseeded) != 1 {
-		t.Fatalf("256 KiB budget: want team-p dropped by name, team-q kept, got %+v", big)
+		t.Fatalf("256 KiB budget: want tenant-p dropped by name, tenant-q kept, got %+v", big)
 	}
 
 	// Reversed input order gives the same drop.
@@ -481,7 +481,7 @@ func TestPartitionReloadFailuresByTenant(t *testing.T) {
 	failures := []*mitev1.RehydrationReloadFailure{
 		{Item: "team-a", Error: "x"},
 		{Item: "team-a/build", Error: "y"},
-		{Item: "team-bb/build", Error: "z"},
+		{Item: "tenant-bb/build", Error: "z"},
 		{Item: "other/job", Error: "w"},
 	}
 	out := partitionReloadFailuresByTenant(failures, []string{"team-a", "team-b"})
@@ -494,7 +494,7 @@ func TestPartitionReloadFailuresByTenant(t *testing.T) {
 		t.Errorf("team-a items = %v, want %v", items, want)
 	}
 	if _, ok := out["team-b"]; ok {
-		t.Errorf("team-b = %v, want no failures: team-bb is not under team-b", out["team-b"])
+		t.Errorf("team-b = %v, want no failures: tenant-bb is not under team-b", out["team-b"])
 	}
 	if len(out) != 1 {
 		t.Errorf("tenants = %v, want only team-a", out)

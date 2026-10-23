@@ -53,7 +53,7 @@ const (
 // build, and a retry would then run the job twice.
 const retrySkipHeartbeatLost = "heartbeat-lost"
 
-// interruptedRetryAutomatic is the Team.spec.pipelines.interruptedRetry
+// interruptedRetryAutomatic is the Tenant.spec.pipelines.interruptedRetry
 // value that makes a mark publish one automatic retry_run action.
 const interruptedRetryAutomatic = "automatic"
 

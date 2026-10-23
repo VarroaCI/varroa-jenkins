@@ -48,15 +48,15 @@ func (p *proposeRelay) Issue(context.Context, string, forgeapi.IssueRequest) (fo
 	return forgeapi.IssueReply{}, errors.New("not used")
 }
 
-// proposeTenants answers the Team payments with one pipelines tenant on the
-// core cluster. Any other team has no tenant.
+// proposeTenants answers the Tenant payments with one pipelines tenant on the
+// core cluster. Any other tenant has no tenant.
 type proposeTenants struct{}
 
-func (proposeTenants) Resolve(_ context.Context, _ *auth.Claims, team string) ([]TenantRef, error) {
-	if team != "payments" {
+func (proposeTenants) Resolve(_ context.Context, _ *auth.Claims, tenant string) ([]TenantRef, error) {
+	if tenant != "payments" {
 		return nil, nil
 	}
-	return []TenantRef{{Tenant: "payments", Team: "payments", Folder: "payments", Cluster: "core"}}, nil
+	return []TenantRef{{Tenant: "payments", TenantName: "payments", Folder: "payments", Cluster: "core"}}, nil
 }
 
 func (proposeTenants) ResolveRun(context.Context, *auth.Claims, recordstore.Run) (TenantRef, error) {
@@ -159,7 +159,7 @@ func TestProposePipeline_RefusalsInOrder(t *testing.T) {
 		name   string
 		setup  func(t *testing.T, f *proposeFixture)
 		user   *auth.Claims
-		team   string
+		tenant string
 		repo   string
 		status int
 		code   string
@@ -168,26 +168,26 @@ func TestProposePipeline_RefusalsInOrder(t *testing.T) {
 	nobody := &auth.Claims{Subject: proposeNobody, PreferredUsername: "nobody", IssuedAt: time.Now()}
 	reader := &auth.Claims{Subject: proposeReader, PreferredUsername: "reader", IssuedAt: time.Now()}
 	forgeRow := func(code string, status int, checks int) row {
-		return row{name: code, user: nil, team: "payments", repo: proposeRepo, status: status, code: code, checks: checks,
+		return row{name: code, user: nil, tenant: "payments", repo: proposeRepo, status: status, code: code, checks: checks,
 			setup: func(t *testing.T, f *proposeFixture) {
 				f.relay.checkReply = forgeapi.CheckReply{Status: forgeapi.Status{Code: code, Error: "refused"}}
 			}}
 	}
 	rows := []row{
-		{name: "switch off", team: "payments", repo: proposeRepo, status: http.StatusConflict, code: assistantErrOff,
+		{name: "switch off", tenant: "payments", repo: proposeRepo, status: http.StatusConflict, code: assistantErrOff,
 			setup: func(t *testing.T, f *proposeFixture) {
 				off := false
 				if _, err := f.mem.PutSettings(context.Background(), agent.UserScope(proposeWriter), store.SettingsPatch{Enabled: &off}, proposeWriter); err != nil {
 					t.Fatal(err)
 				}
 			}},
-		{name: "no use verb", user: nobody, team: "payments", repo: proposeRepo, status: http.StatusForbidden},
-		{name: "unreadable team", team: "nope", repo: proposeRepo, status: http.StatusNotFound},
-		{name: "reader", user: reader, team: "payments", repo: proposeRepo, status: http.StatusForbidden},
-		{name: "http scheme", team: "payments", repo: "http://git.example.org/acme/payments", status: http.StatusBadRequest, code: forgeapi.CodeRepoURLInvalid},
-		{name: "userinfo", team: "payments", repo: "https://u:p@git.example.org/acme/payments", status: http.StatusBadRequest, code: forgeapi.CodeRepoURLInvalid},
-		{name: "port 8443", team: "payments", repo: "https://git.example.org:8443/acme/payments", status: http.StatusBadRequest, code: forgeapi.CodeRepoURLInvalid},
-		{name: "data level none", team: "payments", repo: proposeRepo, status: http.StatusConflict, code: proposeErrDataSharingTooLow,
+		{name: "no use verb", user: nobody, tenant: "payments", repo: proposeRepo, status: http.StatusForbidden},
+		{name: "unreadable tenant", tenant: "nope", repo: proposeRepo, status: http.StatusNotFound},
+		{name: "reader", user: reader, tenant: "payments", repo: proposeRepo, status: http.StatusForbidden},
+		{name: "http scheme", tenant: "payments", repo: "http://git.example.org/acme/payments", status: http.StatusBadRequest, code: forgeapi.CodeRepoURLInvalid},
+		{name: "userinfo", tenant: "payments", repo: "https://u:p@git.example.org/acme/payments", status: http.StatusBadRequest, code: forgeapi.CodeRepoURLInvalid},
+		{name: "port 8443", tenant: "payments", repo: "https://git.example.org:8443/acme/payments", status: http.StatusBadRequest, code: forgeapi.CodeRepoURLInvalid},
+		{name: "data level none", tenant: "payments", repo: proposeRepo, status: http.StatusConflict, code: proposeErrDataSharingTooLow,
 			setup: func(t *testing.T, f *proposeFixture) {
 				none := agent.DataNone
 				if _, err := f.mem.PutSettings(context.Background(), agent.UserScope(proposeWriter), store.SettingsPatch{DataSharing: &none}, proposeWriter); err != nil {
@@ -200,29 +200,29 @@ func TestProposePipeline_RefusalsInOrder(t *testing.T) {
 		forgeRow(forgeapi.CodeForgeWriteDenied, http.StatusUnprocessableEntity, 1),
 		forgeRow(forgeapi.CodeJenkinsfileExists, http.StatusConflict, 1),
 		forgeRow(forgeapi.CodeProposalBranchExists, http.StatusConflict, 1),
-		{name: "relay other error", team: "payments", repo: proposeRepo, status: http.StatusBadGateway, code: forgeapi.CodeForgeUnreachable, checks: 1,
+		{name: "relay other error", tenant: "payments", repo: proposeRepo, status: http.StatusBadGateway, code: forgeapi.CodeForgeUnreachable, checks: 1,
 			setup: func(t *testing.T, f *proposeFixture) { f.relay.checkErr = errors.New("no reply") }},
-		{name: "relay timeout", team: "payments", repo: proposeRepo, status: http.StatusGatewayTimeout, code: codeOperatorTimeout, checks: 1,
+		{name: "relay timeout", tenant: "payments", repo: proposeRepo, status: http.StatusGatewayTimeout, code: codeOperatorTimeout, checks: 1,
 			setup: func(t *testing.T, f *proposeFixture) {
 				f.relay.checkErr = fmt.Errorf("forge check request: %w", nats.ErrTimeout)
 			}},
-		{name: "relay no responders", team: "payments", repo: proposeRepo, status: http.StatusServiceUnavailable, code: codeOperatorUnavailable, checks: 1,
+		{name: "relay no responders", tenant: "payments", repo: proposeRepo, status: http.StatusServiceUnavailable, code: codeOperatorUnavailable, checks: 1,
 			setup: func(t *testing.T, f *proposeFixture) { f.relay.checkErr = nats.ErrNoResponders }},
-		{name: "relay wrapped no responders", team: "payments", repo: proposeRepo, status: http.StatusServiceUnavailable, code: codeOperatorUnavailable, checks: 1,
+		{name: "relay wrapped no responders", tenant: "payments", repo: proposeRepo, status: http.StatusServiceUnavailable, code: codeOperatorUnavailable, checks: 1,
 			setup: func(t *testing.T, f *proposeFixture) {
 				f.relay.checkErr = fmt.Errorf("forge check request: %w", nats.ErrNoResponders)
 			}},
-		{name: "caller deadline", team: "payments", repo: proposeRepo, status: http.StatusGatewayTimeout, code: codeOperatorTimeout, checks: 1,
+		{name: "caller deadline", tenant: "payments", repo: proposeRepo, status: http.StatusGatewayTimeout, code: codeOperatorTimeout, checks: 1,
 			setup: func(t *testing.T, f *proposeFixture) {
 				f.relay.checkErr = fmt.Errorf("forge check request: %w", context.DeadlineExceeded)
 			}},
-		{name: "caller canceled", team: "payments", repo: proposeRepo, status: http.StatusBadGateway, code: forgeapi.CodeForgeUnreachable, checks: 1,
+		{name: "caller canceled", tenant: "payments", repo: proposeRepo, status: http.StatusBadGateway, code: forgeapi.CodeForgeUnreachable, checks: 1,
 			setup: func(t *testing.T, f *proposeFixture) { f.relay.checkErr = context.Canceled }},
-		{name: "reply unreachable", team: "payments", repo: proposeRepo, status: http.StatusBadGateway, code: forgeapi.CodeForgeUnreachable, checks: 1,
+		{name: "reply unreachable", tenant: "payments", repo: proposeRepo, status: http.StatusBadGateway, code: forgeapi.CodeForgeUnreachable, checks: 1,
 			setup: func(t *testing.T, f *proposeFixture) {
 				f.relay.checkReply = forgeapi.CheckReply{Status: forgeapi.Status{Code: forgeapi.CodeForgeUnreachable, Error: "down"}}
 			}},
-		{name: "busy", team: "payments", repo: proposeRepo, status: http.StatusTooManyRequests, code: assistantErrBusy, checks: 1,
+		{name: "busy", tenant: "payments", repo: proposeRepo, status: http.StatusTooManyRequests, code: assistantErrBusy, checks: 1,
 			setup: func(t *testing.T, f *proposeFixture) { f.seedRunning(t, agent.MaxRunningSessions) }},
 	}
 	for _, r := range rows {
@@ -236,7 +236,7 @@ func TestProposePipeline_RefusalsInOrder(t *testing.T) {
 				user = f.writerClaims()
 			}
 			before := f.sessionCount(t)
-			rec := f.do(t, user, http.MethodPost, "/pipelines/"+r.team+"/propose", map[string]any{"repo": r.repo})
+			rec := f.do(t, user, http.MethodPost, "/pipelines/"+r.tenant+"/propose", map[string]any{"repo": r.repo})
 			if rec.Code != r.status {
 				t.Fatalf("status = %d, want %d, body %s", rec.Code, r.status, rec.Body)
 			}
@@ -284,7 +284,7 @@ func TestProposePipeline_StartsSessionWithServerContext(t *testing.T) {
 	if body.Repo != proposeRepo || body.Forge != "gitea" || body.BaseBranch != "main" || body.CredentialID != "forge-cred" {
 		t.Fatalf("body = %+v", body)
 	}
-	if len(f.relay.checkReqs) != 1 || f.relay.checkReqs[0] != (forgeapi.CheckRequest{Team: "payments", Repo: proposeRepo}) {
+	if len(f.relay.checkReqs) != 1 || f.relay.checkReqs[0] != (forgeapi.CheckRequest{Tenant: "payments", Repo: proposeRepo}) {
 		t.Fatalf("check requests = %+v", f.relay.checkReqs)
 	}
 	f.rt.Wait()
@@ -297,7 +297,7 @@ func TestProposePipeline_StartsSessionWithServerContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sess.Context[agent.CtxTeam] != "payments" || sess.Context[agent.CtxRoute] != "/pipelines/payments" ||
+	if sess.Context[agent.CtxTenant] != "payments" || sess.Context[agent.CtxRoute] != "/pipelines/payments" ||
 		sess.Context[agent.CtxRepo] != proposeRepo || sess.Context[agent.CtxPrompt] != prompts.ProposePipeline ||
 		sess.Context["baseRevision"] != "5555555555555555555555555555555555555555" {
 		t.Fatalf("context = %v", sess.Context)
@@ -328,7 +328,7 @@ func TestProposePipeline_UserProviderSetsLevelAndSession(t *testing.T) {
 				Models: []string{"m2"}, Trust: agent.TrustExternal},
 		},
 		ExternalDataSharing: agent.DataNone,
-		Budgets:             provider.Budgets{Session: 100000, UserDay: 1000000, TeamDay: 1000000, Steps: 32},
+		Budgets:             provider.Budgets{Session: 100000, UserDay: 1000000, TenantDay: 1000000, Steps: 32},
 		ApprovalExpiryText:  "1h",
 		ApprovalExpiry:      time.Hour,
 	}
@@ -415,7 +415,7 @@ func TestForgeCodeStatus_ProposalBaseMoved(t *testing.T) {
 	}
 }
 
-// TestForgeCodeStatus_PullRequestBusy checks that a busy Team maps to too many
+// TestForgeCodeStatus_PullRequestBusy checks that a busy Tenant maps to too many
 // requests.
 func TestForgeCodeStatus_PullRequestBusy(t *testing.T) {
 	if got := forgeCodeStatus(forgeapi.CodePullRequestBusy); got != http.StatusTooManyRequests {

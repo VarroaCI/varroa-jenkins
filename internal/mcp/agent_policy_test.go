@@ -7,7 +7,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/agent"
 	"github.com/varroaci/varroa-jenkins/internal/agent/datashare"
 	"github.com/varroaci/varroa-jenkins/internal/agent/policy"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/accept"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/accept"
 )
 
 // liveByName indexes the live tool list by name.
@@ -40,8 +40,8 @@ func TestPolicyListsNameRegisteredTools(t *testing.T) {
 func TestEveryUneligibleWriteIsNeverUnattended(t *testing.T) {
 	t.Parallel()
 
-	// The Team agent output tools are the only writes that a session may run
-	// without an approval when its TeamAgent turns them on. Every other write
+	// The Tenant agent output tools are the only writes that a session may run
+	// without an approval when its TenantAgent turns them on. Every other write
 	// outside the eligible set must stay approval-gated.
 	outputs := accept.OutputToolNames([]string{"note", "issue", "webhook"})
 	for _, tool := range liveTools(t) {
@@ -52,7 +52,7 @@ func TestEveryUneligibleWriteIsNeverUnattended(t *testing.T) {
 		def := agent.ToolDef{Name: tool.Name, Class: class}
 		if slices.Contains(outputs, tool.Name) {
 			if policy.IsNeverUnattended(def, outputs) {
-				t.Fatalf("output tool %s is refused unattended, so its TeamAgent output cannot run", tool.Name)
+				t.Fatalf("output tool %s is refused unattended, so its TenantAgent output cannot run", tool.Name)
 			}
 			continue
 		}

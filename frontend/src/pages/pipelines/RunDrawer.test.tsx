@@ -15,7 +15,7 @@ function renderDrawer(parameters: PipelineParameter[], onSubmitted = vi.fn()) {
   const onClose = vi.fn();
   const result = render(
     <QueryClientProvider client={queryClient}>
-      <RunDrawer team="acme" jobPath="payments/checkout-api/main" parameters={parameters} onClose={onClose} onSubmitted={onSubmitted} />
+      <RunDrawer tenant="acme" jobPath="payments/checkout-api/main" parameters={parameters} onClose={onClose} onSubmitted={onSubmitted} />
     </QueryClientProvider>,
   );
   return { ...result, onClose, onSubmitted };

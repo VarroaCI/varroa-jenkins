@@ -210,16 +210,16 @@ public class VarroaMarkerFlowDefinitionTest {
         TestScmSource source = new TestScmSource("src");
         String marker = "apiVersion: varroa.dev/v1\n"
                 + "kind: Pipeline\n"
-                + "template: team-a-only\n";
+                + "template: tenant-a-only\n";
         source.commit("r1", VarroaMarkerFlowDefinition.MARKER_PATH, marker);
         source.setTip("r1");
-        Folder folder = j.jenkins.createProject(Folder.class, "team-b");
+        Folder folder = j.jenkins.createProject(Folder.class, "tenant-b");
         WorkflowJob job = indexBranch(folder, "repo", source);
 
         WorkflowRun run = j.buildAndAssertStatus(Result.FAILURE, job);
 
-        j.assertLogContains("team-a-only", run);
-        j.assertLogContains("team-b", run);
+        j.assertLogContains("tenant-a-only", run);
+        j.assertLogContains("tenant-b", run);
     }
 
     @Test
@@ -301,7 +301,7 @@ public class VarroaMarkerFlowDefinitionTest {
     @Test
     @ConfiguredWithCode("pipeline-marker-flow-templates.yml")
     public void aTenantTemplateNamingASystemOnlyCredentialFailsNamingTheFolderStore() throws Exception {
-        addTemplate(gitTemplate("tenant-git", "team-b", "sys-cred-1", "https://example.invalid/repo.git"));
+        addTemplate(gitTemplate("tenant-git", "tenant-b", "sys-cred-1", "https://example.invalid/repo.git"));
 
         TestScmSource source = new TestScmSource("src");
         String marker = "apiVersion: varroa.dev/v1\n"
@@ -309,13 +309,13 @@ public class VarroaMarkerFlowDefinitionTest {
                 + "template: tenant-git\n";
         source.commit("r1", VarroaMarkerFlowDefinition.MARKER_PATH, marker);
         source.setTip("r1");
-        Folder folder = j.jenkins.createProject(Folder.class, "team-b");
+        Folder folder = j.jenkins.createProject(Folder.class, "tenant-b");
         WorkflowJob job = indexBranch(folder, "repo", source);
 
         WorkflowRun run = j.buildAndAssertStatus(Result.FAILURE, job);
 
         j.assertLogContains("sys-cred-1", run);
-        j.assertLogContains("team-b", run);
+        j.assertLogContains("tenant-b", run);
     }
 
     @Test
@@ -367,7 +367,7 @@ public class VarroaMarkerFlowDefinitionTest {
         TestScmSource source = new TestScmSource("src");
         source.commit("trusted", VarroaMarkerFlowDefinition.MARKER_PATH, VALID_MARKER);
         source.commit("untrusted", VarroaMarkerFlowDefinition.MARKER_PATH,
-                "apiVersion: varroa.dev/v1\nkind: Pipeline\ntemplate: team-a-only\n");
+                "apiVersion: varroa.dev/v1\nkind: Pipeline\ntemplate: tenant-a-only\n");
         source.setTip("untrusted");
         source.setTrustOverride(id -> "trusted");
         WorkflowJob job = indexBranch(source);

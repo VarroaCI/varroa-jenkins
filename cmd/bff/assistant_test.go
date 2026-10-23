@@ -29,7 +29,7 @@ func TestBuildAssistant_BadConfigIsOff(t *testing.T) {
 // TestBuildAssistant_NoDSNIsOff proves a valid config without a record store
 // DSN leaves the assistant off.
 func TestBuildAssistant_NoDSNIsOff(t *testing.T) {
-	cfg := `{"providers":[],"externalDataSharing":"metadata","budgets":{"session":1,"userDay":1,"teamDay":1,"steps":1},"approvalExpiry":"1h"}`
+	cfg := `{"providers":[],"externalDataSharing":"metadata","budgets":{"session":1,"userDay":1,"tenantDay":1,"steps":1},"approvalExpiry":"1h"}`
 	rt, err := buildAssistant(context.Background(), cfg, "", "core", "", nil, quietLogger())
 	if err != nil || rt != nil {
 		t.Fatalf("buildAssistant = %v, %v; want nil, nil", rt, err)

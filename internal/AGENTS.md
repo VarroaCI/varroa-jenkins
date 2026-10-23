@@ -325,7 +325,7 @@ reading each package's entry point):
   `CatalogItem`/`ComposedBundle`; downstream consumers push the resolved
   intent to mites for remote-cluster metrics.
 - **`tenancy/`** — namespace classification and lifecycle (`NamespaceState`)
-  for the control plane; the seam multi-cluster/team-scoping features build on.
+  for the control plane; the seam multi-cluster/tenant-scoping features build on.
 - **`telemetry/`** — OpenTelemetry config helpers, incl.
   `Disabled()` reading `VARROA_TELEMETRY_DISABLED`. `NewMeterProvider` builds
   the provider that `InitTelemetry` installs as global; a test uses it and
@@ -522,8 +522,8 @@ go test -race -count=1 ./internal/<pkg>/...        # single package
 - [bundle](bundle/AGENTS.md) — ComposedBundle composition, git/catalog resolution, JCasC merge, and the delivered pipeline-template set (`pipelinetemplate/`)
 - [rbac](rbac/AGENTS.md) — VarroaRole/JenkinsRole resolution and role-strategy YAML generation
 - [bus](bus/AGENTS.md) — NATS/JetStream transport: subjects, streams, KV buckets, cluster directory, subscription-denial watchers, the self-healing request responder and listener, the `bustest` NATS test helpers
-- [agent](agent/AGENTS.md) — assistant and team-agent core: session, event, approval, and settings types; the tool policy, data-sharing, budget, and prompt packages; the session store (`store/`); the model-provider contract and adapters (`provider/`); the sandbox contract (`sandbox/v1`).
-- [teamagent](teamagent/AGENTS.md) — Team agent core: `accept/` (the one rule that maps a `TeamAgent` to its principal), `token/` (the HS256 session credential, redacted), `instructions/` (the standing-instruction read through the forge relay), and the runner's `cache/` (TeamAgent objects from informers), `config/`, `store/` (record-store queries), `triggers/` (the audit-feed path), and `sessions/` (the session runtime).
-- `keylock/` — a set of mutexes, one for each key, with a context-bound wait and a non-blocking `TryLock`. An entry lives only while a caller holds or waits for its key. It has no child doc. The controller tick lock uses `Lock`. The forge pull-request Team lock uses `TryLock`, so a second request for a Team is refused at once.
-- `forgerelay/` — bus framing of the forge `check`, `read`, `pullrequest`, and `issue` requests. It has no child doc. Requesters call it and the operator shard answers. `forgeops` answers `pullrequest` one at a time for each Team on a replica, and `pullrequest` and `issue` under the deadline that the request carries.
+- [agent](agent/AGENTS.md) — assistant and tenant-agent core: session, event, approval, and settings types; the tool policy, data-sharing, budget, and prompt packages; the session store (`store/`); the model-provider contract and adapters (`provider/`); the sandbox contract (`sandbox/v1`).
+- [tenantagent](tenantagent/AGENTS.md) — Tenant agent core: `accept/` (the one rule that maps a `TenantAgent` to its principal), `token/` (the HS256 session credential, redacted), `instructions/` (the standing-instruction read through the forge relay), and the runner's `cache/` (TenantAgent objects from informers), `config/`, `store/` (record-store queries), `triggers/` (the audit-feed path), and `sessions/` (the session runtime).
+- `keylock/` — a set of mutexes, one for each key, with a context-bound wait and a non-blocking `TryLock`. An entry lives only while a caller holds or waits for its key. It has no child doc. The controller tick lock uses `Lock`. The forge pull-request Tenant lock uses `TryLock`, so a second request for a Tenant is refused at once.
+- `forgerelay/` — bus framing of the forge `check`, `read`, `pullrequest`, and `issue` requests. It has no child doc. Requesters call it and the operator shard answers. `forgeops` answers `pullrequest` one at a time for each Tenant on a replica, and `pullrequest` and `issue` under the deadline that the request carries.
 - [recordstore](recordstore/AGENTS.md) — build-record Postgres store: schema, migrations, ledger, the placement fence, the cross-tenant grant evaluator and responder, the upstream fan-out, the fleet lock table, the tenant-sync responder, the backstop scheduler, blob abstraction; the `runs` row carries the `source`, `summary`, `inputs`, and `replay_of` columns

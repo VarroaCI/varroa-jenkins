@@ -32,7 +32,7 @@ var registry = map[reflect.Type]kindInfo{
 	reflect.TypeOf(v1alpha1.CatalogItem{}):    {catalogItemGVR, "CatalogItem", true, true},
 	reflect.TypeOf(v1alpha1.ComposedBundle{}): {composedBundleGVR, "ComposedBundle", true, true},
 	reflect.TypeOf(v1alpha1.BroodOperation{}): {broodOperationGVR, "BroodOperation", true, true},
-	reflect.TypeOf(v1alpha1.TeamAgent{}):      {teamAgentGVR, "TeamAgent", true, true},
+	reflect.TypeOf(v1alpha1.TenantAgent{}):    {tenantAgentGVR, "TenantAgent", true, true},
 	reflect.TypeOf(v1alpha1.User{}):           {userGVR, "User", true, true},
 
 	// Cluster-scoped kinds.
@@ -44,7 +44,7 @@ var registry = map[reflect.Type]kindInfo{
 	reflect.TypeOf(v1alpha1.ControllerClass{}):       {controllerClassGVR, "ControllerClass", false, true},
 	reflect.TypeOf(v1alpha1.JenkinsVersionProfile{}): {jenkinsVersionProfileGVR, "JenkinsVersionProfile", false, true},
 	reflect.TypeOf(v1alpha1.Group{}):                 {groupGVR, "Group", false, true},
-	reflect.TypeOf(v1alpha1.Team{}):                  {teamGVR, "Team", false, true},
+	reflect.TypeOf(v1alpha1.Tenant{}):                {tenantGVR, "Tenant", false, true},
 	reflect.TypeOf(v1alpha1.Runner{}):                {runnerGVR, "Runner", false, true},
 	reflect.TypeOf(v1alpha1.UpdateCenter{}):          {updateCentersGVR, "UpdateCenter", false, true},
 	reflect.TypeOf(v1alpha1.ProfileCandidate{}):      {profileCandidateGVR, "ProfileCandidate", false, true},
@@ -55,7 +55,7 @@ var registry = map[reflect.Type]kindInfo{
 // clear when the caller's status omits them (the fields are omitempty, so a
 // plain marshal would silently leave stale server-side values). Curated to
 // match the pre-crdstore per-kind patch methods exactly — do NOT generalize:
-// most kinds (User, Team, …) rely on partial patches leaving unrelated
+// most kinds (User, Tenant, …) rely on partial patches leaving unrelated
 // fields (credentials, preferences) untouched.
 var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	composedBundleGVR: {"errors": nil, "warnings": nil, "message": ""},
@@ -99,7 +99,7 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	},
 	// placement, pipelines, and rehydration are all omitempty. A plain
 	// marshal leaves the stale cell binding, the door token and secret, or
-	// the stale rehydration state in etcd once a Team stops being a
+	// the stale rehydration state in etcd once a Tenant stops being a
 	// pipelines tenant. These three entries clear them, so a re-enabled
 	// tenant never revives credentials issued before the teardown.
 	// This map holds no controllerGVR entry for "cell". Such an entry
@@ -115,7 +115,7 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	// keeps the old values, and the tick repeats a completed purge for
 	// good. A NestedClear still deletes the whole object when the caller
 	// omits it.
-	teamGVR: {
+	tenantGVR: {
 		"placement": nil,
 		"pipelines": NestedClear{
 			"pendingPurgeGeneration":    nil,
@@ -127,12 +127,12 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	},
 	// cell and cellNamespace are both omitempty. An unplaced runner must
 	// clear both, or a merge patch would leave the stale cell binding in
-	// etcd once the owning Team loses its placement.
+	// etcd once the owning Tenant loses its placement.
 	runnerGVR: {"cell": "", "cellNamespace": ""},
 	// lastSession and instructionsSHA are omitempty. A session that ends or an
 	// instructions read that drops its commit must clear them, or a merge patch
 	// keeps the stale value.
-	teamAgentGVR: {"lastSession": nil, "instructionsSHA": ""},
+	tenantAgentGVR: {"lastSession": nil, "instructionsSHA": ""},
 	// tenants is omitempty. A pool whose last tenant leaves must report an
 	// empty list, or a merge patch leaves the stale names in etcd.
 	cellPoolGVR: {"tenants": nil},
@@ -247,9 +247,9 @@ var (
 	provisioningDefaultsGVR  = gvr("provisioningdefaults")
 	userGVR                  = gvr("users")
 	groupGVR                 = gvr("groups")
-	teamGVR                  = gvr("teams")
+	tenantGVR                = gvr("tenants")
 	runnerGVR                = gvr("runners")
-	teamAgentGVR             = gvr("teamagents")
+	tenantAgentGVR           = gvr("tenantagents")
 	jenkinsVersionProfileGVR = gvr("jenkinsversionprofiles")
 	controllerClassGVR       = gvr("controllerclasses")
 	updateCentersGVR         = gvr("updatecenters")

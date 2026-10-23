@@ -29,7 +29,7 @@ func (p TenantRetentionPolicy) IsZero() bool {
 }
 
 // retentionWire is the JSON shape of the "retention" key in a tenant
-// placement policy. It mirrors v1alpha1.TeamPipelinesRetention.
+// placement policy. It mirrors v1alpha1.TenantPipelinesRetention.
 type retentionWire struct {
 	Retention *struct {
 		Runs string `json:"runs"`

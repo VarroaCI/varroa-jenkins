@@ -88,31 +88,31 @@ const tenantAgentGCTimeoutSeconds = 2400
 // Service. An agent pod outlives the Jenkins JVM that launched it, so its
 // URL names an endpoint the operator can repoint rather than the cell's own
 // Service.
-func tenantAgentEndpoint(team, namespace string, slot int32) string {
-	return fmt.Sprintf("http://%s.%s.svc.cluster.local:8080", tenantAgentServiceName(team, slot), namespace)
+func tenantAgentEndpoint(tenant, namespace string, slot int32) string {
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local:8080", tenantAgentServiceName(tenant, slot), namespace)
 }
 
 // tenantCloudFor builds the one kubernetes cloud a placed tenant gets
 // (design D11): usageRestricted, the operator's jnlp pod template first,
 // then the pod templates lifted from the tenant's bundle in bundle order.
 // Every template carries the tenant's ServiceAccount and the reserved node
-// label the agent fence reads. The "<team>-" template-name prefix is
+// label the agent fence reads. The "<tenant>-" template-name prefix is
 // readability only and carries no authorization meaning. agentEndpoint is
 // the tenant's own agent Service, never the cell's own endpoint.
-func tenantCloudFor(team, agentNamespace, agentEndpoint string, lifted []bundle.TenantCloudTemplate) bundle.TenantCloud {
+func tenantCloudFor(tenant, agentNamespace, agentEndpoint string, lifted []bundle.TenantCloudTemplate) bundle.TenantCloud {
 	cloud := bundle.TenantCloud{
-		Name:                     team,
+		Name:                     tenant,
 		Namespace:                agentNamespace,
 		JenkinsURL:               agentEndpoint,
-		CredentialsID:            tenantCloudCredentialID(team),
+		CredentialsID:            tenantCloudCredentialID(tenant),
 		UsageRestricted:          true,
 		WebSocket:                true,
 		GarbageCollectionTimeout: tenantAgentGCTimeoutSeconds,
 		Templates: []bundle.TenantCloudTemplate{{
-			Name:           team + "-default",
+			Name:           tenant + "-default",
 			Namespace:      agentNamespace,
-			ServiceAccount: tenantAgentServiceAccountName(team),
-			Labels:         fmt.Sprintf("%s %s-default", tenantNodeLabel(team), team),
+			ServiceAccount: tenantAgentServiceAccountName(tenant),
+			Labels:         fmt.Sprintf("%s %s-default", tenantNodeLabel(tenant), tenant),
 			Containers: []bundle.TenantCloudContainer{{
 				Name:                  "jnlp",
 				Image:                 tenantAgentJnlpImage(),
@@ -129,10 +129,10 @@ func tenantCloudFor(team, agentNamespace, agentEndpoint string, lifted []bundle.
 }
 
 // tenantNodeLabel returns the reserved node label design D12's agent fence
-// reads. It carries the authorization meaning; the "<team>-" prefix on a
+// reads. It carries the authorization meaning; the "<tenant>-" prefix on a
 // pod template's other labels does not.
-func tenantNodeLabel(team string) string {
-	return "varroa-tenant-" + team
+func tenantNodeLabel(tenant string) string {
+	return "varroa-tenant-" + tenant
 }
 
 // tenantCloudCredential is bundle.CellCloudCredential's name inside this
@@ -268,8 +268,8 @@ func (r *Reconciler) applyCellContent(ctx context.Context, cr *v1alpha1.Controll
 		templateBase = ""
 	}
 
-	teams := r.listPlacedTeams(ctx, cr)
-	state, err := r.assembleCellContent(ctx, cr, teams, coreSet, templateBase)
+	tenants := r.listPlacedTenants(ctx, cr)
+	state, err := r.assembleCellContent(ctx, cr, tenants, coreSet, templateBase)
 	if err != nil {
 		return err
 	}
@@ -308,15 +308,15 @@ func (r *Reconciler) applyCellContent(ctx context.Context, cr *v1alpha1.Controll
 // The answer is the slot whose agent Service this cell's tenant cloud
 // dials, so an agent launched here reaches an endpoint that follows the
 // slot's own holder.
-func tenantSlotOnCell(team *v1alpha1.Team, cr *v1alpha1.Controller) int32 {
-	if team.Status.Placement == nil {
+func tenantSlotOnCell(tenant *v1alpha1.Tenant, cr *v1alpha1.Controller) int32 {
+	if tenant.Status.Placement == nil {
 		return tenantSlotZero
 	}
-	for _, m := range team.Status.Placement.Members {
+	for _, m := range tenant.Status.Placement.Members {
 		if m.Cell != cr.Name || m.CellNamespace != cr.Namespace {
 			continue
 		}
-		if m.Role == v1alpha1.TeamMemberRoleStandby || m.Slot == nil {
+		if m.Role == v1alpha1.TenantMemberRoleStandby || m.Slot == nil {
 			return tenantSlotZero
 		}
 		return *m.Slot

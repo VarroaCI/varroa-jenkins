@@ -126,20 +126,20 @@ func TestRESTVarroaRoleBindingCreate_ExistingNameAnswers409(t *testing.T) {
 	}
 }
 
-func TestTeamHandlers_AdminCreate_ExistingNameAnswers409(t *testing.T) {
+func TestTenantHandlers_AdminCreate_ExistingNameAnswers409(t *testing.T) {
 	srv, _ := publishTestServer(t)
 	st := srv.deps.Store.(*crdstore.Fake)
-	crdstore.MustSeed(st, &v1alpha1.Team{
-		ObjectMeta: metav1.ObjectMeta{Name: "new-team"},
-		Spec:       v1alpha1.TeamSpec{Members: []string{"alice"}},
+	crdstore.MustSeed(st, &v1alpha1.Tenant{
+		ObjectMeta: metav1.ObjectMeta{Name: "new-tenant"},
+		Spec:       v1alpha1.TenantSpec{Members: []string{"alice"}},
 	})
 
 	w := httptest.NewRecorder()
-	srv.handleCreateTeam(w, withClaims(httptest.NewRequest(http.MethodPost, "/teams", strings.NewReader(`{"name":"new-team","members":["bob"],"namespaces":["ns1"]}`))))
+	srv.handleCreateTenant(w, withClaims(httptest.NewRequest(http.MethodPost, "/tenants", strings.NewReader(`{"name":"new-tenant","members":["bob"],"namespaces":["ns1"]}`))))
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, body %s; want 409", w.Code, w.Body.String())
 	}
-	got, err := crdstore.Get[v1alpha1.Team](context.Background(), st, "new-team", "")
+	got, err := crdstore.Get[v1alpha1.Tenant](context.Background(), st, "new-tenant", "")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -150,13 +150,13 @@ func TestTeamHandlers_AdminCreate_ExistingNameAnswers409(t *testing.T) {
 
 func TestRunnerHandlers_CreateExistingNameAnswers409(t *testing.T) {
 	srv, store, ctx := runnerAdminTestServer(t)
-	seedRunnerTeam(t, store)
+	seedRunnerTenant(t, store)
 	seedRunner(t, store, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "win-1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
 	})
 
-	body := `{"name":"win-1","spec":{"team":"payments","launcher":"inbound","remoteFS":"/var/k"}}`
+	body := `{"name":"win-1","spec":{"tenant":"payments","launcher":"inbound","remoteFS":"/var/k"}}`
 	req := httptest.NewRequest(http.MethodPost, "/runners", strings.NewReader(body)).WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleRunners(w, req)

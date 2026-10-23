@@ -293,7 +293,7 @@ func TestControllerSpecPatchOnlyIncludesSuppliedFields(t *testing.T) {
 
 	spec, err = controllerSpecPatch(map[string]any{
 		"version":           "2.516.3",
-		"composedBundleRef": "team-bundle",
+		"composedBundleRef": "tenant-bundle",
 		"powerState":        "Running",
 		"hibernation":       map[string]any{"enabled": true},
 	})
@@ -301,7 +301,7 @@ func TestControllerSpecPatchOnlyIncludesSuppliedFields(t *testing.T) {
 		t.Fatalf("controllerSpecPatch: %v", err)
 	}
 	got, _ := json.Marshal(spec)
-	want := `{"composedBundleRef":{"name":"team-bundle"},"hibernation":{"enabled":true},"powerState":"Running","version":"2.516.3"}`
+	want := `{"composedBundleRef":{"name":"tenant-bundle"},"hibernation":{"enabled":true},"powerState":"Running","version":"2.516.3"}`
 	if string(got) != want {
 		t.Errorf("patch = %s\nwant %s", got, want)
 	}

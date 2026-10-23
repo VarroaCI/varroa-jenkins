@@ -5,7 +5,7 @@ import (
 )
 
 // ConcurrencyLimit is one named set of a tenant's jobs and the number of
-// its builds that run at one time. It mirrors Team.spec.pipelines
+// its builds that run at one time. It mirrors Tenant.spec.pipelines
 // .concurrencyLimits as the operator announces it.
 type ConcurrencyLimit struct {
 	Name string   `json:"name"`

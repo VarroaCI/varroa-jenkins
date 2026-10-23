@@ -26,7 +26,7 @@ The grace period defaults to 60 minutes and cannot be below 5. Automatic hiberna
 
 Use Varroa's queue URL for supported SCM webhooks. Direct requests to sleeping Jenkins can be lost. A hibernated controller cannot run timer-triggered jobs.
 
-On a dedicated controller, a GitLab delivery to the queue URL's `generic-webhook-trigger/invoke` path can carry the job token in the GitLab **Secret token** field (`X-Gitlab-Token`) or as `?token=`. The query value wins when both are present. A delivery with no token starts only jobs whose `genericTrigger` has no token. The tenant door requires `?token=<team>:<name>` and strips `X-Gitlab-Token`, so a tenant replay carries no GitLab token header.
+On a dedicated controller, a GitLab delivery to the queue URL's `generic-webhook-trigger/invoke` path can carry the job token in the GitLab **Secret token** field (`X-Gitlab-Token`) or as `?token=`. The query value wins when both are present. A delivery with no token starts only jobs whose `genericTrigger` has no token. The tenant door requires `?token=<tenant>:<name>` and strips `X-Gitlab-Token`, so a tenant replay carries no GitLab token header.
 
 A [headless](../security/headless-controllers.md) controller hibernates the same way. Webhooks still queue and replay once it wakes. The human wake redirect page is not served for it. It answers `404` instead. A headless controller has no URL to redirect the browser to.
 

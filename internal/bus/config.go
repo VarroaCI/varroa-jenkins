@@ -3,7 +3,7 @@ package bus
 import "encoding/json"
 
 // OperatorBundlesSubject returns operator.<cluster>.bundles.<verb>.
-// verb ∈ list|get|create|update|delete|preview|pause|resume|teamcontent.
+// verb ∈ list|get|create|update|delete|preview|pause|resume|tenantcontent.
 // Request/response types per verb are defined below in this file.
 func OperatorBundlesSubject(cluster, verb string) string {
 	return "operator." + cluster + ".bundles." + verb
@@ -50,19 +50,19 @@ func OperatorCellPoolsSubject(cluster, verb string) string {
 	return "operator." + cluster + ".cellpools." + verb
 }
 
-// TeamBundleContentRequest is the payload for bundles.teamcontent. Team
-// names a Team that the member cluster holds.
-type TeamBundleContentRequest struct {
-	Team string `json:"team"`
+// TenantBundleContentRequest is the payload for bundles.tenantcontent. Tenant
+// names a Tenant that the member cluster holds.
+type TenantBundleContentRequest struct {
+	Tenant string `json:"tenant"`
 }
 
-// TeamBundleContentResponse is the reply for bundles.teamcontent. An empty
-// Bundle means the Team has no pipelines bundle ref, or the ref names no
+// TenantBundleContentResponse is the reply for bundles.tenantcontent. An empty
+// Bundle means the Tenant has no pipelines bundle ref, or the ref names no
 // ComposedBundle. A nil Content means the bundle has no contentRef, or its
-// ConfigMap is absent. Code CodeNotFound means the member holds no such Team.
+// ConfigMap is absent. Code CodeNotFound means the member holds no such Tenant.
 // Content holds only the keys a pipeline read needs. Held is true when the
-// Team's member cells (active or standby) record an ItemsHeld warning for the Team.
-type TeamBundleContentResponse struct {
+// Tenant's member cells (active or standby) record an ItemsHeld warning for the Tenant.
+type TenantBundleContentResponse struct {
 	Bundle  json.RawMessage   `json:"bundle,omitempty"`
 	Content map[string]string `json:"content,omitempty"`
 	Held    bool              `json:"held,omitempty"`

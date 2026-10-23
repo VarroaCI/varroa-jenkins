@@ -141,8 +141,8 @@ Counters: `varroa.gateway.trigger_accepted`, `recorder_ingest_trigger_accepted_t
 The recorder publishes one notification per run change onto the NATS subject
 `runs.<cluster>.<tenant>`.
 
-The BFF serves one stream per team at `GET /pipelines/{team}/stream`, under the ticket scope
-`pipelines:{team}`, with `run` and `stage` events.
+The BFF serves one stream per tenant at `GET /pipelines/{tenant}/stream`, under the ticket scope
+`pipelines:{tenant}`, with `run` and `stage` events.
 
 A page treats a notification as a hint and refetches the record.
 
@@ -212,7 +212,7 @@ serves them in `cases`, failed cases first, and the report file in `report`.
 `retention.runs` controls the case rows. `retention.artifacts` controls the report. Without
 the report, `downloadable` is false.
 
-`GET /pipelines/{team}/jobs/{job}/tests/{case}` answers the recent outcomes of one case, newest
+`GET /pipelines/{tenant}/jobs/{job}/tests/{case}` answers the recent outcomes of one case, newest
 first. `{case}` is a `caseKey` value from the tests read, encoded for one path segment.
 The read answers 50 rows, and `limit` accepts at most 200. It covers the `retention.runs`
 window.
@@ -254,7 +254,7 @@ came first. The recorder deletes no row, because a partial set would erase sched
 `GET /search` and the MCP `search` tool add three record-backed kinds on top of the four
 Kubernetes-sourced kinds: `job`, `run`, and `activity`. Each kind is capped at five results.
 Matching is a Postgres full-text prefix match on the last search token, not a substring match:
-`serv` matches `team-a/service/main`, but no infix in a longer word. Without the record store
+`serv` matches `tenant-a/service/main`, but no infix in a longer word. Without the record store
 these three kinds are absent; the other four still answer.
 
 ## The ledger and intent keys

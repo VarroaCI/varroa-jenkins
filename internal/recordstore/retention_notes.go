@@ -38,7 +38,7 @@ DELETE FROM varroa.run_notes WHERE id IN (
   LIMIT $2)`
 
 // runNoteTenantFilterSQL narrows a job-note batch to one tenant.
-const runNoteTenantFilterSQL = `AND cluster = $3 AND team = $4`
+const runNoteTenantFilterSQL = `AND cluster = $3 AND tenant = $4`
 
 // deleteExpiredRunNotes deletes the notes that no retention window keeps.
 // A run note follows its run, so it goes once its run row is gone. A job

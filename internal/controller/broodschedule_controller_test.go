@@ -473,8 +473,8 @@ func TestScheduleReconciler_CronJobCommandSelectorJSON(t *testing.T) {
 	cr.Spec.Template.Targets = v1alpha1.BroodTargets{
 		Selector: &metav1.LabelSelector{
 			MatchLabels: map[string]string{
-				"team": "payments",
-				"tier": "prod",
+				"tenant": "payments",
+				"tier":   "prod",
 			},
 		},
 	}
@@ -507,8 +507,8 @@ func TestScheduleReconciler_CronJobCommandSelectorJSON(t *testing.T) {
 			if !ok {
 				t.Fatalf("matchLabels not found in %v", sel)
 			}
-			if ml["team"] != "payments" || ml["tier"] != "prod" {
-				t.Errorf("matchLabels = %+v, want {team:payments, tier:prod}", ml)
+			if ml["tenant"] != "payments" || ml["tier"] != "prod" {
+				t.Errorf("matchLabels = %+v, want {tenant:payments, tier:prod}", ml)
 			}
 		}
 	}
@@ -699,10 +699,10 @@ func TestScheduleReconciler_StatusCopy(t *testing.T) {
 
 // --- Task 3.9: Tenancy violation ---
 
-func TestScheduleReconciler_TenancyViolationTeamNSWithNamespaces(t *testing.T) {
+func TestScheduleReconciler_TenancyViolationTenantNSWithNamespaces(t *testing.T) {
 	cr := testSchedule("tv-ns", "team-ns")
 	cr.Finalizers = append(cr.Finalizers, scheduleFinalizer)
-	cr.Spec.Template.Targets.Namespaces = []string{"other-ns"} // not allowed in team namespace
+	cr.Spec.Template.Targets.Namespaces = []string{"other-ns"} // not allowed in tenant namespace
 	r, _ := newTestScheduleReconciler(t, cr)
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "team-ns", Name: "tv-ns"}}
@@ -727,10 +727,10 @@ func TestScheduleReconciler_TenancyViolationTeamNSWithNamespaces(t *testing.T) {
 	}
 }
 
-func TestScheduleReconciler_TenancyViolationMultipleClustersTeamNS(t *testing.T) {
+func TestScheduleReconciler_TenancyViolationMultipleClustersTenantNS(t *testing.T) {
 	cr := testSchedule("tv-cl", "team-ns")
 	cr.Finalizers = append(cr.Finalizers, scheduleFinalizer)
-	cr.Spec.Template.Clusters = []string{"cluster-a", "cluster-b"} // >1 cluster in team ns
+	cr.Spec.Template.Clusters = []string{"cluster-a", "cluster-b"} // >1 cluster in tenant ns
 	r, _ := newTestScheduleReconciler(t, cr)
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "team-ns", Name: "tv-cl"}}

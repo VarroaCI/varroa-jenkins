@@ -37,7 +37,7 @@ type assembleCellState struct {
 
 // assembleCellContent runs the tenant items pipeline (design D7) plus
 // tenant credential, folder, and cloud assembly (D8, D10, D11) for a cell.
-// teams is task 8.11a's placed-tenant listing, read once per tick. coreSet
+// tenants is task 8.11a's placed-tenant listing, read once per tick. coreSet
 // is the cell's resolved plugin set. templateBase is the cell's
 // jenkins.yaml with the cell bundle's own pipeline templates in it; a
 // tenant fragment must load against it.
@@ -54,7 +54,7 @@ type assembleCellState struct {
 // A read error for a non-draining tenant's bundle fails the assembly. It
 // is a fault of the API read, not of the tenant content, and a hold would
 // push the tenant's cloud with no pod template and drop its templates.
-func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Controller, teams []*v1alpha1.Team, coreSet []pluginlock.PluginEntry, templateBase string) (assembleCellState, error) {
+func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Controller, tenants []*v1alpha1.Tenant, coreSet []pluginlock.PluginEntry, templateBase string) (assembleCellState, error) {
 	var (
 		manifests     []*items.Manifest
 		clouds        []bundle.TenantCloud
@@ -66,55 +66,55 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		warnings      []v1alpha1.TenantWarning
 	)
 
-	hold := func(team string, fault error) {
-		held = append(held, team)
+	hold := func(tenant string, fault error) {
+		held = append(held, tenant)
 		warnings = append(warnings, v1alpha1.TenantWarning{
-			Tenant:  team,
-			Reason:  v1alpha1.TeamReasonItemsHeld,
+			Tenant:  tenant,
+			Reason:  v1alpha1.TenantReasonItemsHeld,
 			Message: fmt.Sprintf("tenant folder held: %v", fault),
 		})
 		if r.Logger != nil {
 			r.Logger.Warn("cell content: tenant items fail a check; holding the tenant folder",
-				"team", team, "error", fault)
+				"tenant", tenant, "error", fault)
 		}
 	}
 
-	ordered := slices.Clone(teams)
-	slices.SortFunc(ordered, func(a, b *v1alpha1.Team) int { return strings.Compare(a.Name, b.Name) })
+	ordered := slices.Clone(tenants)
+	slices.SortFunc(ordered, func(a, b *v1alpha1.Tenant) int { return strings.Compare(a.Name, b.Name) })
 	budget := newCellCredentialBudget(cellCredentialBudgetBytes)
 
-	for _, team := range ordered {
-		if team.Spec.Pipelines == nil {
-			// A Team can carry a stale entry in status.cell.tenants for one
+	for _, tenant := range ordered {
+		if tenant.Spec.Pipelines == nil {
+			// A Tenant can carry a stale entry in status.cell.tenants for one
 			// tick after spec.pipelines is cleared; teardown is what
 			// removes it from the list, so this is a skip, not a failure.
 			continue
 		}
-		agentNamespace := team.Spec.Pipelines.AgentNamespace
-		draining := tenantIsDrainingFromCell(team, cr)
+		agentNamespace := tenant.Spec.Pipelines.AgentNamespace
+		draining := tenantIsDrainingFromCell(tenant, cr)
 		if draining {
-			drainingNames = append(drainingNames, team.Name)
+			drainingNames = append(drainingNames, tenant.Name)
 		}
 
 		// A draining tenant still reads its bundle, because its cloud keeps
 		// the lifted pod templates. A read fault for a draining tenant
 		// lifts nothing and does not fail the cell.
-		data, err := r.readTenantBundleContent(ctx, team)
+		data, err := r.readTenantBundleContent(ctx, tenant)
 		var notReady error
 		if errors.Is(err, errTenantBundleNotReady) {
 			notReady, err = err, nil
 		}
 		if err != nil {
 			if !draining {
-				return assembleCellState{}, fmt.Errorf("tenant %q: %w", team.Name, err)
+				return assembleCellState{}, fmt.Errorf("tenant %q: %w", tenant.Name, err)
 			}
 			if r.Logger != nil {
 				r.Logger.Warn("cell content: draining tenant bundle unreadable; lifting no pod template",
-					"team", team.Name, "error", err)
+					"tenant", tenant.Name, "error", err)
 			}
 			data = nil
 		}
-		lifted, bundleWarnings := tenantBundleCloudContent(team.Name, agentNamespace, data)
+		lifted, bundleWarnings := tenantBundleCloudContent(tenant.Name, agentNamespace, data)
 		warnings = append(warnings, bundleWarnings...)
 
 		// A draining tenant loses only its folder here. That is what
@@ -128,8 +128,8 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 			fragment, templateFindings := bundle.LintTenantTemplates(data["pipeline-templates.yaml"])
 			// Two tenant folders never overlap, so two tenant fragments never
 			// conflict: each fragment loads against the cell's own base only.
-			_, fragErr := bundle.InjectPipelineTemplates(templateBase, fragment, team.Name)
-			rerooted, err := materializeTenantManifest(team.Name, data, coreSet)
+			_, fragErr := bundle.InjectPipelineTemplates(templateBase, fragment, tenant.Name)
+			rerooted, err := materializeTenantManifest(tenant.Name, data, coreSet)
 			if notReady != nil {
 				err = notReady
 			}
@@ -140,7 +140,7 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 				err = fmt.Errorf("pipeline template lint failed: %s", lint.Summary(templateFindings))
 			}
 			if err != nil {
-				hold(team.Name, err)
+				hold(tenant.Name, err)
 			} else {
 				folder := &rerooted.Items[0]
 
@@ -148,15 +148,15 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 				// from a tenant Secret must not reach ResolveVars or the
 				// unresolved-variable check, which run on ItemsYAML after this.
 				projected := &items.Item{Kind: folder.Kind, Name: folder.Name}
-				warnings = append(warnings, r.projectTenantCredentials(ctx, team.Name, agentNamespace, projected)...)
+				warnings = append(warnings, r.projectTenantCredentials(ctx, tenant.Name, agentNamespace, projected)...)
 				prop := folderCredentialsPropertyOf(projected)
-				charged, budgetWarnings := budget.trim(team.Name, prop)
+				charged, budgetWarnings := budget.trim(tenant.Name, prop)
 				// A library names a credential that its folder cannot see.
 				// That tenant is held, and none of its content is carried,
 				// so its bytes return to the budget and its skips go unreported.
 				if err := checkFolderLibraryCredentials(rerooted, prop.FolderCredentials); err != nil {
 					budget.refund(charged)
-					hold(team.Name, err)
+					hold(tenant.Name, err)
 				} else {
 					warnings = append(warnings, budgetWarnings...)
 					if len(prop.FolderCredentials) > 0 {
@@ -164,7 +164,7 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 					}
 
 					folder.Properties = append(folder.Properties, items.Property{
-						Kubernetes: &items.KubernetesFolderProperty{PermittedClouds: []string{team.Name}},
+						Kubernetes: &items.KubernetesFolderProperty{PermittedClouds: []string{tenant.Name}},
 					})
 
 					manifests = append(manifests, rerooted)
@@ -179,7 +179,7 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 			// templates stay.
 			if fragErr == nil && strings.TrimSpace(fragment) != "" {
 				fragments = append(fragments, bundle.CellTemplateFragment{
-					Folder:        team.Name,
+					Folder:        tenant.Name,
 					TemplatesYAML: fragment,
 				})
 			}
@@ -191,9 +191,9 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		// the selector, or a first resumed build would find no cloud to
 		// provision from. A standby never launches an agent, because the
 		// claim fence answers NOT_HOME for every job.
-		agentEndpoint := tenantAgentEndpoint(team.Name, cr.Namespace, tenantSlotOnCell(team, cr))
-		clouds = append(clouds, tenantCloudFor(team.Name, agentNamespace, agentEndpoint, lifted))
-		if cred := r.tenantCloudCredentialFor(ctx, team.Name, agentNamespace); cred != nil {
+		agentEndpoint := tenantAgentEndpoint(tenant.Name, cr.Namespace, tenantSlotOnCell(tenant, cr))
+		clouds = append(clouds, tenantCloudFor(tenant.Name, agentNamespace, agentEndpoint, lifted))
+		if cred := r.tenantCloudCredentialFor(ctx, tenant.Name, agentNamespace); cred != nil {
 			creds = append(creds, *cred)
 		}
 	}
@@ -234,8 +234,8 @@ var errTenantBundleNotReady = errors.New("tenant bundle is missing or not materi
 // returns nil data and an error that wraps errTenantBundleNotReady. Any
 // other read error, of the bundle or of its ConfigMap, returns an error
 // that does not wrap it.
-func (r *Reconciler) readTenantBundleContent(ctx context.Context, team *v1alpha1.Team) (map[string]string, error) {
-	ref := team.Spec.Pipelines.ComposedBundleRef
+func (r *Reconciler) readTenantBundleContent(ctx context.Context, tenant *v1alpha1.Tenant) (map[string]string, error) {
+	ref := tenant.Spec.Pipelines.ComposedBundleRef
 	if ref == nil {
 		return nil, nil
 	}
@@ -264,14 +264,14 @@ func (r *Reconciler) readTenantBundleContent(ctx context.Context, team *v1alpha1
 // returns the lift's warnings. It also records a BundleKeysIgnored warning
 // for a non-empty plugins.yaml or rbac.yaml, which a cell never applies.
 // It runs for a draining tenant too.
-func tenantBundleCloudContent(team, agentNamespace string, data map[string]string) ([]bundle.TenantCloudTemplate, []v1alpha1.TenantWarning) {
-	lift := liftTenantPodTemplates(team, agentNamespace, data["jenkins.yaml"], bundle.ParseVariables(data["variables.yaml"]))
+func tenantBundleCloudContent(tenant, agentNamespace string, data map[string]string) ([]bundle.TenantCloudTemplate, []v1alpha1.TenantWarning) {
+	lift := liftTenantPodTemplates(tenant, agentNamespace, data["jenkins.yaml"], bundle.ParseVariables(data["variables.yaml"]))
 	warnings := lift.Warnings
 	for _, key := range []string{"plugins.yaml", "rbac.yaml"} {
 		if strings.TrimSpace(data[key]) != "" {
 			warnings = append(warnings, v1alpha1.TenantWarning{
-				Tenant:  team,
-				Reason:  v1alpha1.TeamReasonBundleKeysIgnored,
+				Tenant:  tenant,
+				Reason:  v1alpha1.TenantReasonBundleKeysIgnored,
 				Message: fmt.Sprintf("tenant bundle key %q is ignored on a cell", key),
 			})
 		}
@@ -285,8 +285,8 @@ func tenantBundleCloudContent(team, agentNamespace string, data map[string]strin
 				continue
 			}
 			warnings = append(warnings, v1alpha1.TenantWarning{
-				Tenant:  team,
-				Reason:  v1alpha1.TeamReasonBundleKeysIgnored,
+				Tenant:  tenant,
+				Reason:  v1alpha1.TenantReasonBundleKeysIgnored,
 				Message: fmt.Sprintf("tenant item manifest key %q from %s is ignored on a cell", d.Key, d.Source),
 			})
 		}
@@ -300,8 +300,8 @@ func tenantBundleCloudContent(team, agentNamespace string, data map[string]strin
 // the tenant's own variables, and the cell lint rules. The plugin-set
 // checks run here only, because they need the cell's coreSet. Nil data
 // gives an empty folder.
-func materializeTenantManifest(team string, data map[string]string, coreSet []pluginlock.PluginEntry) (*items.Manifest, error) {
-	rerooted, err := bundle.TenantItemsManifest(team, data)
+func materializeTenantManifest(tenant string, data map[string]string, coreSet []pluginlock.PluginEntry) (*items.Manifest, error) {
+	rerooted, err := bundle.TenantItemsManifest(tenant, data)
 	if err != nil {
 		return nil, err
 	}
@@ -321,12 +321,12 @@ func materializeTenantManifest(team string, data map[string]string, coreSet []pl
 // Secret (design D7/D11) and returns the SYSTEM-scope credential to inject
 // for it, or nil while the token controller has not populated the token
 // key yet (a transient state right after placement, not an error).
-func (r *Reconciler) tenantCloudCredentialFor(ctx context.Context, team, agentNamespace string) *tenantCloudCredential {
-	data, err := r.client.GetSecret(ctx, tenantAgentTokenSecretName(team), agentNamespace)
+func (r *Reconciler) tenantCloudCredentialFor(ctx context.Context, tenant, agentNamespace string) *tenantCloudCredential {
+	data, err := r.client.GetSecret(ctx, tenantAgentTokenSecretName(tenant), agentNamespace)
 	if err != nil || len(data["token"]) == 0 {
 		return nil
 	}
-	return &tenantCloudCredential{ID: tenantCloudCredentialID(team), Secret: string(data["token"])}
+	return &tenantCloudCredential{ID: tenantCloudCredentialID(tenant), Secret: string(data["token"])}
 }
 
 // recordCellTenantWarnings rebuilds cr.Status.Cell.TenantWarnings' entries
@@ -340,13 +340,13 @@ func recordCellTenantWarnings(cr *v1alpha1.Controller, fresh []v1alpha1.TenantWa
 		cr.Status.Cell = &v1alpha1.CellStatus{}
 	}
 	cr.Status.Cell.TenantWarnings = replaceTenantWarnings(cr.Status.Cell.TenantWarnings,
-		v1alpha1.TeamReasonBundleKeysIgnored, filterTenantWarnings(fresh, v1alpha1.TeamReasonBundleKeysIgnored))
+		v1alpha1.TenantReasonBundleKeysIgnored, filterTenantWarnings(fresh, v1alpha1.TenantReasonBundleKeysIgnored))
 	cr.Status.Cell.TenantWarnings = replaceTenantWarnings(cr.Status.Cell.TenantWarnings,
-		v1alpha1.TeamReasonPodTemplateSkipped, filterTenantWarnings(fresh, v1alpha1.TeamReasonPodTemplateSkipped))
+		v1alpha1.TenantReasonPodTemplateSkipped, filterTenantWarnings(fresh, v1alpha1.TenantReasonPodTemplateSkipped))
 	cr.Status.Cell.TenantWarnings = replaceTenantWarnings(cr.Status.Cell.TenantWarnings,
-		v1alpha1.TeamReasonCredentialSkipped, filterTenantWarnings(fresh, v1alpha1.TeamReasonCredentialSkipped))
+		v1alpha1.TenantReasonCredentialSkipped, filterTenantWarnings(fresh, v1alpha1.TenantReasonCredentialSkipped))
 	cr.Status.Cell.TenantWarnings = replaceTenantWarnings(cr.Status.Cell.TenantWarnings,
-		v1alpha1.TeamReasonItemsHeld, filterTenantWarnings(fresh, v1alpha1.TeamReasonItemsHeld))
+		v1alpha1.TenantReasonItemsHeld, filterTenantWarnings(fresh, v1alpha1.TenantReasonItemsHeld))
 }
 
 // dropKeptTenants removes each tenant that appliedTenantsAfterItemsApply
@@ -376,7 +376,7 @@ func dropKeptTenants(cell *v1alpha1.CellStatus) {
 func heldTenants(cell *v1alpha1.CellStatus) map[string]bool {
 	held := make(map[string]bool)
 	for _, w := range cell.TenantWarnings {
-		if w.Reason == v1alpha1.TeamReasonItemsHeld {
+		if w.Reason == v1alpha1.TenantReasonItemsHeld {
 			held[w.Tenant] = true
 		}
 	}
@@ -387,7 +387,7 @@ func heldTenants(cell *v1alpha1.CellStatus) map[string]bool {
 func refusedTenants(cell *v1alpha1.CellStatus) map[string]bool {
 	refused := make(map[string]bool)
 	for _, w := range cell.TenantWarnings {
-		if w.Reason == v1alpha1.TeamReasonItemsApplyFailed {
+		if w.Reason == v1alpha1.TenantReasonItemsApplyFailed {
 			refused[w.Tenant] = true
 		}
 	}

@@ -108,7 +108,7 @@ func asyncDenial(t *testing.T, url, user, pass string) (*nats.Conn, func() error
 }
 
 // agentTriggersConsumer and agentTriggersConfig mirror the durable consumer that
-// internal/teamagent/triggers creates. The bus package cannot import that package.
+// internal/tenantagent/triggers creates. The bus package cannot import that package.
 const agentTriggersConsumer = "agent-triggers"
 
 func agentTriggersConfig() *nats.ConsumerConfig {

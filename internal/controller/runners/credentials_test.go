@@ -181,7 +181,7 @@ func TestReadCredential_UnresolvedTokenInEachValue(t *testing.T) {
 		name string
 		data map[string]string
 	}{
-		{"username", map[string]string{"username": "${team}", "privateKey": "PEMDATA"}},
+		{"username", map[string]string{"username": "${tenant}", "privateKey": "PEMDATA"}},
 		{"privateKey", map[string]string{"username": "jenkins", "privateKey": "${key}"}},
 		{"passphrase", map[string]string{"username": "jenkins", "privateKey": "PEMDATA", "passphrase": "${pass}"}},
 	}
@@ -276,7 +276,7 @@ func TestRenderCredential_IDMatchesLauncherCredentialsID(t *testing.T) {
 // reader renders a credential for a delivered ssh runner placed on cell.
 func TestBuildCredentials_DeliveredSSHRunnerRendersOne(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	runner := credentialRunner("win-1-key")
 	crdstore.MustSeed(f, runner)
 
@@ -300,7 +300,7 @@ func TestBuildCredentials_DeliveredSSHRunnerRendersOne(t *testing.T) {
 // runner, which never carries an ssh credential, contributes nothing.
 func TestBuildCredentials_InboundRunnerContributesNone(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, inboundRunner())
 
 	creds, err := BuildCredentials(context.Background(), f, &fakeSecretReader{namespace: "agents"}, cellFor("cell-a"))
@@ -317,7 +317,7 @@ func TestBuildCredentials_InboundRunnerContributesNone(t *testing.T) {
 // "one bad runner does not stop the others" for the credential set.
 func TestBuildCredentials_FaultedCredentialContributesNone(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, credentialRunner("missing-key"))
 
 	creds, err := BuildCredentials(context.Background(), f, &fakeSecretReader{namespace: "agents"}, cellFor("cell-a"))
@@ -333,7 +333,7 @@ func TestBuildCredentials_FaultedCredentialContributesNone(t *testing.T) {
 // cell contributes nothing.
 func TestBuildCredentials_OnlyThisCell(t *testing.T) {
 	f := crdstore.NewFake()
-	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
+	crdstore.MustSeed(f, placedTenant("payments", "cell-a", "varroa-system"))
 	crdstore.MustSeed(f, credentialRunner("win-1-key"))
 
 	secrets := &fakeSecretReader{

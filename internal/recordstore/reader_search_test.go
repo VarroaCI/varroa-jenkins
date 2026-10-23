@@ -26,7 +26,7 @@ func TestBuildSearchTSQuery(t *testing.T) {
 		{"punctuation only", "!!! ---", "", false},
 		{"one token", "service", "service:*", true},
 		{"several tokens", "team-a service", "team & a & service:*", true},
-		{"mixed case and punctuation", "Team-A/Service", "team & a & service:*", true},
+		{"mixed case and punctuation", "Tenant-A/Service", "tenant & a & service:*", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

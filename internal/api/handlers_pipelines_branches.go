@@ -11,7 +11,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
-// JobBranchList is the body of GET /pipelines/{team}/jobs/{job}/branches.
+// JobBranchList is the body of GET /pipelines/{tenant}/jobs/{job}/branches.
 // It carries the branch and change-request inventory of one multibranch
 // job. The inventory is up to ten minutes stale, and a down cell keeps
 // the last inventory it sent. observedAt is absent while the cell has
@@ -56,13 +56,13 @@ type branchScanJSON struct {
 	Message       string   `json:"message,omitempty"`
 }
 
-// handleListJobBranches serves GET /pipelines/{team}/jobs/{job}/branches.
+// handleListJobBranches serves GET /pipelines/{tenant}/jobs/{job}/branches.
 func (s *Server) handleListJobBranches(w http.ResponseWriter, r *http.Request) {
 	if s.deps.RecordStore == nil {
 		s.pipelinesUnavailable(w)
 		return
 	}
-	list, serr := s.ListJobBranches(r.Context(), auth.ClaimsFromContext(r.Context()), r.PathValue("team"), r.PathValue("job"))
+	list, serr := s.ListJobBranches(r.Context(), auth.ClaimsFromContext(r.Context()), r.PathValue("tenant"), r.PathValue("job"))
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return
@@ -71,15 +71,15 @@ func (s *Server) handleListJobBranches(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListJobBranches answers the branch and change-request inventory of one
-// multibranch job of a team. It is the shared read for the HTTP route and
+// multibranch job of a tenant. It is the shared read for the HTTP route and
 // the list_job_branches MCP tool. A job with no inventory row answers an
 // empty list, not a 404, so the job page renders while the cell has not
 // exported the job yet.
-func (s *Server) ListJobBranches(ctx context.Context, claims *auth.Claims, team, jobPath string) (JobBranchList, *ServiceError) {
+func (s *Server) ListJobBranches(ctx context.Context, claims *auth.Claims, tenant, jobPath string) (JobBranchList, *ServiceError) {
 	if s.deps.RecordStore == nil {
 		return JobBranchList{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
 	}
-	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	refs, serr := s.resolveTenantTenants(ctx, claims, tenant)
 	if serr != nil {
 		return JobBranchList{}, serr
 	}

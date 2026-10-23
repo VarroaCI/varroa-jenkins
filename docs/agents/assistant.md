@@ -1,7 +1,7 @@
 # Assistant
 
 The assistant is a chat surface in the Varroa BFF. It answers questions about
-a run, a team, or a controller. It can propose a change. A change that writes
+a run, a tenant, or a controller. It can propose a change. A change that writes
 state waits for a person to approve it.
 
 The assistant is off by default. An operator turns it on with the chart.
@@ -75,7 +75,7 @@ GRANT INSERT, UPDATE ON varroa.agent_sessions, varroa.agent_session_events,
 | `assistant.externalDataSharing` | `metadata` | The highest data level for an `external` provider. |
 | `assistant.budgets.session` | `200000` | Tokens for one session. |
 | `assistant.budgets.userDay` | `1000000` | Tokens for one user in one UTC day. |
-| `assistant.budgets.teamDay` | `2000000` | Tokens for one team in one UTC day. |
+| `assistant.budgets.tenantDay` | `2000000` | Tokens for one tenant in one UTC day. |
 | `assistant.budgets.steps` | `32` | Provider calls for one session. |
 | `assistant.approvalExpiry` | `24h` | How long an approval waits. |
 
@@ -85,7 +85,7 @@ Open the assistant from the top bar, or press `a` on any page. The palette
 also has an "Ask the assistant" row. The button and the key appear only when
 the assistant is on for you.
 
-The drawer shows a context chip. The chip names the build, job, team, or
+The drawer shows a context chip. The chip names the build, job, tenant, or
 controller in view. The assistant reads that context when you start a
 conversation. A follow-up message keeps the first context. Open a new
 conversation to change it.
@@ -105,14 +105,14 @@ When the provider list does not load, the Assistant tab shows a notice. The Admi
 
 Agent rows appear in the activity feed under the Agents filter.
 
-The team home card starts a proposal. See [Propose a pipeline](../tutorials/propose-a-pipeline.md).
+The tenant home card starts a proposal. See [Propose a pipeline](../tutorials/propose-a-pipeline.md).
 
 ## Data levels
 
 Each session has one data level. The level is the lowest of three limits:
 
 - the user's level, which is `none`, `metadata`, or `logs`,
-- the team's level, set by an admin for each tenant,
+- the tenant's level, set by an admin for each tenant,
 - the provider ceiling. An `internal` provider has no ceiling. An `external`
   provider has the `externalDataSharing` ceiling.
 
@@ -184,7 +184,7 @@ with `session_key_missing`.
 |---|---|---|
 | `skipped` `budget_day` | Session state | The user spent the day budget. Wait for the UTC day to end. |
 | `skipped` `kill_switch` | Session state | An admin paused the assistant. Ask an admin to resume it. |
-| `skipped` `data_sharing_none` | Session state | The data level is `none`. Raise the user or team level. |
+| `skipped` `data_sharing_none` | Session state | The data level is `none`. Raise the user or tenant level. |
 | `skipped` `provider_unavailable` | Session state | The provider has no key or no model. Check the Secret. |
 | `budget_session` | Error event | The session spent its tokens. Start a new session. |
 | `budget_day` | Error event | The day budget is spent. |
@@ -200,4 +200,4 @@ with `session_key_missing`.
 | `prompt_not_startable` | HTTP 403 | The prompt cannot start a session. |
 | `kill_switch` | HTTP 409 | The kill switch blocks an approval. |
 | `approval_expired` | HTTP 409 | The approval expired before the decision. Ask again in a new session. |
-| `team_agent_session` | HTTP 409 | A Team agent session takes no messages. |
+| `tenant_agent_session` | HTTP 409 | A Tenant agent session takes no messages. |

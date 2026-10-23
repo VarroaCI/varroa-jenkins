@@ -13,8 +13,8 @@ describe("routing helpers", () => {
   });
 
   it("encodes every controller identity segment once", () => {
-    expect(controllerRoute("edge/a", "team one", "controller#1")).toBe(
-      "/controllers/edge%2Fa/team%20one/controller%231",
+    expect(controllerRoute("edge/a", "tenant one", "controller#1")).toBe(
+      "/controllers/edge%2Fa/tenant%20one/controller%231",
     );
   });
 });

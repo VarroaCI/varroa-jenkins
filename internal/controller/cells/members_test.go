@@ -12,13 +12,13 @@ import (
 
 func intPtr(n int32) *int32 { return &n }
 
-// slotTeam builds a pipelines tenant asking for members active slots and
+// slotTenant builds a pipelines tenant asking for members active slots and
 // standby warm members.
-func slotTeam(members, standby int32) *v1alpha1.Team {
-	team := testTeam()
-	team.Spec.Pipelines.Members = &members
-	team.Spec.Pipelines.Standby = &standby
-	return team
+func slotTenant(members, standby int32) *v1alpha1.Tenant {
+	tenant := testTenant()
+	tenant.Spec.Pipelines.Members = &members
+	tenant.Spec.Pipelines.Standby = &standby
+	return tenant
 }
 
 // appliedCell is readyCell whose appliedTenants names the tenant, so the
@@ -31,8 +31,8 @@ func appliedCell(name string, tenants ...string) CellCandidate {
 }
 
 // memberStatus builds one stored member entry.
-func memberStatus(cell, role string, slot *int32) v1alpha1.TeamMemberStatus {
-	return v1alpha1.TeamMemberStatus{
+func memberStatus(cell, role string, slot *int32) v1alpha1.TenantMemberStatus {
+	return v1alpha1.TenantMemberStatus{
 		Cell: cell, CellNamespace: "cells-ns", Role: role, Slot: slot, Applied: true,
 	}
 }
@@ -51,14 +51,14 @@ func findMember(members []MemberBinding, cell string) *MemberBinding {
 // two slots and one standby takes three cells, one member each.
 func TestDesiredMembersBindsEverySlotAndStandby(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 1)
+	tenant := slotTenant(2, 1)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", team.Name), readyCell("cell-b"), readyCell("cell-c"),
+		appliedCell("cell-a", tenant.Name), readyCell("cell-b"), readyCell("cell-c"),
 	}
 	status := placedStatus(3)
 	slotZero := in.Cells[0]
 
-	members, reason := desiredMembers(in, team, status, &slotZero, fixedNow)
+	members, reason := desiredMembers(in, tenant, status, &slotZero, fixedNow)
 	if len(members) != 3 {
 		t.Fatalf("members = %d, want 3: %+v", len(members), members)
 	}
@@ -69,8 +69,8 @@ func TestDesiredMembersBindsEverySlotAndStandby(t *testing.T) {
 		}
 		cells[m.Cell] = true
 	}
-	if reason != v1alpha1.TeamReasonStandbyPending && reason != "" &&
-		reason != v1alpha1.TeamReasonMembersApplied {
+	if reason != v1alpha1.TenantReasonStandbyPending && reason != "" &&
+		reason != v1alpha1.TenantReasonMembersApplied {
 		t.Fatalf("reason = %q, want no pending slot", reason)
 	}
 }
@@ -80,16 +80,16 @@ func TestDesiredMembersBindsEverySlotAndStandby(t *testing.T) {
 // SlotPending outranks StandbyPending.
 func TestDesiredMembersReportsSlotPendingOnAFullPool(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 1)
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name)}
+	tenant := slotTenant(2, 1)
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name)}
 	status := placedStatus(3)
 	slotZero := in.Cells[0]
 
-	members, reason := desiredMembers(in, team, status, &slotZero, fixedNow)
+	members, reason := desiredMembers(in, tenant, status, &slotZero, fixedNow)
 	if len(members) != 1 {
 		t.Fatalf("members = %d, want 1: %+v", len(members), members)
 	}
-	if reason != v1alpha1.TeamReasonSlotPending {
+	if reason != v1alpha1.TenantReasonSlotPending {
 		t.Fatalf("reason = %q, want SlotPending", reason)
 	}
 }
@@ -99,16 +99,16 @@ func TestDesiredMembersReportsSlotPendingOnAFullPool(t *testing.T) {
 // StandbyPending.
 func TestDesiredMembersReportsStandbyPending(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 1)
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name), readyCell("cell-b")}
+	tenant := slotTenant(2, 1)
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name), readyCell("cell-b")}
 	status := placedStatus(3)
 	slotZero := in.Cells[0]
 
-	members, reason := desiredMembers(in, team, status, &slotZero, fixedNow)
+	members, reason := desiredMembers(in, tenant, status, &slotZero, fixedNow)
 	if len(members) != 2 {
 		t.Fatalf("members = %d, want 2: %+v", len(members), members)
 	}
-	if reason != v1alpha1.TeamReasonStandbyPending {
+	if reason != v1alpha1.TenantReasonStandbyPending {
 		t.Fatalf("reason = %q, want StandbyPending", reason)
 	}
 }
@@ -117,17 +117,17 @@ func TestDesiredMembersReportsStandbyPending(t *testing.T) {
 // reporting the tenant applied answers MembersApplied.
 func TestDesiredMembersReportsMembersApplied(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name), appliedCell("cell-b", team.Name)}
+	tenant := slotTenant(2, 0)
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name), appliedCell("cell-b", tenant.Name)}
 	status := placedStatus(3)
-	status.Placement.Members = []v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	status.Placement.Members = []v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	}
 	slotZero := in.Cells[0]
 
-	_, reason := desiredMembers(in, team, status, &slotZero, fixedNow)
-	if reason != v1alpha1.TeamReasonMembersApplied {
+	_, reason := desiredMembers(in, tenant, status, &slotZero, fixedNow)
+	if reason != v1alpha1.TenantReasonMembersApplied {
 		t.Fatalf("reason = %q, want MembersApplied", reason)
 	}
 }
@@ -136,34 +136,34 @@ func TestDesiredMembersReportsMembersApplied(t *testing.T) {
 // choice: the standby with the newer applied time takes the empty slot.
 func TestDesiredMembersPromotesTheNewestAppliedStandby(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 1)
+	tenant := slotTenant(2, 1)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", team.Name),
-		appliedCell("cell-old", team.Name),
-		appliedCell("cell-new", team.Name),
+		appliedCell("cell-a", tenant.Name),
+		appliedCell("cell-old", tenant.Name),
+		appliedCell("cell-new", tenant.Name),
 	}
 	status := placedStatus(3)
-	status.Placement.Members = []v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-old", v1alpha1.TeamMemberRoleStandby, nil),
-		memberStatus("cell-new", v1alpha1.TeamMemberRoleStandby, nil),
+	status.Placement.Members = []v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-old", v1alpha1.TenantMemberRoleStandby, nil),
+		memberStatus("cell-new", v1alpha1.TenantMemberRoleStandby, nil),
 	}
 	older := fixedNow.Add(-time.Hour)
 	newer := fixedNow.Add(-time.Minute)
 	in.LastSync = &SyncCache{Members: []AnnounceMember{
-		{Cell: "cell-old", Namespace: "cells-ns", Role: v1alpha1.TeamMemberRoleStandby, AppliedAt: &older},
-		{Cell: "cell-new", Namespace: "cells-ns", Role: v1alpha1.TeamMemberRoleStandby, AppliedAt: &newer},
+		{Cell: "cell-old", Namespace: "cells-ns", Role: v1alpha1.TenantMemberRoleStandby, AppliedAt: &older},
+		{Cell: "cell-new", Namespace: "cells-ns", Role: v1alpha1.TenantMemberRoleStandby, AppliedAt: &newer},
 	}}
 	slotZero := in.Cells[0]
 
-	members, _ := desiredMembers(in, team, status, &slotZero, fixedNow)
+	members, _ := desiredMembers(in, tenant, status, &slotZero, fixedNow)
 	promoted := findMember(members, "cell-new")
-	if promoted == nil || promoted.Role != v1alpha1.TeamMemberRoleActive ||
+	if promoted == nil || promoted.Role != v1alpha1.TenantMemberRoleActive ||
 		promoted.Slot == nil || *promoted.Slot != 1 {
 		t.Fatalf("cell-new did not take slot 1: %+v", members)
 	}
 	stayed := findMember(members, "cell-old")
-	if stayed == nil || stayed.Role != v1alpha1.TeamMemberRoleStandby {
+	if stayed == nil || stayed.Role != v1alpha1.TenantMemberRoleStandby {
 		t.Fatalf("cell-old did not stay a standby: %+v", members)
 	}
 }
@@ -173,8 +173,8 @@ func TestDesiredMembersPromotesTheNewestAppliedStandby(t *testing.T) {
 func TestPromotionBreaksATieByCellName(t *testing.T) {
 	at := fixedNow
 	standbys := []MemberBinding{
-		{Cell: "cell-z", Namespace: "cells-ns", Role: v1alpha1.TeamMemberRoleStandby, Applied: true, AppliedAt: &at},
-		{Cell: "cell-b", Namespace: "cells-ns", Role: v1alpha1.TeamMemberRoleStandby, Applied: true, AppliedAt: &at},
+		{Cell: "cell-z", Namespace: "cells-ns", Role: v1alpha1.TenantMemberRoleStandby, Applied: true, AppliedAt: &at},
+		{Cell: "cell-b", Namespace: "cells-ns", Role: v1alpha1.TenantMemberRoleStandby, Applied: true, AppliedAt: &at},
 	}
 	chosen := takePromotionSource(&standbys, map[string]bool{})
 	if chosen == nil || chosen.Cell != "cell-b" {
@@ -190,7 +190,7 @@ func TestPromotionBreaksATieByCellName(t *testing.T) {
 // through to the existing move path.
 func TestPromotionSkipsAnUnappliedStandby(t *testing.T) {
 	standbys := []MemberBinding{
-		{Cell: "cell-b", Namespace: "cells-ns", Role: v1alpha1.TeamMemberRoleStandby, Applied: false},
+		{Cell: "cell-b", Namespace: "cells-ns", Role: v1alpha1.TenantMemberRoleStandby, Applied: false},
 	}
 	if chosen := takePromotionSource(&standbys, map[string]bool{}); chosen != nil {
 		t.Fatalf("an unapplied standby was promoted: %+v", chosen)
@@ -202,19 +202,19 @@ func TestPromotionSkipsAnUnappliedStandby(t *testing.T) {
 // dense.
 func TestDesiredMembersScaleDownReleasesTheHighestSlots(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
+	tenant := slotTenant(2, 0)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", team.Name), appliedCell("cell-b", team.Name), appliedCell("cell-c", team.Name),
+		appliedCell("cell-a", tenant.Name), appliedCell("cell-b", tenant.Name), appliedCell("cell-c", tenant.Name),
 	}
 	status := placedStatus(3)
-	status.Placement.Members = []v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
-		memberStatus("cell-c", v1alpha1.TeamMemberRoleActive, intPtr(2)),
+	status.Placement.Members = []v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
+		memberStatus("cell-c", v1alpha1.TenantMemberRoleActive, intPtr(2)),
 	}
 	slotZero := in.Cells[0]
 
-	members, _ := desiredMembers(in, team, status, &slotZero, fixedNow)
+	members, _ := desiredMembers(in, tenant, status, &slotZero, fixedNow)
 	if len(members) != 2 {
 		t.Fatalf("members = %d, want 2: %+v", len(members), members)
 	}
@@ -239,17 +239,17 @@ func TestDesiredMembersScaleDownReleasesTheHighestSlots(t *testing.T) {
 func TestDesiredMembersCountsAStandbyAgainstCapacity(t *testing.T) {
 	in := testInputs()
 	in.MaxTenantsDefault = 1
-	team := slotTeam(1, 1)
+	tenant := slotTenant(1, 1)
 	full := readyCell("cell-b", "other-tenant")
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name), full}
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name), full}
 	status := placedStatus(3)
 	slotZero := in.Cells[0]
 
-	members, reason := desiredMembers(in, team, status, &slotZero, fixedNow)
+	members, reason := desiredMembers(in, tenant, status, &slotZero, fixedNow)
 	if len(members) != 1 {
 		t.Fatalf("members = %d, want 1: a full cell is no candidate: %+v", len(members), members)
 	}
-	if reason != v1alpha1.TeamReasonStandbyPending {
+	if reason != v1alpha1.TenantReasonStandbyPending {
 		t.Fatalf("reason = %q, want StandbyPending", reason)
 	}
 }
@@ -259,12 +259,12 @@ func TestDesiredMembersCountsAStandbyAgainstCapacity(t *testing.T) {
 // never selected for a second slot.
 func TestDesiredMembersNeverPicksACellHoldingAMember(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name)}
+	tenant := slotTenant(2, 0)
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name)}
 	status := placedStatus(3)
 	slotZero := in.Cells[0]
 
-	members, _ := desiredMembers(in, team, status, &slotZero, fixedNow)
+	members, _ := desiredMembers(in, tenant, status, &slotZero, fixedNow)
 	if len(members) != 1 {
 		t.Fatalf("members = %d, want 1: the one cell already holds slot 0: %+v", len(members), members)
 	}
@@ -274,18 +274,18 @@ func TestDesiredMembersNeverPicksACellHoldingAMember(t *testing.T) {
 // evacuating leaves the set, and the slot takes a fresh candidate.
 func TestDesiredMembersDropsAnEvacuatingCell(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	evacuating := appliedCell("cell-b", team.Name)
+	tenant := slotTenant(2, 0)
+	evacuating := appliedCell("cell-b", tenant.Name)
 	evacuating.Evacuate = true
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name), evacuating, readyCell("cell-c")}
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name), evacuating, readyCell("cell-c")}
 	status := placedStatus(3)
-	status.Placement.Members = []v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	status.Placement.Members = []v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	}
 	slotZero := in.Cells[0]
 
-	members, _ := desiredMembers(in, team, status, &slotZero, fixedNow)
+	members, _ := desiredMembers(in, tenant, status, &slotZero, fixedNow)
 	if findMember(members, "cell-b") != nil {
 		t.Fatalf("an evacuating cell kept its member: %+v", members)
 	}
@@ -299,20 +299,20 @@ func TestDesiredMembersDropsAnEvacuatingCell(t *testing.T) {
 // rehydration seed apply on each of them.
 func TestPlaceAppliesEveryMemberOnItsCell(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 1)
+	tenant := slotTenant(2, 1)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", team.Name), readyCell("cell-b"), readyCell("cell-c"),
+		appliedCell("cell-a", tenant.Name), readyCell("cell-b"), readyCell("cell-c"),
 	}
 	status := placedStatus(3)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	patched := map[string]bool{}
 	for _, p := range out.CellPatches {
 		patched[p.Name] = true
-		if !containsString(p.Tenants, team.Name) {
+		if !containsString(p.Tenants, tenant.Name) {
 			t.Fatalf("the patch for %s does not name the tenant: %+v", p.Name, p.Tenants)
 		}
 	}
@@ -329,15 +329,15 @@ func TestPlaceAppliesEveryMemberOnItsCell(t *testing.T) {
 // existing keep path set.
 func TestPlaceReportsSlotPendingOnTheCondition(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name)}
+	tenant := slotTenant(2, 0)
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name)}
 	status := placedStatus(3)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonSlotPending {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonSlotPending {
 		t.Fatalf("condition = %+v, want SlotPending", cond)
 	}
 	if cond.Status != metav1.ConditionFalse {
@@ -350,15 +350,15 @@ func TestPlaceReportsSlotPendingOnTheCondition(t *testing.T) {
 // earlier rule is unchanged for it.
 func TestPlaceKeepsTenantPlacedForASingleMemberTenant(t *testing.T) {
 	in := testInputs()
-	team := testTeam()
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name)}
+	tenant := testTenant()
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name)}
 	status := placedStatus(3)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonTenantPlaced {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonTenantPlaced {
 		t.Fatalf("condition = %+v, want TenantPlaced", cond)
 	}
 }

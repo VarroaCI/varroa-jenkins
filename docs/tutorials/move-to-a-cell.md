@@ -1,15 +1,15 @@
 # Move a Jenkinsfile onto a Cell
 
-A cell runs your Jenkinsfile with no Jenkins web UI, on agent pods in your team's namespace. Make the edits below in order, then find the build on the Pipelines page.
+A cell runs your Jenkinsfile with no Jenkins web UI, on agent pods in your tenant's namespace. Make the edits below in order, then find the build on the Pipelines page.
 
 ## Before you start
 
-An operator makes your `Team` a pipelines tenant and gives it a composed bundle. You own that bundle's Git repository. Keep these rules in mind:
+An operator makes your `Tenant` a pipelines tenant and gives it a composed bundle. You own that bundle's Git repository. Keep these rules in mind:
 
 - `items.yaml` declares your jobs.
 - `jenkins.yaml` declares your pod templates only.
 
-Read [Make a Team a pipelines tenant](../operations/cells.md#make-a-team-a-pipelines-tenant) and [Create a bundle](../config/composed-bundles.md#create-a-bundle) first.
+Read [Make a Tenant a pipelines tenant](../operations/cells.md#make-a-tenant-a-pipelines-tenant) and [Create a bundle](../config/composed-bundles.md#create-a-bundle) first.
 
 ## What a cell changes
 
@@ -21,13 +21,13 @@ Read [Make a Team a pipelines tenant](../operations/cells.md#make-a-team-a-pipel
 | Build history on the controller disk | History in the build record store. The cell's disk is temporary. |
 | Global credentials, tools and libraries | Folder-scoped credentials and libraries only |
 
-A cell can restart or move your team at any time. A running Pipeline build resumes on the next cell.
+A cell can restart or move your tenant at any time. A running Pipeline build resumes on the next cell.
 
 For more detail, read [headless controllers](../security/headless-controllers.md), [Build records](../operations/build-records.md) and [Pipeline mesh](../operations/pipeline-mesh.md).
 
 ## 1. Declare the job in items.yaml
 
-Add a `pipeline` item with a `cpsScmFlowDefinition` that points at your existing Jenkinsfile. You can also use a `multibranch` item. The operator puts the item under a top-level folder named after your team.
+Add a `pipeline` item with a `cpsScmFlowDefinition` that points at your existing Jenkinsfile. You can also use a `multibranch` item. The operator puts the item under a top-level folder named after your tenant.
 
 ```yaml
 items:
@@ -52,7 +52,7 @@ See [Jobs and items](../config/items.md#define-a-pipeline) for every field.
 
 ## 2. Select an agent
 
-Replace `agent any` and every inline `kubernetes { yaml … }` agent with a label from your own cloud. The operator gives every tenant the `<team>-default` template. That template has one container and no build tools.
+Replace `agent any` and every inline `kubernetes { yaml … }` agent with a label from your own cloud. The operator gives every tenant the `<tenant>-default` template. That template has one container and no build tools.
 
 An inline pod has no tenant label. The agent fence keeps such a build in the queue.
 
@@ -63,7 +63,7 @@ pipeline {
 }
 ```
 
-To add a template, add an entry to `jenkins.clouds[].kubernetes.templates` in the bundle's `jenkins.yaml`. The operator adds the `<team>-` prefix to the name and the label.
+To add a template, add an entry to `jenkins.clouds[].kubernetes.templates` in the bundle's `jenkins.yaml`. The operator adds the `<tenant>-` prefix to the name and the label.
 
 ```yaml
 jenkins:
@@ -92,7 +92,7 @@ pipeline {
 }
 ```
 
-To build on a machine outside the cluster, register a runner. Select `<team>-runner`, or `<team>-<label>` for a label the runner declares.
+To build on a machine outside the cluster, register a runner. Select `<tenant>-runner`, or `<tenant>-<label>` for a label the runner declares.
 
 Read [Tenant pod templates](../operations/tenant-pod-templates.md#what-the-operator-writes), [External runners](../operations/runners.md#labels-and-the-tenant-fence) and [Isolation controls](../operations/cells.md#isolation-controls).
 
@@ -117,7 +117,7 @@ Do not put a secret value in a bundle variable or in `items.yaml`. See [Projecte
 
 Declare each library as `folderLibraries` on a folder that your `items.yaml` declares. The `@Library('name')` call then resolves as before.
 
-The library must sit on a folder that the tenant declares. It must not sit on the team root folder, which the operator creates. This example uses a folder named `apps`:
+The library must sit on a folder that the tenant declares. It must not sit on the tenant root folder, which the operator creates. This example uses a folder named `apps`:
 
 ```yaml
 - kind: folder
@@ -165,12 +165,12 @@ triggers:
 Point the GitHub webhook at the tenant webhook door:
 
 ```text
-https://<host>/hibernation/<token>/teams/<team>/queue/github-webhook/
+https://<host>/hibernation/<token>/tenants/<tenant>/queue/github-webhook/
 ```
 
-Set the webhook's signing secret to the `webhookSecret` value from the `Team` status. Your operator gives you both the token and the secret.
+Set the webhook's signing secret to the `webhookSecret` value from the `Tenant` status. Your operator gives you both the token and the secret.
 
-GitHub works without extra setup. Generic and GitLab deliveries use the generic path with a `<team>:` token.
+GitHub works without extra setup. Generic and GitLab deliveries use the generic path with a `<tenant>:` token.
 
 Read [Schedule a job](../config/items.md#schedule-a-job), [Tenant webhooks](../operations/webhooks.md) and [Cell restrictions](../config/items.md#cell-restrictions).
 
@@ -207,11 +207,11 @@ Read [Build logs and artifacts](../operations/build-logs-and-artifacts.md#agent-
 
 ## 8. Find the build
 
-Open **Pipelines**, select your team, then select the job. The build page shows the stages, the log, the artifacts and the test results. You can start a build with parameters on that page.
+Open **Pipelines**, select your tenant, then select the job. The build page shows the stages, the log, the artifacts and the test results. You can start a build with parameters on that page.
 
 The record store keeps the log and the artifacts after the cell restarts.
 
-Read [Read and run pipelines](pipelines.md#open-a-team), [Open a build](pipelines.md#open-a-build) and [Operate a run](run-operations.md).
+Read [Read and run pipelines](pipelines.md#open-a-tenant), [Open a build](pipelines.md#open-a-build) and [Operate a run](run-operations.md).
 
 ## Patterns a cell does not run
 
@@ -231,4 +231,4 @@ Read [Read and run pipelines](pipelines.md#open-a-team), [Open a build](pipeline
 ## Next steps
 
 - [Tenant slots](../operations/tenant-slots.md) explains which slot runs a job.
-- [Cross-tenant pipelines](../config/cross-tenant-pipelines.md) explains how to call another team's job.
+- [Cross-tenant pipelines](../config/cross-tenant-pipelines.md) explains how to call another tenant's job.

@@ -20,7 +20,7 @@ import (
 // every candidate above it to the next round.
 const maxBackstopFiresPerRound = 100
 
-// selectFire applies Team.spec.pipelines.cronCatchUp to one job's
+// selectFire applies Tenant.spec.pipelines.cronCatchUp to one job's
 // candidate occurrences, already filtered by isBackstopCandidate. "one"
 // (the default) fires the newest and counts the rest missed; "none"
 // fires nothing and counts every one missed. A nil fire means the round

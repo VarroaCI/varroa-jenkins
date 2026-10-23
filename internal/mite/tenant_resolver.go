@@ -13,7 +13,7 @@ import (
 )
 
 // cellTenantResolveTTL is the cache lifetime design.md D14 sets for both
-// the Controller cell lookup and the Team placement lookup.
+// the Controller cell lookup and the Tenant placement lookup.
 const cellTenantResolveTTL = 30 * time.Second
 
 // cellTenantResolveTimeout bounds one cold lookup against the CRD store,
@@ -22,7 +22,7 @@ const cellTenantResolveTimeout = 2 * time.Second
 
 // crdCellTenantResolver is the production CellTenantResolver (design.md
 // D14). It reads the owning Controller, by namespace and cell name, and —
-// for a cell — the named Team, from the CRD store, each cached for
+// for a cell — the named Tenant, from the CRD store, each cached for
 // cellTenantResolveTTL. It is unexported: callers build one through
 // NewCellTenantResolver and use it only through the CellTenantResolver
 // interface.
@@ -30,8 +30,8 @@ type crdCellTenantResolver struct {
 	store crdstore.Backend
 
 	mu          sync.Mutex
-	controllers map[string]cellFlagEntry      // key "ns/cell"
-	teams       map[string]teamPlacementEntry // key Team name
+	controllers map[string]cellFlagEntry        // key "ns/cell"
+	tenants     map[string]tenantPlacementEntry // key Tenant name
 }
 
 // cellFlagEntry caches whether one Controller is a cell.
@@ -40,11 +40,11 @@ type cellFlagEntry struct {
 	expires time.Time
 }
 
-// teamPlacementEntry caches one Team's placement. placed is false for a
-// Team that carries no placement yet, or that does not exist — an
-// unplaced Team and an absent one answer a job path the same way: no
+// tenantPlacementEntry caches one Tenant's placement. placed is false for a
+// Tenant that carries no placement yet, or that does not exist — an
+// unplaced Tenant and an absent one answer a job path the same way: no
 // tenant hosts it.
-type teamPlacementEntry struct {
+type tenantPlacementEntry struct {
 	placed        bool
 	cluster       string
 	cellNamespace string
@@ -63,7 +63,7 @@ type teamPlacementEntry struct {
 // The gateway answers the tenant for any member cell, slot or standby:
 // the claim fence answers NOT_HOME, and a resolver that refused such a
 // cell would hide that answer behind a fail-closed path.
-func (e teamPlacementEntry) holdsCell(namespace, cell string) bool {
+func (e tenantPlacementEntry) holdsCell(namespace, cell string) bool {
 	if len(e.members) == 0 {
 		return e.cellNamespace == namespace && e.cell == cell
 	}
@@ -71,12 +71,12 @@ func (e teamPlacementEntry) holdsCell(namespace, cell string) bool {
 }
 
 // NewCellTenantResolver builds the resolver design.md D14 owns. store
-// reads Controller and Team CRDs.
+// reads Controller and Tenant CRDs.
 func NewCellTenantResolver(store crdstore.Backend) CellTenantResolver {
 	return &crdCellTenantResolver{
 		store:       store,
 		controllers: make(map[string]cellFlagEntry),
-		teams:       make(map[string]teamPlacementEntry),
+		tenants:     make(map[string]tenantPlacementEntry),
 	}
 }
 
@@ -100,24 +100,24 @@ func (r *crdCellTenantResolver) ResolveJobTenant(cluster, ns, cell, jobPath stri
 		return ns + "/" + cell, 0
 	}
 
-	team := firstPathSegment(jobPath)
-	if team == "" {
+	tenant := firstPathSegment(jobPath)
+	if tenant == "" {
 		return "", 0
 	}
 
-	placement, resolved := r.teamPlacement(team)
+	placement, resolved := r.tenantPlacement(tenant)
 	if !resolved || !placement.placed {
 		return "", 0
 	}
 	if !placement.holdsCell(ns, cell) {
-		// The team holds no member on this cell. This cell must not
+		// The tenant holds no member on this cell. This cell must not
 		// answer for a tenant it does not host.
 		return "", 0
 	}
 	if placement.cluster != "" && placement.cluster != cluster {
 		return "", 0
 	}
-	return team, placement.generation
+	return tenant, placement.generation
 }
 
 // firstPathSegment returns the first "/"-delimited segment of jobPath,
@@ -164,14 +164,14 @@ func (r *crdCellTenantResolver) isCell(ns, cell string) (isCell, resolved bool) 
 	return isCellFlag, true
 }
 
-// teamPlacement reads team's current placement, cached for
+// tenantPlacement reads tenant's current placement, cached for
 // cellTenantResolveTTL. resolved is false only on a transient read
-// error; an absent Team caches as placed=false like an unplaced one.
-func (r *crdCellTenantResolver) teamPlacement(team string) (entry teamPlacementEntry, resolved bool) {
+// error; an absent Tenant caches as placed=false like an unplaced one.
+func (r *crdCellTenantResolver) tenantPlacement(tenant string) (entry tenantPlacementEntry, resolved bool) {
 	now := time.Now()
 
 	r.mu.Lock()
-	if e, found := r.teams[team]; found && now.Before(e.expires) {
+	if e, found := r.tenants[tenant]; found && now.Before(e.expires) {
 		r.mu.Unlock()
 		return e, true
 	}
@@ -179,21 +179,21 @@ func (r *crdCellTenantResolver) teamPlacement(team string) (entry teamPlacementE
 
 	ctx, cancel := context.WithTimeout(context.Background(), cellTenantResolveTimeout)
 	defer cancel()
-	tm, err := crdstore.Get[v1alpha1.Team](ctx, r.store, team, "")
+	tm, err := crdstore.Get[v1alpha1.Tenant](ctx, r.store, tenant, "")
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			e := teamPlacementEntry{placed: false, expires: now.Add(cellTenantResolveTTL)}
+			e := tenantPlacementEntry{placed: false, expires: now.Add(cellTenantResolveTTL)}
 			r.mu.Lock()
-			r.teams[team] = e
+			r.tenants[tenant] = e
 			r.mu.Unlock()
 			return e, true
 		}
-		return teamPlacementEntry{}, false
+		return tenantPlacementEntry{}, false
 	}
 
-	var e teamPlacementEntry
+	var e tenantPlacementEntry
 	if p := tm.Status.Placement; p != nil && p.Cell != "" && p.CellNamespace != "" {
-		e = teamPlacementEntry{
+		e = tenantPlacementEntry{
 			placed:        true,
 			cluster:       p.Cluster,
 			cellNamespace: p.CellNamespace,
@@ -205,7 +205,7 @@ func (r *crdCellTenantResolver) teamPlacement(team string) (entry teamPlacementE
 	e.expires = now.Add(cellTenantResolveTTL)
 
 	r.mu.Lock()
-	r.teams[team] = e
+	r.tenants[tenant] = e
 	r.mu.Unlock()
 	return e, true
 }
@@ -213,7 +213,7 @@ func (r *crdCellTenantResolver) teamPlacement(team string) (entry teamPlacementE
 // memberCellSet answers the cell key of every member of the tenant.
 // An empty member list answers an empty map, which holdsCell resolves to
 // the scalar cell.
-func memberCellSet(members []v1alpha1.TeamMemberStatus) map[string]bool {
+func memberCellSet(members []v1alpha1.TenantMemberStatus) map[string]bool {
 	if len(members) == 0 {
 		return nil
 	}

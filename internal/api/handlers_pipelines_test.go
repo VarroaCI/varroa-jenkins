@@ -158,7 +158,7 @@ func TestLatestChangeMessage(t *testing.T) {
 	}
 }
 
-// --- 3.5: GET /pipelines/{team} ---
+// --- 3.5: GET /pipelines/{tenant} ---
 
 func TestHandleListPipelines_UnionsCatalogAndRecords_TruncatedFlag(t *testing.T) {
 	client := newSingleControllerFixture(t)
@@ -183,7 +183,7 @@ func TestHandleListPipelines_UnionsCatalogAndRecords_TruncatedFlag(t *testing.T)
 	}
 
 	srv := pipelinesTestServer(client, authz, reader, nil)
-	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"team": "ctrl-a"})
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"tenant": "ctrl-a"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -236,7 +236,7 @@ func TestHandleListPipelines_RunningRunSurvivesFinishedRunFlood(t *testing.T) {
 	}
 
 	srv := pipelinesTestServer(client, authz, reader, nil)
-	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"team": "ctrl-a"})
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"tenant": "ctrl-a"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -281,7 +281,7 @@ func TestHandleListPipelines_RunningNowCarriesTheCurrentStage(t *testing.T) {
 	}
 
 	srv := pipelinesTestServer(client, authz, reader, nil)
-	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"team": "ctrl-a"})
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"tenant": "ctrl-a"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -304,7 +304,7 @@ func TestHandleListPipelines_RunningNowCarriesTheCurrentStage(t *testing.T) {
 	}
 }
 
-// --- 3.6: GET /pipelines/{team}/jobs/{job} ---
+// --- 3.6: GET /pipelines/{tenant}/jobs/{job} ---
 
 const parameterizedItemYAML = `
 items:
@@ -349,7 +349,7 @@ func TestHandleGetPipelineJob_ParameterDefinitionsReachResponse(t *testing.T) {
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/ctrl-a/jobs/app-a",
-		map[string]string{"team": "ctrl-a", "job": "app-a"})
+		map[string]string{"tenant": "ctrl-a", "job": "app-a"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -381,22 +381,22 @@ func TestHandleGetPipelineJob_ParameterDefinitionsReachResponse(t *testing.T) {
 	}
 }
 
-// TestHandleGetPipelineJob_TenantFolderForPlacedTeam asserts a placed
-// Team's job detail carries its Jenkins folder prefix, TenantRef.Folder,
-// which equals the Team name for design D1's placed-Team tenant kind.
-func TestHandleGetPipelineJob_TenantFolderForPlacedTeam(t *testing.T) {
+// TestHandleGetPipelineJob_TenantFolderForPlacedTenant asserts a placed
+// Tenant's job detail carries its Jenkins folder prefix, TenantRef.Folder,
+// which equals the Tenant name for design D1's placed-Tenant tenant kind.
+func TestHandleGetPipelineJob_TenantFolderForPlacedTenant(t *testing.T) {
 	client := newFakeResourceClient()
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
 	}
-	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
 
 	authz := resolverAuthorizer("payments")
 	reader := newFakeRecordReader()
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Fapp-a",
-		map[string]string{"team": "payments", "job": "payments/app-a"})
+		map[string]string{"tenant": "payments", "job": "payments/app-a"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -408,7 +408,7 @@ func TestHandleGetPipelineJob_TenantFolderForPlacedTeam(t *testing.T) {
 		t.Errorf("tenantFolder = %q, want %q", detail.TenantFolder, "payments")
 	}
 	if detail.Tenant != "payments" {
-		t.Errorf("tenant = %q, want %q for a Team tenant", detail.Tenant, "payments")
+		t.Errorf("tenant = %q, want %q for a Tenant tenant", detail.Tenant, "payments")
 	}
 }
 
@@ -421,7 +421,7 @@ func TestHandleGetPipelineJob_DependenciesBothDirections(t *testing.T) {
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
 	}
-	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
 
 	authz := resolverAuthorizer("payments")
 	reader := newFakeRecordReader()
@@ -432,7 +432,7 @@ func TestHandleGetPipelineJob_DependenciesBothDirections(t *testing.T) {
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Frelease",
-		map[string]string{"team": "payments", "job": "payments/release"})
+		map[string]string{"tenant": "payments", "job": "payments/release"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -474,7 +474,7 @@ func TestHandleGetPipelineJob_DependenciesUngrantedEdgeVisible(t *testing.T) {
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
 	}
-	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
 
 	authz := resolverAuthorizer("payments")
 	reader := newFakeRecordReader()
@@ -484,7 +484,7 @@ func TestHandleGetPipelineJob_DependenciesUngrantedEdgeVisible(t *testing.T) {
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Frelease",
-		map[string]string{"team": "payments", "job": "payments/release"})
+		map[string]string{"tenant": "payments", "job": "payments/release"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -505,14 +505,14 @@ func TestHandleGetPipelineJob_DependenciesEmptyForNoEdge(t *testing.T) {
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
 	}
-	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
 
 	authz := resolverAuthorizer("payments")
 	reader := newFakeRecordReader()
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Flonely",
-		map[string]string{"team": "payments", "job": "payments/lonely"})
+		map[string]string{"tenant": "payments", "job": "payments/lonely"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -532,14 +532,14 @@ func TestHandleGetPipelineJob_DependenciesEmptyForNoEdge(t *testing.T) {
 // caller with no read right on the tenant reaches no dependency data.
 // The route answers the same 404 "job not found" that tenantForJob
 // already returns for any unauthorized job read (tenantresolver.go: "A
-// 403 would tell the caller a team it may not read exists"); this
+// 403 would tell the caller a tenant it may not read exists"); this
 // dependency edge introduces no new authorization outcome.
 func TestHandleGetPipelineJob_NoReadRightReturnsNoDependencyData(t *testing.T) {
 	client := newFakeResourceClient()
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
 	}
-	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
 
 	authz := resolverAuthorizer() // no tenant granted at all
 	reader := newFakeRecordReader()
@@ -549,7 +549,7 @@ func TestHandleGetPipelineJob_NoReadRightReturnsNoDependencyData(t *testing.T) {
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Frelease",
-		map[string]string{"team": "payments", "job": "payments/release"})
+		map[string]string{"tenant": "payments", "job": "payments/release"})
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
@@ -591,7 +591,7 @@ func TestHandleGetPipelineJob_Last30DaysCard(t *testing.T) {
 
 	srv := pipelinesTestServer(client, authz, reader, nil)
 	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fapp-a",
-		map[string]string{"team": "ctrl-a", "job": "acme/app-a"})
+		map[string]string{"tenant": "ctrl-a", "job": "acme/app-a"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -644,7 +644,7 @@ func TestHandleGetPipelineJob_Last30DaysDegradesToNullOnReaderError(t *testing.T
 
 	srv := pipelinesTestServer(client, authz, reader, nil)
 	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fapp-a",
-		map[string]string{"team": "ctrl-a", "job": "acme/app-a"})
+		map[string]string{"tenant": "ctrl-a", "job": "acme/app-a"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -661,7 +661,7 @@ func TestHandleGetPipelineJob_Last30DaysDegradesToNullOnReaderError(t *testing.T
 	}
 }
 
-// --- 3.7: GET /pipelines/{team}/jobs/{job}/runs ---
+// --- 3.7: GET /pipelines/{tenant}/jobs/{job}/runs ---
 
 func TestHandleListRuns_CrossTenantMergeNoGapNoRepeat_RevokedTenantContinues(t *testing.T) {
 	client := newFakeResourceClient()
@@ -669,11 +669,11 @@ func TestHandleListRuns_CrossTenantMergeNoGapNoRepeat_RevokedTenantContinues(t *
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a"}},
 		"ctrl-b": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "ns-b"}},
 	}
-	team := &v1alpha1.Team{
+	tenant := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns-a", "ns-b"}},
+		Spec:       v1alpha1.TenantSpec{Namespaces: []string{"ns-a", "ns-b"}},
 	}
-	crdstore.MustSeed(client.crdStore, team)
+	crdstore.MustSeed(client.crdStore, tenant)
 
 	reader := newFakeRecordReader()
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -697,7 +697,7 @@ func TestHandleListRuns_CrossTenantMergeNoGapNoRepeat_RevokedTenantContinues(t *
 			q.Set("cursor", cursor)
 		}
 		rec := doPipelinesRequest(t, srv.handleListRuns, "/pipelines/payments/jobs/svc%2Fmain/runs?"+q.Encode(),
-			map[string]string{"team": "payments", "job": "svc/main"})
+			map[string]string{"tenant": "payments", "job": "svc/main"})
 		if rec.Code != http.StatusOK {
 			t.Fatalf("page %d: status = %d, body = %s", page, rec.Code, rec.Body.String())
 		}
@@ -735,7 +735,7 @@ func TestHandleListRuns_CrossTenantMergeNoGapNoRepeat_RevokedTenantContinues(t *
 	narrowed := pipelineGrantAuthorizer([]string{"read"}, "ns-a/ctrl-a")
 	srv2 := pipelinesTestServer(client, narrowed, reader, nil)
 	rec := doPipelinesRequest(t, srv2.handleListRuns, "/pipelines/payments/jobs/svc%2Fmain/runs?limit=10",
-		map[string]string{"team": "payments", "job": "svc/main"})
+		map[string]string{"tenant": "payments", "job": "svc/main"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("after revoke: status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -761,11 +761,11 @@ func TestHandleListRuns_CrossTenantMerge_UntouchedTenantCursorNoRepeatNoGap(t *t
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a"}},
 		"ctrl-b": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "ns-b"}},
 	}
-	team := &v1alpha1.Team{
+	tenant := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns-a", "ns-b"}},
+		Spec:       v1alpha1.TenantSpec{Namespaces: []string{"ns-a", "ns-b"}},
 	}
-	crdstore.MustSeed(client.crdStore, team)
+	crdstore.MustSeed(client.crdStore, tenant)
 
 	reader := newFakeRecordReader()
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -794,7 +794,7 @@ func TestHandleListRuns_CrossTenantMerge_UntouchedTenantCursorNoRepeatNoGap(t *t
 			q.Set("cursor", cursor)
 		}
 		rec := doPipelinesRequest(t, srv.handleListRuns, "/pipelines/payments/jobs/svc%2Fmain/runs?"+q.Encode(),
-			map[string]string{"team": "payments", "job": "svc/main"})
+			map[string]string{"tenant": "payments", "job": "svc/main"})
 		if rec.Code != http.StatusOK {
 			t.Fatalf("page %d: status = %d, body = %s", page, rec.Code, rec.Body.String())
 		}
@@ -835,11 +835,11 @@ func TestHandleListRuns_CrossTenantMerge_ExhaustedTenantDoesNotRevive(t *testing
 		"ctrl-b": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "ns-b"}},
 		"ctrl-c": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-c", Namespace: "ns-c"}},
 	}
-	team := &v1alpha1.Team{
+	tenant := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns-a", "ns-b", "ns-c"}},
+		Spec:       v1alpha1.TenantSpec{Namespaces: []string{"ns-a", "ns-b", "ns-c"}},
 	}
-	crdstore.MustSeed(client.crdStore, team)
+	crdstore.MustSeed(client.crdStore, tenant)
 
 	reader := newFakeRecordReader()
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -871,7 +871,7 @@ func TestHandleListRuns_CrossTenantMerge_ExhaustedTenantDoesNotRevive(t *testing
 			q.Set("cursor", cursor)
 		}
 		rec := doPipelinesRequest(t, srv.handleListRuns, "/pipelines/payments/jobs/svc%2Fmain/runs?"+q.Encode(),
-			map[string]string{"team": "payments", "job": "svc/main"})
+			map[string]string{"tenant": "payments", "job": "svc/main"})
 		if rec.Code != http.StatusOK {
 			t.Fatalf("page %d: status = %d, body = %s", page, rec.Code, rec.Body.String())
 		}
@@ -926,10 +926,10 @@ items:
 `
 
 // pipelinesJobDetail issues one job-detail request and decodes it.
-func pipelinesJobDetail(t *testing.T, srv *Server, team, jobPath string) pipelineJobDetailJSON {
+func pipelinesJobDetail(t *testing.T, srv *Server, tenant, jobPath string) pipelineJobDetailJSON {
 	t.Helper()
 	var detail pipelineJobDetailJSON
-	if err := json.Unmarshal([]byte(pipelinesJobDetailBody(t, srv, team, jobPath)), &detail); err != nil {
+	if err := json.Unmarshal([]byte(pipelinesJobDetailBody(t, srv, tenant, jobPath)), &detail); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	return detail
@@ -937,10 +937,10 @@ func pipelinesJobDetail(t *testing.T, srv *Server, team, jobPath string) pipelin
 
 // pipelinesJobDetailBody issues one job-detail request and returns its
 // body, so a test can assert a key is absent rather than zero.
-func pipelinesJobDetailBody(t *testing.T, srv *Server, team, jobPath string) string {
+func pipelinesJobDetailBody(t *testing.T, srv *Server, tenant, jobPath string) string {
 	t.Helper()
-	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/"+team+"/jobs/"+url.PathEscape(jobPath),
-		map[string]string{"team": team, "job": jobPath})
+	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/"+tenant+"/jobs/"+url.PathEscape(jobPath),
+		map[string]string{"tenant": tenant, "job": jobPath})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -953,7 +953,7 @@ func TestHandleGetPipelineJob_DeclaredByAndDefinitionPath(t *testing.T) {
 	client := newSingleControllerFixture(t)
 	client.configMaps["bundle-a-content"] = map[string]string{"items.yaml": jenkinsfileItemsYAML}
 	client.composedBundles["bundle-a"].Spec.Inputs = []v1alpha1.ComposedInput{
-		{GitSource: &v1alpha1.GitBundleSource{RepoURL: "https://github.com/acme/svc", Path: "bundles/team"}},
+		{GitSource: &v1alpha1.GitBundleSource{RepoURL: "https://github.com/acme/svc", Path: "bundles/tenant"}},
 	}
 	client.composedBundles["bundle-a"].Status.ObservedRevisions = map[string]string{"0": "sha-git"}
 
@@ -982,7 +982,7 @@ func TestHandleGetPipelineJob_DeclaredByAndDefinitionPath(t *testing.T) {
 	if db.Kind != "gitSource" || db.Name != "https://github.com/acme/svc" || db.RepoURL != "https://github.com/acme/svc" {
 		t.Errorf("declaredBy = %+v, want the gitSource input's repo URL", db)
 	}
-	if db.Path != "bundles/team" || db.Revision != "sha-git" {
+	if db.Path != "bundles/tenant" || db.Revision != "sha-git" {
 		t.Errorf("path/revision = %q/%q, want the input's path and observed revision", db.Path, db.Revision)
 	}
 	if want := (bundleRefJSON{Namespace: "test-ns", Name: "bundle-a"}); db.Bundle != want {
@@ -1063,9 +1063,9 @@ func TestHandleGetPipelineJob_UnresolvableInputKeepsDefinition(t *testing.T) {
 	}
 }
 
-// --- GET /pipelines/{team}/jobs/{job}/tests/{case} ---
+// --- GET /pipelines/{tenant}/jobs/{job}/tests/{case} ---
 
-// newCaseHistoryFixture builds a Server over the team "payments", which
+// newCaseHistoryFixture builds a Server over the tenant "payments", which
 // resolves to the two controller tenants ns-a/ctrl-a and ns-b/ctrl-b, and
 // grants read on the tenants named in granted.
 func newCaseHistoryFixture(reader *fakeRecordReader, granted ...string) *Server {
@@ -1074,9 +1074,9 @@ func newCaseHistoryFixture(reader *fakeRecordReader, granted ...string) *Server 
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a"}},
 		"ctrl-b": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "ns-b"}},
 	}
-	crdstore.MustSeed(client.crdStore, &v1alpha1.Team{
+	crdstore.MustSeed(client.crdStore, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns-a", "ns-b"}},
+		Spec:       v1alpha1.TenantSpec{Namespaces: []string{"ns-a", "ns-b"}},
 	})
 	return pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, granted...), reader, nil)
 }
@@ -1090,7 +1090,7 @@ func caseHistoryPath(caseKey, query string) string {
 }
 
 func caseHistoryValues(caseKey string) map[string]string {
-	return map[string]string{"team": "payments", "job": "svc/main", "case": caseKey}
+	return map[string]string{"tenant": "payments", "job": "svc/main", "case": caseKey}
 }
 
 func TestHandleListJobTestCaseHistory_MergesTenantsNewestFirst(t *testing.T) {
@@ -1127,7 +1127,7 @@ func TestHandleListJobTestCaseHistory_MergesTenantsNewestFirst(t *testing.T) {
 	if mid.Suite != "it" || mid.Status != "REGRESSION" || mid.ErrorDetails != "boom" || mid.BuildNumber != 1 {
 		t.Fatalf("row = %+v", mid)
 	}
-	// The run link names the resolved tenant's own team segment, the rule
+	// The run link names the resolved tenant's own tenant segment, the rule
 	// the fleet lock rows follow.
 	if resp.Items[0].Result != "FAILURE" || resp.Items[0].RunLink != "/pipelines/ctrl-a/svc%2Fmain/a-2" {
 		t.Fatalf("row = %+v, want the result and the run link", resp.Items[0])
@@ -1153,7 +1153,7 @@ func TestHandleListJobTestCaseHistory_ReadsAdmittedTenantsAlone(t *testing.T) {
 	}
 }
 
-func TestHandleListJobTestCaseHistory_RefusedTeamIs404(t *testing.T) {
+func TestHandleListJobTestCaseHistory_RefusedTenantIs404(t *testing.T) {
 	reader := newFakeRecordReader()
 	reader.caseHistory[caseHistoryKey("core", "ns-a/ctrl-a", "svc/main", "C", "n")] = []recordstore.TestCaseOutcome{
 		{RunID: "a-1", Suite: "unit", Status: "FAILED"},

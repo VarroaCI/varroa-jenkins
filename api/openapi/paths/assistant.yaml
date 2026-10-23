@@ -63,7 +63,7 @@
       - {name: scope, in: query, description: 'all lists every session and needs the admin verb.', schema: {type: string, enum: [all]}}
       - {name: kind, in: query, schema: {type: string}}
       - {name: prompt, in: query, schema: {type: string}}
-      - {name: team, in: query, schema: {type: string}}
+      - {name: tenant, in: query, schema: {type: string}}
       - {name: state, in: query, schema: {type: string}}
       - {name: cursor, in: query, schema: {type: string}}
       - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
@@ -165,7 +165,7 @@
       carries its sequence number as its id. The stream closes after a done
       event. The stream reads the ticket of the session scope, because a
       browser EventSource cannot set headers. A caller who is neither the session
-      owner nor, for a Team agent session, a tenant reader, receives each
+      owner nor, for a Tenant agent session, a tenant reader, receives each
       tool_result frame with an empty content and withheld set to true. The
       frame keeps call_id and name.
     x-sse: true

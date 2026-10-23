@@ -21,8 +21,8 @@ func registerForgeTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 
 func registerOpenPullRequestTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	tool := mcp.NewTool("open_pull_request",
-		mcp.WithDescription("Open one pull request on a team's repository from a new branch with the given files. The branch must not exist. In an assistant session every call waits for a person's approval, and the repo must be the session's repo."),
-		mcp.WithString("team", mcp.Required(), mcp.Description("The team name")),
+		mcp.WithDescription("Open one pull request on a tenant's repository from a new branch with the given files. The branch must not exist. In an assistant session every call waits for a person's approval, and the repo must be the session's repo."),
+		mcp.WithString("tenant", mcp.Required(), mcp.Description("The tenant name")),
 		mcp.WithString("repo", mcp.Required(), mcp.Description("An https repository URL")),
 		mcp.WithString("branch", mcp.Required(), mcp.Description("A new branch name, at most 200 characters")),
 		mcp.WithString("title", mcp.Required(), mcp.Description("1 to 200 characters, one line")),
@@ -48,9 +48,9 @@ func registerOpenPullRequestTool(mcpServer *server.MCPServer, deps *api.Dependen
 		if err := marshalUnmarshal(args["files"], &files); err != nil {
 			return mcp.NewToolResultError("invalid_argument: files: " + err.Error()), nil
 		}
-		team := strArg(args, "team")
+		tenant := strArg(args, "tenant")
 		res, serr := api.NewServer(deps).OpenPullRequest(ctx, claims, api.OpenPullRequestArgs{
-			Team:   team,
+			Tenant: tenant,
 			Repo:   strArg(args, "repo"),
 			Branch: strArg(args, "branch"),
 			Title:  strArg(args, "title"),
@@ -62,7 +62,7 @@ func registerOpenPullRequestTool(mcpServer *server.MCPServer, deps *api.Dependen
 		}
 		emitActivityForCluster(ctx, deps, claims, res.Cluster, activity.Event{
 			Type:    "pipeline.proposal.opened",
-			Message: fmt.Sprintf("Pull request #%d opened for team %s", res.Number, team),
+			Message: fmt.Sprintf("Pull request #%d opened for tenant %s", res.Number, tenant),
 			URL:     res.URL,
 		})
 		return resultJSON(map[string]any{"url": res.URL, "number": res.Number})

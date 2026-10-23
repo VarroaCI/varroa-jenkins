@@ -292,15 +292,15 @@ public class VarroaSecurityRealmTest {
         assertNotNull("expected user authentication", auth);
         assertEquals(userId, auth.getName());
         boolean authenticated = false;
-        boolean platformTeam = false;
+        boolean platformTenant = false;
         for (org.acegisecurity.GrantedAuthority authority : auth.getAuthorities()) {
             if ("authenticated".equals(authority.getAuthority())) authenticated = true;
-            if ("platform-team".equals(authority.getAuthority())) platformTeam = true;
+            if ("platform-team".equals(authority.getAuthority())) platformTenant = true;
             assertFalse("user tokens must not receive system authorities",
                     authority.getAuthority().startsWith("ROLE:varroa:system-"));
         }
         assertTrue("expected authenticated authority", authenticated);
-        assertTrue("expected groups from literal groups claim", platformTeam);
+        assertTrue("expected groups from literal groups claim", platformTenant);
     }
 
     @SuppressWarnings("unchecked")

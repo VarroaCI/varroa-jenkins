@@ -10,7 +10,7 @@ arguments. Other mutable controller fields belong in `spec`:
 
 ```json
 {
-  "namespace": "teams-platform",
+  "namespace": "tenants-platform",
   "name": "demo",
   "version": "2.555",
   "hibernation": {
@@ -64,7 +64,7 @@ Resolve the conflict in this order:
 
 ```json
 {
-  "namespace": "teams-platform",
+  "namespace": "tenants-platform",
   "name": "demo",
   "version": "2.555",
   "force": true

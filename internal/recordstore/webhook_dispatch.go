@@ -174,11 +174,11 @@ type webhookRow struct {
 	key         string
 }
 
-// webhookEventFor returns the X-Varroa-Event value of a delivery key. A Team
+// webhookEventFor returns the X-Varroa-Event value of a delivery key. A Tenant
 // agent message is not a run completion, so it carries its own event type.
 func webhookEventFor(key string) string {
-	if strings.HasPrefix(key, teamAgentWebhookKeyPrefix) {
-		return teamAgentWebhookEvent
+	if strings.HasPrefix(key, tenantAgentWebhookKeyPrefix) {
+		return tenantAgentWebhookEvent
 	}
 	return webhookEventRunCompleted
 }
@@ -276,7 +276,7 @@ func (d *WebhookDispatcher) deliver(ctx context.Context, row webhookRow) {
 		d.logger.Warn("webhook target read failed", "delivery", row.deliveryID, "error", err)
 		return
 	}
-	// A replaced Team object has a new incarnation. Its receiver must
+	// A replaced Tenant object has a new incarnation. Its receiver must
 	// not get a delivery that the old object's run produced.
 	if !ok || incarnation != row.incarnation {
 		d.setState(ctx, row, "dropped", row.attempts, 0, "tenant webhook removed or the tenant was replaced")

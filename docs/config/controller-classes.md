@@ -50,8 +50,8 @@ spec:
 apiVersion: varroa.dev/v1alpha1
 kind: Controller
 metadata:
-  name: team-ci
-  namespace: teams-platform
+  name: tenant-ci
+  namespace: tenants-platform
 spec:
   className: production
 ```

@@ -35,7 +35,7 @@ func isOperatorUnavailable(err error) bool { return bus.IsNoResponder(err) }
 
 // OpenPullRequestArgs are the model's arguments of open_pull_request.
 type OpenPullRequestArgs struct {
-	Team   string
+	Tenant string
 	Repo   string
 	Branch string
 	Title  string
@@ -60,16 +60,16 @@ func (s *Server) OpenPullRequest(ctx context.Context, claims *auth.Claims, a Ope
 	if s.deps.ForgeRelay == nil {
 		return OpenPullRequestResult{}, toolErr(http.StatusServiceUnavailable, forgeapi.CodeForgeUnreachable, "the forge relay is not configured")
 	}
-	refs, serr := s.resolveTeamTenants(ctx, claims, a.Team)
-	ref, ok := teamPipelinesTenant(refs, a.Team)
+	refs, serr := s.resolveTenantTenants(ctx, claims, a.Tenant)
+	ref, ok := tenantPipelinesTenant(refs, a.Tenant)
 	if serr != nil || !ok || !s.canReadPipeline(claims, ref, "") {
-		return OpenPullRequestResult{}, toolErr(http.StatusNotFound, "not_found", "team not found")
+		return OpenPullRequestResult{}, toolErr(http.StatusNotFound, "not_found", "tenant not found")
 	}
 	if !s.canWritePipeline(claims, ref, "") {
 		return OpenPullRequestResult{}, toolErr(http.StatusForbidden, "forbidden", "the tenant write check refused the call")
 	}
 
-	sess, inSession, err := s.teamAgentSession(ctx)
+	sess, inSession, err := s.tenantAgentSession(ctx)
 	if err != nil {
 		return OpenPullRequestResult{}, toolErr(http.StatusServiceUnavailable, "internal", "session snapshot is unavailable")
 	}
@@ -111,7 +111,7 @@ func (s *Server) OpenPullRequest(ctx context.Context, claims *auth.Claims, a Ope
 		cluster = s.deps.CoreCluster
 	}
 	reply, err := s.deps.ForgeRelay.PullRequest(ctx, cluster, forgeapi.PullRequestRequest{
-		Team: a.Team, Repo: u.String(), Branch: a.Branch, Title: a.Title, Body: body,
+		Tenant: a.Tenant, Repo: u.String(), Branch: a.Branch, Title: a.Title, Body: body,
 		Files: a.Files, CommitMessage: msg, BaseRevision: baseRevision,
 	})
 	if err != nil && isOperatorUnavailable(err) {

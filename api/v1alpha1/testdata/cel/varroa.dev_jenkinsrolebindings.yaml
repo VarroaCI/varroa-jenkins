@@ -8,7 +8,7 @@ base:
     roleRef: developer
     subjects:
       - kind: Group
-        name: team-a
+        name: tenant-a
     jenkinsScope:
       type: item
 cases:
@@ -16,7 +16,7 @@ cases:
     rule: |-
       !has(self.tenants)
     field: spec.controllerScope
-    new: {spec: {controllerScope: {tenants: [{name: team-a}]}}}
+    new: {spec: {controllerScope: {tenants: [{name: tenant-a}]}}}
     want: reject
   - name: controller scope with namespaces accepted
     rule: |-

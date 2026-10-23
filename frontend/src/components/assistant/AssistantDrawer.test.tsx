@@ -34,7 +34,7 @@ const session: AssistantSession = {
   id: "s1",
   kind: "assistant",
   principal: "alice",
-  team: "",
+  tenant: "",
   cluster: "core",
   trigger: "manual",
   context: { route: "dashboard" },

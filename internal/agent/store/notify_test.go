@@ -43,7 +43,7 @@ func TestNotify_ContentFree(t *testing.T) {
 		t.Fatal(err)
 	}
 	sess := agent.Session{
-		ID: id, Kind: agent.KindAssistant, Principal: "u", Cluster: "core", Team: "",
+		ID: id, Kind: agent.KindAssistant, Principal: "u", Cluster: "core", Tenant: "",
 		Trigger: agent.TriggerManual, Provider: "p", Model: "m",
 		KeySource: agent.KeySourceChart, DataSharing: agent.DataLogs,
 		State: agent.StateRunning, LeaseOwner: "owner-1",

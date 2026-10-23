@@ -31,7 +31,7 @@ type runnerEntry struct {
 
 // runnerSpecEntry mirrors v1alpha1.RunnerSpec.
 type runnerSpecEntry struct {
-	Team          string   `json:"team"`
+	Tenant        string   `json:"tenant"`
 	Launcher      string   `json:"launcher"`
 	Labels        []string `json:"labels,omitempty"`
 	RemoteFS      string   `json:"remoteFS"`
@@ -73,7 +73,7 @@ type createRunnerRequest struct {
 
 func runnerSpecEntryFromSpec(s v1alpha1.RunnerSpec) runnerSpecEntry {
 	return runnerSpecEntry{
-		Team:          s.Team,
+		Tenant:        s.Tenant,
 		Launcher:      s.Launcher,
 		Labels:        s.Labels,
 		RemoteFS:      s.RemoteFS,
@@ -87,7 +87,7 @@ func runnerSpecEntryFromSpec(s v1alpha1.RunnerSpec) runnerSpecEntry {
 
 func runnerSpecFromEntry(e runnerSpecEntry) v1alpha1.RunnerSpec {
 	return v1alpha1.RunnerSpec{
-		Team:          e.Team,
+		Tenant:        e.Tenant,
 		Launcher:      e.Launcher,
 		Labels:        e.Labels,
 		RemoteFS:      e.RemoteFS,
@@ -138,14 +138,14 @@ func (s *Server) runnerFromCRD(claims *auth.Claims, r *v1alpha1.Runner) runnerEn
 }
 
 // canReadRunner reports whether claims may read a runner belonging to
-// team: the runners:read verb, and CanReadPipeline on the runner's own
+// tenant: the runners:read verb, and CanReadPipeline on the runner's own
 // tenant with an empty job path — a runner is tenant-wide and belongs to
 // no job (specs/runner-registration).
-func (s *Server) canReadRunner(claims *auth.Claims, team string) bool {
+func (s *Server) canReadRunner(claims *auth.Claims, tenant string) bool {
 	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadRunners(claims) {
 		return false
 	}
-	ref, err := TenantRefFromTenant(team)
+	ref, err := TenantRefFromTenant(tenant)
 	if err != nil {
 		return false
 	}
@@ -153,10 +153,10 @@ func (s *Server) canReadRunner(claims *auth.Claims, team string) bool {
 }
 
 // runnerTenantWriteGrant reports whether claims hold CanWritePipeline on
-// team, with an empty job path. Shared by the three write-verb checks
+// tenant, with an empty job path. Shared by the three write-verb checks
 // below, each of which also requires its own runners verb.
-func (s *Server) runnerTenantWriteGrant(claims *auth.Claims, team string) bool {
-	ref, err := TenantRefFromTenant(team)
+func (s *Server) runnerTenantWriteGrant(claims *auth.Claims, tenant string) bool {
+	ref, err := TenantRefFromTenant(tenant)
 	if err != nil {
 		return false
 	}
@@ -164,32 +164,32 @@ func (s *Server) runnerTenantWriteGrant(claims *auth.Claims, team string) bool {
 }
 
 // canCreateRunner reports whether claims may create a runner belonging to
-// team: the runners:create verb and the tenant write grant.
-func (s *Server) canCreateRunner(claims *auth.Claims, team string) bool {
+// tenant: the runners:create verb and the tenant write grant.
+func (s *Server) canCreateRunner(claims *auth.Claims, tenant string) bool {
 	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanCreateRunners(claims) {
 		return false
 	}
-	return s.runnerTenantWriteGrant(claims, team)
+	return s.runnerTenantWriteGrant(claims, tenant)
 }
 
 // canUpdateRunner reports whether claims may update a runner belonging to
-// team: the runners:update verb and the tenant write grant. team is the
-// stored object's spec.team, which is immutable.
-func (s *Server) canUpdateRunner(claims *auth.Claims, team string) bool {
+// tenant: the runners:update verb and the tenant write grant. tenant is the
+// stored object's spec.tenant, which is immutable.
+func (s *Server) canUpdateRunner(claims *auth.Claims, tenant string) bool {
 	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanUpdateRunners(claims) {
 		return false
 	}
-	return s.runnerTenantWriteGrant(claims, team)
+	return s.runnerTenantWriteGrant(claims, tenant)
 }
 
 // canDeleteRunner reports whether claims may delete a runner belonging to
-// team: the runners:delete verb and the tenant write grant. team is the
-// stored object's spec.team, which is immutable.
-func (s *Server) canDeleteRunner(claims *auth.Claims, team string) bool {
+// tenant: the runners:delete verb and the tenant write grant. tenant is the
+// stored object's spec.tenant, which is immutable.
+func (s *Server) canDeleteRunner(claims *auth.Claims, tenant string) bool {
 	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanDeleteRunners(claims) {
 		return false
 	}
-	return s.runnerTenantWriteGrant(claims, team)
+	return s.runnerTenantWriteGrant(claims, tenant)
 }
 
 // HandleRunners dispatches /runners requests:
@@ -221,13 +221,13 @@ func (s *Server) handleListRunners(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	team := r.URL.Query().Get("team")
+	tenant := r.URL.Query().Get("tenant")
 	result := make([]runnerEntry, 0, len(runners))
 	for _, rn := range runners {
-		if team != "" && rn.Spec.Team != team {
+		if tenant != "" && rn.Spec.Tenant != tenant {
 			continue
 		}
-		if !s.canReadRunner(claims, rn.Spec.Team) {
+		if !s.canReadRunner(claims, rn.Spec.Tenant) {
 			continue
 		}
 		result = append(result, s.runnerFromCRD(claims, rn))
@@ -251,8 +251,8 @@ func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 		s.writeJSONError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if req.Spec.Team == "" {
-		s.writeJSONError(w, http.StatusBadRequest, "spec.team is required")
+	if req.Spec.Tenant == "" {
+		s.writeJSONError(w, http.StatusBadRequest, "spec.tenant is required")
 		return
 	}
 	if req.Spec.Launcher == "" {
@@ -264,18 +264,18 @@ func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The tenant write grant is checked before the Team lookup: a caller
-	// with no grant on the named team learns only "forbidden", never
-	// whether the team exists (specs/runner-registration, "a fleet verb
+	// The tenant write grant is checked before the Tenant lookup: a caller
+	// with no grant on the named tenant learns only "forbidden", never
+	// whether the tenant exists (specs/runner-registration, "a fleet verb
 	// alone does not reach another tenant's runner").
-	if !s.canCreateRunner(claims, req.Spec.Team) {
+	if !s.canCreateRunner(claims, req.Spec.Tenant) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
 
 	ctx := r.Context()
-	if _, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, req.Spec.Team, ""); err != nil {
-		s.writeJSONError(w, http.StatusBadRequest, "spec.team names no Team")
+	if _, err := crdstore.Get[v1alpha1.Tenant](ctx, s.deps.Store, req.Spec.Tenant, ""); err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, "spec.tenant names no Tenant")
 		return
 	}
 
@@ -298,7 +298,7 @@ func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 // HandleRunnerDispatch dispatches /runners/{name} requests:
 //
 //	GET    /runners/{name} — get runner detail
-//	PATCH  /runners/{name} — merge-patch spec.* (team and launcher are immutable)
+//	PATCH  /runners/{name} — merge-patch spec.* (tenant and launcher are immutable)
 //	DELETE /runners/{name} — delete a runner
 func (s *Server) HandleRunnerDispatch(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/runners/")
@@ -332,7 +332,7 @@ func (s *Server) handleGetRunner(w http.ResponseWriter, r *http.Request, name st
 		s.writeJSONError(w, http.StatusNotFound, "runner not found")
 		return
 	}
-	if !s.canReadRunner(claims, runner.Spec.Team) {
+	if !s.canReadRunner(claims, runner.Spec.Tenant) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -342,7 +342,7 @@ func (s *Server) handleGetRunner(w http.ResponseWriter, r *http.Request, name st
 
 // handlePatchRunner applies an RFC 7386 JSON merge patch to spec.* only.
 // The patch is rejected with 400 for any top-level key other than "spec",
-// and for a merged spec that changes team or launcher: both are immutable
+// and for a merged spec that changes tenant or launcher: both are immutable
 // (types.go's CEL rules enforce the same constraint against a real
 // apiserver; this handler enforces it against crdstore.Fake too, and
 // gives the caller a clearer message than a raw CEL rejection).
@@ -376,7 +376,7 @@ func (s *Server) handlePatchRunner(w http.ResponseWriter, r *http.Request, name 
 		s.writeJSONError(w, http.StatusNotFound, "runner not found")
 		return
 	}
-	if !s.canUpdateRunner(claims, existing.Spec.Team) {
+	if !s.canUpdateRunner(claims, existing.Spec.Tenant) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -403,8 +403,8 @@ func (s *Server) handlePatchRunner(w http.ResponseWriter, r *http.Request, name 
 		s.writeJSONError(w, http.StatusBadRequest, "invalid patch JSON")
 		return
 	}
-	if mergedSpec.Team != existing.Spec.Team {
-		s.writeJSONError(w, http.StatusBadRequest, "spec.team is immutable")
+	if mergedSpec.Tenant != existing.Spec.Tenant {
+		s.writeJSONError(w, http.StatusBadRequest, "spec.tenant is immutable")
 		return
 	}
 	if mergedSpec.Launcher != existing.Spec.Launcher {
@@ -439,7 +439,7 @@ func (s *Server) handleDeleteRunner(w http.ResponseWriter, r *http.Request, name
 		s.writeJSONError(w, http.StatusNotFound, "runner not found")
 		return
 	}
-	if !s.canDeleteRunner(claims, runner.Spec.Team) {
+	if !s.canDeleteRunner(claims, runner.Spec.Tenant) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}

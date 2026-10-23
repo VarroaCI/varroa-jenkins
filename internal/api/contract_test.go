@@ -77,8 +77,8 @@ var routeManifest = []route{
 	{Method: "GET", Path: "/api/v1/builtin-roles"},
 	{Method: "GET", Path: "/api/v1/groups"},
 	{Method: "POST", Path: "/api/v1/groups"},
-	{Method: "GET", Path: "/api/v1/teams"},
-	{Method: "POST", Path: "/api/v1/teams"},
+	{Method: "GET", Path: "/api/v1/tenants"},
+	{Method: "POST", Path: "/api/v1/tenants"},
 	{Method: "GET", Path: "/api/v1/runners"},
 	{Method: "POST", Path: "/api/v1/runners"},
 	{Method: "GET", Path: "/api/v1/cellpools"},
@@ -118,10 +118,10 @@ var routeManifest = []route{
 	// Groups sub-routes
 	{Method: "PUT", Path: "/api/v1/groups/{name}"},
 	{Method: "DELETE", Path: "/api/v1/groups/{name}"},
-	// Teams sub-routes
-	{Method: "GET", Path: "/api/v1/teams/{name}"},
-	{Method: "PUT", Path: "/api/v1/teams/{name}"},
-	{Method: "DELETE", Path: "/api/v1/teams/{name}"},
+	// Tenants sub-routes
+	{Method: "GET", Path: "/api/v1/tenants/{name}"},
+	{Method: "PUT", Path: "/api/v1/tenants/{name}"},
+	{Method: "DELETE", Path: "/api/v1/tenants/{name}"},
 	{Method: "GET", Path: "/api/v1/runners/{name}"},
 	{Method: "PATCH", Path: "/api/v1/runners/{name}"},
 	{Method: "DELETE", Path: "/api/v1/runners/{name}"},
@@ -223,27 +223,27 @@ var routeManifest = []route{
 	{Method: "POST", Path: "/api/v1/version-candidates/{name}/promote"},
 	// Pipelines
 	{Method: "GET", Path: "/api/v1/pipelines"},
-	{Method: "GET", Path: "/api/v1/pipelines/{team}"},
-	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}"},
-	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}/branches"},
-	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}/notes"},
-	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}/runs"},
-	{Method: "POST", Path: "/api/v1/pipelines/{team}/jobs/{job}/runs"},
-	{Method: "POST", Path: "/api/v1/pipelines/{team}/jobs/{job}/scan"},
-	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}/tests/{case}"},
-	// Fleet locks (add-fleet-locks-view): the team read and the
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}"},
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/jobs/{job}"},
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/jobs/{job}/branches"},
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/jobs/{job}/notes"},
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/jobs/{job}/runs"},
+	{Method: "POST", Path: "/api/v1/pipelines/{tenant}/jobs/{job}/runs"},
+	{Method: "POST", Path: "/api/v1/pipelines/{tenant}/jobs/{job}/scan"},
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/jobs/{job}/tests/{case}"},
+	// Fleet locks (add-fleet-locks-view): the tenant read and the
 	// fleet-wide read.
-	{Method: "GET", Path: "/api/v1/pipelines/{team}/locks"},
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/locks"},
 	{Method: "GET", Path: "/api/v1/locks"},
-	{Method: "POST", Path: "/api/v1/pipelines/{team}/markers/validate"},
-	{Method: "GET", Path: "/api/v1/pipelines/{team}/cell"},
-	{Method: "POST", Path: "/api/v1/pipelines/{team}/propose"},
-	{Method: "GET", Path: "/api/v1/pipelines/{team}/stream"},
-	// Team agent routes (api/openapi/paths/teamagents.yaml).
-	{Method: "GET", Path: "/api/v1/pipelines/{team}/agent"},
-	{Method: "GET", Path: "/api/v1/pipelines/{team}/agent/sessions"},
-	{Method: "GET", Path: "/api/v1/pipelines/{team}/agent/capabilities"},
-	{Method: "POST", Path: "/api/v1/pipelines/{team}/agent/run"},
+	{Method: "POST", Path: "/api/v1/pipelines/{tenant}/markers/validate"},
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/cell"},
+	{Method: "POST", Path: "/api/v1/pipelines/{tenant}/propose"},
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/stream"},
+	// Tenant agent routes (api/openapi/paths/tenantagents.yaml).
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/agent"},
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/agent/sessions"},
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/agent/capabilities"},
+	{Method: "POST", Path: "/api/v1/pipelines/{tenant}/agent/run"},
 	{Method: "GET", Path: "/api/v1/agents"},
 	{Method: "PUT", Path: "/api/v1/agents/{namespace}/{name}/unattended"},
 	{Method: "GET", Path: "/api/v1/cells/usage"},
@@ -408,7 +408,7 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 	crdstore.MustSeed(client.crdStore, client.composedBundles["test-bundle"])
 	crdstore.MustSeed(client.crdStore, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-runner"},
-		Spec:       v1alpha1.RunnerSpec{Team: "test-team", Launcher: "inbound", RemoteFS: "/var/j"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "test-tenant", Launcher: "inbound", RemoteFS: "/var/j"},
 		Status:     v1alpha1.RunnerStatus{Token: "deadbeefdeadbeefdeadbeefdeadbeef"},
 	})
 	// The signed-in admin's User, so PUT /me/preferences has a row to update.
@@ -416,12 +416,12 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "admin-user", Namespace: "test-ns"},
 		Spec:       v1alpha1.UserSpec{Email: "admin@test.com"},
 	})
-	// A placed pipelines Team, so the landing-page list answers one row
+	// A placed pipelines Tenant, so the landing-page list answers one row
 	// for the response schema to check.
-	crdstore.MustSeed(client.crdStore, &v1alpha1.Team{
+	crdstore.MustSeed(client.crdStore, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "contract-tenant"},
-		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"test-ns"}, Pipelines: &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: "test-ns"}},
-		Status: v1alpha1.TeamStatus{Placement: &v1alpha1.TeamPlacementStatus{
+		Spec:       v1alpha1.TenantSpec{Namespaces: []string{"test-ns"}, Pipelines: &v1alpha1.TenantPipelinesSpec{Profile: "lts", AgentNamespace: "test-ns"}},
+		Status: v1alpha1.TenantStatus{Placement: &v1alpha1.TenantPlacementStatus{
 			Cluster: "core", Cell: "test-cell", CellNamespace: "test-ns", Generation: 1,
 		}},
 	})

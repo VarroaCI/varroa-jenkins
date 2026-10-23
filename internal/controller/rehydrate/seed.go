@@ -55,7 +55,7 @@ func (s JobSeed) RecordCount() int {
 // the nextBuildNumber file, the N newest records plus the newest
 // successful record (design.md D4), and each selected record's
 // build.xml and, when it carries a change, its changelog0.xml. n is
-// Team.spec.pipelines.rehydrateBuilds. jenkinsHome is the cell's
+// Tenant.spec.pipelines.rehydrateBuilds. jenkinsHome is the cell's
 // Jenkins container's JENKINS_HOME, used to build each <checkouts>
 // changelogFile path.
 func BuildJobSeed(jr JobRecords, n int, jenkinsHome string, opts Options) (JobSeed, error) {

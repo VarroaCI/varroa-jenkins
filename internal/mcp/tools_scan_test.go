@@ -18,12 +18,12 @@ func TestScanMultibranchToolPublishesOneScan(t *testing.T) {
 		Authorizer:     pipelinesTestAuthorizer("write"),
 		Store:          crdstore.NewFake(),
 		RecordStore:    newFakePipelineReader(),
-		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", Team: "team-a", Folder: "team-a"}}},
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", TenantName: "team-a", Folder: "team-a"}}},
 		MiteRegistry:   sent,
 	}
 
 	tr := callPipelineTool(t, deps, "scan_multibranch", map[string]interface{}{
-		"team": "team-a", "job": "team-a/multi",
+		"tenant": "team-a", "job": "team-a/multi",
 	})
 	if tr.IsError {
 		t.Fatalf("scan_multibranch returned error: %v", tr.Content)
@@ -55,12 +55,12 @@ func TestScanMultibranchToolDeniesAReadOnlyCaller(t *testing.T) {
 	deps := &api.Dependencies{
 		Authorizer:     pipelinesTestAuthorizer("read"),
 		RecordStore:    newFakePipelineReader(),
-		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", Team: "team-a", Folder: "team-a"}}},
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", TenantName: "team-a", Folder: "team-a"}}},
 		MiteRegistry:   sent,
 	}
 
 	tr := callPipelineTool(t, deps, "scan_multibranch", map[string]interface{}{
-		"team": "team-a", "job": "team-a/multi",
+		"tenant": "team-a", "job": "team-a/multi",
 	})
 	if !tr.IsError {
 		t.Fatal("expected scan_multibranch to deny a read-only caller")

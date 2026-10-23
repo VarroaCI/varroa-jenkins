@@ -65,7 +65,7 @@ func validConfig() string {
 	     "models":["varroa-smoke"],"trust":"internal","default":true,"hasSecret":false}
 	  ],
 	  "externalDataSharing":"metadata",
-	  "budgets":{"session":100000,"userDay":500000,"teamDay":2000000,"steps":32},
+	  "budgets":{"session":100000,"userDay":500000,"tenantDay":2000000,"steps":32},
 	  "approvalExpiry":"30m",
 	  "egress":{"networkPolicy":true,"cidrs":[],"ports":[443]}
 	}`
@@ -98,7 +98,7 @@ func TestDecodeRules(t *testing.T) {
 		}
 	}
 
-	empty := `{"providers":[],"externalDataSharing":"none","budgets":{"session":1,"userDay":1,"teamDay":1,"steps":1},"approvalExpiry":"2h"}`
+	empty := `{"providers":[],"externalDataSharing":"none","budgets":{"session":1,"userDay":1,"tenantDay":1,"steps":1},"approvalExpiry":"2h"}`
 	c, err := Decode([]byte(empty))
 	if err != nil {
 		t.Fatalf("empty provider list refused: %v", err)

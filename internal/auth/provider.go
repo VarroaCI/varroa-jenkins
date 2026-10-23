@@ -46,19 +46,19 @@ type ScheduleVerifier interface {
 	Verify(ctx context.Context, token string) (*Claims, bool, error)
 }
 
-// TeamAgentVerifier validates a Team agent session token. It is implemented
-// by (*teamagent.Verifier). It reports matched=false for a token that is not
-// a Team agent token, so the caller can try the next verifier.
-type TeamAgentVerifier interface {
+// TenantAgentVerifier validates a Tenant agent session token. It is implemented
+// by (*tenantagent.Verifier). It reports matched=false for a token that is not
+// a Tenant agent token, so the caller can try the next verifier.
+type TenantAgentVerifier interface {
 	Verify(r *http.Request, token string) (claims *Claims, sessionID string, matched bool, err error)
 }
 
-// ReservedSubjectPrefix starts the subject of every Team agent. Only the
-// Team agent verifier may produce a subject with this prefix.
+// ReservedSubjectPrefix starts the subject of every Tenant agent. Only the
+// Tenant agent verifier may produce a subject with this prefix.
 const ReservedSubjectPrefix = "agent:"
 
 // ErrReservedSubject refuses an identity that carries the reserved agent
-// prefix on a path other than the Team agent verifier.
+// prefix on a path other than the Tenant agent verifier.
 var ErrReservedSubject = errors.New("identity uses the reserved agent prefix")
 
 // ReservedSubject reports whether any identity value of the claims starts
@@ -76,16 +76,16 @@ func ReservedSubject(c *Claims) bool {
 	return false
 }
 
-// agentSessionKey carries the session id of a Team agent request.
+// agentSessionKey carries the session id of a Tenant agent request.
 type agentSessionKey struct{}
 
-// ContextWithAgentSession returns a context that names the Team agent
+// ContextWithAgentSession returns a context that names the Tenant agent
 // session of the request.
 func ContextWithAgentSession(ctx context.Context, sid string) context.Context {
 	return context.WithValue(ctx, agentSessionKey{}, sid)
 }
 
-// AgentSessionFrom returns the Team agent session id of the request, when
+// AgentSessionFrom returns the Tenant agent session id of the request, when
 // one is set.
 func AgentSessionFrom(ctx context.Context) (string, bool) {
 	sid, ok := ctx.Value(agentSessionKey{}).(string)

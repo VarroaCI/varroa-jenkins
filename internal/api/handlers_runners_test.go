@@ -17,8 +17,8 @@ import (
 )
 
 // runnerAdminTestServer builds a Server whose Authorizer admits
-// "test-admin" as full admin (mirrors adminTeamTestServer in
-// handlers_teams_test.go).
+// "test-admin" as full admin (mirrors adminTenantTestServer in
+// handlers_tenants_test.go).
 func runnerAdminTestServer(t *testing.T) (*Server, *crdstore.Fake, context.Context) {
 	t.Helper()
 	adminRole := &v1alpha1.VarroaRole{
@@ -51,7 +51,7 @@ func runnerAdminTestServer(t *testing.T) (*Server, *crdstore.Fake, context.Conte
 
 // runnerFleetOnlyTestServer builds a Server whose caller "fleet-user" holds
 // only a cluster-wide runners rule with the given verbs — the "runners"
-// gate alone, no tenant grant on any Team.
+// gate alone, no tenant grant on any Tenant.
 func runnerFleetOnlyTestServer(t *testing.T, verbs []string) (*Server, *crdstore.Fake, context.Context) {
 	t.Helper()
 	role := &v1alpha1.VarroaRole{
@@ -139,11 +139,11 @@ func seedRunner(t *testing.T, store *crdstore.Fake, r *v1alpha1.Runner) {
 	crdstore.MustSeed(store, r)
 }
 
-func seedRunnerTeam(t *testing.T, store *crdstore.Fake) {
+func seedRunnerTenant(t *testing.T, store *crdstore.Fake) {
 	t.Helper()
-	crdstore.MustSeed(store, &v1alpha1.Team{
+	crdstore.MustSeed(store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec:       v1alpha1.TeamSpec{Members: []string{"someone"}, Namespaces: []string{"payments"}},
+		Spec:       v1alpha1.TenantSpec{Members: []string{"someone"}, Namespaces: []string{"payments"}},
 	})
 }
 
@@ -151,10 +151,10 @@ func seedRunnerTeam(t *testing.T, store *crdstore.Fake) {
 
 func TestRunnerHandlers_AdminCRUD(t *testing.T) {
 	srv, store, ctx := runnerAdminTestServer(t)
-	seedRunnerTeam(t, store)
+	seedRunnerTenant(t, store)
 
 	// create
-	createBody := `{"name":"win-1","spec":{"team":"payments","launcher":"inbound","remoteFS":"/var/j"}}`
+	createBody := `{"name":"win-1","spec":{"tenant":"payments","launcher":"inbound","remoteFS":"/var/j"}}`
 	req := httptest.NewRequest(http.MethodPost, "/runners", bytes.NewReader([]byte(createBody))).WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleRunners(w, req)
@@ -190,7 +190,7 @@ func TestRunnerHandlers_AdminCRUD(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("get: decode: %v", err)
 	}
-	if got.Spec.Team != "payments" || got.Spec.Launcher != "inbound" {
+	if got.Spec.Tenant != "payments" || got.Spec.Launcher != "inbound" {
 		t.Fatalf("get: unexpected spec %+v", got.Spec)
 	}
 
@@ -222,10 +222,10 @@ func TestRunnerHandlers_AdminCRUD(t *testing.T) {
 	}
 }
 
-func TestRunnerHandlers_CreateUnknownTeamRefused(t *testing.T) {
+func TestRunnerHandlers_CreateUnknownTenantRefused(t *testing.T) {
 	srv, _, ctx := runnerAdminTestServer(t)
-	// No Team "payments" seeded.
-	body := `{"name":"win-1","spec":{"team":"payments","launcher":"inbound","remoteFS":"/var/j"}}`
+	// No Tenant "payments" seeded.
+	body := `{"name":"win-1","spec":{"tenant":"payments","launcher":"inbound","remoteFS":"/var/j"}}`
 	req := httptest.NewRequest(http.MethodPost, "/runners", bytes.NewReader([]byte(body))).WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleRunners(w, req)
@@ -236,14 +236,14 @@ func TestRunnerHandlers_CreateUnknownTeamRefused(t *testing.T) {
 
 func TestRunnerHandlers_PatchImmutableFieldsRefused(t *testing.T) {
 	srv, store, ctx := runnerAdminTestServer(t)
-	seedRunnerTeam(t, store)
+	seedRunnerTenant(t, store)
 	seedRunner(t, store, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "win-1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
 	})
 
 	cases := []string{
-		`{"spec":{"team":"other-team"}}`,
+		`{"spec":{"tenant":"other-team"}}`,
 		`{"spec":{"launcher":"ssh"}}`,
 	}
 	for _, body := range cases {
@@ -260,9 +260,9 @@ func TestRunnerHandlers_PatchImmutableFieldsRefused(t *testing.T) {
 
 func TestRunnerHandlers_FleetVerbWithoutTenantGrant_CreateForbidden(t *testing.T) {
 	srv, store, ctx := runnerFleetOnlyTestServer(t, []string{"read", "create", "update", "delete"})
-	seedRunnerTeam(t, store)
+	seedRunnerTenant(t, store)
 
-	body := `{"name":"win-1","spec":{"team":"payments","launcher":"inbound","remoteFS":"/var/j"}}`
+	body := `{"name":"win-1","spec":{"tenant":"payments","launcher":"inbound","remoteFS":"/var/j"}}`
 	req := httptest.NewRequest(http.MethodPost, "/runners", bytes.NewReader([]byte(body))).WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleRunners(w, req)
@@ -278,7 +278,7 @@ func TestRunnerHandlers_FleetVerbWithoutTenantGrant_UpdateForbidden(t *testing.T
 	srv, store, ctx := runnerFleetOnlyTestServer(t, []string{"read", "create", "update", "delete"})
 	seedRunner(t, store, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "win-1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
 	})
 
 	body := `{"spec":{"numExecutors":3}}`
@@ -294,7 +294,7 @@ func TestRunnerHandlers_FleetVerbWithoutTenantGrant_DeleteForbidden(t *testing.T
 	srv, store, ctx := runnerFleetOnlyTestServer(t, []string{"read", "create", "update", "delete"})
 	seedRunner(t, store, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "win-1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
 	})
 
 	req := httptest.NewRequest(http.MethodDelete, "/runners/win-1", nil).WithContext(ctx)
@@ -312,7 +312,7 @@ func TestRunnerHandlers_ListFiltersUnreadableTenants(t *testing.T) {
 	srv, store, ctx := runnerFleetOnlyTestServer(t, []string{"read"})
 	seedRunner(t, store, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "win-1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/runners", nil).WithContext(ctx)
@@ -337,10 +337,10 @@ func TestRunnerHandlers_EmptyJobPathPassesNarrowedGrant(t *testing.T) {
 	// runner carries no job path, so the narrowed grant must still admit
 	// the read and write checks.
 	srv, store, ctx := runnerTenantTestServer(t, []string{"read", "create", "update", "delete"}, []string{"read", "write"}, []string{"foo/*"})
-	seedRunnerTeam(t, store)
+	seedRunnerTenant(t, store)
 	seedRunner(t, store, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "win-1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/runners/win-1", nil).WithContext(ctx)
@@ -363,10 +363,10 @@ func TestRunnerHandlers_EmptyJobPathPassesNarrowedGrant(t *testing.T) {
 
 func TestRunnerHandlers_TokenRedaction(t *testing.T) {
 	srv, store, ctx := runnerAdminTestServer(t)
-	seedRunnerTeam(t, store)
+	seedRunnerTenant(t, store)
 	seedRunner(t, store, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "win-1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
 		Status:     v1alpha1.RunnerStatus{Token: "deadbeefdeadbeefdeadbeefdeadbeef", Connected: true},
 	})
 
@@ -384,10 +384,10 @@ func TestRunnerHandlers_TokenRedaction(t *testing.T) {
 
 	// A viewer-style caller (read only, no create) must not see the token.
 	viewerSrv, viewerStore, viewerCtx := runnerTenantTestServer(t, []string{"read"}, []string{"read", "write"}, nil)
-	seedRunnerTeam(t, viewerStore)
+	seedRunnerTenant(t, viewerStore)
 	seedRunner(t, viewerStore, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "win-1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "inbound", RemoteFS: "/var/j"},
 		Status:     v1alpha1.RunnerStatus{Token: "deadbeefdeadbeefdeadbeefdeadbeef", Connected: true},
 	})
 	req = httptest.NewRequest(http.MethodGet, "/runners/win-1", nil).WithContext(viewerCtx)

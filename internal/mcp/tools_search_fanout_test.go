@@ -70,14 +70,14 @@ func TestMCPSearch_ReportsFailedMemberCluster(t *testing.T) {
 	deps.Logger = slog.Default()
 	deps.Authorizer = api.NewAuthorizer(rbac.NewTestResolverWithRoles(roles, bindings), false)
 	deps.Brood = &searchFanoutMCPBrood{
-		controllers: []api.ClusterController{{Cluster: "core", CR: &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "team-core", Namespace: "ns-a"}}}},
+		controllers: []api.ClusterController{{Cluster: "core", CR: &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "tenant-core", Namespace: "ns-a"}}}},
 		statuses: []api.ClusterFanoutStatus{
 			{Name: "core", OK: true},
 			{Name: "member-b", OK: false, Error: "cluster unreachable"},
 		},
 	}
 
-	out := callSearchFanoutMCP(t, deps, &auth.Claims{Subject: "u"}, "team")
+	out := callSearchFanoutMCP(t, deps, &auth.Claims{Subject: "u"}, "tenant")
 
 	var row *api.ClusterFanoutStatus
 	for i := range out.Clusters {
@@ -98,7 +98,7 @@ func TestMCPSearch_NoAuthorizerReturnsEmptyClusters(t *testing.T) {
 	handler := NewHandler(deps)
 	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
 		"name":      "search",
-		"arguments": map[string]interface{}{"query": "team"},
+		"arguments": map[string]interface{}{"query": "tenant"},
 	}, nil)
 	tr := parseToolResult(t, resp.Result)
 	if tr.IsError {

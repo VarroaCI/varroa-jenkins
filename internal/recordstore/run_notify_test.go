@@ -336,10 +336,10 @@ func TestRunNotifierDropsUnusableSubjectToken(t *testing.T) {
 		runID, cluster, tenant string
 	}{
 		{"run-1", testCluster, testTenant + ">"},
-		{"run-2", testCluster, testTenant + " team"},
+		{"run-2", testCluster, testTenant + " tenant"},
 		{"run-3", testCluster, "*"},
 		{"run-4", testCluster + ">", testTenant},
-		{"run-5", "core team", testTenant},
+		{"run-5", "core tenant", testTenant},
 	}
 	for _, tc := range bad {
 		notify := notifyOne(tc.runID, "run", "RUNNING")

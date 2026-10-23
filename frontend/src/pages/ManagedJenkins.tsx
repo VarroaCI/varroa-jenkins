@@ -8,10 +8,10 @@ import { controllerRoute } from "../routing";
 import { usePermissions, canDoInNamespace } from "../hooks/usePermissions";
 
 // pipelinesHref resolves the Pipelines surface link for a headless
-// controller's card. A controller name is always the "team" URL segment
-// the tenant resolver falls back to when no Team CRD claims it (the
+// controller's card. A controller name is always the "tenant" URL segment
+// the tenant resolver falls back to when no Tenant CRD claims it (the
 // synthetic single-controller tenant), so the DTO's own name resolves a
-// team; an absent name falls back to the Pipelines index.
+// tenant; an absent name falls back to the Pipelines index.
 function pipelinesHref(controllerName?: string): string {
   return controllerName ? `/pipelines/${encodeURIComponent(controllerName)}` : "/pipelines";
 }

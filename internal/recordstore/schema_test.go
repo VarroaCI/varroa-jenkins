@@ -267,7 +267,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"run_id", "uuid", true},
 		{"run_created_at", "timestamp with time zone", true},
 		{"cluster", "text", false},
-		{"team", "text", false},
+		{"tenant", "text", false},
 		{"job_path", "text", false},
 		{"principal", "text", false},
 		{"session_id", "uuid", true},
@@ -280,7 +280,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"id", "uuid", false},
 		{"kind", "text", false},
 		{"principal", "text", false},
-		{"team", "text", false},
+		{"tenant", "text", false},
 		{"cluster", "text", false},
 		{"trigger", "text", false},
 		{"context", "jsonb", false},
@@ -289,7 +289,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"key_source", "text", false},
 		{"data_sharing", "text", false},
 		{"instructions_sha", "text", true},
-		{"team_agent_generation", "bigint", true},
+		{"tenant_agent_generation", "bigint", true},
 		{"state", "text", false},
 		{"skip_reason", "text", true},
 		{"prompt_tokens", "bigint", false},
@@ -331,10 +331,10 @@ var expectedColumns = map[string][]columnSpec{
 		{"updated_at", "timestamp with time zone", false},
 		{"updated_by", "text", true},
 	},
-	// The team_agent_spend table comes from migration 00040. The recorder
-	// keeps one row per Team and UTC day.
-	"team_agent_spend": {
-		{"team", "text", false},
+	// The tenant_agent_spend table comes from migration 00040. The recorder
+	// keeps one row per Tenant and UTC day.
+	"tenant_agent_spend": {
+		{"tenant", "text", false},
 		{"day", "date", false},
 		{"tokens", "bigint", false},
 		{"sessions", "integer", false},
@@ -557,7 +557,7 @@ func TestNonPartitionedTables(t *testing.T) {
 		"run_artifacts", "job_schedules", "job_schedule_cells", "tenant_placements",
 		"fleet_locks", "run_test_cases", "webhook_deliveries", "run_waits", "upstream_origins",
 		"run_notes", "agent_sessions", "agent_session_events", "agent_approvals", "agent_settings",
-		"team_agent_spend",
+		"tenant_agent_spend",
 	} {
 		var relkind string
 		if err := db.QueryRowContext(ctx,
@@ -591,7 +591,7 @@ func TestIndexesExist(t *testing.T) {
 		"job_branch_projects": {"job_branch_projects_cell_idx"},
 		"fleet_locks":         {"fleet_locks_one_holder", "fleet_locks_cluster_owner_tenant"},
 		"run_test_cases":      {"run_test_cases_history_idx", "run_test_cases_created_at_idx"},
-		"agent_sessions":      {"agent_sessions_principal_started_idx", "agent_sessions_team_started_idx", "agent_sessions_lease_idx"},
+		"agent_sessions":      {"agent_sessions_principal_started_idx", "agent_sessions_tenant_started_idx", "agent_sessions_lease_idx"},
 		"agent_approvals":     {"agent_approvals_session_idx", "agent_approvals_pending_idx", "agent_approvals_target_idx"},
 		"run_notes":           {"run_notes_run_idx", "run_notes_job_idx", "run_notes_run_created_idx", "run_notes_session_idx"},
 	}

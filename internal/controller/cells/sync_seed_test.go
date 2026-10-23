@@ -23,10 +23,10 @@ func TestPlace_Reannounce_AnnouncesTheSeedTheCellReportsThisTick(t *testing.T) {
 	cell := readyCell("cell-a")
 	cell.Instance = "uid-1"
 	in.Cells = []CellCandidate{cell}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	out1, err := Place(context.Background(), in, team, status)
+	out1, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
@@ -34,9 +34,9 @@ func TestPlace_Reannounce_AnnouncesTheSeedTheCellReportsThisTick(t *testing.T) {
 	// The cell now reports the tenant applied on uid-1. The Rehydrated
 	// condition still reads False, exactly as it does before the
 	// rehydration pass of this same tick runs.
-	status.Conditions = append(status.Conditions, v1alpha1.TeamCondition{
-		Type: v1alpha1.TeamConditionRehydrated, Status: metav1.ConditionFalse,
-		Reason: v1alpha1.TeamReasonRehydrationPending,
+	status.Conditions = append(status.Conditions, v1alpha1.TenantCondition{
+		Type: v1alpha1.TenantConditionRehydrated, Status: metav1.ConditionFalse,
+		Reason: v1alpha1.TenantReasonRehydrationPending,
 	})
 	in.MemberSeed = func(string, string) (string, []string) { return "uid-1", nil }
 	in.LastSync = out1.SyncCacheUpdate
@@ -50,7 +50,7 @@ func TestPlace_Reannounce_AnnouncesTheSeedTheCellReportsThisTick(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
 	if calls != 1 {
@@ -73,20 +73,20 @@ func TestPlace_Reannounce_ReportsNoSeedWhileTheCellReportsNone(t *testing.T) {
 	cell := readyCell("cell-a")
 	cell.Instance = "uid-1"
 	in.Cells = []CellCandidate{cell}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	out1, err := Place(context.Background(), in, team, status)
+	out1, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
 
 	// The condition still reads True for the instance before the roll.
-	status.Conditions = append(status.Conditions, v1alpha1.TeamCondition{
-		Type: v1alpha1.TeamConditionRehydrated, Status: metav1.ConditionTrue,
-		Reason: v1alpha1.TeamReasonTenantRehydrated,
+	status.Conditions = append(status.Conditions, v1alpha1.TenantCondition{
+		Type: v1alpha1.TenantConditionRehydrated, Status: metav1.ConditionTrue,
+		Reason: v1alpha1.TenantReasonTenantRehydrated,
 	})
-	status.Rehydration = &v1alpha1.TeamRehydrationStatus{CellInstance: "uid-1"}
+	status.Rehydration = &v1alpha1.TenantRehydrationStatus{CellInstance: "uid-1"}
 
 	rolled := cell
 	rolled.Instance = "uid-2"
@@ -102,7 +102,7 @@ func TestPlace_Reannounce_ReportsNoSeedWhileTheCellReportsNone(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
 	if got.RehydratedInstance != "" {
@@ -121,10 +121,10 @@ func TestPlace_Reannounce_CarriesTheSeedAndTheDeferredJobs(t *testing.T) {
 	cell := readyCell("cell-a")
 	cell.Instance = "uid-1"
 	in.Cells = []CellCandidate{cell}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	out1, err := Place(context.Background(), in, team, status)
+	out1, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestPlace_Reannounce_CarriesTheSeedAndTheDeferredJobs(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
 	if got.RehydratedInstance != "uid-1" {

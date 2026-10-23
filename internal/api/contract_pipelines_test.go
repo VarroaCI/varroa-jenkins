@@ -15,10 +15,10 @@ func init() {
 	// stays excluded from coverage-gate-1 until section 5 replaces the
 	// 501 stub and adds its own case here.
 	registerContractCases(
-		// The landing-page list answers the local pipelines Teams with
+		// The landing-page list answers the local pipelines Tenants with
 		// recordStore false when no record store is wired, not 503.
 		contractCase{
-			Name:       "listPipelineTeams-recordStoreDisabled",
+			Name:       "listPipelineTenants-recordStoreDisabled",
 			Method:     "GET",
 			Path:       "/api/v1/pipelines",
 			Claims:     adminClaims,
@@ -179,7 +179,7 @@ func init() {
 		},
 
 		// The marker lint endpoint contacts no cell and reads no
-		// record-store data, but it still resolves {team} through
+		// record-store data, but it still resolves {tenant} through
 		// TenantResolver, which newContractServer wires the same way it
 		// leaves RecordStore unset — so this route answers the same
 		// uniform 503 the other pipelines paths above answer.
@@ -192,11 +192,11 @@ func init() {
 			WantStatus: http.StatusServiceUnavailable,
 		},
 
-		// The team run stream reads no record-store row, but it answers
+		// The tenant run stream reads no record-store row, but it answers
 		// 503 through pipelinesUnavailable while RecordStore is unset, so
 		// the handler refuses the stream rather than opening a dead one.
 		contractCase{
-			Name:       "streamTeamRuns-recordStoreDisabled",
+			Name:       "streamTenantRuns-recordStoreDisabled",
 			Method:     "GET",
 			Path:       "/api/v1/pipelines/payments/stream",
 			Claims:     adminClaims,
@@ -209,14 +209,14 @@ func init() {
 	// Both lock reads answer from the record store, and newContractServer
 	// wires none, so each route answers the same uniform 503 the pipelines
 	// paths above answer: ListFleetLocks checks the store before it
-	// resolves the team, and the fleet-wide read checks it before the
+	// resolves the tenant, and the fleet-wide read checks it before the
 	// gate. That proves both routes are wired to their handler and their
 	// response matches the spec's ServiceUnavailable shape.
 	// handlers_pipelines_locks_test.go covers the 200 shape, the row key
 	// set, and the fleetlocks:read gate over a fakeRecordReader.
 	registerContractCases(
 		contractCase{
-			Name:       "listTeamFleetLocks-recordStoreDisabled",
+			Name:       "listTenantFleetLocks-recordStoreDisabled",
 			Method:     "GET",
 			Path:       "/api/v1/pipelines/payments/locks",
 			Claims:     adminClaims,

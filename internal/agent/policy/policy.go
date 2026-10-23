@@ -9,7 +9,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/agent"
 )
 
-// UnattendedEligible lists the write tools that a team agent may run
+// UnattendedEligible lists the write tools that a tenant agent may run
 // without a person's approval. A write tool outside this list needs an
 // approval for every call.
 var UnattendedEligible = []string{"run_pipeline", "restart_run", "scan_multibranch"}

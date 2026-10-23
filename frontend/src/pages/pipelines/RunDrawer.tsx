@@ -35,7 +35,7 @@ function paramUiSchema(param: PipelineParameter): Record<string, unknown> {
 }
 
 export interface RunDrawerProps {
-  team: string;
+  tenant: string;
   jobPath: string;
   parameters: PipelineParameter[];
   onClose: () => void;
@@ -43,7 +43,7 @@ export interface RunDrawerProps {
   onSubmitted: (runId: string) => void;
 }
 
-export function RunDrawer({ team, jobPath, parameters, onClose, onSubmitted }: RunDrawerProps) {
+export function RunDrawer({ tenant, jobPath, parameters, onClose, onSubmitted }: RunDrawerProps) {
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   // One client token per drawer instance (design D3a): minted once on
   // mount, and reused on every submit from this drawer, so a repeated
@@ -69,7 +69,7 @@ export function RunDrawer({ team, jobPath, parameters, onClose, onSubmitted }: R
       for (const [k, v] of Object.entries(formData)) {
         if (v !== undefined && v !== null) stringParams[k] = String(v);
       }
-      return createRun(team, jobPath, { clientToken, parameters: stringParams });
+      return createRun(tenant, jobPath, { clientToken, parameters: stringParams });
     },
     onSuccess: (res) => onSubmitted(res.runId),
   });

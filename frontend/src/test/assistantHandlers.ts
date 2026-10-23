@@ -109,7 +109,7 @@ export function assistantHandlers(opts: AssistantHandlerOptions = {}) {
       await record(request);
       return HttpResponse.json(createRunNote({ body: "posted" }), { status: 201 });
     }),
-    http.get(`${BASE}/pipelines/:team/jobs/:job/notes`, async ({ request }) => {
+    http.get(`${BASE}/pipelines/:tenant/jobs/:job/notes`, async ({ request }) => {
       await record(request);
       return HttpResponse.json({ items: opts.notes ?? [] });
     }),

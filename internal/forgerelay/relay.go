@@ -1,5 +1,5 @@
 // Package forgerelay carries forge requests from a requester to the operator
-// shard that owns the Team. The requester is the BFF or the agent runner. The
+// shard that owns the Tenant. The requester is the BFF or the agent runner. The
 // operator answers on operator.<cluster>.forge.<verb>. The package holds the
 // request and reply framing only, so every requester uses one path.
 package forgerelay

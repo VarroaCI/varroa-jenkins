@@ -27,7 +27,7 @@ spec:
   roleRef: operator
   subjects:
     - kind: Group
-      name: platform-team
+      name: platform-tenant
     - kind: User
       name: release-user
 ```
@@ -47,10 +47,10 @@ spec:
   roleRef: developer
   subjects:
     - kind: Group
-      name: payments-team
+      name: payments-tenant
   scope:
     namespaces:
-      - teams-payments
+      - tenants-payments
     controllerSelector:
       matchLabels:
         environment: nonproduction
@@ -82,7 +82,7 @@ It has three verbs.
 |---|---|
 | `read` | Read a tenant's jobs, runs, stages, logs, artifacts, tests, and changes |
 | `write` | Start, cancel, and rerun a tenant's builds |
-| `admin` | Write a tenant's `Team.spec.pipelines.exports` |
+| `admin` | Write a tenant's `Tenant.spec.pipelines.exports` |
 
 A verb does not imply another verb. `write` does not grant `read`. List
 every verb a role needs.
@@ -109,9 +109,9 @@ pool with `kubectl` or through GitOps.
 | `developer` | None |
 | `viewer` | None |
 
-A pool's `status.tenants` lists every tenant on the pool, and the Teams API is admin-only. A read
+A pool's `status.tenants` lists every tenant on the pool, and the Tenants API is admin-only. A read
 verb for a developer or a viewer would therefore disclose the tenant list to a caller who may not
-list Teams. `CellPool` is cluster-scoped, so a namespace-scoped binding satisfies neither verb.
+list Tenants. `CellPool` is cluster-scoped, so a namespace-scoped binding satisfies neither verb.
 
 ## Read the fleet locks
 
@@ -128,7 +128,7 @@ list Teams. `CellPool` is cluster-scoped, so a namespace-scoped binding satisfie
 
 A fleet-wide lock list names every tenant's lock names and job paths at once. Both verbs
 therefore stay with the operator role, as `cellpools` does. A tenant sees its own locks on the
-team home with no verb.
+tenant home with no verb.
 
 ## Grant break-glass access
 
@@ -156,7 +156,7 @@ the full runbook.
 
 ## Scope a binding to a pipelines tenant
 
-A pipelines tenant is a `Team`. Scope a `VarroaRoleBinding` to one or more
+A pipelines tenant is a `Tenant`. Scope a `VarroaRoleBinding` to one or more
 tenants:
 
 ```yaml
@@ -168,15 +168,15 @@ spec:
   roleRef: developer
   subjects:
     - kind: Group
-      name: checkout-team
+      name: checkout-tenant
   scope:
     tenants:
-      - name: checkout-team
+      - name: checkout-tenant
         jobs:
           - "release/*"
 ```
 
-`tenants[].name` names a `Team`. `tenants[].jobs` is an optional list of
+`tenants[].name` names a `Tenant`. `tenants[].jobs` is an optional list of
 folder-relative glob patterns. An absent `jobs` list covers every job of the
 tenant. A pattern uses `*` for one path segment, `**` to cross a `/`, and
 `?` for one character.
@@ -191,8 +191,8 @@ binding to `tenants` to grant `pipelines` access.
 Open **Access**, then **Role Bindings**, then the binding. Expand **Scope**
 and use the **Pipelines Tenants** editor.
 
-1. Select **+ Add tenant** and name the `Team`. The list offers the teams you
-   can read. A team that does not exist yet is accepted.
+1. Select **+ Add tenant** and name the `Tenant`. The list offers the tenants you
+   can read. A tenant that does not exist yet is accepted.
 2. Select **+ Narrow to job patterns** to add a `jobs` list. Leave the list
    off to cover every job of the tenant.
 3. Select **+ Add pattern** and enter a folder-relative pattern. The editor
@@ -200,7 +200,7 @@ and use the **Pipelines Tenants** editor.
    pattern starting with `/`, and an empty list.
 
 The editor shows a live count in the form `matches 3 of 10 jobs you can see`.
-The count reads the team's job list with **your** grants, not the subject's,
+The count reads the tenant's job list with **your** grants, not the subject's,
 so a narrower view of your own produces a smaller count. When the job list
 cannot be read the editor states so, and still accepts every pattern.
 
@@ -215,9 +215,9 @@ starts. It changes nothing inside Jenkins. Jenkins keeps one item role per
 tenant, which covers the tenant's whole folder. Varroa defines no
 folder-level Jenkins role.
 
-## Reach a tenant through Team membership
+## Reach a tenant through Tenant membership
 
-A `Team` member reaches the team's pipelines tenant through the `Team`. The
+A `Tenant` member reaches the tenant's pipelines tenant through the `Tenant`. The
 member needs no separate `VarroaRoleBinding` for that tenant.
 
 ## Jenkins role bindings carry no tenant scope
@@ -251,7 +251,7 @@ For one controller and a built-in role, use `Controller.spec.rbacSpec`:
 spec:
   rbacSpec:
     groups:
-      - name: payments-team
+      - name: payments-tenant
         role: developer
 ```
 

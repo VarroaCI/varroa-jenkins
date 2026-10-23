@@ -25,7 +25,7 @@ function renderAgents() {
 }
 
 const item = {
-  namespace: "varroa-system", name: "ta-one", team: "acme", cluster: "core", enabled: true,
+  namespace: "varroa-system", name: "ta-one", tenant: "acme", cluster: "core", enabled: true,
   paused: null, sessionsToday: 3, spendToday: 12, failedToday: 1, conditions: [],
   unattendedRequested: ["restart_run"], unattendedGranted: [],
 };
@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 describe("Agents", () => {
-  it("hides the unattended toggle without the teamagents:unattended grant", async () => {
+  it("hides the unattended toggle without the tenantagents:unattended grant", async () => {
     mockCanToggle.mockReturnValue(false);
     renderAgents();
     expect(await screen.findByText("varroa-system/ta-one")).toBeInTheDocument();

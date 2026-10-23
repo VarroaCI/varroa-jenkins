@@ -18,7 +18,7 @@ func TestSearch_WarnsOnFailedCluster(t *testing.T) {
 	var stderr strings.Builder
 	root := newRootCmd()
 	root.SetErr(&stderr)
-	root.SetArgs([]string{"search", "team"})
+	root.SetArgs([]string{"search", "tenant"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("search failed: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestSearch_NoWarningWhenClustersOK(t *testing.T) {
 	var stderr strings.Builder
 	root := newRootCmd()
 	root.SetErr(&stderr)
-	root.SetArgs([]string{"search", "team"})
+	root.SetArgs([]string{"search", "tenant"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("search failed: %v", err)
 	}

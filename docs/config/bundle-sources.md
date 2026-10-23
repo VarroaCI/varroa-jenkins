@@ -7,7 +7,7 @@ A bundle source is a Git repository or OCI artifact with a bundle directory.
 Every bundle requires `bundle.yaml` and at least one JCasC file.
 
 ```text
-team-bundle/
+tenant-bundle/
 |-- bundle.yaml
 |-- jenkins.yaml
 |-- plugins.yaml
@@ -16,7 +16,7 @@ team-bundle/
 ```
 
 ```yaml
-id: team-platform
+id: tenant-platform
 version: "1"
 apiVersion: "2"
 jcasc:
@@ -51,12 +51,12 @@ apiVersion: varroa.dev/v1alpha1
 kind: ComposedBundle
 metadata:
   name: platform-baseline
-  namespace: teams-platform
+  namespace: tenants-platform
 spec:
   inputs:
     - gitSource:
         repoURL: https://github.com/example/casc-bundles.git
-        path: bundles/team-platform
+        path: bundles/tenant-platform
         revision: main
 ```
 
@@ -70,10 +70,10 @@ For private HTTPS Git, set `secretRef` to a same-namespace Secret with
 `username`, `password`, and an allowed-hosts annotation:
 
 ```bash
-kubectl create secret generic bundle-git -n teams-platform \
+kubectl create secret generic bundle-git -n tenants-platform \
   --from-literal=username=git \
   --from-literal=password='<token>'
-kubectl annotate secret bundle-git -n teams-platform \
+kubectl annotate secret bundle-git -n tenants-platform \
   varroa.dev/allowed-hosts=github.com
 ```
 
@@ -87,7 +87,7 @@ spec:
   inputs:
     - ociSource:
         ref: ghcr.io/varroaci/casc-bundles:v1
-        path: bundles/team-platform
+        path: bundles/tenant-platform
         secretRef: oci-pull-creds
 ```
 
@@ -104,8 +104,8 @@ Use `varroactl export bundle` to publish one Git bundle as an OCI artifact:
 
 ```bash
 varroactl export bundle --repo https://github.com/example/bundles.git \
-  --path bundles/team-platform --revision main \
-  --to oci://registry.example.com/bundles/team-platform:v1
+  --path bundles/tenant-platform --revision main \
+  --to oci://registry.example.com/bundles/tenant-platform:v1
 ```
 
 `--to` accepts `oci://`, `dir://`, and `tar://`. The command refuses `uc://`, because the update center serves plugin packs only.
@@ -116,12 +116,12 @@ The artifact root is the bundle directory. Import it with `ref` only:
 spec:
   inputs:
     - ociSource:
-        ref: registry.example.com/bundles/team-platform:v1
+        ref: registry.example.com/bundles/tenant-platform:v1
 ```
 
 - An `oci://` destination with an explicit `:tag` uses that tag.
 - A `dir://` or `tar://` destination uses the tag `<repo>-<path>`, for example
-  `github.com-example-bundles-bundles-team-platform`.
+  `github.com-example-bundles-bundles-tenant-platform`.
 - The paths `a-b` and `a/b` produce the same derived tag. Use an explicit tag in that case.
 - The manifest records the source URL without credentials, the commit SHA, and the bundle path.
 

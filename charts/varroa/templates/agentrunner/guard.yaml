@@ -1,11 +1,11 @@
 {{- if .Values.agentRunner.enabled }}
 {{- if not .Values.assistant.enabled }}
-{{- fail "agentRunner.enabled needs assistant.enabled. The Team agent runs the assistant loop and its providers." }}
+{{- fail "agentRunner.enabled needs assistant.enabled. The Tenant agent runs the assistant loop and its providers." }}
 {{- end }}
 {{- if not .Values.recordStore.enabled }}
-{{- fail "agentRunner.enabled needs recordStore.enabled. Team agent sessions live in the record store database." }}
+{{- fail "agentRunner.enabled needs recordStore.enabled. Tenant agent sessions live in the record store database." }}
 {{- end }}
 {{- if not .Values.bff.enabled }}
-{{- fail "agentRunner.enabled needs bff.enabled. Team agent sessions call the BFF MCP endpoint." }}
+{{- fail "agentRunner.enabled needs bff.enabled. Tenant agent sessions call the BFF MCP endpoint." }}
 {{- end }}
 {{- end }}

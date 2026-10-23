@@ -455,7 +455,7 @@ func TestCommandCRUD_CreateMetadataStampRetriesOnTransientFailure(t *testing.T) 
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "meta-retry",
 			Namespace: "team-a",
-			Labels:    map[string]string{"team": "platform"},
+			Labels:    map[string]string{"tenant": "platform"},
 		},
 		Spec: v1alpha1.ControllerSpec{Version: "2.0"},
 	}
@@ -490,8 +490,8 @@ func TestCommandCRUD_CreateMetadataStampRetriesOnTransientFailure(t *testing.T) 
 	if len(patches) != 1 {
 		t.Fatalf("expected exactly 1 recorded metadata patch, got %d", len(patches))
 	}
-	if labels, ok := patches[0].Meta["labels"].(map[string]string); !ok || labels["team"] != "platform" {
-		t.Fatalf("recorded metadata labels = %#v, want {team: platform}", patches[0].Meta["labels"])
+	if labels, ok := patches[0].Meta["labels"].(map[string]string); !ok || labels["tenant"] != "platform" {
+		t.Fatalf("recorded metadata labels = %#v, want {tenant: platform}", patches[0].Meta["labels"])
 	}
 
 	// The inline bundle must NOT be deleted.
@@ -520,7 +520,7 @@ func TestCommandCRUD_CreateMetadataStampExhaustedStillSucceeds(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "meta-exhaust",
 			Namespace: "team-a",
-			Labels:    map[string]string{"team": "platform"},
+			Labels:    map[string]string{"tenant": "platform"},
 		},
 		Spec: v1alpha1.ControllerSpec{Version: "2.0"},
 	}
@@ -571,7 +571,7 @@ func TestCommandCRUD_CreateReplyCarriesStampedLabels(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "meta-reply",
 			Namespace: "team-a",
-			Labels:    map[string]string{"team": "platform"},
+			Labels:    map[string]string{"tenant": "platform"},
 		},
 		Spec: v1alpha1.ControllerSpec{Version: "2.0"},
 	}
@@ -597,8 +597,8 @@ func TestCommandCRUD_CreateReplyCarriesStampedLabels(t *testing.T) {
 	if err := json.Unmarshal(createResp.Item, &reply); err != nil {
 		t.Fatalf("unmarshal reply item: %v", err)
 	}
-	if reply.Labels["team"] != "platform" {
-		t.Fatalf("reply body labels = %#v, want {team: platform}", reply.Labels)
+	if reply.Labels["tenant"] != "platform" {
+		t.Fatalf("reply body labels = %#v, want {tenant: platform}", reply.Labels)
 	}
 }
 
@@ -1686,7 +1686,7 @@ func TestCommandCRUD_Create_ScopedWrites(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "my-ctrl",
 			Namespace:   "team-a",
-			Labels:      map[string]string{"team": "platform"},
+			Labels:      map[string]string{"tenant": "platform"},
 			Annotations: map[string]string{"owner": "alice"},
 		},
 		Spec: v1alpha1.ControllerSpec{Version: "2.0"},
@@ -1757,8 +1757,8 @@ func TestCommandCRUD_Create_ScopedWrites(t *testing.T) {
 		t.Fatalf("metadata patch target = %s/%s, want team-a/my-ctrl", p.Namespace, p.Name)
 	}
 	labels, ok := p.Meta["labels"].(map[string]string)
-	if !ok || labels["team"] != "platform" {
-		t.Fatalf("metadata patch labels = %#v, want {team: platform}", p.Meta["labels"])
+	if !ok || labels["tenant"] != "platform" {
+		t.Fatalf("metadata patch labels = %#v, want {tenant: platform}", p.Meta["labels"])
 	}
 	annotations, ok := p.Meta["annotations"].(map[string]string)
 	if !ok || annotations["owner"] != "alice" {

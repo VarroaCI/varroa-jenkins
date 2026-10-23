@@ -1,5 +1,5 @@
-// Command agentrunner runs the Team agent sessions. It consumes the audit feed,
-// starts a session for each trigger that a TeamAgent enables, and runs the
+// Command agentrunner runs the Tenant agent sessions. It consumes the audit feed,
+// starts a session for each trigger that a TenantAgent enables, and runs the
 // sessions through the BFF MCP endpoint. It serves /healthz, /readyz, and
 // /metrics on port 8080, and it answers no NATS request.
 package main
@@ -40,32 +40,32 @@ import (
 	agentstore "github.com/varroaci/varroa-jenkins/internal/agent/store"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/forgerelay"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/accept"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/cache"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/config"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/sessions"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/spend"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/status"
-	teamstore "github.com/varroaci/varroa-jenkins/internal/teamagent/store"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/token"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/triggers"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/accept"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/cache"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/config"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/sessions"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/spend"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/status"
+	tenantstore "github.com/varroaci/varroa-jenkins/internal/tenantagent/store"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/token"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/triggers"
 )
 
-// minSchemaVersion is the first record-store schema that holds the Team agent
+// minSchemaVersion is the first record-store schema that holds the Tenant agent
 // spend table.
 const minSchemaVersion = 40
 
 // consumerPending is the number of rows the trigger consumer has not read yet.
 var consumerPending = prometheus.NewGauge(prometheus.GaugeOpts{
 	Name: "varroa_agent_consumer_pending",
-	Help: "Activity rows that the Team agent trigger consumer has not read yet.",
+	Help: "Activity rows that the Tenant agent trigger consumer has not read yet.",
 })
 
 // triggerCounts counts each trigger by its outcome.
 var triggerCounts = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Name: "varroa_agent_triggers_total",
-	Help: "Activity rows handled by the Team agent trigger path, by trigger and outcome.",
+	Help: "Activity rows handled by the Tenant agent trigger path, by trigger and outcome.",
 }, []string{"trigger", "outcome"})
 
 func main() {
@@ -150,7 +150,7 @@ func run(logger *slog.Logger, busURL, caFile, passFile string, port int) error {
 	var consumerReady atomic.Bool
 	deps := &runnerDeps{
 		cfg: cfg, st: st, reg: reg, objs: objs, key: key, conn: conn, logger: logger,
-		tenants: teamstore.New(pool, nil),
+		tenants: tenantstore.New(pool, nil),
 		relay:   forgerelay.Relay{Conn: conn},
 	}
 	go serveHTTP(ctx, port, pool, conn, objs, &ready, &consumerReady, logger)
@@ -197,7 +197,7 @@ func run(logger *slog.Logger, busURL, caFile, passFile string, port int) error {
 	return nil
 }
 
-// waitForSchema polls until the record store holds the Team agent tables.
+// waitForSchema polls until the record store holds the Tenant agent tables.
 func waitForSchema(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error {
 	for {
 		var v int64
@@ -223,7 +223,7 @@ type runnerDeps struct {
 	key     []byte
 	conn    *bus.Conn
 	logger  *slog.Logger
-	tenants *teamstore.Store
+	tenants *tenantstore.Store
 	relay   forgerelay.Relay
 	pool    *sessions.Pool
 }
@@ -249,7 +249,7 @@ func (d *runnerDeps) startConsumer(ctx context.Context, consumerReady *atomic.Bo
 		},
 		Owner: d.cfg.PodName,
 		Image: os.Getenv("VARROA_IMAGE_DIGEST"),
-		Source: func(ta *v1alpha1.TeamAgent) (string, string) {
+		Source: func(ta *v1alpha1.TenantAgent) (string, string) {
 			if ta.Spec.Instructions == nil {
 				return "", ""
 			}
@@ -267,8 +267,8 @@ func (d *runnerDeps) startConsumer(ctx context.Context, consumerReady *atomic.Bo
 		Store:   d.st,
 		Tenants: d.tenants,
 		Owner:   d.cfg.PodName,
-		Teams: func() []string {
-			return acceptedTeams(d.objs.AcceptInput())
+		TenantNames: func() []string {
+			return acceptedTenants(d.objs.AcceptInput())
 		},
 		// The slot is reserved before the lease is taken, and the pool frees it
 		// when the resumed run ends.
@@ -289,7 +289,7 @@ func (d *runnerDeps) startConsumer(ctx context.Context, consumerReady *atomic.Bo
 				return
 			case <-ticker.C:
 				if _, err := resumer.Scan(ctx); err != nil {
-					d.logger.Warn("team agent resume scan", "error", err.Error())
+					d.logger.Warn("tenant agent resume scan", "error", err.Error())
 				}
 			}
 		}
@@ -318,18 +318,18 @@ func (d *runnerDeps) startConsumer(ctx context.Context, consumerReady *atomic.Bo
 	}()
 }
 
-// dynWriter writes a TeamAgent's status through the status subresource.
+// dynWriter writes a TenantAgent's status through the status subresource.
 type dynWriter struct{ dyn dynamic.Interface }
 
-var teamAgentGVR = schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "teamagents"}
+var tenantAgentGVR = schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "tenantagents"}
 
 // WriteStatus merge-patches the status of ta.
-func (w dynWriter) WriteStatus(ctx context.Context, ta *v1alpha1.TeamAgent, st v1alpha1.TeamAgentStatus) error {
+func (w dynWriter) WriteStatus(ctx context.Context, ta *v1alpha1.TenantAgent, st v1alpha1.TenantAgentStatus) error {
 	body, err := json.Marshal(map[string]any{"status": st})
 	if err != nil {
 		return err
 	}
-	_, err = w.dyn.Resource(teamAgentGVR).Namespace(ta.Namespace).Patch(ctx, ta.Name,
+	_, err = w.dyn.Resource(tenantAgentGVR).Namespace(ta.Namespace).Patch(ctx, ta.Name,
 		types.MergePatchType, body, metav1.PatchOptions{}, "status")
 	return err
 }
@@ -350,18 +350,18 @@ func (d *runnerDeps) reportConsumerPending(ctx context.Context) {
 	}
 }
 
-// acceptedTeams returns the names of the Teams that have an accepted TeamAgent.
-func acceptedTeams(in accept.Input) []string {
+// acceptedTenants returns the names of the Tenants that have an accepted TenantAgent.
+func acceptedTenants(in accept.Input) []string {
 	seen := map[string]bool{}
 	var out []string
-	for i := range in.TeamAgents {
-		team := in.TeamAgents[i].Spec.TeamRef.Name
-		if seen[team] {
+	for i := range in.TenantAgents {
+		tenant := in.TenantAgents[i].Spec.TenantRef.Name
+		if seen[tenant] {
 			continue
 		}
-		if ta, ok := accept.AcceptedFor(in, team); ok && ta != nil {
-			seen[team] = true
-			out = append(out, team)
+		if ta, ok := accept.AcceptedFor(in, tenant); ok && ta != nil {
+			seen[tenant] = true
+			out = append(out, tenant)
 		}
 	}
 	return out
@@ -374,13 +374,13 @@ func (n natsMsg) Ack() error { return n.m.Ack() }
 
 func (n natsMsg) NakWithDelay(delay time.Duration) error { return n.m.NakWithDelay(delay) }
 
-// placement answers the cluster that holds a tenant's live cell. A core Team
+// placement answers the cluster that holds a tenant's live cell. A core Tenant
 // reports it on its status. A member-placed tenant reads the record store.
 func (d *runnerDeps) placement(tenant string) (string, bool) {
 	in := d.objs.AcceptInput()
-	if team := in.Teams[tenant]; team != nil {
-		if team.Status.Placement != nil && team.Status.Placement.Cluster != "" {
-			return team.Status.Placement.Cluster, true
+	if tenantObj := in.Tenants[tenant]; tenantObj != nil {
+		if tenantObj.Status.Placement != nil && tenantObj.Status.Placement.Cluster != "" {
+			return tenantObj.Status.Placement.Cluster, true
 		}
 		return d.cfg.Cluster, true
 	}
@@ -402,9 +402,9 @@ func (d *runnerDeps) runSession(ctx context.Context, writer agentstore.Store, se
 			sessions.SessionsTotal.WithLabelValues(string(st.State)).Inc()
 		}
 	}()
-	ta, ok := d.objs.ByUID(teamUIDOf(sess))
+	ta, ok := d.objs.ByUID(tenantUIDOf(sess))
 	if !ok {
-		d.logger.Warn("team agent session has no object", "session", sess.ID.String())
+		d.logger.Warn("tenant agent session has no object", "session", sess.ID.String())
 		endFailed(ctx, writer, sess)
 		return
 	}
@@ -424,13 +424,13 @@ func (d *runnerDeps) runSession(ctx context.Context, writer agentstore.Store, se
 	}
 	if trigger == loop.TriggerStart {
 		if err := sessions.Prepare(ctx, writer, d.relay, d.cfg.Cluster, sess, ta); err != nil {
-			d.logger.Warn("team agent first turn", "session", sess.ID.String(), "error", err.Error())
+			d.logger.Warn("tenant agent first turn", "session", sess.ID.String(), "error", err.Error())
 			endFailed(ctx, writer, sess)
 			return
 		}
 	}
 	// The outputs and the unattended list are the ones the session was created
-	// with, so an edit to the TeamAgent does not change a queued session.
+	// with, so an edit to the TenantAgent does not change a queued session.
 	outputs := stringsOf(sess.Context["outputs"])
 	host := sessions.NewHTTPHost(d.cfg.BFFURL, d.key, sess.Principal, ta.UID, sess.ID, outputs, time.Now)
 	unattended := stringsOf(sess.Context["unattended"])
@@ -438,7 +438,7 @@ func (d *runnerDeps) runSession(ctx context.Context, writer agentstore.Store, se
 	rc := loop.RunConfig{
 		Host:           host,
 		DecideWrite:    sessions.NewDecision(unattended, outputs),
-		DaySpend:       d.daySpend(sess.Team, dayBudget),
+		DaySpend:       d.daySpend(sess.Tenant, dayBudget),
 		Provider:       entry.Provider,
 		Key:            pkey,
 		Model:          sess.Model,
@@ -461,7 +461,7 @@ func (d *runnerDeps) runSession(ctx context.Context, writer agentstore.Store, se
 		Logger: d.logger,
 	}
 	if err := loop.Run(ctx, rc, trigger); err != nil {
-		d.logger.Warn("team agent run", "session", sess.ID.String(), "error", err.Error())
+		d.logger.Warn("tenant agent run", "session", sess.ID.String(), "error", err.Error())
 	}
 }
 
@@ -494,11 +494,11 @@ func stringsOf(v any) []string {
 	return []string{}
 }
 
-// budgetsOf returns the session and day budgets of one TeamAgent. A TeamAgent
+// budgetsOf returns the session and day budgets of one TenantAgent. A TenantAgent
 // may lower the chart values; it never raises them.
-func (d *runnerDeps) budgetsOf(ta *v1alpha1.TeamAgent) (int64, int64) {
+func (d *runnerDeps) budgetsOf(ta *v1alpha1.TenantAgent) (int64, int64) {
 	session := d.cfg.Assistant.Budgets.Session
-	day := d.cfg.Assistant.Budgets.TeamDay
+	day := d.cfg.Assistant.Budgets.TenantDay
 	if ta.Spec.Budgets != nil {
 		if b := ta.Spec.Budgets.Session; b != nil && *b < session {
 			session = *b
@@ -510,24 +510,24 @@ func (d *runnerDeps) budgetsOf(ta *v1alpha1.TeamAgent) (int64, int64) {
 	return session, day
 }
 
-// daySpend reads the Team's day total and returns it with its limit for the loop.
-func (d *runnerDeps) daySpend(team string, limit int64) func(ctx context.Context) (int64, int64, error) {
+// daySpend reads the Tenant's day total and returns it with its limit for the loop.
+func (d *runnerDeps) daySpend(tenant string, limit int64) func(ctx context.Context) (int64, int64, error) {
 	return func(ctx context.Context) (int64, int64, error) {
-		total, err := d.tenants.TeamDaySpend(ctx, team, time.Now())
+		total, err := d.tenants.TenantDaySpend(ctx, tenant, time.Now())
 		return total, limit, err
 	}
 }
 
-// teamUIDOf returns the UID of the TeamAgent that a session names in its
+// tenantUIDOf returns the UID of the TenantAgent that a session names in its
 // context.
-func teamUIDOf(sess agent.Session) string {
-	ta, _ := sess.Context["teamagent"].(map[string]any)
+func tenantUIDOf(sess agent.Session) string {
+	ta, _ := sess.Context["tenantagent"].(map[string]any)
 	uid, _ := ta["uid"].(string)
 	return uid
 }
 
-// tenantLookup maps runs and Teams to their tenants for the data-sharing check.
-type tenantLookup struct{ s *teamstore.Store }
+// tenantLookup maps runs and Tenants to their tenants for the data-sharing check.
+type tenantLookup struct{ s *tenantstore.Store }
 
 var _ datashare.TenantResolver = tenantLookup{}
 
@@ -535,9 +535,9 @@ func (l tenantLookup) RunTenant(ctx context.Context, runID string) (string, erro
 	return l.s.RunTenant(ctx, runID)
 }
 
-// TeamTenant returns the tenant of a Team: the Team's own name.
-func (l tenantLookup) TeamTenant(_ context.Context, team string) (string, error) {
-	return team, nil
+// TenantTenant returns the tenant of a Tenant: the Tenant's own name.
+func (l tenantLookup) TenantTenant(_ context.Context, tenant string) (string, error) {
+	return tenant, nil
 }
 
 // serveHTTP serves the probes and the metrics.

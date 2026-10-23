@@ -61,12 +61,12 @@ tags:
     description: User management (admin).
   - name: groups
     description: Group management (admin).
-  - name: teams
-    description: Team management (admin).
+  - name: tenants
+    description: Tenant management (admin).
   - name: runners
     description: External agent (runner) registration for a pipelines tenant.
-  - name: TeamAgents
-    description: The Team agent of a pipelines tenant, its sessions, capabilities, and unattended grants.
+  - name: TenantAgents
+    description: The Tenant agent of a pipelines tenant, its sessions, capabilities, and unattended grants.
   - name: identity
     description: Identity settings and built-in roles (admin).
   - name: controllers
@@ -98,7 +98,7 @@ tags:
   - name: upgrade-tracking
     description: Upstream Jenkins version observation and upgrade candidate promotion.
   - name: Pipelines
-    description: Team-scoped pipeline, run, log, and artifact surfaces.
+    description: Tenant-scoped pipeline, run, log, and artifact surfaces.
   - name: CellPools
     description: Cell-pool capacity read and scale control.
   - name: Cells
@@ -176,10 +176,10 @@ paths:
     $ref: './paths/groups.yaml#/~1api~1v1~1groups'
   /api/v1/groups/{name}:
     $ref: './paths/groups.yaml#/~1api~1v1~1groups~1{name}'
-  /api/v1/teams:
-    $ref: './paths/teams.yaml#/~1api~1v1~1teams'
-  /api/v1/teams/{name}:
-    $ref: './paths/teams.yaml#/~1api~1v1~1teams~1{name}'
+  /api/v1/tenants:
+    $ref: './paths/tenants.yaml#/~1api~1v1~1tenants'
+  /api/v1/tenants/{name}:
+    $ref: './paths/tenants.yaml#/~1api~1v1~1tenants~1{name}'
   /api/v1/runners:
     $ref: './paths/runners.yaml#/~1api~1v1~1runners'
   /api/v1/runners/{name}:
@@ -342,40 +342,40 @@ paths:
     $ref: './paths/version-candidates.yaml#/~1api~1v1~1version-candidates~1{name}~1promote'
   /api/v1/pipelines:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines'
-  /api/v1/pipelines/{team}:
-    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}'
-  /api/v1/pipelines/{team}/jobs/{job}:
-    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}'
-  /api/v1/pipelines/{team}/jobs/{job}/branches:
-    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1branches'
-  /api/v1/pipelines/{team}/jobs/{job}/runs:
-    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1runs'
-  /api/v1/pipelines/{team}/jobs/{job}/scan:
-    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1scan'
-  /api/v1/pipelines/{team}/jobs/{job}/tests/{case}:
-    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1tests~1{case}'
-  /api/v1/pipelines/{team}/locks:
-    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1locks'
-  /api/v1/pipelines/{team}/markers/validate:
-    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1markers~1validate'
-  /api/v1/pipelines/{team}/cell:
-    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1cell'
-  /api/v1/pipelines/{team}/propose:
-    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1propose'
-  /api/v1/pipelines/{team}/stream:
-    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1stream'
-  /api/v1/pipelines/{team}/agent:
-    $ref: './paths/teamagents.yaml#/~1api~1v1~1pipelines~1{team}~1agent'
-  /api/v1/pipelines/{team}/agent/sessions:
-    $ref: './paths/teamagents.yaml#/~1api~1v1~1pipelines~1{team}~1agent~1sessions'
-  /api/v1/pipelines/{team}/agent/capabilities:
-    $ref: './paths/teamagents.yaml#/~1api~1v1~1pipelines~1{team}~1agent~1capabilities'
-  /api/v1/pipelines/{team}/agent/run:
-    $ref: './paths/teamagents.yaml#/~1api~1v1~1pipelines~1{team}~1agent~1run'
+  /api/v1/pipelines/{tenant}:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}'
+  /api/v1/pipelines/{tenant}/jobs/{job}:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1jobs~1{job}'
+  /api/v1/pipelines/{tenant}/jobs/{job}/branches:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1jobs~1{job}~1branches'
+  /api/v1/pipelines/{tenant}/jobs/{job}/runs:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1jobs~1{job}~1runs'
+  /api/v1/pipelines/{tenant}/jobs/{job}/scan:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1jobs~1{job}~1scan'
+  /api/v1/pipelines/{tenant}/jobs/{job}/tests/{case}:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1jobs~1{job}~1tests~1{case}'
+  /api/v1/pipelines/{tenant}/locks:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1locks'
+  /api/v1/pipelines/{tenant}/markers/validate:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1markers~1validate'
+  /api/v1/pipelines/{tenant}/cell:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1cell'
+  /api/v1/pipelines/{tenant}/propose:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1propose'
+  /api/v1/pipelines/{tenant}/stream:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1stream'
+  /api/v1/pipelines/{tenant}/agent:
+    $ref: './paths/tenantagents.yaml#/~1api~1v1~1pipelines~1{tenant}~1agent'
+  /api/v1/pipelines/{tenant}/agent/sessions:
+    $ref: './paths/tenantagents.yaml#/~1api~1v1~1pipelines~1{tenant}~1agent~1sessions'
+  /api/v1/pipelines/{tenant}/agent/capabilities:
+    $ref: './paths/tenantagents.yaml#/~1api~1v1~1pipelines~1{tenant}~1agent~1capabilities'
+  /api/v1/pipelines/{tenant}/agent/run:
+    $ref: './paths/tenantagents.yaml#/~1api~1v1~1pipelines~1{tenant}~1agent~1run'
   /api/v1/agents:
-    $ref: './paths/teamagents.yaml#/~1api~1v1~1agents'
+    $ref: './paths/tenantagents.yaml#/~1api~1v1~1agents'
   /api/v1/agents/{namespace}/{name}/unattended:
-    $ref: './paths/teamagents.yaml#/~1api~1v1~1agents~1{namespace}~1{name}~1unattended'
+    $ref: './paths/tenantagents.yaml#/~1api~1v1~1agents~1{namespace}~1{name}~1unattended'
   /api/v1/cells/usage:
     $ref: './paths/cells.yaml#/~1api~1v1~1cells~1usage'
   /api/v1/cells/{namespace}/{name}/usage:
@@ -408,8 +408,8 @@ paths:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1restart'
   /api/v1/runs/{run}/notes:
     $ref: './paths/notes.yaml#/~1api~1v1~1runs~1{run}~1notes'
-  /api/v1/pipelines/{team}/jobs/{job}/notes:
-    $ref: './paths/notes.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1notes'
+  /api/v1/pipelines/{tenant}/jobs/{job}/notes:
+    $ref: './paths/notes.yaml#/~1api~1v1~1pipelines~1{tenant}~1jobs~1{job}~1notes'
   /api/v1/runs/{run}/inputs/{input}/proceed:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1inputs~1{input}~1proceed'
   /api/v1/runs/{run}/inputs/{input}/abort:
@@ -600,14 +600,14 @@ components:
       $ref: './components/schemas.yaml#/SubjectRef'
     SummaryJSON:
       $ref: './components/schemas.yaml#/SummaryJSON'
-    TeamCondition:
-      $ref: './components/schemas.yaml#/TeamCondition'
-    TeamEntry:
-      $ref: './components/schemas.yaml#/TeamEntry'
-    TeamNamespaceState:
-      $ref: './components/schemas.yaml#/TeamNamespaceState'
-    TeamRequest:
-      $ref: './components/schemas.yaml#/TeamRequest'
+    TenantCondition:
+      $ref: './components/schemas.yaml#/TenantCondition'
+    TenantEntry:
+      $ref: './components/schemas.yaml#/TenantEntry'
+    TenantNamespaceState:
+      $ref: './components/schemas.yaml#/TenantNamespaceState'
+    TenantRequest:
+      $ref: './components/schemas.yaml#/TenantRequest'
     TokenResponse:
       $ref: './components/schemas.yaml#/TokenResponse'
     UpdateUserRequest:

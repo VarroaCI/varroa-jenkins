@@ -597,21 +597,21 @@ func (f *fakeResourceClient) PatchJenkinsVersionProfileStatus(_ context.Context,
 	return nil
 }
 
-// ---- Team CRD operations ----
+// ---- Tenant CRD operations ----
 
-func (f *fakeResourceClient) ListTeamCRDs(_ context.Context) ([]*v1alpha1.Team, error) {
+func (f *fakeResourceClient) ListTenantCRDs(_ context.Context) ([]*v1alpha1.Tenant, error) {
 	return nil, nil
 }
-func (f *fakeResourceClient) GetTeamCRD(_ context.Context, name string) (*v1alpha1.Team, error) {
-	return nil, k8serrors.NewNotFound(v1alpha1.Resource("teams"), name)
+func (f *fakeResourceClient) GetTenantCRD(_ context.Context, name string) (*v1alpha1.Tenant, error) {
+	return nil, k8serrors.NewNotFound(v1alpha1.Resource("tenants"), name)
 }
-func (f *fakeResourceClient) ApplyTeamCRD(_ context.Context, cr *v1alpha1.Team) error {
+func (f *fakeResourceClient) ApplyTenantCRD(_ context.Context, cr *v1alpha1.Tenant) error {
 	return nil
 }
-func (f *fakeResourceClient) DeleteTeamCRD(_ context.Context, name string) error {
+func (f *fakeResourceClient) DeleteTenantCRD(_ context.Context, name string) error {
 	return nil
 }
-func (f *fakeResourceClient) PatchTeamStatus(_ context.Context, name string, status *v1alpha1.TeamStatus) error {
+func (f *fakeResourceClient) PatchTenantStatus(_ context.Context, name string, status *v1alpha1.TenantStatus) error {
 	return nil
 }
 func (f *fakeResourceClient) ListBroodOperationCRDs(_ context.Context, _ string) ([]*v1alpha1.BroodOperation, error) {
@@ -945,8 +945,8 @@ func TestHandleMePermissions_TenantsFieldIsArray(t *testing.T) {
 			},
 		}},
 	}
-	teams := []*v1alpha1.Team{
-		{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}, Spec: v1alpha1.TeamSpec{Namespaces: []string{"team-a"}}},
+	tenantObjs := []*v1alpha1.Tenant{
+		{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}, Spec: v1alpha1.TenantSpec{Namespaces: []string{"team-a"}}},
 	}
 
 	roleIdx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
@@ -957,9 +957,9 @@ func TestHandleMePermissions_TenantsFieldIsArray(t *testing.T) {
 	for _, b := range bindings {
 		_ = bindingIdx.Add(b)
 	}
-	teamIdx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
-	for _, tm := range teams {
-		_ = teamIdx.Add(tm)
+	tenantIdx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	for _, tm := range tenantObjs {
+		_ = tenantIdx.Add(tm)
 	}
 	resolver := rbac.NewResolver(
 		&fakeInformer{indexer: roleIdx},
@@ -967,7 +967,7 @@ func TestHandleMePermissions_TenantsFieldIsArray(t *testing.T) {
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
-		&fakeInformer{indexer: teamIdx},
+		&fakeInformer{indexer: tenantIdx},
 		false, []string{"sub"},
 	)
 

@@ -1,4 +1,4 @@
-// Package agent holds the core types of the assistant and team agents: the
+// Package agent holds the core types of the assistant and tenant agents: the
 // session, event, approval, and settings records, the enumerations that the
 // record store and the wire share, and the create decision.
 //

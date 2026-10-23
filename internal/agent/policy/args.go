@@ -10,7 +10,7 @@ import (
 // Args holds the top-level string arguments that name a target.
 type Args struct {
 	Run       string
-	Team      string
+	Tenant    string
 	Job       string
 	Cluster   string
 	Namespace string
@@ -26,7 +26,7 @@ func ParseArgs(args json.RawMessage) Args {
 	}
 	var out Args
 	targets := map[string]*string{
-		"run": &out.Run, "team": &out.Team, "job": &out.Job,
+		"run": &out.Run, "tenant": &out.Tenant, "job": &out.Job,
 		"cluster": &out.Cluster, "namespace": &out.Namespace, "name": &out.Name,
 	}
 	for key, raw := range fields {
@@ -50,7 +50,7 @@ func Target(name string, args json.RawMessage) (agent.TargetKind, string) {
 }
 
 // TargetIn returns the kind and reference of the object a tool call acts on.
-// The first rule that matches wins: a run argument names a run; a team and
+// The first rule that matches wins: a run argument names a run; a tenant and
 // a job name a job; a controller tool with a name names a controller, and
 // it uses defaultCluster when the call names no cluster. Every other call
 // names no target.
@@ -59,8 +59,8 @@ func TargetIn(name string, args json.RawMessage, defaultCluster string) (agent.T
 	switch {
 	case a.Run != "":
 		return agent.TargetRun, a.Run
-	case a.Team != "" && a.Job != "":
-		return agent.TargetJob, a.Team + "/" + a.Job
+	case a.Tenant != "" && a.Job != "":
+		return agent.TargetJob, a.Tenant + "/" + a.Job
 	case strings.HasSuffix(name, "_controller") && a.Name != "":
 		cluster := a.Cluster
 		if cluster == "" {

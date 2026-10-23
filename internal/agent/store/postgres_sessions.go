@@ -31,12 +31,12 @@ func (p *Postgres) ListSessions(ctx context.Context, q SessionQuery) (SessionPag
 		WHERE ($1 = '' OR principal = $1)
 		  AND ($2 = '' OR kind = $2)
 		  AND ($3 = '' OR context->>'prompt' = $3)
-		  AND ($4 = '' OR team = $4)
+		  AND ($4 = '' OR tenant = $4)
 		  AND ($5 = '' OR state = $5)
 		  AND (NOT $6::boolean OR (started_at, id) < ($7::timestamptz, $8::uuid))
 		ORDER BY started_at DESC, id DESC
 		LIMIT $9`,
-		q.Principal, string(q.Kind), q.Prompt, q.Team, string(q.State),
+		q.Principal, string(q.Kind), q.Prompt, q.Tenant, string(q.State),
 		hasCursor, cT, cID, limit+1,
 	)
 	if err != nil {

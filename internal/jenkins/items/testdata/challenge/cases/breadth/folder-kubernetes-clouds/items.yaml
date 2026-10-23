@@ -6,4 +6,4 @@ items:
     properties:
       - kubernetes:
           permittedClouds:
-            - team-a
+            - tenant-a

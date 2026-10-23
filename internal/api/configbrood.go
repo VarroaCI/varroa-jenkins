@@ -96,11 +96,11 @@ type ConfigBrood interface {
 	// one cell. It refuses the local cluster.
 	CellGrants(ctx context.Context, cluster string, tenants []string) ([]bus.CellTenantGrants, error)
 
-	// --- Member-placed Team bundles (member clusters only) ---
-	// GetTeamBundleContent reads a Team that only a member cluster holds.
-	// It refuses the local cluster, whose Teams the caller reads on its own store.
-	// held is true while the member cell holds the Team's items.
-	GetTeamBundleContent(ctx context.Context, cluster, team string) (cb *v1alpha1.ComposedBundle, content map[string]string, held bool, err error)
+	// --- Member-placed Tenant bundles (member clusters only) ---
+	// GetTenantBundleContent reads a Tenant that only a member cluster holds.
+	// It refuses the local cluster, whose Tenants the caller reads on its own store.
+	// held is true while the member cell holds the Tenant's items.
+	GetTenantBundleContent(ctx context.Context, cluster, tenant string) (cb *v1alpha1.ComposedBundle, content map[string]string, held bool, err error)
 }
 
 // busConfigBrood implements ConfigBrood over the NATS bus (with direct k8s

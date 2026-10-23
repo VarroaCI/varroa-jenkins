@@ -31,13 +31,13 @@ func claimedCell(name string, claimedAt time.Time) *v1alpha1.Controller {
 
 // TestCellPool_DrainConflictsWithAClaimWrittenAfterItsReRead names the
 // interleaving the claim closes. The drain re-reads a free cell. The
-// placement pass then claims that cell and writes the Team fence. The
+// placement pass then claims that cell and writes the Tenant fence. The
 // conditional delete must fail, because the claim moves the cell's
 // resourceVersion after the drain observes it.
 func TestCellPool_DrainConflictsWithAClaimWrittenAfterItsReRead(t *testing.T) {
 	store := crdstore.NewFake()
 	cell := versionedCell("cell-lts-2-555-1", "uid-1", "1", nil)
-	crdstore.MustSeed(store, newProfile(), newPool(0), cell, pipelinesTeam())
+	crdstore.MustSeed(store, newProfile(), newPool(0), cell, pipelinesTenant())
 
 	ctrlGVR, err := crdstore.GVRFor[v1alpha1.Controller]()
 	if err != nil {
@@ -54,11 +54,11 @@ func TestCellPool_DrainConflictsWithAClaimWrittenAfterItsReRead(t *testing.T) {
 			if err := WriteCellClaim(ctx, store, name, namespace, "team-a", testClockNow); err != nil {
 				t.Errorf("WriteCellClaim: %v", err)
 			}
-			if err := crdstore.PatchStatus[v1alpha1.Team](ctx, store, "team-a", "",
+			if err := crdstore.PatchStatus[v1alpha1.Tenant](ctx, store, "team-a", "",
 				map[string]any{"placement": map[string]any{
 					"cell": name, "cellNamespace": namespace,
 				}}); err != nil {
-				t.Errorf("write the Team fence: %v", err)
+				t.Errorf("write the Tenant fence: %v", err)
 			}
 		}
 	})
@@ -82,7 +82,7 @@ func TestCellPool_DrainSkipsAFenceWrittenAfterTheSnapshot(t *testing.T) {
 	store := crdstore.NewFake()
 	// The claim is older than the window, so guard zero lets the cell pass.
 	cell := claimedCell("cell-lts-2-555-1", testClockNow.Add(-CellClaimTTL-time.Minute))
-	crdstore.MustSeed(store, newProfile(), newPool(0), cell, pipelinesTeam())
+	crdstore.MustSeed(store, newProfile(), newPool(0), cell, pipelinesTenant())
 
 	ctrlGVR, err := crdstore.GVRFor[v1alpha1.Controller]()
 	if err != nil {
@@ -93,11 +93,11 @@ func TestCellPool_DrainSkipsAFenceWrittenAfterTheSnapshot(t *testing.T) {
 	store.SetAfterGet(ctrlGVR, func(namespace, name string) {
 		if !fenced {
 			fenced = true
-			if err := crdstore.PatchStatus[v1alpha1.Team](ctx, store, "team-a", "",
+			if err := crdstore.PatchStatus[v1alpha1.Tenant](ctx, store, "team-a", "",
 				map[string]any{"placement": map[string]any{
 					"cell": name, "cellNamespace": namespace,
 				}}); err != nil {
-				t.Errorf("write the Team fence: %v", err)
+				t.Errorf("write the Tenant fence: %v", err)
 			}
 		}
 	})

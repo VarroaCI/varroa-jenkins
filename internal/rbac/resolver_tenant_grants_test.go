@@ -18,31 +18,31 @@ func mustParseTenant(t *testing.T, name string) ParsedTenant {
 	return ref
 }
 
-// readyTeam builds a Team whose managed Group counts: status.groupRef names
-// it and TeamRBACReady is true.
-func readyTeam(roleRef string, subjects ...v1alpha1.SubjectRef) *v1alpha1.Team {
+// readyTenant builds a Tenant whose managed Group counts: status.groupRef names
+// it and TenantRBACReady is true.
+func readyTenant(roleRef string, subjects ...v1alpha1.SubjectRef) *v1alpha1.Tenant {
 	const name = "payments"
-	return &v1alpha1.Team{
+	return &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       v1alpha1.TeamSpec{RoleRef: roleRef, Subjects: subjects},
-		Status: v1alpha1.TeamStatus{
-			GroupRef:   "team-" + name,
-			Conditions: []v1alpha1.TeamCondition{{Type: v1alpha1.TeamConditionRBACReady, Status: metav1.ConditionTrue}},
+		Spec:       v1alpha1.TenantSpec{RoleRef: roleRef, Subjects: subjects},
+		Status: v1alpha1.TenantStatus{
+			GroupRef:   "tenant-" + name,
+			Conditions: []v1alpha1.TenantCondition{{Type: v1alpha1.TenantConditionRBACReady, Status: metav1.ConditionTrue}},
 		},
 	}
 }
 
-func TestTenantGrantSources_TeamMembershipPath(t *testing.T) {
-	team := readyTeam("developer", v1alpha1.SubjectRef{Kind: "User", Name: "alice"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Team{team}, nil)
+func TestTenantGrantSources_TenantMembershipPath(t *testing.T) {
+	tenant := readyTenant("developer", v1alpha1.SubjectRef{Kind: "User", Name: "alice"})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Tenant{tenant}, nil)
 
 	grants := r.TenantGrantSources(mustParseTenant(t, "payments"))
 	if len(grants) != 1 {
 		t.Fatalf("expected 1 grant, got %d: %+v", len(grants), grants)
 	}
 	g := grants[0]
-	if g.Source != GrantSourceTeamMembership {
-		t.Errorf("Source = %q, want %q", g.Source, GrantSourceTeamMembership)
+	if g.Source != GrantSourceTenantMembership {
+		t.Errorf("Source = %q, want %q", g.Source, GrantSourceTenantMembership)
 	}
 	if g.Binding != "" {
 		t.Errorf("Binding = %q, want empty for the membership path", g.Binding)
@@ -50,7 +50,7 @@ func TestTenantGrantSources_TeamMembershipPath(t *testing.T) {
 	if g.RoleRef != "developer" {
 		t.Errorf("RoleRef = %q, want developer", g.RoleRef)
 	}
-	if len(g.Subjects) != 2 || g.Subjects[0].Name != "team-payments" || g.Subjects[1].Name != "alice" {
+	if len(g.Subjects) != 2 || g.Subjects[0].Name != "tenant-payments" || g.Subjects[1].Name != "alice" {
 		t.Errorf("Subjects = %+v, want the managed Group and alice", g.Subjects)
 	}
 	if len(g.Verbs) != 2 || g.Verbs[0] != "read" || g.Verbs[1] != "write" {
@@ -61,33 +61,33 @@ func TestTenantGrantSources_TeamMembershipPath(t *testing.T) {
 	}
 }
 
-func TestTenantGrantSources_TeamMembershipSkipsAnUnreadyGroup(t *testing.T) {
-	team := &v1alpha1.Team{
+func TestTenantGrantSources_TenantMembershipSkipsAnUnreadyGroup(t *testing.T) {
+	tenant := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec:       v1alpha1.TeamSpec{RoleRef: "developer"},
-		Status:     v1alpha1.TeamStatus{GroupRef: "team-payments"},
+		Spec:       v1alpha1.TenantSpec{RoleRef: "developer"},
+		Status:     v1alpha1.TenantStatus{GroupRef: "tenant-payments"},
 	}
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Team{team}, nil)
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Tenant{tenant}, nil)
 
-	// TeamRBACReady is absent, so the managed Group is not an effective
-	// subject and the Team names no other subject.
+	// TenantRBACReady is absent, so the managed Group is not an effective
+	// subject and the Tenant names no other subject.
 	if grants := r.TenantGrantSources(mustParseTenant(t, "payments")); len(grants) != 0 {
 		t.Fatalf("expected no grant, got %+v", grants)
 	}
 }
 
-func TestTenantGrantSources_AdminTeamRoleYieldsNoGrant(t *testing.T) {
-	team := readyTeam("admin")
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Team{team}, nil)
+func TestTenantGrantSources_AdminTenantRoleYieldsNoGrant(t *testing.T) {
+	tenant := readyTenant("admin")
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Tenant{tenant}, nil)
 
 	if grants := r.TenantGrantSources(mustParseTenant(t, "payments")); len(grants) != 0 {
 		t.Fatalf("an admin roleRef contributed %d grants", len(grants))
 	}
 }
 
-func TestTenantGrantSources_EmptyTeamRoleMeansDeveloper(t *testing.T) {
-	team := readyTeam("")
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Team{team}, nil)
+func TestTenantGrantSources_EmptyTenantRoleMeansDeveloper(t *testing.T) {
+	tenant := readyTenant("")
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Tenant{tenant}, nil)
 
 	grants := r.TenantGrantSources(mustParseTenant(t, "payments"))
 	if len(grants) != 1 || grants[0].RoleRef != "developer" {
@@ -193,7 +193,7 @@ func TestTenantGrantSources_TwoGrantsStaySeparate(t *testing.T) {
 }
 
 func TestTenantGrantSources_StableOrder(t *testing.T) {
-	team := readyTeam("developer")
+	tenant := readyTenant("developer")
 	bindings := []*v1alpha1.VarroaRoleBinding{
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "zz-wide"},
@@ -213,11 +213,11 @@ func TestTenantGrantSources_StableOrder(t *testing.T) {
 			},
 		},
 	}
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole(), viewerRole()}, bindings, []*v1alpha1.Team{team}, nil)
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole(), viewerRole()}, bindings, []*v1alpha1.Tenant{tenant}, nil)
 
 	grants := r.TenantGrantSources(mustParseTenant(t, "payments"))
 	want := []struct{ source, binding string }{
-		{GrantSourceTeamMembership, ""},
+		{GrantSourceTenantMembership, ""},
 		{GrantSourceTenantScopedBinding, "bb-scoped"},
 		{GrantSourceClusterWideBinding, "aa-wide"},
 		{GrantSourceClusterWideBinding, "zz-wide"},
@@ -302,7 +302,7 @@ func TestTenantGrantSources_ControllerTenantResolvesNothing(t *testing.T) {
 
 	// A cell hosts pipelines tenants only, so a synthetic controller tenant
 	// resolves nothing.
-	if grants := r.TenantGrantSources(mustParseTenant(t, "team-a/ci")); len(grants) != 0 {
+	if grants := r.TenantGrantSources(mustParseTenant(t, "tenant-a/ci")); len(grants) != 0 {
 		t.Fatalf("a controller tenant resolved %d grants", len(grants))
 	}
 }

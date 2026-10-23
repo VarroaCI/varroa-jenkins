@@ -72,14 +72,14 @@ func TestValidateAndPartition_MixingQualifiedUnqualified(t *testing.T) {
 	}
 }
 
-func TestValidateAndPartition_3TokenInTeamMode(t *testing.T) {
+func TestValidateAndPartition_3TokenInTenantMode(t *testing.T) {
 	req := broodCreateRequest{
 		Namespace: "team-ns",
 		Spec:      v1alpha1.BroodOperationSpec{Targets: v1alpha1.BroodTargets{Names: []string{"core/ns/ctrl-a"}}},
 	}
 	_, err := validateAndPartition(req, "core", knownCluster, "operator-ns")
 	if err == nil {
-		t.Fatal("expected error for 3-token names in team mode")
+		t.Fatal("expected error for 3-token names in tenant mode")
 	}
 }
 
@@ -119,7 +119,7 @@ func TestValidateAndPartition_AllWithNames(t *testing.T) {
 	}
 }
 
-func TestValidateAndPartition_TeamModeMultipleClusters(t *testing.T) {
+func TestValidateAndPartition_TenantModeMultipleClusters(t *testing.T) {
 	req := broodCreateRequest{
 		Namespace: "team-ns",
 		Spec:      v1alpha1.BroodOperationSpec{Targets: v1alpha1.BroodTargets{Names: []string{"ctrl-a"}}},
@@ -127,7 +127,7 @@ func TestValidateAndPartition_TeamModeMultipleClusters(t *testing.T) {
 	}
 	_, err := validateAndPartition(req, "core", knownCluster, "operator-ns")
 	if err == nil {
-		t.Fatal("expected error for team mode with >1 cluster")
+		t.Fatal("expected error for tenant mode with >1 cluster")
 	}
 }
 
@@ -155,7 +155,7 @@ func TestValidateAndPartition_AllMixedWithExplicit(t *testing.T) {
 	}
 }
 
-func TestValidateAndPartition_HappyTeamSingleCluster(t *testing.T) {
+func TestValidateAndPartition_HappyTenantSingleCluster(t *testing.T) {
 	req := broodCreateRequest{
 		Namespace: "team-ns",
 		Spec:      v1alpha1.BroodOperationSpec{Targets: v1alpha1.BroodTargets{Names: []string{"ctrl-a"}}},

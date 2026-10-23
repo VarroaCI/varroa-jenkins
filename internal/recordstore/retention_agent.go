@@ -19,7 +19,7 @@ const agentFinalStates = "'completed','failed','cancelled','skipped','expired'"
 
 // deleteExpiredAgentSessionsSQL deletes one batch of final agent sessions
 // with their events and approvals in one statement. The optional cluster
-// and team filters narrow the batch to one tenant.
+// and tenant filters narrow the batch to one tenant.
 const deleteExpiredAgentSessionsSQL = `
 WITH doomed AS (
   SELECT id FROM varroa.agent_sessions
@@ -35,7 +35,7 @@ DELETE FROM varroa.agent_sessions WHERE id IN (SELECT id FROM doomed)`
 
 // tenantFilterSQL narrows a batch to one tenant. Its placeholders are $3
 // and $4.
-const tenantFilterSQL = `AND cluster = $3 AND team = $4`
+const tenantFilterSQL = `AND cluster = $3 AND tenant = $4`
 
 // deleteExpiredAgentSessions deletes final agent sessions past their
 // window, with their events and approvals. The store-wide window applies

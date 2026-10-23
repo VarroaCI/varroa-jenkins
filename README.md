@@ -12,7 +12,7 @@ agents drive all of it.
 
 ## Pipelines
 
-A team declares pipelines and names its Jenkinsfiles. Varroa runs them on a Jenkins it
+A tenant declares pipelines and names its Jenkinsfiles. Varroa runs them on a Jenkins it
 creates and replaces on its own. Build history lives outside that Jenkins. When its host
 is lost, a running build continues on the next one, with no shared disk and no cluster
 of JVMs.
@@ -20,7 +20,7 @@ of JVMs.
 Start with [Read and run pipelines](docs/tutorials/pipelines.md), then
 [Move a Jenkinsfile onto a cell](docs/tutorials/move-to-a-cell.md). The handbook covers
 [build records](docs/operations/build-records.md), [how a build survives](docs/operations/pipeline-mesh.md),
-[cross-team calls and locks](docs/config/cross-tenant-pipelines.md), and
+[cross-tenant calls and locks](docs/config/cross-tenant-pipelines.md), and
 [your own machines as agents](docs/operations/runners.md).
 
 ## AI agents

@@ -32,35 +32,35 @@ per-runner egress rule pins the cell to the runner's address on its port.
 
 | Field | Rule |
 |---|---|
-| `team` | Required. Immutable. Names the owning `Team`. |
+| `tenant` | Required. Immutable. Names the owning `Tenant`. |
 | `launcher` | Required. Immutable. `ssh` or `inbound`. |
-| `labels` | Optional. Suffixes only. The operator prefixes each with `<team>-`. |
+| `labels` | Optional. Suffixes only. The operator prefixes each with `<tenant>-`. |
 | `remoteFS` | Required. The agent's work directory on the machine. |
 | `numExecutors` | Optional. Default `1`. |
 | `host` | Required for `ssh`. Forbidden for `inbound`. The SSH target. |
 | `port` | Optional for `ssh`. Default `22`. Forbidden for `inbound`. |
-| `credentialRef` | Required for `ssh`. Forbidden for `inbound`. Names a Secret in the team's agent namespace. |
+| `credentialRef` | Required for `ssh`. Forbidden for `inbound`. Names a Secret in the tenant's agent namespace. |
 | `javaPath` | Optional. `ssh` only. An explicit java binary path. |
 
 None of `remoteFS`, `host`, or `javaPath` may contain `${`. Varroa carries these values into
 Jenkins configuration as literal text and refuses one that looks like an unresolved
 substitution.
 
-`status` reports `nodeName` (`<team>-<runner name>`), `cell`, `cellNamespace`, `token`
+`status` reports `nodeName` (`<tenant>-<runner name>`), `cell`, `cellNamespace`, `token`
 (`inbound` only), `connected`, `lastSeen`, and a `Ready` condition. `connected` reflects the
 most recent liveness probe; Varroa keeps no runner history log.
 
 ## Register a runner
 
 ```bash
-varroactl runner register <name> --tenant <team> --remote-fs <path> [flags]
+varroactl runner register <name> --tenant <tenant> --remote-fs <path> [flags]
 ```
 
 creates the object, then waits up to 60 seconds for the operator to fill its status.
 
 | Flag | Required | Meaning |
 |---|---|---|
-| `--tenant` | Yes | The owning team. |
+| `--tenant` | Yes | The owning tenant. |
 | `--remote-fs` | Yes | The work directory on the machine. |
 | `--launcher` | No | `ssh` or `inbound`. Default `inbound`. |
 | `--labels` | No | Comma-separated label suffixes. |
@@ -71,7 +71,7 @@ creates the object, then waits up to 60 seconds for the operator to fill its sta
 | `--java-path` | No | An explicit java binary path. |
 
 `<name>` becomes the runner's object name and half of its rendered node name,
-`<team>-<name>`. It must be a DNS-1123 label: lowercase letters, digits, and hyphens only. The
+`<tenant>-<name>`. It must be a DNS-1123 label: lowercase letters, digits, and hyphens only. The
 command checks the name before it contacts the server.
 
 For an `inbound` runner, the command prints the exact launch command once the token is minted.
@@ -89,7 +89,7 @@ label, and its three data keys.
    kind: Secret
    metadata:
      name: win-1-ssh-key
-     namespace: team-payments
+     namespace: tenant-payments
      labels:
        varroa.dev/runner-credential: "true"
    stringData:
@@ -184,25 +184,25 @@ cell's own composed bundle, authored by a platform operator, can add one.
 Such a cloud must follow four rules:
 
 1. Its credential uses `scope: SYSTEM`.
-2. Every instance or template carries the reserved label `varroa-tenant-<team>`, written by the
+2. Every instance or template carries the reserved label `varroa-tenant-<tenant>`, written by the
    platform operator by hand.
 3. Its launcher is the plugin's SSH launcher, so the cell dials out.
-4. Its name is not a Team name.
+4. Its name is not a Tenant name.
 
 An instance missing rule 2 is blocked for every tenant: the agent fence fails closed on an
 unlabelled node.
 
 ## Labels and the tenant fence
 
-The fence reads one thing on a node: the reserved label `varroa-tenant-<team>`. A node carrying
+The fence reads one thing on a node: the reserved label `varroa-tenant-<tenant>`. A node carrying
 no reserved label is blocked for every tenant.
 
 Varroa renders that label on every runner node before any other label, so a tenant cannot forge
-it. A declared label named `varroa-tenant-x` is itself prefixed to `<team>-varroa-tenant-x` and
+it. A declared label named `varroa-tenant-x` is itself prefixed to `<tenant>-varroa-tenant-x` and
 carries no reserved token.
 
-Every runner node also carries `<team>-runner`, so a build can select "any runner of my team"
-with no declared label. Each entry in `spec.labels` becomes `<team>-<label>`. The `<team>-`
+Every runner node also carries `<tenant>-runner`, so a build can select "any runner of my tenant"
+with no declared label. Each entry in `spec.labels` becomes `<tenant>-<label>`. The `<tenant>-`
 prefix is a naming convention only. It grants no access.
 
 ## Cell egress for an SSH host
@@ -237,11 +237,11 @@ Every `Ready` reason a `Runner` can report:
 | Reason | Status | Meaning | Action |
 |---|---|---|---|
 | `Connected` | True | The last liveness probe found the node online. | None. |
-| `TeamNotFound` | False | `spec.team` names no `Team`. | Fix the name, or create the `Team`. |
-| `TeamNotPipelines` | False | The named `Team` sets no `spec.pipelines`. | Add `spec.pipelines`. See [Multi-tenancy](multi-tenancy.md#onboard-a-pipelines-tenant). |
+| `TenantNotFound` | False | `spec.tenant` names no `Tenant`. | Fix the name, or create the `Tenant`. |
+| `TenantNotPipelines` | False | The named `Tenant` sets no `spec.pipelines`. | Add `spec.pipelines`. See [Multi-tenancy](multi-tenancy.md#onboard-a-pipelines-tenant). |
 | `LauncherUnsupported` | False | `spec.launcher` is neither `ssh` nor `inbound`. | Fix `spec.launcher`. |
-| `TeamNameUnsupported` | False | The `Team` name or the `Runner` name is not a DNS-1123 label. | Rename the object. A dotted name is the usual cause. |
-| `AwaitingPlacement` | False | The `Team` is not yet placed on a cell. | Wait, or diagnose placement. See [Cells](cells.md#troubleshoot-placement). |
+| `TenantNameUnsupported` | False | The `Tenant` name or the `Runner` name is not a DNS-1123 label. | Rename the object. A dotted name is the usual cause. |
+| `AwaitingPlacement` | False | The `Tenant` is not yet placed on a cell. | Wait, or diagnose placement. See [Cells](cells.md#troubleshoot-placement). |
 | `CredentialMissing` | False | The Secret named by `credentialRef` is absent, or lacks the `varroa.dev/runner-credential: "true"` label. | Create or label the Secret. |
 | `CredentialMalformed` | False | The Secret is missing `username` or `privateKey`, or a value contains `${`. | Fix the Secret's data. |
 | `Offline` | False | The last liveness probe found the node offline, or none has succeeded yet. | Check the machine and its network path to the cell. |

@@ -91,7 +91,7 @@ function tenantEntryGrants(entry: TenantCapabilities, verb: string, jobPath: str
 /**
  * parseSyntheticNamespace returns the namespace of a synthetic
  * (single-controller) tenant value shaped "<namespace>/<controller>", or
- * undefined for a Team tenant (no "/") or a malformed value.
+ * undefined for a Tenant tenant (no "/") or a malformed value.
  */
 function parseSyntheticNamespace(tenant: string): string | undefined {
   const idx = tenant.indexOf("/");
@@ -103,7 +103,7 @@ function parseSyntheticNamespace(tenant: string): string | undefined {
 /**
  * canAccessTenantPipeline tests one tenant's `tenants` entries **one at a
  * time** and never unions them: the verb and a job-path match must come
- * from the same entry. `tenant` is a Team name, or a synthetic
+ * from the same entry. `tenant` is a Tenant name, or a synthetic
  * "<namespace>/<controller>" value.
  *
  * `jobPath`, when given, is folder-relative: the caller strips the tenant's
@@ -113,11 +113,11 @@ function parseSyntheticNamespace(tenant: string): string | undefined {
  * caller-supplied `jobPath` here must already be relative to that folder,
  * not the full job path.
  *
- * `tenants` enumerates Team tenants only, so a synthetic tenant never has an
+ * `tenants` enumerates Tenant tenants only, so a synthetic tenant never has an
  * entry. For such a tenant this falls back to `global` plus a `scopes`
  * entry whose `namespaces` allowlist holds the tenant's namespace,
  * permissively for a controller-selector or namespace-unbounded scope. A
- * Team tenant with no entry holds no grant: the partition already
+ * Tenant tenant with no entry holds no grant: the partition already
  * enumerated it and found nothing.
  */
 export function canAccessTenantPipeline(

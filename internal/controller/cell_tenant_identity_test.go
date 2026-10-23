@@ -18,7 +18,7 @@ import (
 // Secret (created by the placement pass) carries a token value, the
 // controller reconciler reads it and carries it on
 // mat.CellCloudCredentials as the SYSTEM-scope secret-text credential
-// varroa-cloud-<team> — without creating or modifying the ServiceAccount,
+// varroa-cloud-<tenant> — without creating or modifying the ServiceAccount,
 // its token Secret, or its RBAC. The controller reconciler only reads what
 // the placement pass owns.
 //
@@ -31,11 +31,11 @@ import (
 // covers that seam).
 func TestApplyCellContent_ProjectsTenantAgentTokenAsSystemCredential(t *testing.T) {
 	client := newTestClient()
-	crdstore.MustSeed(client.store, &v1alpha1.Team{
+	crdstore.MustSeed(client.store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec: v1alpha1.TeamSpec{
+		Spec: v1alpha1.TenantSpec{
 			Namespaces: []string{"payments-ns"},
-			Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Pipelines: &v1alpha1.TenantPipelinesSpec{
 				Profile:        "jenkins-lts",
 				AgentNamespace: "payments-ns",
 			},
@@ -85,11 +85,11 @@ func TestApplyCellContent_ProjectsTenantAgentTokenAsSystemCredential(t *testing.
 // token controller has not caught up) is skipped, not an error.
 func TestApplyCellContent_MissingTokenSkipsCredentialInjection(t *testing.T) {
 	client := newTestClient()
-	crdstore.MustSeed(client.store, &v1alpha1.Team{
+	crdstore.MustSeed(client.store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec: v1alpha1.TeamSpec{
+		Spec: v1alpha1.TenantSpec{
 			Namespaces: []string{"payments-ns"},
-			Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Pipelines: &v1alpha1.TenantPipelinesSpec{
 				Profile:        "jenkins-lts",
 				AgentNamespace: "payments-ns",
 			},
@@ -122,11 +122,11 @@ func TestApplyCellContent_MissingTokenSkipsCredentialInjection(t *testing.T) {
 // command it pushes to the mite.
 func TestCellTenantCloudCredentialNeverReachesConfigMapButReachesMite(t *testing.T) {
 	client := newTestClientWithBundle()
-	crdstore.MustSeed(client.store, &v1alpha1.Team{
+	crdstore.MustSeed(client.store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec: v1alpha1.TeamSpec{
+		Spec: v1alpha1.TenantSpec{
 			Namespaces: []string{"payments-ns"},
-			Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Pipelines: &v1alpha1.TenantPipelinesSpec{
 				Profile:        "jenkins-lts",
 				AgentNamespace: "payments-ns",
 			},

@@ -41,7 +41,7 @@ describe("BroodOperationModal", () => {
     });
   });
 
-  it("previews with bare names and the shared namespace (team tenancy shape)", async () => {
+  it("previews with bare names and the shared namespace (tenant tenancy shape)", async () => {
     const user = userEvent.setup();
     mockPreviewBroodOperation.mockResolvedValue({
       clusters: [

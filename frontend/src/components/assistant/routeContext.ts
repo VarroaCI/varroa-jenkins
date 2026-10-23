@@ -1,5 +1,5 @@
 // The route context of the assistant. A session carries what the page
-// shows, so the assistant knows the build, job, team, or controller in view.
+// shows, so the assistant knows the build, job, tenant, or controller in view.
 import { matchPath } from "react-router-dom";
 import type { AssistantSessionContext } from "../../types/assistant";
 
@@ -15,10 +15,10 @@ interface Row {
 
 /** ROUTE_TABLE is matched in order. The first match wins. */
 export const ROUTE_TABLE: readonly Row[] = [
-  { pattern: "/pipelines/:team/:job/tests/:case", route: "test-case" },
-  { pattern: "/pipelines/:team/:job/:run", route: "build" },
-  { pattern: "/pipelines/:team/:job", route: "job" },
-  { pattern: "/pipelines/:team", route: "team" },
+  { pattern: "/pipelines/:tenant/:job/tests/:case", route: "test-case" },
+  { pattern: "/pipelines/:tenant/:job/:run", route: "build" },
+  { pattern: "/pipelines/:tenant/:job", route: "job" },
+  { pattern: "/pipelines/:tenant", route: "tenant" },
   { pattern: "/controllers/:cluster/:namespace/:name", route: "controller" },
   { pattern: "/cells", route: "cells" },
   { pattern: "/locks", route: "locks" },
@@ -35,13 +35,13 @@ export function routeContext(pathname: string, hint: RouteHint = {}): AssistantS
     const dec = (v: string | undefined) => (v === undefined ? "" : decodeURIComponent(v));
     switch (row.route) {
       case "test-case":
-        return { route: row.route, team: dec(p.team), job: dec(p.job) };
+        return { route: row.route, tenant: dec(p.tenant), job: dec(p.job) };
       case "build":
-        return { route: row.route, team: dec(p.team), job: dec(p.job), run: dec(p.run) };
+        return { route: row.route, tenant: dec(p.tenant), job: dec(p.job), run: dec(p.run) };
       case "job":
-        return { route: row.route, team: dec(p.team), job: dec(p.job) };
-      case "team":
-        return { route: row.route, team: dec(p.team) };
+        return { route: row.route, tenant: dec(p.tenant), job: dec(p.job) };
+      case "tenant":
+        return { route: row.route, tenant: dec(p.tenant) };
       case "controller": {
         const ref = `${dec(p.cluster)}/${dec(p.namespace)}/${dec(p.name)}`;
         return hint.cell ? { route: row.route, controller: ref, cell: ref } : { route: row.route, controller: ref };
@@ -55,7 +55,7 @@ export function routeContext(pathname: string, hint: RouteHint = {}): AssistantS
   return { route: first || "dashboard" };
 }
 
-const KEYS = ["team", "job", "run", "controller", "cell"] as const;
+const KEYS = ["tenant", "job", "run", "controller", "cell"] as const;
 
 /** contextDiffers reports whether two contexts name another object. */
 export function contextDiffers(a: AssistantSessionContext, b: AssistantSessionContext): boolean {
@@ -66,12 +66,12 @@ export function contextDiffers(a: AssistantSessionContext, b: AssistantSessionCo
 export function contextLabel(ctx: AssistantSessionContext): string {
   switch (ctx.route) {
     case "build":
-      return `Build ${(ctx.run ?? "").slice(0, 8)} of ${ctx.team ?? ""}/${ctx.job ?? ""}`;
+      return `Build ${(ctx.run ?? "").slice(0, 8)} of ${ctx.tenant ?? ""}/${ctx.job ?? ""}`;
     case "job":
     case "test-case":
-      return `Job ${ctx.team ?? ""}/${ctx.job ?? ""}`;
-    case "team":
-      return `Team ${ctx.team ?? ""}`;
+      return `Job ${ctx.tenant ?? ""}/${ctx.job ?? ""}`;
+    case "tenant":
+      return `Tenant ${ctx.tenant ?? ""}`;
     case "controller":
       return ctx.cell ? `Cell ${ctx.cell}` : `Controller ${ctx.controller ?? ""}`;
     case "cells":

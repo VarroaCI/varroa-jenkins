@@ -52,7 +52,7 @@ func (n notifyingStore) notify(ctx context.Context, id uuid.UUID, seq int) {
 	if err != nil {
 		return
 	}
-	if err := n.pub(bus.AgentSessionSubject(s.Cluster, s.Team), body); err != nil {
+	if err := n.pub(bus.AgentSessionSubject(s.Cluster, s.Tenant), body); err != nil {
 		n.logger.Warn("session notify: publish", "error", err.Error())
 	}
 }

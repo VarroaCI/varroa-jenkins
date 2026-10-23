@@ -11,18 +11,18 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
 
-// fakeGrantReader answers the grant walk from a map keyed by team name.
+// fakeGrantReader answers the grant walk from a map keyed by tenant name.
 type fakeGrantReader struct {
 	sources map[string][]rbac.TenantGrantSource
 	roles   map[string][]rbac.TenantMemberRole
 }
 
 func (f *fakeGrantReader) TenantGrantSourcesTruncated(t rbac.ParsedTenant) ([]rbac.TenantGrantSource, bool) {
-	return f.sources[t.Team], false
+	return f.sources[t.Tenant], false
 }
 
 func (f *fakeGrantReader) TenantMemberRoles(t rbac.ParsedTenant) []rbac.TenantMemberRole {
-	return f.roles[t.Team]
+	return f.roles[t.Tenant]
 }
 
 func grantsCRUD(reader TenantGrantReader) *ConfigCRUD {

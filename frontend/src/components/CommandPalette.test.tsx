@@ -82,7 +82,7 @@ describe("CommandPalette", () => {
   it("displays sections and groups of search results", async () => {
     mockBffFetch.mockResolvedValue({clusters: [], items: [
       { type: "controller", name: "jenkins-main", namespace: "default", link: "/controllers/default/jenkins-main" },
-      { type: "group", name: "dev-team", namespace: "default", link: "/groups/default/dev-team" },
+      { type: "group", name: "dev-tenant", namespace: "default", link: "/groups/default/dev-tenant" },
     ]});
 
     renderPalette();
@@ -95,7 +95,7 @@ describe("CommandPalette", () => {
     expect(await screen.findByText("controllers")).toBeInTheDocument();
     expect(screen.getByText("groups")).toBeInTheDocument();
     expect(screen.getByText("jenkins-main")).toBeInTheDocument();
-    expect(screen.getByText("dev-team")).toBeInTheDocument();
+    expect(screen.getByText("dev-tenant")).toBeInTheDocument();
   });
 
   it("renders the job, run, and activity kinds with their own groups", async () => {

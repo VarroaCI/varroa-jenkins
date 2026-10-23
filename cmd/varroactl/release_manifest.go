@@ -31,7 +31,7 @@ const releaseManifestTag = "release-manifest"
 // lists them, so an operator knows what to mirror by hand.
 var releaseUnseen = []string{
 	"Images in Jenkins pipeline scripts and in podTemplate steps.",
-	"Pod templates of Team and CellPool objects that users create through the API.",
+	"Pod templates of Tenant and CellPool objects that users create through the API.",
 	"The CloudNativePG operator image when a Cluster sets no imageName.",
 	"Images a Jenkins plugin pulls at run time.",
 }

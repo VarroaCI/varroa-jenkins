@@ -1,7 +1,7 @@
 # Cell Usage
 
 A cell hosts many tenants in one Jenkins process. Three reads report how busy that process is:
-two for an operator, and one for a team user. Read [Cells and pipelines tenants](cells.md) first.
+two for an operator, and one for a tenant user. Read [Cells and pipelines tenants](cells.md) first.
 Every read needs the [build record store](build-records.md), and answers `503` without it.
 
 ## Operator reads
@@ -57,13 +57,13 @@ status on the `Controller`.
 
 ## Your cell
 
-A team user reads its own view of the cell:
+A tenant user reads its own view of the cell:
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" https://<dashboard>/api/v1/pipelines/payments/cell
 ```
 
-The read applies the same tenant read check the team page applies, and it carries no other
+The read applies the same tenant read check the tenant page applies, and it carries no other
 tenant's name, job path, run, or count. `otherTenantCount` is a count, never a list.
 
 `members` carries one entry for each member of the tenant, with that member's cell, its role, and
@@ -77,7 +77,7 @@ The `state` field holds one of five values.
 | `moving` | the pass is moving the tenant to another cell |
 | `rehydrating` | a member's folder is not built yet |
 | `unplaced` | the tenant waits for its first cell |
-| `notCellHosted` | the team is a single controller |
+| `notCellHosted` | the tenant is a single controller |
 
 `reason` carries the `Placed` condition's reason. For `unplaced` the body holds `state` and
 `reason` alone, and for `notCellHosted` it holds `state` alone.

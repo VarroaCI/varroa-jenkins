@@ -55,7 +55,7 @@ func TestRegrantFromNewIncarnationStampsNewIncarnation(t *testing.T) {
 		t.Fatalf("first claim: want granted, got %+v", first)
 	}
 
-	// The replacement Team takes the name, and its cell instance announces.
+	// The replacement Tenant takes the name, and its cell instance announces.
 	if _, err := db.Exec(`UPDATE varroa.tenant_placements
 		SET incarnation = 'uid-b', cell_instance = 'pod-b', rehydrated_instance = 'pod-b'
 		WHERE cluster = $1 AND tenant = $2`, testCluster, testTenant); err != nil {

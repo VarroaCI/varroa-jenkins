@@ -187,7 +187,7 @@ describe("Sidebar", () => {
       "Users", "Groups", "Built-in Roles",
       "Varroa Roles", "Varroa Role Bindings",
       "Jenkins Roles", "Jenkins Role Bindings",
-      "Teams", "Provisioning", "Versions", "Identity",
+      "Tenants", "Provisioning", "Versions", "Identity",
     ];
     for (const label of retired) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();

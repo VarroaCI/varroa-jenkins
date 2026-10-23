@@ -356,7 +356,7 @@ export default function JenkinsRoleBindingForm() {
                     <label className={styles.formLabel}>Folder</label>
                     <input
                       className={styles.formInput}
-                      placeholder="e.g. /teams/backend"
+                      placeholder="e.g. /tenants/backend"
                       value={jenkinsScopeFolder}
                       onChange={(e) => setJenkinsScopeFolder(e.target.value)}
                     />
@@ -368,7 +368,7 @@ export default function JenkinsRoleBindingForm() {
                     <label className={styles.formLabel}>Pattern</label>
                     <input
                       className={styles.formInput}
-                      placeholder="e.g. .*team-a.*"
+                      placeholder="e.g. .*tenant-a.*"
                       value={jenkinsScopePattern}
                       onChange={(e) => setJenkinsScopePattern(e.target.value)}
                     />

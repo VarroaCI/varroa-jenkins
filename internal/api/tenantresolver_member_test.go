@@ -31,25 +31,25 @@ type localBrood struct {
 
 func (b localBrood) LocalCluster() string { return b.local }
 
-func TestTenantResolver_MemberPlacedTeamResolvesFromThePlacementRow(t *testing.T) {
+func TestTenantResolver_MemberPlacedTenantResolvesFromThePlacementRow(t *testing.T) {
 	placements := &fakePlacementReader{rows: map[string][]recordstore.TenantPlacement{
 		"shop": {{Cluster: "member", Namespace: "varroa-system", Cell: "cell-m-0", Generation: 1}},
 	}}
-	resolver := NewTeamTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
+	resolver := NewTenantTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
 		WithMemberPlacements(placements))
 
 	refs, err := resolver.Resolve(context.Background(), resolverClaims, "shop")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	want := TenantRef{Cluster: "member", Namespace: "varroa-system", Controller: "cell-m-0", Tenant: "shop", Team: "shop", Folder: "shop"}
+	want := TenantRef{Cluster: "member", Namespace: "varroa-system", Controller: "cell-m-0", Tenant: "shop", TenantName: "shop", Folder: "shop"}
 	if len(refs) != 1 || refs[0] != want {
 		t.Fatalf("refs = %+v, want [%+v]", refs, want)
 	}
 }
 
 func TestTenantResolver_MemberPlacementIgnoresLocalAndEmptyRows(t *testing.T) {
-	// A row of the local cluster belongs to a Team the local API server no
+	// A row of the local cluster belongs to a Tenant the local API server no
 	// longer holds, and a row with no cell names no tenant home. Neither
 	// resolves, so the name falls through to the synthetic step.
 	placements := &fakePlacementReader{rows: map[string][]recordstore.TenantPlacement{
@@ -58,7 +58,7 @@ func TestTenantResolver_MemberPlacementIgnoresLocalAndEmptyRows(t *testing.T) {
 			{Cluster: "member", Namespace: "varroa-system", Cell: "", Generation: 1},
 		},
 	}}
-	resolver := NewTeamTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
+	resolver := NewTenantTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
 		WithMemberPlacements(placements))
 
 	_, err := resolver.Resolve(context.Background(), resolverClaims, "shop")
@@ -72,7 +72,7 @@ func TestTenantResolver_MemberPlacementAtGenerationZeroDoesNotResolve(t *testing
 	placements := &fakePlacementReader{rows: map[string][]recordstore.TenantPlacement{
 		"shop": {{Cluster: "member", Namespace: "varroa-system", Cell: "cell-m-0", Generation: 0}},
 	}}
-	resolver := NewTeamTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
+	resolver := NewTenantTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
 		WithMemberPlacements(placements))
 
 	_, err := resolver.Resolve(context.Background(), resolverClaims, "shop")
@@ -86,7 +86,7 @@ func TestTenantResolver_MemberPlacementOnTwoClustersIs409(t *testing.T) {
 			{Cluster: "member-b", Namespace: "varroa-system", Cell: "cell-b-0", Generation: 1},
 		},
 	}}
-	resolver := NewTeamTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
+	resolver := NewTenantTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
 		WithMemberPlacements(placements))
 
 	_, err := resolver.Resolve(context.Background(), resolverClaims, "shop")
@@ -96,24 +96,24 @@ func TestTenantResolver_MemberPlacementOnTwoClustersIs409(t *testing.T) {
 	}
 }
 
-func TestTenantResolver_LocalTeamSkipsThePlacementRead(t *testing.T) {
+func TestTenantResolver_LocalTenantSkipsThePlacementRead(t *testing.T) {
 	store := crdstore.NewFake()
-	seedTeam(t, store, placedTeamObject("payments", "core", "varroa-cells", "cell-a"))
+	seedTenant(t, store, placedTenantObject("payments", "core", "varroa-cells", "cell-a"))
 	placements := &fakePlacementReader{}
-	resolver := NewTeamTenantResolver(store, failListAllBrood{t: t}, resolverAuthorizer("payments"),
+	resolver := NewTenantTenantResolver(store, failListAllBrood{t: t}, resolverAuthorizer("payments"),
 		WithMemberPlacements(placements))
 
 	if _, err := resolver.Resolve(context.Background(), resolverClaims, "payments"); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if placements.calls != 0 {
-		t.Errorf("placement reads = %d, want 0 for a Team the local API server holds", placements.calls)
+		t.Errorf("placement reads = %d, want 0 for a Tenant the local API server holds", placements.calls)
 	}
 }
 
 func TestTenantResolver_MemberPlacementReadErrorFails(t *testing.T) {
 	placements := &fakePlacementReader{err: errors.New("boom")}
-	resolver := NewTeamTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
+	resolver := NewTenantTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
 		WithMemberPlacements(placements))
 
 	if _, err := resolver.Resolve(context.Background(), resolverClaims, "shop"); err == nil {

@@ -8,7 +8,7 @@
       - {name: controller, in: query, schema: {type: string}}
       - {name: cluster, in: query, schema: {type: string}}
       - {name: namespace, in: query, schema: {type: string}}
-      - {name: source, in: query, schema: {type: string, enum: [mite, operator, user, api, jenkins, mcp, assistant, team_agent]}}
+      - {name: source, in: query, schema: {type: string, enum: [mite, operator, user, api, jenkins, mcp, assistant, tenant_agent]}}
       - {name: severity, in: query, schema: {type: string, enum: [info, warning, error]}}
       - {name: actor, in: query, schema: {type: string}}
       - {name: type, in: query, schema: {type: string}}

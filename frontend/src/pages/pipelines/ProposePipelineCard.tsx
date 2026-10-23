@@ -31,17 +31,17 @@ export const PROPOSE_ERROR_LABELS: Record<string, string> = {
   assistant_busy: "You have too many sessions running. Wait for one to end.",
   kill_switch: "The assistant is paused for this installation.",
   repo_url_invalid: "Enter an https repository URL with no port other than 443.",
-  data_sharing_too_low: "The data level of this team and provider hides the repository.",
-  no_matching_credential: "No team credential covers this forge host.",
+  data_sharing_too_low: "The data level of this tenant and provider hides the repository.",
+  no_matching_credential: "No tenant credential covers this forge host.",
   forge_unsupported: "This forge is not supported.",
-  forge_auth_failed: "The team credential was refused by the forge.",
-  forge_write_denied: "The team credential may not write to this repository.",
+  forge_auth_failed: "The tenant credential was refused by the forge.",
+  forge_write_denied: "The tenant credential may not write to this repository.",
   forge_unreachable: "The forge did not answer. Check the network policy.",
   operator_timeout: "The operator did not answer in time. Wait, then try again.",
   operator_unavailable: "No operator received the check. Wait, then try again.",
   jenkinsfile_exists: "The repository already holds a Jenkinsfile.",
   proposal_branch_exists: "The branch varroa/propose-pipeline exists. Delete the branch or merge its pull request.",
-  not_found: "The repository or the team was not found.",
+  not_found: "The repository or the tenant was not found.",
   invalid_request: "The request was not valid.",
   internal: "The proposal failed inside Varroa.",
 };
@@ -59,7 +59,7 @@ function errorCode(err: unknown): string {
 }
 
 /** ProposePipelineCard shows the proposal form and the state of the proposal. */
-export default function ProposePipelineCard({ team }: { team: string }) {
+export default function ProposePipelineCard({ tenant }: { tenant: string }) {
   const assistant = useAssistant();
   const queryClient = useQueryClient();
   const [repo, setRepo] = useState("");
@@ -71,8 +71,8 @@ export default function ProposePipelineCard({ team }: { team: string }) {
   const [actionError, setActionError] = useState("");
 
   const sessions = useQuery({
-    queryKey: ["propose-session", team],
-    queryFn: () => listAssistantSessions({ prompt: "propose-pipeline", team, limit: 1 }),
+    queryKey: ["propose-session", tenant],
+    queryFn: () => listAssistantSessions({ prompt: "propose-pipeline", tenant, limit: 1 }),
     enabled: assistant.switchOn,
   });
   const current = sessionId ?? sessions.data?.items[0]?.id ?? null;
@@ -88,7 +88,7 @@ export default function ProposePipelineCard({ team }: { team: string }) {
   });
 
   const start = useMutation({
-    mutationFn: (url: string) => proposePipeline(team, url),
+    mutationFn: (url: string) => proposePipeline(tenant, url),
     onSuccess: (r) => {
       setRefused("");
       setStartedOver(false);
@@ -208,7 +208,7 @@ export default function ProposePipelineCard({ team }: { team: string }) {
           <p>
             <a href={view.url} target="_blank" rel="noreferrer">Pull request #{view.number} opened</a>
           </p>
-          <p>Merge the pull request. Then add the repository to the team bundle as a multibranch job.</p>
+          <p>Merge the pull request. Then add the repository to the tenant bundle as a multibranch job.</p>
           <div className={styles.actions}>
             <Button size="sm" variant="ghost" onClick={() => setStartedOver(true)}>Start over</Button>
           </div>

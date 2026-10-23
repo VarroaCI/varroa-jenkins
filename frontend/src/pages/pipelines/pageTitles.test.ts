@@ -5,7 +5,7 @@ import {
   jobTitle,
   notStartedTitle,
   relativeJob,
-  teamTitle,
+  tenantTitle,
   testCaseTitle,
 } from "./pageTitles";
 
@@ -34,12 +34,12 @@ describe("pageTitles", () => {
     expect(notStartedTitle("payments", "", "main")).toBe("Not started · main · payments");
   });
 
-  it("builds the team and index titles", () => {
-    expect(teamTitle("payments")).toBe("payments · Pipelines");
+  it("builds the tenant and index titles", () => {
+    expect(tenantTitle("payments")).toBe("payments · Pipelines");
     expect(indexTitle()).toBe("Pipelines");
   });
 
-  it("builds a test case title from the test, job and team", () => {
+  it("builds a test case title from the test, job and tenant", () => {
     expect(testCaseTitle("payments", "main", "adds totals")).toBe("adds totals · main · payments");
   });
 });
