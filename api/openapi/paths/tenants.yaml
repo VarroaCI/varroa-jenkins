@@ -1,0 +1,122 @@
+# tenants — admin tenant management.
+/api/v1/tenants:
+  get:
+    operationId: listTenants
+    tags: [tenants]
+    summary: Lists all tenants (admin only).
+    responses:
+      "200":
+        description: Tenant list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/TenantEntry'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+  post:
+    operationId: createTenant
+    tags: [tenants]
+    summary: Creates a new tenant (admin).
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/TenantRequest'
+    responses:
+      "201":
+        description: Tenant created.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+
+/api/v1/tenants/{name}:
+  get:
+    operationId: getTenant
+    tags: [tenants]
+    summary: Gets a tenant's details (admin).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Tenant details.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/TenantEntry'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  put:
+    operationId: updateTenant
+    tags: [tenants]
+    summary: Updates a tenant (admin).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/TenantRequest'
+    responses:
+      "200":
+        description: Tenant updated.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  delete:
+    operationId: deleteTenant
+    tags: [tenants]
+    summary: Deletes a tenant (admin).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "204":
+        description: Tenant deleted.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

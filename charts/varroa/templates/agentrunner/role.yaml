@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/component: varroa-agent
     {{- include "varroa.labels" . | nindent 4 }}
 rules:
-  # The status lease elects one replica to write TeamAgent status.
+  # The status lease elects one replica to write TenantAgent status.
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "create", "update"]

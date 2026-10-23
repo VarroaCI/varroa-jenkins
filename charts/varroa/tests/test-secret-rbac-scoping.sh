@@ -16,7 +16,7 @@ COMMON=(--set auth.oidc.clientSecret=x --set auth.oidc.clientId=x
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 default_render="$(helm template t "$CHART_DIR" "${COMMON[@]}")"
-scoped_render="$(helm template t "$CHART_DIR" "${COMMON[@]}" --set 'managedNamespaces={team-a,team-b}')"
+scoped_render="$(helm template t "$CHART_DIR" "${COMMON[@]}" --set 'managedNamespaces={tenant-a,tenant-b}')"
 
 # --- Default mode ---
 # The BFF holds NO cluster-wide Secret access in any mode: its Secret CRUD is
@@ -52,7 +52,7 @@ if echo "$scoped_render" | yq eval-all '
   fail "scoped: the BFF ClusterRole must NOT grant cluster-wide configmap access"
 fi
 # Operator Secret Role must exist in each managed namespace + release namespace.
-for ns in default team-a team-b; do
+for ns in default tenant-a tenant-b; do
   echo "$scoped_render" | yq eval-all "
     select(.kind==\"Role\" and .metadata.namespace==\"$ns\" and (.metadata.name|test(\"operator\")))
     | .rules[] | select(.resources[]==\"secrets\") | .verbs[]" - \

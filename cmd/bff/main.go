@@ -54,7 +54,7 @@ import (
 	ldappkg "github.com/varroaci/varroa-jenkins/internal/auth/ldap"
 	localpkg "github.com/varroaci/varroa-jenkins/internal/auth/local"
 	"github.com/varroaci/varroa-jenkins/internal/auth/schedule"
-	teamagentauth "github.com/varroaci/varroa-jenkins/internal/auth/teamagent"
+	tenantagentauth "github.com/varroaci/varroa-jenkins/internal/auth/tenantagent"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -66,8 +66,8 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 	"github.com/varroaci/varroa-jenkins/internal/signing"
-	teamagentcache "github.com/varroaci/varroa-jenkins/internal/teamagent/cache"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
+	tenantagentcache "github.com/varroaci/varroa-jenkins/internal/tenantagent/cache"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
 
@@ -504,34 +504,34 @@ func main() {
 	}
 	controllerLister := api.NewIndexerControllerLister(controllerInformer.GetIndexer())
 
-	// Team informer, built like the five above. It feeds the Team-membership
+	// Tenant informer, built like the five above. It feeds the Tenant-membership
 	// path of tenant capability resolution (internal/rbac EffectiveTenantCapabilities).
-	teamGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "teams"}
-	teamInformer := cache.NewSharedIndexInformer(
+	tenantGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "tenants"}
+	tenantInformer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return dynamicClient.Resource(teamGVR).List(context.TODO(), options)
+				return dynamicClient.Resource(tenantGVR).List(context.TODO(), options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return dynamicClient.Resource(teamGVR).Watch(context.TODO(), options)
+				return dynamicClient.Resource(tenantGVR).Watch(context.TODO(), options)
 			},
 		},
 		&unstructured.Unstructured{},
 		0,
 		cache.Indexers{},
 	)
-	if err := teamInformer.SetTransform(func(obj interface{}) (interface{}, error) {
+	if err := tenantInformer.SetTransform(func(obj interface{}) (interface{}, error) {
 		u, ok := obj.(*unstructured.Unstructured)
 		if !ok {
 			return obj, nil
 		}
-		team := &v1alpha1.Team{}
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, team); err != nil {
+		tenant := &v1alpha1.Tenant{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, tenant); err != nil {
 			return nil, err
 		}
-		return team, nil
+		return tenant, nil
 	}); err != nil {
-		logger.Error("failed to set transform on team informer", "error", err)
+		logger.Error("failed to set transform on tenant informer", "error", err)
 		os.Exit(1)
 	}
 
@@ -611,7 +611,7 @@ func main() {
 
 	userClaims := auth.ParseClaimNames(envDefault("VARROA_OIDC_USER_CLAIM", "preferred_username,sub"))
 	groupClaims := auth.ParseClaimNames(envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"))
-	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, teamInformer, *defaultRead,
+	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, tenantInformer, *defaultRead,
 		userClaims)
 	// The cell grants read must resolve the same User principals as the operator.
 	rbacResolver.SetUserDirectory(userInformer.GetIndexer(), operatorNamespace)
@@ -636,7 +636,7 @@ func main() {
 	go controllerInformer.Run(ctx.Done())
 	go jenkinsRoleInformer.Run(ctx.Done())
 	go jenkinsRoleBindingInformer.Run(ctx.Done())
-	go teamInformer.Run(ctx.Done())
+	go tenantInformer.Run(ctx.Done())
 	go runnerInformer.Run(ctx.Done())
 	go userInformer.Run(ctx.Done())
 	if !cache.WaitForCacheSync(ctx.Done(),
@@ -645,7 +645,7 @@ func main() {
 		controllerInformer.HasSynced,
 		jenkinsRoleInformer.HasSynced,
 		jenkinsRoleBindingInformer.HasSynced,
-		teamInformer.HasSynced,
+		tenantInformer.HasSynced,
 		runnerInformer.HasSynced,
 		userInformer.HasSynced,
 	) {
@@ -759,18 +759,18 @@ func main() {
 				// The run notes go to the recorder, which owns every write to
 				// varroa.run_notes.
 				apiDeps.RunNotePoster = api.NewBusRunNotePoster(busConn)
-				// The Team agent tools reach the operator's forge answers and
+				// The Tenant agent tools reach the operator's forge answers and
 				// the recorder's webhook responder over the bus. The core
 				// cluster answers every forge request.
 				apiDeps.ForgeRelay = forgerelay.Relay{Conn: busConn}
 				apiDeps.WebhookEnqueuer = api.NewBusWebhookEnqueuer(busConn)
 				apiDeps.CoreCluster = cluster
 				// The key file is mounted only when agentRunner is on. The
-				// cache needs the TeamAgent RBAC rule that the same flag renders.
-				if os.Getenv("VARROA_TEAM_AGENT_KEY_FILE") != "" {
-					teamAgents := teamagentcache.New(dynamicClient, operatorNamespace, logger)
-					go teamAgents.Run(ctx)
-					apiDeps.TeamAgents = teamAgents
+				// cache needs the TenantAgent RBAC rule that the same flag renders.
+				if os.Getenv("VARROA_TENANT_AGENT_KEY_FILE") != "" {
+					tenantAgents := tenantagentcache.New(dynamicClient, operatorNamespace, logger)
+					go tenantAgents.Run(ctx)
+					apiDeps.TenantAgents = tenantAgents
 				}
 			}
 
@@ -797,15 +797,15 @@ func main() {
 	} else {
 		logger.Warn("VARROA_RECORDSTORE_DSN not set; activity history reads are unavailable (deps.Backfill is nil)")
 	}
-	// The pipelines tenant resolver maps a {team} URL segment onto tenants
-	// through Team CRDs and the brood router. The record store adds the
-	// placement rows of Teams that a member cluster holds; a nil store
+	// The pipelines tenant resolver maps a {tenant} URL segment onto tenants
+	// through Tenant CRDs and the brood router. The record store adds the
+	// placement rows of Tenants that a member cluster holds; a nil store
 	// leaves that step off.
 	var placements api.TenantPlacementReader
 	if apiDeps.RecordStore != nil {
 		placements = apiDeps.RecordStore
 	}
-	apiDeps.TenantResolver = api.NewTeamTenantResolver(apiDeps.Store, apiDeps.Brood, apiDeps.Authorizer,
+	apiDeps.TenantResolver = api.NewTenantTenantResolver(apiDeps.Store, apiDeps.Brood, apiDeps.Authorizer,
 		api.WithMemberPlacements(placements))
 	apiDeps.JenkinsTokenSigner = tokenSigner
 
@@ -1077,12 +1077,12 @@ func main() {
 		ticketVerifier = auth.NewTicketVerifier(signer.PublicKey(), *bffURL)
 	}
 
-	// A Team agent token is verified only when the runner is on, which is the
+	// A Tenant agent token is verified only when the runner is on, which is the
 	// only time the key file is mounted. The verifier answers the cached
-	// TeamAgent for the token's UID and the session principal for its sid.
-	var teamAgentVerifier auth.TeamAgentVerifier
-	if apiDeps.TeamAgents != nil && os.Getenv("VARROA_TEAM_AGENT_KEY_FILE") != "" {
-		tav, err := teamagentauth.NewVerifier(os.Getenv("VARROA_TEAM_AGENT_KEY_FILE"), apiDeps.TeamAgents,
+	// TenantAgent for the token's UID and the session principal for its sid.
+	var tenantAgentVerifier auth.TenantAgentVerifier
+	if apiDeps.TenantAgents != nil && os.Getenv("VARROA_TENANT_AGENT_KEY_FILE") != "" {
+		tav, err := tenantagentauth.NewVerifier(os.Getenv("VARROA_TENANT_AGENT_KEY_FILE"), apiDeps.TenantAgents,
 			func(ctx context.Context, id uuid.UUID) (string, error) {
 				if apiDeps.Assistant == nil || apiDeps.Assistant.Store == nil {
 					return "", errors.New("assistant store is not configured")
@@ -1094,23 +1094,23 @@ func main() {
 				return sess.Principal, nil
 			})
 		if err != nil {
-			logger.Error("team agent verifier", "error", err)
+			logger.Error("tenant agent verifier", "error", err)
 			os.Exit(1)
 		}
-		teamAgentVerifier = tav
+		tenantAgentVerifier = tav
 	}
 
 	var authHandler http.Handler
 	if !telemetryDisabled {
 		otelHandler := otelhttp.NewHandler(mux, "varroa-bff")
 		if provider != nil {
-			authHandler = auth.AuthMiddleware(provider, keyVerifier, ticketVerifier, scheduleVerifier, teamAgentVerifier, otelHandler, logger)
+			authHandler = auth.AuthMiddleware(provider, keyVerifier, ticketVerifier, scheduleVerifier, tenantAgentVerifier, otelHandler, logger)
 		} else {
 			authHandler = otelHandler
 		}
 	} else {
 		if provider != nil {
-			authHandler = auth.AuthMiddleware(provider, keyVerifier, ticketVerifier, scheduleVerifier, teamAgentVerifier, mux, logger)
+			authHandler = auth.AuthMiddleware(provider, keyVerifier, ticketVerifier, scheduleVerifier, tenantAgentVerifier, mux, logger)
 		} else {
 			authHandler = mux
 		}

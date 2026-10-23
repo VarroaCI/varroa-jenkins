@@ -880,7 +880,7 @@ func TestCanManageCatalogSourcesInNamespace(t *testing.T) {
 	if !aOp.CanManageCatalogSourcesInNamespace(claimsOp, "create", "team-a") {
 		t.Error("cluster-wide operator must be allowed to create CatalogSources in any namespace")
 	}
-	if !aOp.CanManageCatalogSourcesInNamespace(claimsOp, "create", "team-z") {
+	if !aOp.CanManageCatalogSourcesInNamespace(claimsOp, "create", "tenant-z") {
 		t.Error("cluster-wide operator must be allowed to create CatalogSources in any namespace")
 	}
 
@@ -911,7 +911,7 @@ func TestCanManageCatalogSourcesInNamespace(t *testing.T) {
 				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "user-c"}},
 				RoleRef:  "selector-scoped",
 				Scope: &v1alpha1.VarroaRoleBindingScope{
-					ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+					ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"tenant": "a"}},
 				},
 			}},
 	}

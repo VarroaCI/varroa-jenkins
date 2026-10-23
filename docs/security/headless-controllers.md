@@ -174,8 +174,8 @@ https://<dashboard>/headless/<cluster>/<namespace>/<controller>/
 
 Every Jenkins link that the controller emits uses this origin. `BUILD_URL` and `JENKINS_URL`
 in a build point to the door too. A link to a Jenkins item opens the matching Varroa page.
-For example, `…/headless/core/team-a/ci/job/team-a/job/app/12/display/redirect` opens
-`/pipelines/team-a/team-a%2Fapp/<runId>`.
+For example, `…/headless/core/tenant-a/ci/job/tenant-a/job/app/12/display/redirect` opens
+`/pipelines/tenant-a/tenant-a%2Fapp/<runId>`.
 
 The door resolves a link only when a recorded run matches the item path. The record store must be
 enabled for the link to resolve. Without a match, the door answers "Build page not found".

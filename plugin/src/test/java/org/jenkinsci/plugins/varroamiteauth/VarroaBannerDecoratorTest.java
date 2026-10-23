@@ -80,8 +80,8 @@ public class VarroaBannerDecoratorTest {
 
         try (ACLContext ignored = ACL.as2(authFor("bob",
                 "authenticated", "anonymous", "ROLE:varroa:system-mite", "ROLE:jenkins-admin",
-                "team-ops", "team-dev", "everyone", "team-ops"))) {
-            assertEquals("team-ops,team-dev,everyone", decorator.getCurrentUserGroups());
+                "team-ops", "tenant-dev", "everyone", "team-ops"))) {
+            assertEquals("team-ops,tenant-dev,everyone", decorator.getCurrentUserGroups());
         }
     }
 

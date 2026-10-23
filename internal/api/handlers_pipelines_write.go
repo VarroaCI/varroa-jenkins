@@ -1,5 +1,5 @@
 // Package api: the pipelines write paths (design D3, D3a): POST
-// /pipelines/{team}/jobs/{job}/runs, POST /runs/{run}/cancel, POST
+// /pipelines/{tenant}/jobs/{job}/runs, POST /runs/{run}/cancel, POST
 // /runs/{run}/rerun, and the two run input routes POST
 // /runs/{run}/inputs/{input}/proceed and .../abort. The BFF mints or
 // validates the run identity, then
@@ -40,7 +40,7 @@ type runActionResponse struct {
 	State     string `json:"state"`
 }
 
-// createRunRequest is POST /pipelines/{team}/jobs/{job}/runs' body
+// createRunRequest is POST /pipelines/{tenant}/jobs/{job}/runs' body
 // (components/schemas.yaml#CreateRunRequest). Every field is optional.
 type createRunRequest struct {
 	ClientToken string            `json:"clientToken,omitempty"`
@@ -66,18 +66,18 @@ func decodeJSONBody(body io.Reader, v any) error {
 // read-admitted by TenantResolver.Resolve) to the tenant that hosts
 // jobPath, and return the folder-qualified job path to use from that
 // point on. A jobPath that already starts with a candidate's folder is
-// the long form. A jobPath that omits it is the short form: team names
-// the tenant already, so the one candidate whose folder equals team
+// the long form. A jobPath that omits it is the short form: tenant names
+// the tenant already, so the one candidate whose folder equals tenant
 // hosts jobPath under that folder. One surviving tenant is used. Two or
 // more break on an explicit cluster value; a remaining tie answers 409
 // naming every candidate, and no surviving tenant answers 404 naming
 // the expected shape. The first candidate is never taken silently.
-func selectWriteTenant(refs []TenantRef, team, jobPath, cluster string) (TenantRef, string, *ServiceError) {
-	survivors, paths := matchingWriteTenants(refs, team, jobPath)
+func selectWriteTenant(refs []TenantRef, tenant, jobPath, cluster string) (TenantRef, string, *ServiceError) {
+	survivors, paths := matchingWriteTenants(refs, tenant, jobPath)
 	if len(survivors) == 0 {
 		return TenantRef{}, "", &ServiceError{
 			Status:  http.StatusNotFound,
-			Message: fmt.Sprintf("no tenant hosts job path %q; expected <team>/<job path below the tenant folder>", jobPath),
+			Message: fmt.Sprintf("no tenant hosts job path %q; expected <tenant>/<job path below the tenant folder>", jobPath),
 		}
 	}
 	if len(survivors) == 1 {
@@ -113,9 +113,9 @@ func selectWriteTenant(refs []TenantRef, team, jobPath, cluster string) (TenantR
 // direct match wins outright, since an explicit folder-qualified path
 // names its tenant without guessing. Only when no ref matches directly
 // does it try the short form: jobPath alone, prefixed with the one
-// ref whose folder equals team. team already names the tenant, so a
+// ref whose folder equals tenant. tenant already names the tenant, so a
 // folder that disagrees with it is never a short-form candidate.
-func matchingWriteTenants(refs []TenantRef, team, jobPath string) ([]TenantRef, []string) {
+func matchingWriteTenants(refs []TenantRef, tenant, jobPath string) ([]TenantRef, []string) {
 	var direct []TenantRef
 	var directPaths []string
 	for _, ref := range refs {
@@ -128,7 +128,7 @@ func matchingWriteTenants(refs []TenantRef, team, jobPath string) ([]TenantRef, 
 		return direct, directPaths
 	}
 	for _, ref := range refs {
-		if ref.Folder != "" && ref.Folder == team {
+		if ref.Folder != "" && ref.Folder == tenant {
 			return []TenantRef{ref}, []string{ref.Folder + "/" + jobPath}
 		}
 	}
@@ -303,23 +303,23 @@ func (s *Server) resolveRunForWrite(w http.ResponseWriter, r *http.Request, clai
 	return run, ref, true
 }
 
-// --- Task 4.3: POST /pipelines/{team}/jobs/{job}/runs ---
+// --- Task 4.3: POST /pipelines/{tenant}/jobs/{job}/runs ---
 
-// createRun implements design D3's write path: resolve the team to one
+// createRun implements design D3's write path: resolve the tenant to one
 // write-admitted tenant, mint or validate the run identity, and publish
 // one TRIGGER_BUILD command. It is shared by handleCreateRun and the
 // run_pipeline MCP tool, which supplies an empty clientToken (design
 // D3a: an MCP call carries no client token, so the BFF mints a fresh
 // run identifier every time).
-func (s *Server) createRun(ctx context.Context, claims *auth.Claims, team, jobPath, clientToken, cluster string, parameters map[string]string) (runID, intentKey string, ref TenantRef, serr *ServiceError) {
+func (s *Server) createRun(ctx context.Context, claims *auth.Claims, tenant, jobPath, clientToken, cluster string, parameters map[string]string) (runID, intentKey string, ref TenantRef, serr *ServiceError) {
 	if s.deps.RecordStore == nil {
 		return "", "", TenantRef{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
 	}
-	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	refs, serr := s.resolveTenantTenants(ctx, claims, tenant)
 	if serr != nil {
 		return "", "", TenantRef{}, serr
 	}
-	ref, jobPath, serr = selectWriteTenant(refs, team, jobPath, cluster)
+	ref, jobPath, serr = selectWriteTenant(refs, tenant, jobPath, cluster)
 	if serr != nil {
 		return "", "", TenantRef{}, serr
 	}
@@ -362,7 +362,7 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	claims := auth.ClaimsFromContext(ctx)
-	team := r.PathValue("team")
+	tenant := r.PathValue("tenant")
 	jobPath := r.PathValue("job")
 
 	var req createRunRequest
@@ -371,7 +371,7 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runID, intentKey, _, serr := s.createRun(ctx, claims, team, jobPath, req.ClientToken, req.Cluster, req.Parameters)
+	runID, intentKey, _, serr := s.createRun(ctx, claims, tenant, jobPath, req.ClientToken, req.Cluster, req.Parameters)
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return
@@ -598,10 +598,10 @@ func (s *Server) handleReplayRun(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusAccepted, runActionResponse{RunID: runID, IntentKey: intentKey, State: "requested"})
 }
 
-// --- Scan a multibranch job: POST /pipelines/{team}/jobs/{job}/scan ---
+// --- Scan a multibranch job: POST /pipelines/{tenant}/jobs/{job}/scan ---
 
 // scanMultibranchRequest is the optional body of the scan route. An empty
-// body names no cluster, and the team's one write-admitted tenant answers.
+// body names no cluster, and the tenant's one write-admitted tenant answers.
 type scanMultibranchRequest struct {
 	Cluster string `json:"cluster,omitempty"`
 }
@@ -614,7 +614,7 @@ type scanRequestedResponse struct {
 }
 
 // scanMultibranch publishes one SCAN_MULTIBRANCH command for a multibranch
-// job. It resolves the team to one write-admitted tenant, runs the tenant
+// job. It resolves the tenant to one write-admitted tenant, runs the tenant
 // write check, and mints a fresh UUIDv7 scan identifier. The command goes
 // to the member that holds the job's home slot, so the scan runs where the
 // job's builds run. It answers the cluster the command reached, so the
@@ -623,15 +623,15 @@ type scanRequestedResponse struct {
 // The route refuses a job that cannot be scanned before it publishes. The
 // plugin records the outcome of an accepted scan, and the branch inventory
 // carries it.
-func (s *Server) scanMultibranch(ctx context.Context, claims *auth.Claims, team, jobPath, cluster string) (scanID string, target TenantRef, serr *ServiceError) {
+func (s *Server) scanMultibranch(ctx context.Context, claims *auth.Claims, tenant, jobPath, cluster string) (scanID string, target TenantRef, serr *ServiceError) {
 	if s.deps.RecordStore == nil {
 		return "", TenantRef{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
 	}
-	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	refs, serr := s.resolveTenantTenants(ctx, claims, tenant)
 	if serr != nil {
 		return "", TenantRef{}, serr
 	}
-	ref, jobPath, serr := selectWriteTenant(refs, team, jobPath, cluster)
+	ref, jobPath, serr := selectWriteTenant(refs, tenant, jobPath, cluster)
 	if serr != nil {
 		return "", TenantRef{}, serr
 	}
@@ -702,7 +702,7 @@ func (s *Server) scanTargetError(ctx context.Context, ref TenantRef, jobPath str
 	return nil
 }
 
-// handleScanMultibranch answers POST /pipelines/{team}/jobs/{job}/scan. It
+// handleScanMultibranch answers POST /pipelines/{tenant}/jobs/{job}/scan. It
 // answers 202 with the scan identifier and the state "requested".
 func (s *Server) handleScanMultibranch(w http.ResponseWriter, r *http.Request) {
 	if s.deps.RecordStore == nil {
@@ -715,7 +715,7 @@ func (s *Server) handleScanMultibranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	claims := auth.ClaimsFromContext(r.Context())
-	scanID, _, serr := s.scanMultibranch(r.Context(), claims, r.PathValue("team"), r.PathValue("job"), req.Cluster)
+	scanID, _, serr := s.scanMultibranch(r.Context(), claims, r.PathValue("tenant"), r.PathValue("job"), req.Cluster)
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return

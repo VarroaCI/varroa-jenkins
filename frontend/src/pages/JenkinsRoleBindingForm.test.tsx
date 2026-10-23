@@ -41,7 +41,7 @@ const existingBinding = createJenkinsRoleBinding({
     subjects: [{ kind: "User", name: "alice" }],
     roleRef: "jenkins-admin",
     controllerScope: { namespaces: ["infra"], controllerSelector: { matchLabels: { tier: "prod" } } },
-    jenkinsScope: { type: "Folder", folder: "/teams/infra", propagate: "Children" },
+    jenkinsScope: { type: "Folder", folder: "/tenants/infra", propagate: "Children" },
   },
 });
 
@@ -179,7 +179,7 @@ describe("JenkinsRoleBindingForm — create mode", () => {
 
     // Both scopes start collapsed
     expect(screen.queryByPlaceholderText("namespace-a, namespace-b")).not.toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("e.g. /teams/backend")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("e.g. /tenants/backend")).not.toBeInTheDocument();
 
     // Expand Controller Scope
     await user.click(screen.getByText(/Controller Scope/));
@@ -193,7 +193,7 @@ describe("JenkinsRoleBindingForm — create mode", () => {
 
     // Select Folder type and see folder input
     await user.selectOptions(combos[2], "Folder");
-    expect(screen.getByPlaceholderText("e.g. /teams/backend")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("e.g. /tenants/backend")).toBeInTheDocument();
   });
 
   it("navigates to /jenkins-rolebindings on Cancel", async () => {
@@ -245,7 +245,7 @@ describe("JenkinsRoleBindingForm — edit mode", () => {
     // Expand Jenkins Scope
     await user.click(screen.getByText(/Jenkins Scope/));
     expect(screen.getByDisplayValue("Folder")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("/teams/infra")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("/tenants/infra")).toBeInTheDocument();
   });
 
   it("submits update and navigates to /jenkins-rolebindings", async () => {

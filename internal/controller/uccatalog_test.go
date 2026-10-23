@@ -140,7 +140,7 @@ func TestUCDispatch_ThreeWay(t *testing.T) {
 		seedSingleton(tc)
 		uc := newUCTestServer(t)
 		r := newUCReconciler(t, tc, uc.URL)
-		src := reservedSource("some-team")
+		src := reservedSource("some-tenant")
 		crdstore.MustSeed(tc.store, src)
 		r.Reconcile(context.Background(), src)
 
@@ -235,7 +235,7 @@ func TestUCReservedSource_Adoption(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      updateCenterSourceName,
 			Namespace: testOperatorNS,
-			Labels:    map[string]string{"team": "platform"},
+			Labels:    map[string]string{"tenant": "platform"},
 		},
 		Spec: v1alpha1.CatalogSourceSpec{RepoURL: "https://example.com/x.git", Trusted: true},
 	})
@@ -256,7 +256,7 @@ func TestUCReservedSource_Adoption(t *testing.T) {
 	if got.Labels[managedByLabel] != managedByOperator {
 		t.Errorf("managed-by label not stamped: %v", got.Labels)
 	}
-	if got.Labels["team"] != "platform" {
+	if got.Labels["tenant"] != "platform" {
 		t.Errorf("user labels should survive: %v", got.Labels)
 	}
 	if len(got.OwnerReferences) != 1 || got.OwnerReferences[0].Kind != "UpdateCenter" {

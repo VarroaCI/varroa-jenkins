@@ -36,14 +36,14 @@ func (s *Server) handleListAssistantApprovals(w http.ResponseWriter, r *http.Req
 			s.writeJSONError(w, http.StatusBadRequest, "session must be an id")
 			return
 		}
-		// A Team agent session names its approvals by session alone, so a
-		// tenant reader sees them without being the Team agent's principal.
+		// A Tenant agent session names its approvals by session alone, so a
+		// tenant reader sees them without being the Tenant agent's principal.
 		sess, ok := s.sessionFor(w, r, rt, claims, id, sessionView)
 		if !ok {
 			return
 		}
 		query.SessionID = id
-		if sess.Kind == agent.KindTeamAgent {
+		if sess.Kind == agent.KindTenantAgent {
 			query.Principal = ""
 		}
 	} else if !s.assistantCanUse(claims) {
@@ -192,9 +192,9 @@ func (s *Server) resolveAssistantApproval(w http.ResponseWriter, r *http.Request
 
 	// Every decision checks whether the session can resume. A sibling
 	// approver may have written its result after this one counted pending
-	// approvals, so the check does not rely on PendingLeft. A Team agent
+	// approvals, so the check does not rely on PendingLeft. A Tenant agent
 	// session resumes through the runner's resume scan, not here.
-	if sess.Kind != agent.KindTeamAgent {
+	if sess.Kind != agent.KindTenantAgent {
 		s.resumeIfComplete(r, rt, claims, sess)
 	}
 

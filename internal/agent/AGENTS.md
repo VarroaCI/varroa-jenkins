@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The core of the assistant and the team agents. It holds the session, event,
+The core of the assistant and the tenant agents. It holds the session, event,
 approval, and settings types, the tool policy, the data-sharing rules, the
 budget checks, the fixed prompts, the session store, the model-provider
 contract with its adapters, and the sandbox contract.
@@ -45,7 +45,7 @@ contract with its adapters, and the sandbox contract.
   is its byte copy, and a test fails on drift. The guide stays under `MaxBytes`
   (8192) and holds no link and no blocked term.
 - **System text.** The loop starts the system text with `RunConfig.SystemBase`.
-  An empty value uses `loop.AssistantBase`. The Team agent runner sets
+  An empty value uses `loop.AssistantBase`. The Tenant agent runner sets
   `sessions.SystemBase(ta)`.
 - **Prompt cache.** The Messages adapter marks the last tool, the system
   text block, and the last content block of the last message. Three
@@ -53,8 +53,8 @@ contract with its adapters, and the sandbox contract.
   tokens and also reports them apart (`CacheCreationTokens`,
   `CacheReadTokens`).
 
-- The Team agent runner shares the store. `store.WithNotify` wraps any store and publishes one content-free notice per successful session write. A sweep publishes one notice for each session that it ends. `CreateUnderLock` (Postgres only) runs a check and the insert under a transaction-scoped advisory lock. `SetInstructionsSHA` records the instructions revision and one event in one write. `PutTeamAgentUnattended` writes one TeamAgent's unattended grant to the global settings; the other settings keys are untouched.
-- `agent.Settings.TeamAgentUnattended` maps `namespace/name` to `agent.UnattendedGrant`. A grant names its object by UID, so a recreated object gets no grant.
+- The Tenant agent runner shares the store. `store.WithNotify` wraps any store and publishes one content-free notice per successful session write. A sweep publishes one notice for each session that it ends. `CreateUnderLock` (Postgres only) runs a check and the insert under a transaction-scoped advisory lock. `SetInstructionsSHA` records the instructions revision and one event in one write. `PutTenantAgentUnattended` writes one TenantAgent's unattended grant to the global settings; the other settings keys are untouched.
+- `agent.Settings.TenantAgentUnattended` maps `namespace/name` to `agent.UnattendedGrant`. A grant names its object by UID, so a recreated object gets no grant.
 - `EndSession`, the lease sweep, and `ExpireDue` deny every pending approval of the session they end, with one `approval_resolved` event each. `ExpireDue` reads only the approvals of `waiting_approval` sessions.
 - `agent.MaxRunningSessions` is the cap that the create paths of both kinds use.
 - `SettingsPatch.Check` runs on the merged settings under the scope row lock (`SELECT … FOR UPDATE` in Postgres, `m.mu` in Memory). An error from it writes nothing. The API puts the provider and model pair rules there.

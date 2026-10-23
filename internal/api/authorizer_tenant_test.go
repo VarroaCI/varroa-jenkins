@@ -181,7 +181,7 @@ func TestCanAccessPipeline_Step5_NarrowedGrantAllowsEmptyJobPath(t *testing.T) {
 	ref := TenantRef{Tenant: "team-a", Folder: "team-a"}
 
 	if !a.CanReadPipeline(claims, ref, "") {
-		t.Error("expected a job-narrowed grant to admit the empty job path (renders the team page)")
+		t.Error("expected a job-narrowed grant to admit the empty job path (renders the tenant page)")
 	}
 }
 
@@ -308,12 +308,12 @@ func TestCanReadPipeline_SelectorScopedBindingRefused(t *testing.T) {
 			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "u"}},
 			RoleRef:  "dev",
 			Scope: &v1alpha1.VarroaRoleBindingScope{
-				ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "team-a"}},
+				ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"tenant": "team-a"}},
 			},
 		}},
 	}
 	ctrl := &v1alpha1.Controller{
-		ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a", Labels: map[string]string{"team": "team-a"}},
+		ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a", Labels: map[string]string{"tenant": "team-a"}},
 	}
 	a := NewAuthorizer(testResolverWithController(pipelinesRoles(), bindings, ctrl), false)
 	claims := &auth.Claims{Subject: "u"}
@@ -354,12 +354,12 @@ func TestCanAccessPipeline_NilAuthorizerDeniesAll(t *testing.T) {
 // TenantRef constructors.
 // --------------------------------------------------------------------------
 
-func TestTenantRefFromTenant_TeamTenant(t *testing.T) {
+func TestTenantRefFromTenant_TenantTenant(t *testing.T) {
 	ref, err := TenantRefFromTenant("team-a")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := TenantRef{Tenant: "team-a", Team: "team-a", Folder: "team-a"}
+	want := TenantRef{Tenant: "team-a", TenantName: "team-a", Folder: "team-a"}
 	if ref != want {
 		t.Errorf("got %+v, want %+v", ref, want)
 	}
@@ -374,7 +374,7 @@ func TestTenantRefFromTenant_ControllerTenant(t *testing.T) {
 		Namespace:  "ns-a",
 		Controller: "ctrl-a",
 		Tenant:     "ns-a/ctrl-a",
-		Team:       "ctrl-a",
+		TenantName: "ctrl-a",
 		Folder:     "",
 	}
 	if ref != want {
@@ -401,7 +401,7 @@ func TestTenantRefFromRow_StampsRowIdentityColumns(t *testing.T) {
 		Namespace:  "ns-a",
 		Controller: "ctrl-a",
 		Tenant:     "team-a",
-		Team:       "team-a",
+		TenantName: "team-a",
 		Folder:     "team-a",
 	}
 	if ref != want {

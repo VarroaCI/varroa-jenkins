@@ -15,11 +15,11 @@ export const A1_VALUES = {
   skipReasons: ["budget_day", "kill_switch", "data_sharing_none", "provider_unavailable"] as AssistantSkipReason[],
   errorCodes: [
     "assistant_disabled", "assistant_key_unavailable", "assistant_off", "assistant_busy", "prompt_not_startable", "kill_switch",
-    "approval_expired", "team_agent_session",
+    "approval_expired", "tenant_agent_session",
   ] as AssistantErrorCode[],
   httpCodes: [
     "assistant_disabled", "assistant_key_unavailable", "assistant_off", "assistant_busy", "prompt_not_startable", "kill_switch",
-    "approval_expired", "team_agent_session", "note_too_long", "note_session_invalid",
+    "approval_expired", "tenant_agent_session", "note_too_long", "note_session_invalid",
   ] as (AssistantErrorCode | RunNoteErrorCode)[],
   approvalStates: ["pending", "approved", "denied", "expired"] as AssistantApprovalState[],
 };
@@ -49,7 +49,7 @@ export const ERROR_LABELS: Record<AssistantErrorCode, string> = {
   prompt_not_startable: "This prompt cannot start here.",
   kill_switch: "The assistant is paused by an administrator.",
   approval_expired: "This approval expired. Ask the assistant again.",
-  team_agent_session: "A Team agent session takes no messages.",
+  tenant_agent_session: "A Tenant agent session takes no messages.",
 };
 
 export const HTTP_LABELS: Record<AssistantErrorCode | RunNoteErrorCode, string> = {

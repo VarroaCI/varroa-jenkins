@@ -37,15 +37,15 @@ func TestValidateRunNotePost(t *testing.T) {
 		want string
 	}{
 		{"no principal", RunNotePostRequest{RunID: run, Body: "x"}, RunNoteErrInvalidRequest},
-		{"run and job", RunNotePostRequest{RunID: run, Cluster: "c", Team: "t", JobPath: "j", Principal: "p", Body: "x"}, RunNoteErrInvalidRequest},
-		{"job missing team", RunNotePostRequest{Cluster: "c", JobPath: "j", Principal: "p", Body: "x"}, RunNoteErrInvalidRequest},
+		{"run and job", RunNotePostRequest{RunID: run, Cluster: "c", Tenant: "t", JobPath: "j", Principal: "p", Body: "x"}, RunNoteErrInvalidRequest},
+		{"job missing tenant", RunNotePostRequest{Cluster: "c", JobPath: "j", Principal: "p", Body: "x"}, RunNoteErrInvalidRequest},
 		{"neither", RunNotePostRequest{Principal: "p", Body: "x"}, RunNoteErrInvalidRequest},
 		{"bad run id", RunNotePostRequest{RunID: "nope", Principal: "p", Body: "x"}, RunNoteErrInvalidRequest},
 		{"bad session id", RunNotePostRequest{RunID: run, SessionID: "nope", Principal: "p", Body: "x"}, RunNoteErrInvalidRequest},
 		{"empty body", RunNotePostRequest{RunID: run, Principal: "p"}, RunNoteErrInvalidBody},
 		{"long body", RunNotePostRequest{RunID: run, Principal: "p", Body: strings.Repeat("a", RunNoteMaxBytes+1)}, RunNoteErrInvalidBody},
 		{"valid run", RunNotePostRequest{RunID: run, Principal: "p", Body: "x"}, ""},
-		{"valid job", RunNotePostRequest{Cluster: "c", Team: "t", JobPath: "j", Principal: "p", Body: "x"}, ""},
+		{"valid job", RunNotePostRequest{Cluster: "c", Tenant: "t", JobPath: "j", Principal: "p", Body: "x"}, ""},
 	}
 	for _, tc := range cases {
 		if got := validateRunNotePost(tc.req); got != tc.want {
@@ -80,7 +80,7 @@ func TestPostRunNote_WriteAndRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("human note: %v", err)
 	}
-	if !human.Created || human.Note == nil || human.Note.Team != "payments" || human.Note.JobPath != "payments/api" {
+	if !human.Created || human.Note == nil || human.Note.Tenant != "payments" || human.Note.JobPath != "payments/api" {
 		t.Fatalf("human note = %+v", human)
 	}
 	if human.Note.RunCreatedAt == nil || !human.Note.RunCreatedAt.Equal(created) {
@@ -116,7 +116,7 @@ func TestPostRunNote_MissingRunAndJobNote(t *testing.T) {
 		t.Fatalf("missing run = %+v, %v; want %s", missing, err, RunNoteErrNotFound)
 	}
 
-	job, err := PostRunNote(ctx, pool, RunNotePostRequest{Cluster: "core", Team: "payments", JobPath: "payments/api", Principal: "bob", Body: "job note"})
+	job, err := PostRunNote(ctx, pool, RunNotePostRequest{Cluster: "core", Tenant: "payments", JobPath: "payments/api", Principal: "bob", Body: "job note"})
 	if err != nil || !job.Created || job.Note == nil || job.Note.RunID != nil || job.Note.RunCreatedAt != nil {
 		t.Fatalf("job note = %+v, %v", job, err)
 	}
@@ -137,7 +137,7 @@ func TestRunNoteReaders(t *testing.T) {
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
-	if _, err := PostRunNote(ctx, pool, RunNotePostRequest{Cluster: "core", Team: "payments", JobPath: "payments/api", Principal: "bob", Body: "job"}); err != nil {
+	if _, err := PostRunNote(ctx, pool, RunNotePostRequest{Cluster: "core", Tenant: "payments", JobPath: "payments/api", Principal: "bob", Body: "job"}); err != nil {
 		t.Fatalf("job note: %v", err)
 	}
 
@@ -179,7 +179,7 @@ func TestRunNoteRetention_FollowsRunAndWindow(t *testing.T) {
 	if _, err := db.Exec(`DELETE FROM varroa.runs WHERE run_id = $1`, gone); err != nil {
 		t.Fatalf("purge run: %v", err)
 	}
-	if _, err := PostRunNote(ctx, pool, RunNotePostRequest{Cluster: "core", Team: "payments", JobPath: "payments/api", Principal: "bob", Body: "old job"}); err != nil {
+	if _, err := PostRunNote(ctx, pool, RunNotePostRequest{Cluster: "core", Tenant: "payments", JobPath: "payments/api", Principal: "bob", Body: "old job"}); err != nil {
 		t.Fatalf("job note: %v", err)
 	}
 	if _, err := db.Exec(`UPDATE varroa.run_notes SET created_at = $1 WHERE run_id IS NULL`, old); err != nil {
@@ -204,11 +204,11 @@ func TestRunNotesTableConstraints(t *testing.T) {
 	t.Parallel()
 	db := setupTestDB(t)
 	cases := map[string]string{
-		"empty body": `INSERT INTO varroa.run_notes (id, cluster, team, job_path, principal, body)
+		"empty body": `INSERT INTO varroa.run_notes (id, cluster, tenant, job_path, principal, body)
 			VALUES (gen_random_uuid(), 'c', 't', 'j', 'p', '')`,
-		"run without created_at": `INSERT INTO varroa.run_notes (id, run_id, cluster, team, job_path, principal, body)
+		"run without created_at": `INSERT INTO varroa.run_notes (id, run_id, cluster, tenant, job_path, principal, body)
 			VALUES (gen_random_uuid(), gen_random_uuid(), 'c', 't', 'j', 'p', 'x')`,
-		"empty job path": `INSERT INTO varroa.run_notes (id, cluster, team, job_path, principal, body)
+		"empty job path": `INSERT INTO varroa.run_notes (id, cluster, tenant, job_path, principal, body)
 			VALUES (gen_random_uuid(), 'c', 't', '', 'p', 'x')`,
 	}
 	for name, stmt := range cases {

@@ -34,7 +34,7 @@ const cellNetworkPolicyGoldenPath = "testdata/cell-networkpolicy.golden.yaml"
 func TestBuildCellNetworkPolicyGolden(t *testing.T) {
 	spec := CellPolicySpec{
 		ControllerName:   "ci-00000000",
-		Namespace:        "team-a",
+		Namespace:        "tenant-a",
 		ReleaseNamespace: "varroa-system",
 		GatewayGRPCPort:  9090,
 		AgentNamespaces:  []string{"agents-b", "agents-a"}, // deliberately unsorted
@@ -221,11 +221,11 @@ func TestReconcileCellNetworkPolicyAddsTenantNamespaceOnNextTick(t *testing.T) {
 	rec := newTestReconciler(client)
 	rec.cellsConfig = CellsConfig{NetworkPolicyEnabled: true, CellIsolation: CellIsolation{Enabled: true}}
 
-	crdstore.MustSeed(client.store, &v1alpha1.Team{
+	crdstore.MustSeed(client.store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "team-a"},
-		Spec: v1alpha1.TeamSpec{
+		Spec: v1alpha1.TenantSpec{
 			Namespaces: []string{"agents-a"},
-			Pipelines:  &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: "agents-a"},
+			Pipelines:  &v1alpha1.TenantPipelinesSpec{Profile: "lts", AgentNamespace: "agents-a"},
 		},
 	})
 
@@ -428,26 +428,26 @@ func TestSingleAddressCIDR(t *testing.T) {
 	}
 }
 
-// runnerPlacedTeam and runnerSSHRunner build the minimal Team/Runner pair
+// runnerPlacedTenant and runnerSSHRunner build the minimal Tenant/Runner pair
 // reconcileCellNetworkPolicy's runner-contribution read needs, mirroring
 // the runners package's own private test fixtures (unexported there, so
 // duplicated here rather than imported).
-func runnerPlacedTeam(cell, cellNamespace string) *v1alpha1.Team {
-	return &v1alpha1.Team{
+func runnerPlacedTenant(cell, cellNamespace string) *v1alpha1.Tenant {
+	return &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments", Generation: 1},
-		Spec:       v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{AgentNamespace: "agents"}},
-		Status: v1alpha1.TeamStatus{
-			Placement: &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: cell, CellNamespace: cellNamespace},
+		Spec:       v1alpha1.TenantSpec{Pipelines: &v1alpha1.TenantPipelinesSpec{AgentNamespace: "agents"}},
+		Status: v1alpha1.TenantStatus{
+			Placement: &v1alpha1.TenantPlacementStatus{Cluster: "core", Cell: cell, CellNamespace: cellNamespace},
 		},
 	}
 }
 
 func runnerSSHRunner() *v1alpha1.Runner {
-	const name, team, host = "win-1", "payments", "10.20.0.5"
+	const name, tenant, host = "win-1", "payments", "10.20.0.5"
 	return &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Generation: 1},
 		Spec: v1alpha1.RunnerSpec{
-			Team:          team,
+			Tenant:        tenant,
 			Launcher:      "ssh",
 			RemoteFS:      "/home/jenkins",
 			Host:          host,
@@ -469,11 +469,11 @@ func seedRunnerCredentialSecret(client *testClient) {
 	client.existingSecrets["ssh-key"] = map[string][]byte{"username": []byte("jenkins"), "privateKey": []byte("PEMDATA")}
 }
 
-func runnerInboundRunner(name, team string) *v1alpha1.Runner {
+func runnerInboundRunner(name, tenant string) *v1alpha1.Runner {
 	return &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Generation: 1},
 		Spec: v1alpha1.RunnerSpec{
-			Team:     team,
+			Tenant:   tenant,
 			Launcher: "inbound",
 			RemoteFS: "/home/jenkins",
 		},
@@ -493,7 +493,7 @@ func TestReconcileCellNetworkPolicy_SSHRunnerContributesPeer(t *testing.T) {
 	cr := testController("test", "ns1", v1alpha1.ControllerPhaseConnected)
 	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
 
-	crdstore.MustSeed(client.store, runnerPlacedTeam("test", "ns1"))
+	crdstore.MustSeed(client.store, runnerPlacedTenant("test", "ns1"))
 	seedRunnerCredentialSecret(client)
 	crdstore.MustSeed(client.store, runnerSSHRunner())
 
@@ -535,7 +535,7 @@ func TestReconcileCellNetworkPolicy_InboundOnlyContributesNoPeer(t *testing.T) {
 	cr := testController("test", "ns1", v1alpha1.ControllerPhaseConnected)
 	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
 
-	crdstore.MustSeed(client.store, runnerPlacedTeam("test", "ns1"))
+	crdstore.MustSeed(client.store, runnerPlacedTenant("test", "ns1"))
 	crdstore.MustSeed(client.store, runnerInboundRunner("agent-1", "payments"))
 
 	if err := rec.reconcileCellNetworkPolicy(context.Background(), cr, mustRunnerContribution(t, rec, cr)); err != nil {
@@ -560,7 +560,7 @@ func TestReconcileCellNetworkPolicy_DeletedRunnerLosesItsPeer(t *testing.T) {
 	cr := testController("test", "ns1", v1alpha1.ControllerPhaseConnected)
 	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
 
-	crdstore.MustSeed(client.store, runnerPlacedTeam("test", "ns1"))
+	crdstore.MustSeed(client.store, runnerPlacedTenant("test", "ns1"))
 	seedRunnerCredentialSecret(client)
 	crdstore.MustSeed(client.store, runnerSSHRunner())
 
@@ -613,7 +613,7 @@ func TestReconcileController_RunnerContributionReadOnceEachTick(t *testing.T) {
 	cr := newGateCtrl("cell-a", 0, "", nil)
 	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
 
-	crdstore.MustSeed(client.store, runnerPlacedTeam("cell-a", "ns"))
+	crdstore.MustSeed(client.store, runnerPlacedTenant("cell-a", "ns"))
 	seedRunnerCredentialSecret(client)
 	crdstore.MustSeed(client.store, runnerSSHRunner())
 
@@ -668,7 +668,7 @@ func TestReconcileController_RunnerContributionErrorWritesNothing(t *testing.T) 
 	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
 	cr.Status.Phase = v1alpha1.ControllerPhaseConnected
 	crdstore.MustSeed(client.store, cr)
-	crdstore.MustSeed(client.store, runnerPlacedTeam("cell-a", "ns"))
+	crdstore.MustSeed(client.store, runnerPlacedTenant("cell-a", "ns"))
 	seedRunnerCredentialSecret(client)
 	crdstore.MustSeed(client.store, runnerSSHRunner())
 

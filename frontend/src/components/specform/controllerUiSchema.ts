@@ -68,7 +68,7 @@ export const CONTROLLER_SPEC_UI_SCHEMA: UiSchema = {
   cell: {
     "ui:title": "Cell",
     "ui:help":
-      "A cell hosts tenant pipelines for several Teams. maxTenants bounds placement.",
+      "A cell hosts tenant pipelines for several Tenants. maxTenants bounds placement.",
     enabled: {
       "ui:title": "Enabled",
       "ui:readonly": true,

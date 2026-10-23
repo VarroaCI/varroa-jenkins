@@ -55,7 +55,7 @@ func TestClearStatusFields_RunnerClearsCellFields(t *testing.T) {
 
 	MustSeed(f, &v1alpha1.Runner{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments-win-1"},
-		Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "ssh", RemoteFS: "/home/jenkins"},
+		Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "ssh", RemoteFS: "/home/jenkins"},
 	})
 
 	// Write a status with both fields set.
@@ -91,27 +91,27 @@ func TestClearStatusFields_RunnerClearsCellFields(t *testing.T) {
 	}
 }
 
-// TestClearStatusFields_TeamClearsPipelines asserts a Team status patch that
+// TestClearStatusFields_TenantClearsPipelines asserts a Tenant status patch that
 // omits pipelines force-nulls it: the door token and secret of a tenant
 // that left pipelines must not survive in etcd to become valid again when
 // pipelines is re-enabled.
-func TestClearStatusFields_TeamClearsPipelines(t *testing.T) {
+func TestClearStatusFields_TenantClearsPipelines(t *testing.T) {
 	ctx := context.Background()
 	f := NewFake()
-	gvr, err := GVRFor[v1alpha1.Team]()
+	gvr, err := GVRFor[v1alpha1.Tenant]()
 	if err != nil {
-		t.Fatalf("GVRFor[Team]: %v", err)
+		t.Fatalf("GVRFor[Tenant]: %v", err)
 	}
-	MustSeed(f, &v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
-	if err := PatchStatus[v1alpha1.Team](ctx, f, "payments", "", &v1alpha1.TeamStatus{
-		Pipelines: &v1alpha1.TeamPipelinesStatus{WebhookToken: "tok", WebhookSecret: "sec"},
+	MustSeed(f, &v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
+	if err := PatchStatus[v1alpha1.Tenant](ctx, f, "payments", "", &v1alpha1.TenantStatus{
+		Pipelines: &v1alpha1.TenantPipelinesStatus{WebhookToken: "tok", WebhookSecret: "sec"},
 	}); err != nil {
 		t.Fatalf("PatchStatus (set): %v", err)
 	}
-	if err := f.PatchObjectStatus(ctx, gvr, "", "payments", &v1alpha1.TeamStatus{}); err != nil {
+	if err := f.PatchObjectStatus(ctx, gvr, "", "payments", &v1alpha1.TenantStatus{}); err != nil {
 		t.Fatalf("PatchObjectStatus (clear): %v", err)
 	}
-	got, err := Get[v1alpha1.Team](ctx, f, "payments", "")
+	got, err := Get[v1alpha1.Tenant](ctx, f, "payments", "")
 	if err != nil {
 		t.Fatalf("Get (after clear): %v", err)
 	}
@@ -263,7 +263,7 @@ func TestApplyStatusClears_VarroaRoleClearsFederation(t *testing.T) {
 	}
 }
 
-// TestApplyStatusClears_TeamClearsThePendingPurgeKeys asserts a Team status
+// TestApplyStatusClears_TenantClearsThePendingPurgeKeys asserts a Tenant status
 // patch that still carries a pipelines object clears the three pendingPurge
 // keys inside it.
 //
@@ -272,18 +272,18 @@ func TestApplyStatusClears_VarroaRoleClearsFederation(t *testing.T) {
 // drops them, the merge patch leaves the server's copies in place, and the
 // tick repeats a purge that already succeeded on every reconciliation that
 // follows.
-func TestApplyStatusClears_TeamClearsThePendingPurgeKeys(t *testing.T) {
+func TestApplyStatusClears_TenantClearsThePendingPurgeKeys(t *testing.T) {
 	ctx := context.Background()
 	f := NewFake()
-	gvr, err := GVRFor[v1alpha1.Team]()
+	gvr, err := GVRFor[v1alpha1.Tenant]()
 	if err != nil {
-		t.Fatalf("GVRFor[Team]: %v", err)
+		t.Fatalf("GVRFor[Tenant]: %v", err)
 	}
-	MustSeed(f, &v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
+	MustSeed(f, &v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
 
 	generation := int64(4)
-	if err := PatchStatus[v1alpha1.Team](ctx, f, "payments", "", &v1alpha1.TeamStatus{
-		Pipelines: &v1alpha1.TeamPipelinesStatus{
+	if err := PatchStatus[v1alpha1.Tenant](ctx, f, "payments", "", &v1alpha1.TenantStatus{
+		Pipelines: &v1alpha1.TenantPipelinesStatus{
 			WebhookToken:              "tok",
 			PendingPurgeGeneration:    &generation,
 			PendingPurgeCell:          "cell-a",
@@ -295,8 +295,8 @@ func TestApplyStatusClears_TeamClearsThePendingPurgeKeys(t *testing.T) {
 
 	// The status the retry computes once the purge succeeds: the pipelines
 	// object stands, and every pendingPurge field holds its zero value.
-	cleared := &v1alpha1.TeamStatus{
-		Pipelines: &v1alpha1.TeamPipelinesStatus{WebhookToken: "tok"},
+	cleared := &v1alpha1.TenantStatus{
+		Pipelines: &v1alpha1.TenantPipelinesStatus{WebhookToken: "tok"},
 	}
 	statusJSON, err := json.Marshal(cleared)
 	if err != nil {
@@ -325,7 +325,7 @@ func TestApplyStatusClears_TeamClearsThePendingPurgeKeys(t *testing.T) {
 	if err := f.PatchObjectStatus(ctx, gvr, "", "payments", statusMap); err != nil {
 		t.Fatalf("PatchObjectStatus (clear): %v", err)
 	}
-	got, err := Get[v1alpha1.Team](ctx, f, "payments", "")
+	got, err := Get[v1alpha1.Tenant](ctx, f, "payments", "")
 	if err != nil {
 		t.Fatalf("Get (after clear): %v", err)
 	}
@@ -344,25 +344,25 @@ func TestApplyStatusClears_TeamClearsThePendingPurgeKeys(t *testing.T) {
 	}
 }
 
-// TestRegistryTeamAgent proves the TeamAgent kind resolves as a namespaced
+// TestRegistryTenantAgent proves the TenantAgent kind resolves as a namespaced
 // kind and clears its status fields on an apply.
-func TestRegistryTeamAgent(t *testing.T) {
-	gvr, err := GVRFor[v1alpha1.TeamAgent]()
+func TestRegistryTenantAgent(t *testing.T) {
+	gvr, err := GVRFor[v1alpha1.TenantAgent]()
 	if err != nil {
-		t.Fatalf("GVRFor[TeamAgent]: %v", err)
+		t.Fatalf("GVRFor[TenantAgent]: %v", err)
 	}
-	if gvr.Group != "varroa.dev" || gvr.Version != "v1alpha1" || gvr.Resource != "teamagents" {
+	if gvr.Group != "varroa.dev" || gvr.Version != "v1alpha1" || gvr.Resource != "tenantagents" {
 		t.Errorf("unexpected GVR: %+v", gvr)
 	}
-	info, err := gvrInfo[v1alpha1.TeamAgent]()
+	info, err := gvrInfo[v1alpha1.TenantAgent]()
 	if err != nil {
-		t.Fatalf("gvrInfo[TeamAgent]: %v", err)
+		t.Fatalf("gvrInfo[TenantAgent]: %v", err)
 	}
 	if !info.namespaced {
-		t.Error("TeamAgent must be namespaced")
+		t.Error("TenantAgent must be namespaced")
 	}
-	if info.kind != "TeamAgent" {
-		t.Errorf("kind = %q, want TeamAgent", info.kind)
+	if info.kind != "TenantAgent" {
+		t.Errorf("kind = %q, want TenantAgent", info.kind)
 	}
 	cleared := clearStatusFields[gvr]
 	if _, ok := cleared["lastSession"]; !ok {

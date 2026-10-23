@@ -30,9 +30,9 @@ func newDrainingCellFixture(t *testing.T) (*testClient, *Reconciler, *captureTra
 		Tenants:        []string{"mover", "stay"},
 		AppliedTenants: []string{"mover", "stay"},
 	}
-	stay := pipelinesTeam("stay")
+	stay := pipelinesTenant("stay")
 	seedTenantBundle(client, stay, "stay-bundle", cleanPipelineItemsYAML)
-	mover := pipelinesTeam("mover")
+	mover := pipelinesTenant("mover")
 	seedTenantBundle(client, mover, "mover-bundle", cleanPipelineItemsYAML)
 	markDraining(mover, cr)
 	crdstore.MustSeed(client.store, stay)
@@ -76,7 +76,7 @@ func TestCellDrainingTenantsFollowDeliveredPush(t *testing.T) {
 	// The mover no longer drains, so the next push would carry its folder.
 	// That push is not delivered.
 	transport.sendErr = miteTransport.ErrMiteUnreachable
-	mover := pipelinesTeam("mover")
+	mover := pipelinesTenant("mover")
 	seedTenantBundle(client, mover, "mover-bundle", cleanPipelineItemsYAML)
 	crdstore.MustSeed(client.store, mover)
 	_ = rec.reconcileController(context.Background(), cr)
@@ -152,13 +152,13 @@ func TestAssembleCellContent_ReportsDrainingTenants(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := cellControllerFixture()
 
-	clean := pipelinesTeam("clean")
+	clean := pipelinesTenant("clean")
 	seedTenantBundle(client, clean, "clean-bundle", cleanPipelineItemsYAML)
-	draining := pipelinesTeam("draining")
+	draining := pipelinesTenant("draining")
 	markDraining(draining, cr)
 	seedTenantBundle(client, draining, "draining-bundle", cleanPipelineItemsYAML)
 
-	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{clean, draining}, nil, "")
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Tenant{clean, draining}, nil, "")
 	if err != nil {
 		t.Fatalf("assembleCellContent: %v", err)
 	}
@@ -176,18 +176,18 @@ func TestDrainingTenantsStayASubsetOfTenants(t *testing.T) {
 	cr := cellControllerFixture()
 
 	names := make([]string, 0, 64)
-	teams := make([]*v1alpha1.Team, 0, 64)
+	tenants := make([]*v1alpha1.Tenant, 0, 64)
 	for i := range 64 {
 		name := fmt.Sprintf("tenant-%02d", i)
 		names = append(names, name)
-		team := pipelinesTeam(name)
-		markDraining(team, cr)
-		seedTenantBundle(client, team, name+"-bundle", cleanPipelineItemsYAML)
-		teams = append(teams, team)
+		tenant := pipelinesTenant(name)
+		markDraining(tenant, cr)
+		seedTenantBundle(client, tenant, name+"-bundle", cleanPipelineItemsYAML)
+		tenants = append(tenants, tenant)
 	}
 	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: names}
 
-	state, err := rec.assembleCellContent(context.Background(), cr, teams, nil, "")
+	state, err := rec.assembleCellContent(context.Background(), cr, tenants, nil, "")
 	if err != nil {
 		t.Fatalf("assembleCellContent: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestCellItemsApplyResultFromReplacedInstanceIgnored(t *testing.T) {
 		cr.Status.Cell.Instance = "pod-new"
 		cr.Status.Cell.AppliedTenants = []string{"search"}
 		cr.Status.Cell.TenantWarnings = []v1alpha1.TenantWarning{{
-			Tenant: "payments", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "create payments/repos: boom",
+			Tenant: "payments", Reason: v1alpha1.TenantReasonItemsApplyFailed, Message: "create payments/repos: boom",
 		}}
 		return cr
 	}
@@ -283,7 +283,7 @@ func TestCellBufferedResultFromReplacedPodDoesNotReaddDroppedTenant(t *testing.T
 	cr.Status.Cell.Instance = "pod-old"
 	cr.Status.Cell.AppliedTenants = []string{"payments", "search"}
 	cr.Status.Cell.TenantWarnings = []v1alpha1.TenantWarning{{
-		Tenant: "payments", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "create payments/repos: boom",
+		Tenant: "payments", Reason: v1alpha1.TenantReasonItemsApplyFailed, Message: "create payments/repos: boom",
 	}}
 
 	transport.drainResults = []*mitev1.CommandResult{
@@ -327,7 +327,7 @@ func newParkingCellFixture(t *testing.T) (*testClient, *Reconciler, *captureTran
 	cr.Status.Cell.Instance = "pod-old"
 	cr.Status.Cell.AppliedTenants = []string{"search"}
 	cr.Status.Cell.TenantWarnings = []v1alpha1.TenantWarning{{
-		Tenant: "payments", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "create payments/repos: boom",
+		Tenant: "payments", Reason: v1alpha1.TenantReasonItemsApplyFailed, Message: "create payments/repos: boom",
 	}}
 	return client, rec, transport, cr
 }

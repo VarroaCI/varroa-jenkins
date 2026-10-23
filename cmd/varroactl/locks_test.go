@@ -166,21 +166,21 @@ func TestLocksList_ReadsAllLocks(t *testing.T) {
 	}
 }
 
-// TestLocksList_TeamReadsTeamPath asserts --team reads the team's own path.
-func TestLocksList_TeamReadsTeamPath(t *testing.T) {
+// TestLocksList_TenantReadsTenantPath asserts --tenant reads the tenant's own path.
+func TestLocksList_TenantReadsTenantPath(t *testing.T) {
 	testSetup(t)
 	srv := fleetLockServer(t, "/api/v1/pipelines/acme/locks", lockListBody())
 	defer srv.Close()
 
 	var code int
 	out := captureStdout(t, func() {
-		code = run([]string{"locks", "list", "--team", "acme", "--server", srv.URL})
+		code = run([]string{"locks", "list", "--tenant", "acme", "--server", srv.URL})
 	})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	if !strings.Contains(out, "acme/smoke") {
-		t.Errorf("output = %q, want the team's rows", out)
+		t.Errorf("output = %q, want the tenant's rows", out)
 	}
 }
 

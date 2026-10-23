@@ -114,7 +114,7 @@ spec:
                           maxItems: 64
                           type: array
                         name:
-                          description: Name is a Team name.
+                          description: Name is a Tenant name.
                           maxLength: 253
                           type: string
                       required:
@@ -131,7 +131,7 @@ spec:
                   Global.
                 properties:
                   folder:
-                    description: Folder is the folder path, e.g. "team-a/project-x".
+                    description: Folder is the folder path, e.g. "tenant-a/project-x".
                       Only for Type=Folder.
                     type: string
                   pattern:

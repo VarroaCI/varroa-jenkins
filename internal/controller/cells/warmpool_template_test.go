@@ -39,7 +39,7 @@ func getCell(t *testing.T, store crdstore.Backend, name string) *v1alpha1.Contro
 // same pass creates carry its three fields.
 func TestCellPool_AutoCreatedPoolCarriesTheTemplate(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam())
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant())
 
 	cfg := WarmPoolConfig{Enabled: true, PerProfile: 1, MaxTenantsPerCell: 10, CellTemplate: seedTemplate()}
 	r := newReconciler(store, cfg)
@@ -74,7 +74,7 @@ func TestCellPool_AutoCreatedPoolCarriesTheTemplate(t *testing.T) {
 // A nil configured template seeds a pool with no template.
 func TestCellPool_NilConfiguredTemplateSeedsNone(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam())
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant())
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, PerProfile: 1, MaxTenantsPerCell: 10})
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -89,7 +89,7 @@ func TestCellPool_NilConfiguredTemplateSeedsNone(t *testing.T) {
 // reaches it.
 func TestCellPool_ExistingPoolKeepsItsTemplate(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(1))
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant(), newPool(1))
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, PerProfile: 1, MaxTenantsPerCell: 10, CellTemplate: seedTemplate()})
 	for i := 0; i < 2; i++ {

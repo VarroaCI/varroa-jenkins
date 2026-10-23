@@ -53,7 +53,7 @@ func memberUserTestWriterBinding(subject v1alpha1.SubjectRef) *v1alpha1.VarroaRo
 }
 
 // memberUserTestSubjects returns "Kind:Name" for each subject of the member
-// role of the test team, cluster-wide or narrowed.
+// role of the test tenant, cluster-wide or narrowed.
 func memberUserTestSubjects(t *testing.T, r *Resolver, roleName string) map[string]bool {
 	t.Helper()
 	controller := memberRoleTestController()
@@ -67,8 +67,8 @@ func memberUserTestSubjects(t *testing.T, r *Resolver, roleName string) map[stri
 	}
 	out := map[string]bool{}
 	for _, s := range a.Subjects {
-		// The team's managed Group is always present; the tests check User entries.
-		if s.Kind == "Group" && s.Name == "team-sbsoftware" {
+		// The tenant's managed Group is always present; the tests check User entries.
+		if s.Kind == "Group" && s.Name == "tenant-sbsoftware" {
 			continue
 		}
 		out[s.Kind+":"+s.Name] = true
@@ -78,9 +78,9 @@ func memberUserTestSubjects(t *testing.T, r *Resolver, roleName string) map[stri
 
 func TestJenkinsRoleAssignments_TenantMemberRole_UserSubjectBySubAddsPrincipal(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer")
+	tenant := memberRoleTestTenant("developer")
 	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "sub-alice"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 	withUserDirectory(r, memberUserTestUser("alice", memberUserTestNamespace, "alice", "alice@example.com"))
 
 	got := memberUserTestSubjects(t, r, "varroa:tenant-member:sbsoftware")
@@ -97,9 +97,9 @@ func TestJenkinsRoleAssignments_TenantMemberRole_UserSubjectBySubAddsPrincipal(t
 
 func TestJenkinsRoleAssignments_TenantMemberRole_UserPrincipalFallsBackToEmail(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer")
+	tenant := memberRoleTestTenant("developer")
 	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "sub-alice"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 	withUserDirectory(r, memberUserTestUser("alice", memberUserTestNamespace, "", "alice@example.com"))
 
 	got := memberUserTestSubjects(t, r, "varroa:tenant-member:sbsoftware")
@@ -110,9 +110,9 @@ func TestJenkinsRoleAssignments_TenantMemberRole_UserPrincipalFallsBackToEmail(t
 
 func TestJenkinsRoleAssignments_TenantMemberRole_UserAliasIgnoresUnconfiguredClaim(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer")
+	tenant := memberRoleTestTenant("developer")
 	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "alice@example.com"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 	// The claim list holds sub and preferred_username only, so an email value
 	// never matches a User object.
 	withUserDirectory(r, memberUserTestUser("alice", memberUserTestNamespace, "alice", "alice@example.com"))
@@ -125,9 +125,9 @@ func TestJenkinsRoleAssignments_TenantMemberRole_UserAliasIgnoresUnconfiguredCla
 
 func TestJenkinsRoleAssignments_TenantMemberRole_UserAliasIgnoresOtherNamespaceAndLocalUsers(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer")
+	tenant := memberRoleTestTenant("developer")
 	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "sub-alice"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 	// The local user carries managed-by=local, so it must not be idp-managed.
 	local := memberUserTestUser("local", memberUserTestNamespace, "bob", "")
 	local.Labels[v1alpha1.LabelManagedBy] = v1alpha1.ManagedByLocal
@@ -189,9 +189,9 @@ func TestExpandMemberUserSubjects_DedupesAndKeepsOriginal(t *testing.T) {
 
 func TestJenkinsRoleAssignments_TenantMemberRole_NoUserDirectoryKeepsSubjects(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer")
+	tenant := memberRoleTestTenant("developer")
 	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "sub-alice"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 
 	got := memberUserTestSubjects(t, r, "varroa:tenant-member:sbsoftware")
 	if len(got) != 1 || !got["User:sub-alice"] {
@@ -201,9 +201,9 @@ func TestJenkinsRoleAssignments_TenantMemberRole_NoUserDirectoryKeepsSubjects(t 
 
 func TestGenerate_TenantMemberRoleRendersAliasedUser(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer")
+	tenant := memberRoleTestTenant("developer")
 	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "sub-alice"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 	withUserDirectory(r, memberUserTestUser("alice", memberUserTestNamespace, "alice", ""))
 
 	yamlOut, err := NewGenerator(r).Generate(controller)
@@ -217,9 +217,9 @@ func TestGenerate_TenantMemberRoleRendersAliasedUser(t *testing.T) {
 
 func TestJenkinsRoleAssignments_TenantMemberRole_AgentPrincipalNotAliased(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer")
+	tenant := memberRoleTestTenant("developer")
 	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "sub-alice"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 	withUserDirectory(r, memberUserTestUser("alice", memberUserTestNamespace, "agent:varroa-system/sbsoftware/bot", ""))
 
 	got := memberUserTestSubjects(t, r, "varroa:tenant-member:sbsoftware")
@@ -230,9 +230,9 @@ func TestJenkinsRoleAssignments_TenantMemberRole_AgentPrincipalNotAliased(t *tes
 
 func TestJenkinsRoleAssignments_TenantMemberRole_FormerPreferredUsernameNotGranted(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer")
+	tenant := memberRoleTestTenant("developer")
 	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "sub-alice"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 	user := memberUserTestUser("alice", memberUserTestNamespace, "", "alice@example.com")
 	user.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers] = `["alice"]`
 	withUserDirectory(r, user)
@@ -261,9 +261,9 @@ func memberUserTestCustomClaims(r *Resolver) {
 
 func TestJenkinsRoleAssignments_TenantMemberRole_UserSubjectByCustomClaimAddsPrincipal(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer")
+	tenant := memberRoleTestTenant("developer")
 	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "E123"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 	memberUserTestCustomClaims(r)
 	withUserDirectory(r, memberUserTestWithClaims(memberUserTestUser("alice", memberUserTestNamespace, "alice", "")))
 
@@ -275,9 +275,9 @@ func TestJenkinsRoleAssignments_TenantMemberRole_UserSubjectByCustomClaimAddsPri
 
 func TestJenkinsRoleAssignments_TenantMemberRole_StoredClaimNotConfiguredNotAliased(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer")
+	tenant := memberRoleTestTenant("developer")
 	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "E123"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 	// employee_id is stored on the User but is not a configured claim.
 	withUserDirectory(r, memberUserTestWithClaims(memberUserTestUser("alice", memberUserTestNamespace, "alice", "")))
 
@@ -311,9 +311,9 @@ func TestJenkinsRoleAssignments_TenantMemberRole_NarrowedRoleAliasesCustomClaim(
 
 func TestTenantMemberSubjectExpander_CustomClaim(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("developer")
+	tenant := memberRoleTestTenant("developer")
 	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "E123"})
-	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Tenant{tenant}, []*v1alpha1.Controller{controller})
 	memberUserTestCustomClaims(r)
 	withUserDirectory(r, memberUserTestWithClaims(memberUserTestUser("alice", memberUserTestNamespace, "alice", "")))
 

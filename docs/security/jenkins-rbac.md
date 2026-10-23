@@ -28,10 +28,10 @@ spec:
   roleRef: payments-builder
   subjects:
     - kind: Group
-      name: payments-team
+      name: payments-tenant
   controllerScope:
     namespaces:
-      - teams-payments
+      - tenants-payments
   jenkinsScope:
     type: Folder
     folder: payments
@@ -112,7 +112,7 @@ cluster has no entry. A hive that leaves the fleet loses its entry on the next
 pass.
 
 ```bash
-kubectl get varroarolebinding team-admins -o jsonpath='{.status.federation}'
+kubectl get varroarolebinding tenant-admins -o jsonpath='{.status.federation}'
 ```
 
 | `state` | `reason` | Meaning |
@@ -177,7 +177,7 @@ own `status.federation`. `status.observedGeneration` is set only when the BFF
 writes the role status, so it is not a health signal:
 
 ```bash
-kubectl get varroarole team-admin -o jsonpath='{.status.federation}'
+kubectl get varroarole tenant-admin -o jsonpath='{.status.federation}'
 ```
 
 | `state` | `reason` | Meaning |

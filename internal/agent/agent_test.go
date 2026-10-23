@@ -53,7 +53,7 @@ func TestEnumerationsMatchRegistry(t *testing.T) {
 		}
 	}
 	check("SessionStates", SessionStates(), []string{"running", "waiting_approval", "completed", "failed", "cancelled", "skipped", "expired"})
-	check("SessionKinds", SessionKinds(), []string{"assistant", "team_agent"})
+	check("SessionKinds", SessionKinds(), []string{"assistant", "tenant_agent"})
 	check("EventTypes", EventTypes(), []string{"user", "assistant", "tool_call", "tool_result", "approval_requested", "approval_resolved", "error", "done"})
 	check("ApprovalStates", ApprovalStates(), []string{"pending", "approved", "denied", "expired"})
 	check("SkipReasons", SkipReasons(), []string{"budget_day", "kill_switch", "data_sharing_none", "provider_unavailable"})
@@ -64,7 +64,7 @@ func TestEnumerationsMatchRegistry(t *testing.T) {
 	check("ProviderKinds", ProviderKinds(), []string{"anthropic", "openai-compatible"})
 	check("ProviderTrusts", ProviderTrusts(), []string{"internal", "external"})
 	check("ToolClasses", ToolClasses(), []string{"read", "write"})
-	check("ClientContextKeys", ClientContextKeys(), []string{"route", "team", "job", "run", "controller", "cell"})
+	check("ClientContextKeys", ClientContextKeys(), []string{"route", "tenant", "job", "run", "controller", "cell"})
 	check("ServerContextKeys", ServerContextKeys(), []string{"repo", "prompt"})
 }
 
@@ -116,7 +116,7 @@ func TestSessionContextRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	id := uuid.Must(uuid.NewV7())
-	sc := SessionContext{SessionID: id, Values: map[string]any{CtxTeam: "acme", CtxRun: 7}}
+	sc := SessionContext{SessionID: id, Values: map[string]any{CtxTenant: "acme", CtxRun: 7}}
 	ctx := WithSessionContext(context.Background(), sc)
 
 	got, ok := SessionContextFrom(ctx)
@@ -126,8 +126,8 @@ func TestSessionContextRoundTrip(t *testing.T) {
 	if got.SessionID != id {
 		t.Fatalf("session id = %s, want %s", got.SessionID, id)
 	}
-	if got.String(CtxTeam) != "acme" {
-		t.Fatalf("team = %q, want acme", got.String(CtxTeam))
+	if got.String(CtxTenant) != "acme" {
+		t.Fatalf("tenant = %q, want acme", got.String(CtxTenant))
 	}
 	if got.String(CtxRun) != "" {
 		t.Fatal("a non-string value must read as empty")
@@ -167,7 +167,7 @@ func TestNewEventPayloadKeys(t *testing.T) {
 func TestParseClientContext(t *testing.T) {
 	t.Parallel()
 
-	ok, err := ParseClientContext(json.RawMessage(`{"route":"/x","team":"a","job":"b","run":"c","controller":"d","cell":"e"}`))
+	ok, err := ParseClientContext(json.RawMessage(`{"route":"/x","tenant":"a","job":"b","run":"c","controller":"d","cell":"e"}`))
 	if err != nil {
 		t.Fatalf("six keys: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestParseClientContext(t *testing.T) {
 		}
 	}
 
-	if _, err := ParseClientContext(json.RawMessage(`{"team":5}`)); err == nil {
+	if _, err := ParseClientContext(json.RawMessage(`{"tenant":5}`)); err == nil {
 		t.Fatal("a non-string value was accepted")
 	}
 

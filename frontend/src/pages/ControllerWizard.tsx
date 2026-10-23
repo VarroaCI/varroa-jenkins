@@ -1111,7 +1111,7 @@ export default function ControllerWizard() {
                   </label>
                   <input
                     className={`${styles.input} ${styles.inputMono}`}
-                    placeholder="team-web-builds"
+                    placeholder="tenant-web-builds"
                     value={draft.name}
                     onChange={(e) => {
                       const v = e.target.value.trim().toLowerCase();
@@ -1202,7 +1202,7 @@ export default function ControllerWizard() {
                 </label>
                 <input
                   className={styles.input}
-                  placeholder="CI for the web frontend team"
+                  placeholder="CI for the web frontend tenant"
                   value={draft.description}
                   onChange={(e) => updateDraft({ description: e.target.value })}
                 />
@@ -1426,7 +1426,7 @@ export default function ControllerWizard() {
                       <div className={styles.gitForm}>
                         <div className={styles.field}>
                           <label>Repo URL</label>
-                          <input className={`${styles.input} ${styles.inputMono}`} value={gitUrl} onChange={(e) => setGitUrl(e.target.value)} placeholder="git@github.com:acme/team-jenkins" />
+                          <input className={`${styles.input} ${styles.inputMono}`} value={gitUrl} onChange={(e) => setGitUrl(e.target.value)} placeholder="git@github.com:acme/tenant-jenkins" />
                         </div>
                         <div className={styles.gitFormRow}>
                           <div className={`${styles.field} ${styles.grow}`}>

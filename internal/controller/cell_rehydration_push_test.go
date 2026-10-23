@@ -234,13 +234,13 @@ func TestReconcileConnected_RehydrationHoldEndsOnReconnect(t *testing.T) {
 	}
 }
 
-// placeTeamB places a second tenant, team-b, on cr's cell.
-func placeTeamB(rec *Reconciler, cr *v1alpha1.Controller) {
-	crdstore.MustSeed(rec.client.(*testClient).store, &v1alpha1.Team{
+// placeTenantB places a second tenant, team-b, on cr's cell.
+func placeTenantB(rec *Reconciler, cr *v1alpha1.Controller) {
+	crdstore.MustSeed(rec.client.(*testClient).store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "team-b"},
-		Spec:       v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{}},
-		Status: v1alpha1.TeamStatus{
-			Placement: &v1alpha1.TeamPlacementStatus{Cell: cr.Name, CellNamespace: "default", Generation: 1},
+		Spec:       v1alpha1.TenantSpec{Pipelines: &v1alpha1.TenantPipelinesSpec{}},
+		Status: v1alpha1.TenantStatus{
+			Placement: &v1alpha1.TenantPlacementStatus{Cell: cr.Name, CellNamespace: "default", Generation: 1},
 		},
 	})
 	cr.Status.Cell.Tenants = []string{"team-a", "team-b"}
@@ -261,7 +261,7 @@ func TestReconcileConnected_RehydrationHoldKeepsWhileAnotherTenantHasNoSeed(t *t
 	rec, tr, cr := newRehydrationCell(t, "cell-otherfails", records, nil)
 	pushA := tr.last.CommandId
 	heldBundle := tr.last.Rehydration.BundleId
-	placeTeamB(rec, cr)
+	placeTenantB(rec, cr)
 
 	// The new tenant's homes change the full hash, so this tick pushes.
 	// The push carries the held bundle.
@@ -289,7 +289,7 @@ func TestReconcileConnected_RehydrationHoldKeepsWhileAnotherTenantHasNoSeed(t *t
 // bundle covers every pending tenant.
 func TestReconcileConnected_RehydrationHoldEndsWhenAnotherTenantHasASeed(t *testing.T) {
 	rec, tr, cr := newRehydrationCell(t, "cell-newtenant", perTenantRecords, nil)
-	placeTeamB(rec, cr)
+	placeTenantB(rec, cr)
 
 	tick(t, rec, cr)
 	if tr.sends != 2 || tr.last.Rehydration == nil {
@@ -420,7 +420,7 @@ func TestReconcileConnected_HoldEndedByAnotherTenantKeepsTheOldResult(t *testing
 	rec, tr, cr := newRehydrationCell(t, "cell-keep", perTenantRecords, nil)
 	pushA := tr.last.CommandId
 	firstBundle := tr.last.Rehydration.BundleId
-	placeTeamB(rec, cr)
+	placeTenantB(rec, cr)
 	tr.sendErr = transport.ErrMiteUnreachable
 
 	tick(t, rec, cr)
@@ -447,7 +447,7 @@ func TestReconcileConnected_HoldEndedByAnotherTenantKeepsTheOldResult(t *testing
 func TestReconcileConnected_DeliveredPushReplacesAKeptEntry(t *testing.T) {
 	rec, tr, cr := newRehydrationCell(t, "cell-replace", perTenantRecords, nil)
 	pushA := tr.last.CommandId
-	placeTeamB(rec, cr)
+	placeTenantB(rec, cr)
 
 	tick(t, rec, cr)
 	if tr.sends != 2 || tr.last.Rehydration == nil {
@@ -472,7 +472,7 @@ func TestReconcileConnected_DeliveredPushReplacesAKeptEntry(t *testing.T) {
 func TestReconcileConnected_FailedBuildKeepsTheKeptStamp(t *testing.T) {
 	rec, tr, cr := newRehydrationCell(t, "cell-keepfail", perTenantRecords, nil)
 	pushA := tr.last.CommandId
-	placeTeamB(rec, cr)
+	placeTenantB(rec, cr)
 	rec.buildBundle = func(rehydrate.BudgetResult) (*mitev1.RehydrationBundle, error) {
 		return nil, errors.New("simulated bundle build failure")
 	}

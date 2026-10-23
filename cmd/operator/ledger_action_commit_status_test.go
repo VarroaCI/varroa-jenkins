@@ -77,7 +77,7 @@ func TestHandleLedgerAction_EndCommitStatusCallsForge(t *testing.T) {
 		"varroa.ledger.actions.core", "core", &fakeLedgerActionRunner{}, ender, endCommitStatusAction(t))
 	reqs := waitCalls(t, ender, 1)
 	want := forgeapi.CommitStatusRequest{
-		Team:        "payments",
+		Tenant:      "payments",
 		Repo:        "https://git.example.org/team/app",
 		SHA:         "0123456789abcdef0123456789abcdef01234567",
 		JobPath:     "payments/app/main",

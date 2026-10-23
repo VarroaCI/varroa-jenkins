@@ -51,9 +51,9 @@ TypeScript consumer of it.
   tool's own config if you need to touch that integration.
 - Components pair `Foo.tsx` with `Foo.module.css` (CSS Modules) — see
   `src/components/`. Preserve this pairing for new components.
-- **Propose card** (`pages/pipelines/ProposePipelineCard.tsx`, `proposeState.ts`): the Team home card that starts a `propose-pipeline` session and shows its state. Its rules are pure in `proposeState.ts`. It renders model text as text nodes only.
-- **Assistant UI** (`components/assistant/`): `Markdown.tsx` is the only renderer of model and note text; never use `dangerouslySetInnerHTML`. The session key is never stored in the browser. `transcript.ts` folds frames; it drops a replayed seq. `AssistantProvider` is the one place that answers availability. `providerChoice.ts` holds the removed-provider check that the profile Model card and the admin Defaults card share. `TranscriptStream.tsx` streams a session and `TranscriptView.tsx` renders its rows; the drawer and the Team agent full-page transcript share them, and the caller passes the approval actions.
-- **Team agent pages** (`pages/pipelines/TeamAgent*.tsx`, `pages/Agents.tsx`): the Team agent tabs, the Team home card, and the cluster-wide `/agents` page. Labels say "Team agent", never the bare word "agent". The unattended toggle asks for confirmation before it writes.
+- **Propose card** (`pages/pipelines/ProposePipelineCard.tsx`, `proposeState.ts`): the Tenant home card that starts a `propose-pipeline` session and shows its state. Its rules are pure in `proposeState.ts`. It renders model text as text nodes only.
+- **Assistant UI** (`components/assistant/`): `Markdown.tsx` is the only renderer of model and note text; never use `dangerouslySetInnerHTML`. The session key is never stored in the browser. `transcript.ts` folds frames; it drops a replayed seq. `AssistantProvider` is the one place that answers availability. `providerChoice.ts` holds the removed-provider check that the profile Model card and the admin Defaults card share. `TranscriptStream.tsx` streams a session and `TranscriptView.tsx` renders its rows; the drawer and the Tenant agent full-page transcript share them, and the caller passes the approval actions.
+- **Tenant agent pages** (`pages/pipelines/TenantAgent*.tsx`, `pages/Agents.tsx`): the Tenant agent tabs, the Tenant home card, and the cluster-wide `/agents` page. Labels say "Tenant agent", never the bare word "agent". The unattended toggle asks for confirmation before it writes.
 - **Tab rows**: `components/Tabs.tsx` is the only tab row. Each caller passes a unique `idBase` and an `ariaLabel`. Each caller spreads `tabPanelProps(idBase, activeTab)` on the element that holds the active panel.
 - **Accent fills that carry text use `--accent-fill` + `--on-accent`, never
   `--accent` + a hardcoded label colour.** `--accent` sits in a luminance
@@ -167,7 +167,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
 - `src/pages/` (~109 files) — route-level screens, one per route plus
   matching `*.module.css` and `*.test.tsx` (e.g. `Controllers.tsx`,
   `ControllerDetail.tsx`, `CatalogBrowser.tsx`, `Roles.tsx`, `JenkinsRoles*`,
-  `Teams*`, `PluginsTab.tsx`, `FleetPlugins.tsx`, `Cells.tsx`,
+  `Tenants*`, `PluginsTab.tsx`, `FleetPlugins.tsx`, `Cells.tsx`,
   `CellTab.tsx`, `Locks.tsx`). Registered in `src/App.tsx` / `src/routing.ts`.
   `Cells.tsx` is the fleet Cells page at `/cells`, behind a cluster-wide
   `cellpools:read` gate (`canCellsRow` in `src/lib/navPermissions.ts`, which
@@ -186,8 +186,8 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   `CellTab.tsx` is the Cell tab of
   `ControllerDetail.tsx`, rendered only when the detail response reports
   `kind` `cell`. Its role, agent namespace, and placement generation
-  columns all come from the cell usage read, never from `GET /teams`: a
-  member cell's Team lives on the member cluster only, and the record store
+  columns all come from the cell usage read, never from `GET /tenants`: a
+  member cell's Tenant lives on the member cluster only, and the record store
   holds its placement row. `ControllerDetail.tsx` keeps the active tab in the `tab`
   query parameter, not in state: a user's click pushes a history entry and a
   correction replaces one, so the Back button walks the tabs. Neither cell
@@ -208,13 +208,13 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   the CRD's exactly-one-of rule: the form sends `repoURL` or `ociRef`, never
   both, and an OCI source has no revision. The reserved `varroa-update-center`
   row has no Edit, because the operator owns it (Sync and Delete stay).
-  `TeamForm.tsx` carries an exports editor: each entry picks `job` or
+  `TenantForm.tsx` carries an exports editor: each entry picks `job` or
   `locks` (a select, mirroring the CRD's exactly-one-of rule), the matching
   pattern input(s), and a `callers` list; client-side validation mirrors the
   CRD's CEL rules (a caller required, a non-empty job/locks, `job` never
-  starting with `/`) so a bad entry is caught before submit. `Teams.tsx`
-  lists a team's exports as one summary line per entry, naming its kind,
-  pattern(s), and callers, with a dash for a team that exports nothing.
+  starting with `/`) so a bad entry is caught before submit. `Tenants.tsx`
+  lists a tenant's exports as one summary line per entry, naming its kind,
+  pattern(s), and callers, with a dash for a tenant that exports nothing.
 - **One glob evaluator per language**: `src/lib/jobglob.ts` (`jobGlobMatches`)
   is the browser's only folder-relative job-glob evaluator, and it mirrors
   Go's `internal/rbac/jobglob`. `src/lib/jobglob.test.ts` carries the same
@@ -227,18 +227,18 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   the URL with the returned Varroa page, reading the raw pathname so `%252F` survives.
 - `src/pages/pipelines/` — the pipelines route tree: `PipelinesIndex.tsx`
   (`/pipelines`, lists the names of `GET /pipelines` rows only, which include
-  member-cluster Teams and controller-namespace Teams; it does not merge the
+  member-cluster Tenants and controller-namespace Tenants; it does not merge the
   caller's `tenants` grant names, and a failed read shows an error with Retry;
-  it redirects when exactly one name qualifies), `TeamHome.tsx` (`/pipelines/:team`, the jobs folder tree, a Running
-  now strip, and a `Locks` card that reads `GET /pipelines/{team}/locks`,
+  it redirects when exactly one name qualifies), `TenantHome.tsx` (`/pipelines/:tenant`, the jobs folder tree, a Running
+  now strip, and a `Locks` card that reads `GET /pipelines/{tenant}/locks`,
   refetches on a `lock` stream frame under the same 2-second window a `run` or
   a `stage` frame uses, and polls that read on the cells cadence, because a
-  lock under the team's own prefix that another tenant's run holds publishes
-  its `lock` notification on the holder's subject, which the team stream does
-  not carry), `PipelinePage.tsx` (`/pipelines/:team/:job`, one job's
+  lock under the tenant's own prefix that another tenant's run holds publishes
+  its `lock` notification on the holder's subject, which the tenant stream does
+  not carry), `PipelinePage.tsx` (`/pipelines/:tenant/:job`, one job's
   health, definition, and run list, and hosts `RunDrawer.tsx`'s parameter form; a `wait` stream frame of its own job refetches the job read, which feeds the Waiting card, and the runs table),
-  `BuildPage.tsx` (`/pipelines/:team/:job/:run`, one run's detail; owns both
-  `useEventStream` calls, the team run stream and the run log stream; renders
+  `BuildPage.tsx` (`/pipelines/:tenant/:job/:run`, one run's detail; owns both
+  `useEventStream` calls, the tenant run stream and the run log stream; renders
   the run's `summary` as a header row, renders its failure `digest` in a
   `Digest` card above the `Pipeline` card and below the interrupted banner, and
   renders the **Run links** card (`RunLinksCard.tsx`, `RunLinksCard.module.css`) between the
@@ -259,7 +259,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   `pageTitles.ts` is the only title formatter for the pipelines pages.
   `breakablePath.tsx` inserts break opportunities in a path. A pipelines table
   never uses `overflow-wrap: anywhere` on a cell,
-  and `TestCaseHistory.tsx` (`/pipelines/:team/:job/tests/:case`, the recent
+  and `TestCaseHistory.tsx` (`/pipelines/:tenant/:job/tests/:case`, the recent
   outcomes of one test case). A case key is opaque: `testCaseHref` in
   `jobPath.ts` encodes it as one segment, and no page parses it. The
   history page reads the key from the raw URL path, because React Router's
@@ -306,19 +306,19 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   descendant walk. A `#stage-<id>` fragment also scrolls the page.
   `src/components/Console.tsx` is a different, generic log-line component and
   is not the log viewer for this page — do not route pipeline log rendering
-  through it. `TeamCellCard.tsx` heads `TeamHome.tsx` with the team's own cell.
-  It owns its query on `GET /pipelines/{team}/cell`, the one path it reads, and
+  through it. `TenantCellCard.tsx` heads `TenantHome.tsx` with the tenant's own cell.
+  It owns its query on `GET /pipelines/{tenant}/cell`, the one path it reads, and
   its own `refetchInterval` of 30 seconds; the page's two other reads keep their
   current behaviour. A failed cell read, and the state `notCellHosted`, render
-  `null`: the card never replaces the team home with a page-level recovery
+  `null`: the card never replaces the tenant home with a page-level recovery
   state, and it reserves no grid column. An absent `queueLength` reads
   `not reported`; no absent field renders a zero.
-- **The team home's folder tree** — `jobTree.ts` is the pure model
+- **The tenant home's folder tree** — `jobTree.ts` is the pure model
   (`buildJobTree`, `defaultOpenPaths`, `visibleRows`); it imports no React, so
   every tree rule is tested with no render. `JobTree.tsx` renders one `<tr>`
-  per visible node inside `TeamHome.tsx`'s own `<tbody>`, keeping the six
+  per visible node inside `TenantHome.tsx`'s own `<tbody>`, keeping the six
   frozen columns; it also owns `formatDuration`, the health glyph, and the
-  sparkline, which `TeamHome.tsx` imports back for its Running now tiles. A
+  sparkline, which `TenantHome.tsx` imports back for its Running now tiles. A
   folded node's descendant rows are **not rendered at all** — never hidden
   with a style, so the accessibility tree matches the page. Indentation rides
   `--depth`, declared in `JobTree.module.css` and set per row by an inline
@@ -330,10 +330,10 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   merged with it. `JobTree.tsx` shows a `Pending` badge on a job row or a multibranch node when
   `pending` is true; `PipelinePage.tsx` shows a note above the cards for a pending job.
 - **`src/components/TenantScopeEditor.tsx`** owns the whole `tenants`
-  dimension of a `VarroaRoleBinding` scope: the entry list, the `Team` name
+  dimension of a `VarroaRoleBinding` scope: the entry list, the `Tenant` name
   control, the `jobs` glob list, the grammar help, the six client-side
   refusals (`validateTenantScope`), and the `matches N of M jobs you can see`
-  preview, which reads `GET /pipelines/{team}` with the **editing caller's**
+  preview, which reads `GET /pipelines/{tenant}` with the **editing caller's**
   grants and blocks nothing when that read fails. `RoleBindingForm.tsx` holds
   the whole loaded `scope` object and rebuilds it on submit by spreading that
   value, so a dimension the form does not edit (such as

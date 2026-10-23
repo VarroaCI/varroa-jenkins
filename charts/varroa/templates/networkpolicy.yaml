@@ -290,7 +290,7 @@ spec:
 ---
 # Policy: brood-schedule egress — the fired Job pod (which may run in the
 # operator namespace, subject to default-deny egress) must reach the BFF.
-# Team namespaces have no default-deny, so this is a no-op there.
+# Tenant namespaces have no default-deny, so this is a no-op there.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -327,7 +327,7 @@ spec:
   ingress:
     - from:
         # Scheduled brood operations: the fired Job's varroactl call reaches
-        # the BFF from an arbitrary (team) namespace; allow it by pod label.
+        # the BFF from an arbitrary (tenant) namespace; allow it by pod label.
         - namespaceSelector: {}
           podSelector:
             matchLabels:
@@ -344,7 +344,7 @@ spec:
         - protocol: TCP
           port: {{ .Values.bff.service.port }}
 {{- if .Values.agentRunner.enabled }}
-    # Team agent sessions call the BFF MCP endpoint on 8080.
+    # Tenant agent sessions call the BFF MCP endpoint on 8080.
     - from:
         - podSelector:
             matchLabels:

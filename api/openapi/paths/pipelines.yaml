@@ -1,49 +1,49 @@
-# pipelines - the landing-page team list, team-scoped job listing, job
+# pipelines - the landing-page tenant list, tenant-scoped job listing, job
 # detail, and the run list/create.
 /api/v1/pipelines:
   get:
-    operationId: listPipelineTeams
+    operationId: listPipelineTenants
     tags: [Pipelines]
-    summary: Lists the pipelines Teams the caller may read.
+    summary: Lists the pipelines Tenants the caller may read.
     description: >
-      Answers each local Team that carries spec.pipelines, and each live
+      Answers each local Tenant that carries spec.pipelines, and each live
       record-store placement row of another cluster. A row of the local
       cluster, a row with no cell, and a row at placement generation 0
-      are not listed. A name that a local Team holds lists only the local
-      Team. One name placed on two other clusters lists one row for each
-      cluster. It also answers each local Team without spec.pipelines
+      are not listed. A name that a local Tenant holds lists only the local
+      Tenant. One name placed on two other clusters lists one row for each
+      cluster. It also answers each local Tenant without spec.pipelines
       whose spec.namespaces hold a controller the caller may read. The
       route has no gate of its own: the tenant read check
       drops each row the caller may not read, so a caller who can read
       no row gets an empty list. When the record store is off or its
-      schema is too old, the list carries the local Teams alone and
+      schema is too old, the list carries the local Tenants alone and
       recordStore is false.
     responses:
       "200":
-        description: The pipelines Teams the caller may read.
+        description: The pipelines Tenants the caller may read.
         content:
           application/json:
             schema:
-              $ref: '../components/schemas.yaml#/PipelineTeamList'
+              $ref: '../components/schemas.yaml#/PipelineTenantList'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
       "500":
         $ref: '../components/responses.yaml#/Internal'
 
-/api/v1/pipelines/{team}:
+/api/v1/pipelines/{tenant}:
   get:
     operationId: listPipelines
     tags: [Pipelines]
-    summary: Lists a team's pipelines and its unfinished runs.
+    summary: Lists a tenant's pipelines and its unfinished runs.
     description: >
-      Resolves {team} onto one or more record-store tenants, unions each
+      Resolves {tenant} onto one or more record-store tenants, unions each
       tenant's job summaries with the catalog's declared jobs, and reads
       each tenant's unfinished runs for the Running now strip.
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
     responses:
       "200":
-        description: The team's pipelines and running-now strip.
+        description: The tenant's pipelines and running-now strip.
         content:
           application/json:
             schema:
@@ -53,13 +53,13 @@
       "404":
         $ref: '../components/responses.yaml#/NotFound'
       "409":
-        description: The team name is ambiguous across clusters.
+        description: The tenant name is ambiguous across clusters.
         content:
           application/json:
             schema:
               $ref: '../components/schemas.yaml#/Error'
       "422":
-        description: The team resolves to more tenants than the fan-out ceiling.
+        description: The tenant resolves to more tenants than the fan-out ceiling.
         content:
           application/json:
             schema:
@@ -67,7 +67,7 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
-/api/v1/pipelines/{team}/jobs/{job}:
+/api/v1/pipelines/{tenant}/jobs/{job}:
   get:
     operationId: getPipelineJob
     tags: [Pipelines]
@@ -79,7 +79,7 @@
       never a controller-scoped check, because a cell hosts many
       tenants.
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
       - $ref: '../components/parameters.yaml#/job'
     responses:
       "200":
@@ -95,7 +95,7 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
-/api/v1/pipelines/{team}/jobs/{job}/branches:
+/api/v1/pipelines/{tenant}/jobs/{job}/branches:
   get:
     operationId: listJobBranches
     tags: [Pipelines]
@@ -108,7 +108,7 @@
       observedAt. Each head is listed only when the caller may read its
       job path.
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
       - $ref: '../components/parameters.yaml#/job'
     responses:
       "200":
@@ -124,7 +124,7 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
-/api/v1/pipelines/{team}/jobs/{job}/scan:
+/api/v1/pipelines/{tenant}/jobs/{job}/scan:
   post:
     operationId: scanMultibranch
     tags: [Pipelines]
@@ -137,7 +137,7 @@
       branch inventory, within about one minute during the fifteen
       minutes after the request.
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
       - $ref: '../components/parameters.yaml#/job'
     requestBody:
       required: false
@@ -165,13 +165,13 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
-/api/v1/pipelines/{team}/jobs/{job}/runs:
+/api/v1/pipelines/{tenant}/jobs/{job}/runs:
   get:
     operationId: listRuns
     tags: [Pipelines]
-    summary: Lists a job's runs, filtered and paged across every tenant of the team.
+    summary: Lists a job's runs, filtered and paged across every tenant of the tenant.
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
       - $ref: '../components/parameters.yaml#/job'
       - {name: branch, in: query, schema: {type: string}}
       - {name: result, in: query, schema: {type: string}}
@@ -200,7 +200,7 @@
       job may omit or repeat the tenant's folder segment; both forms
       resolve to the same job.
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
       - $ref: '../components/parameters.yaml#/job'
     requestBody:
       required: false
@@ -232,13 +232,13 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
-/api/v1/pipelines/{team}/jobs/{job}/tests/{case}:
+/api/v1/pipelines/{tenant}/jobs/{job}/tests/{case}:
   get:
     operationId: listJobTestCaseHistory
     tags: [Pipelines]
-    summary: Lists the recent outcomes of one test case of a job, across every tenant of the team.
+    summary: Lists the recent outcomes of one test case of a job, across every tenant of the tenant.
     description: >
-      Resolves {team} onto one or more record-store tenants and applies
+      Resolves {tenant} onto one or more record-store tenants and applies
       the tenant read check to each, with the decoded job path. Reads the
       case history of each admitted tenant, merges the rows newest first,
       and cuts the list to limit. The history is keyed by class name and
@@ -246,7 +246,7 @@
       A job that holds no stored case answers an empty items list. The
       read answers the record store retention window.
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
       - $ref: '../components/parameters.yaml#/job'
       - $ref: '../components/parameters.yaml#/case'
       - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
@@ -266,7 +266,7 @@
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
       "404":
-        description: The team resolves no tenant, or the caller may not read any of its tenants.
+        description: The tenant resolves no tenant, or the caller may not read any of its tenants.
         content:
           application/json:
             schema:
@@ -274,13 +274,13 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
-/api/v1/pipelines/{team}/locks:
+/api/v1/pipelines/{tenant}/locks:
   get:
-    operationId: listTeamFleetLocks
+    operationId: listTenantFleetLocks
     tags: [Pipelines]
-    summary: Lists the fleet locks a team's tenants own, hold, or wait on.
+    summary: Lists the fleet locks a tenant's tenants own, hold, or wait on.
     description: >
-      Resolves {team} onto one or more record-store tenants, applies the
+      Resolves {tenant} onto one or more record-store tenants, applies the
       tenant read check to each, reads each tenant's locks, and merges the
       answers in lock name order, the holder before its waiters. Each row
       carries its own tenant and jobPath, whichever tenant it belongs to.
@@ -290,10 +290,10 @@
       releasing row reports its own acquiredAt. It carries no queue
       position.
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
     responses:
       "200":
-        description: The team's fleet locks, the holder of each name before its waiters.
+        description: The tenant's fleet locks, the holder of each name before its waiters.
         content:
           application/json:
             schema:
@@ -305,18 +305,18 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
-/api/v1/pipelines/{team}/markers/validate:
+/api/v1/pipelines/{tenant}/markers/validate:
   post:
     operationId: validatePipelineMarker
     tags: [Pipelines]
-    summary: Lints a marker file against the team's delivered pipeline templates.
+    summary: Lints a marker file against the tenant's delivered pipeline templates.
     description: >
-      Resolves {team} onto its delivered pipeline-template set (design
+      Resolves {tenant} onto its delivered pipeline-template set (design
       pipeline-marker-file) and validates the posted marker text against
       it. Contacts no cell and no record store, so it works while a cell
       is down and while the record store is disabled.
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
     requestBody:
       required: true
       content:
@@ -339,27 +339,27 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
-/api/v1/pipelines/{team}/cell:
+/api/v1/pipelines/{tenant}/cell:
   get:
-    operationId: getTeamCell
+    operationId: getTenantCell
     tags: [Pipelines]
     summary: Returns the tenant's own view of the cell that hosts it.
     description: >
-      Reads the Team object first, so a pipelines team that waits for its
+      Reads the Tenant object first, so a pipelines tenant that waits for its
       first cell answers 200 with the state unplaced. The body carries
       this tenant's own counts and a neighbour count. It carries no other
       tenant's name, job path, run, or count. canOpenCell is a hint that
       gates no field: a caller the controller read check refuses still
       receives the whole body.
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
     responses:
       "200":
         description: The tenant's cell view.
         content:
           application/json:
             schema:
-              $ref: '../components/schemas.yaml#/TeamCell'
+              $ref: '../components/schemas.yaml#/TenantCell'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
       "404":
@@ -367,7 +367,7 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
-/api/v1/pipelines/{team}/propose:
+/api/v1/pipelines/{tenant}/propose:
   post:
     operationId: proposePipeline
     tags: [Pipelines]
@@ -382,7 +382,7 @@
       2. The caller holds assistant use (403).
       3. The body is valid (400).
       4. The user's assistant switch is on (409 assistant_off).
-      5. The Team is a pipelines tenant the caller reads (404), and the caller
+      5. The Tenant is a pipelines tenant the caller reads (404), and the caller
          holds the tenant write check (403).
       6. The repo is an https URL on port 443 (400 repo_url_invalid).
       7. The data level of the tenant and provider shows read_repo_file
@@ -398,7 +398,7 @@
       proposal_branch_exists (409); not_found (404); forge_unreachable (502);
       operator_timeout (504); operator_unavailable (503).
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
     requestBody:
       required: true
       content:
@@ -461,20 +461,20 @@
             schema:
               $ref: '../components/schemas.yaml#/ProposePipelineError'
 
-/api/v1/pipelines/{team}/stream:
+/api/v1/pipelines/{tenant}/stream:
   get:
-    operationId: streamTeamRuns
+    operationId: streamTenantRuns
     tags: [Pipelines]
-    summary: Streams live run notifications for one team via Server-Sent Events.
+    summary: Streams live run notifications for one tenant via Server-Sent Events.
     description: >
       Streams one frame per live run notification, with the event name run,
       stage, lock, input, or wait and the notification body as data. The stream writes no
       initial frame and replays nothing, so a page refetches its own reads
       when the stream reports itself open. It uses `?ticket=` for browser
-      EventSource auth, and the ticket carries the scope pipelines:{team}.
+      EventSource auth, and the ticket carries the scope pipelines:{tenant}.
     x-sse: true
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
     responses:
       "200":
         description: The event stream (event kinds run, stage, lock, input, and wait).

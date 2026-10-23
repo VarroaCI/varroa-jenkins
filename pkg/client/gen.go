@@ -33,14 +33,14 @@ const (
 
 // Defines values for ComponentsSchemasActivityEventSource.
 const (
-	ComponentsSchemasActivityEventSourceApi       ComponentsSchemasActivityEventSource = "api"
-	ComponentsSchemasActivityEventSourceAssistant ComponentsSchemasActivityEventSource = "assistant"
-	ComponentsSchemasActivityEventSourceJenkins   ComponentsSchemasActivityEventSource = "jenkins"
-	ComponentsSchemasActivityEventSourceMcp       ComponentsSchemasActivityEventSource = "mcp"
-	ComponentsSchemasActivityEventSourceMite      ComponentsSchemasActivityEventSource = "mite"
-	ComponentsSchemasActivityEventSourceOperator  ComponentsSchemasActivityEventSource = "operator"
-	ComponentsSchemasActivityEventSourceTeamAgent ComponentsSchemasActivityEventSource = "team_agent"
-	ComponentsSchemasActivityEventSourceUser      ComponentsSchemasActivityEventSource = "user"
+	ComponentsSchemasActivityEventSourceApi         ComponentsSchemasActivityEventSource = "api"
+	ComponentsSchemasActivityEventSourceAssistant   ComponentsSchemasActivityEventSource = "assistant"
+	ComponentsSchemasActivityEventSourceJenkins     ComponentsSchemasActivityEventSource = "jenkins"
+	ComponentsSchemasActivityEventSourceMcp         ComponentsSchemasActivityEventSource = "mcp"
+	ComponentsSchemasActivityEventSourceMite        ComponentsSchemasActivityEventSource = "mite"
+	ComponentsSchemasActivityEventSourceOperator    ComponentsSchemasActivityEventSource = "operator"
+	ComponentsSchemasActivityEventSourceTenantAgent ComponentsSchemasActivityEventSource = "tenant_agent"
+	ComponentsSchemasActivityEventSourceUser        ComponentsSchemasActivityEventSource = "user"
 )
 
 // Defines values for ComponentsSchemasAssistantApprovalState.
@@ -60,7 +60,7 @@ const (
 	ComponentsSchemasAssistantErrorCodeAssistantOff            ComponentsSchemasAssistantErrorCode = "assistant_off"
 	ComponentsSchemasAssistantErrorCodeKillSwitch              ComponentsSchemasAssistantErrorCode = "kill_switch"
 	ComponentsSchemasAssistantErrorCodePromptNotStartable      ComponentsSchemasAssistantErrorCode = "prompt_not_startable"
-	ComponentsSchemasAssistantErrorCodeTeamAgentSession        ComponentsSchemasAssistantErrorCode = "team_agent_session"
+	ComponentsSchemasAssistantErrorCodeTenantAgentSession      ComponentsSchemasAssistantErrorCode = "tenant_agent_session"
 )
 
 // Defines values for ComponentsSchemasAssistantProviderKind.
@@ -90,8 +90,8 @@ const (
 
 // Defines values for ComponentsSchemasAssistantSessionKind.
 const (
-	ComponentsSchemasAssistantSessionKindAssistant ComponentsSchemasAssistantSessionKind = "assistant"
-	ComponentsSchemasAssistantSessionKindTeamAgent ComponentsSchemasAssistantSessionKind = "team_agent"
+	ComponentsSchemasAssistantSessionKindAssistant   ComponentsSchemasAssistantSessionKind = "assistant"
+	ComponentsSchemasAssistantSessionKindTenantAgent ComponentsSchemasAssistantSessionKind = "tenant_agent"
 )
 
 // Defines values for ComponentsSchemasAssistantSessionSkipReason.
@@ -291,7 +291,7 @@ const (
 const (
 	ClusterWideBinding  ComponentsSchemasCellGrantSource = "clusterWideBinding"
 	FederatedBinding    ComponentsSchemasCellGrantSource = "federatedBinding"
-	TeamMembership      ComponentsSchemasCellGrantSource = "teamMembership"
+	TenantMembership    ComponentsSchemasCellGrantSource = "tenantMembership"
 	TenantScopedBinding ComponentsSchemasCellGrantSource = "tenantScopedBinding"
 )
 
@@ -697,110 +697,110 @@ const (
 	ComponentsSchemasSubjectRefKindUser  ComponentsSchemasSubjectRefKind = "User"
 )
 
-// Defines values for ComponentsSchemasTeamAgentConditionStatus.
+// Defines values for ComponentsSchemasTenantAgentConditionStatus.
 const (
-	ComponentsSchemasTeamAgentConditionStatusFalse   ComponentsSchemasTeamAgentConditionStatus = "False"
-	ComponentsSchemasTeamAgentConditionStatusTrue    ComponentsSchemasTeamAgentConditionStatus = "True"
-	ComponentsSchemasTeamAgentConditionStatusUnknown ComponentsSchemasTeamAgentConditionStatus = "Unknown"
+	ComponentsSchemasTenantAgentConditionStatusFalse   ComponentsSchemasTenantAgentConditionStatus = "False"
+	ComponentsSchemasTenantAgentConditionStatusTrue    ComponentsSchemasTenantAgentConditionStatus = "True"
+	ComponentsSchemasTenantAgentConditionStatusUnknown ComponentsSchemasTenantAgentConditionStatus = "Unknown"
 )
 
-// Defines values for ComponentsSchemasTeamAgentErrorCode.
+// Defines values for ComponentsSchemasTenantAgentErrorCode.
 const (
-	Disabled         ComponentsSchemasTeamAgentErrorCode = "disabled"
-	ManualNotEnabled ComponentsSchemasTeamAgentErrorCode = "manual_not_enabled"
-	NotAccepted      ComponentsSchemasTeamAgentErrorCode = "not_accepted"
-	NothingToGrant   ComponentsSchemasTeamAgentErrorCode = "nothing_to_grant"
-	TeamAgentSession ComponentsSchemasTeamAgentErrorCode = "team_agent_session"
+	Disabled           ComponentsSchemasTenantAgentErrorCode = "disabled"
+	ManualNotEnabled   ComponentsSchemasTenantAgentErrorCode = "manual_not_enabled"
+	NotAccepted        ComponentsSchemasTenantAgentErrorCode = "not_accepted"
+	NothingToGrant     ComponentsSchemasTenantAgentErrorCode = "nothing_to_grant"
+	TenantAgentSession ComponentsSchemasTenantAgentErrorCode = "tenant_agent_session"
 )
 
-// Defines values for ComponentsSchemasTeamAgentSessionDataSharing.
+// Defines values for ComponentsSchemasTenantAgentSessionDataSharing.
 const (
-	ComponentsSchemasTeamAgentSessionDataSharingLogs     ComponentsSchemasTeamAgentSessionDataSharing = "logs"
-	ComponentsSchemasTeamAgentSessionDataSharingMetadata ComponentsSchemasTeamAgentSessionDataSharing = "metadata"
-	ComponentsSchemasTeamAgentSessionDataSharingNone     ComponentsSchemasTeamAgentSessionDataSharing = "none"
+	ComponentsSchemasTenantAgentSessionDataSharingLogs     ComponentsSchemasTenantAgentSessionDataSharing = "logs"
+	ComponentsSchemasTenantAgentSessionDataSharingMetadata ComponentsSchemasTenantAgentSessionDataSharing = "metadata"
+	ComponentsSchemasTenantAgentSessionDataSharingNone     ComponentsSchemasTenantAgentSessionDataSharing = "none"
 )
 
-// Defines values for ComponentsSchemasTeamAgentSessionKeySource.
+// Defines values for ComponentsSchemasTenantAgentSessionKeySource.
 const (
-	Chart ComponentsSchemasTeamAgentSessionKeySource = "chart"
-	User  ComponentsSchemasTeamAgentSessionKeySource = "user"
+	Chart ComponentsSchemasTenantAgentSessionKeySource = "chart"
+	User  ComponentsSchemasTenantAgentSessionKeySource = "user"
 )
 
-// Defines values for ComponentsSchemasTeamAgentSessionKind.
+// Defines values for ComponentsSchemasTenantAgentSessionKind.
 const (
-	ComponentsSchemasTeamAgentSessionKindAssistant ComponentsSchemasTeamAgentSessionKind = "assistant"
-	ComponentsSchemasTeamAgentSessionKindTeamAgent ComponentsSchemasTeamAgentSessionKind = "team_agent"
+	ComponentsSchemasTenantAgentSessionKindAssistant   ComponentsSchemasTenantAgentSessionKind = "assistant"
+	ComponentsSchemasTenantAgentSessionKindTenantAgent ComponentsSchemasTenantAgentSessionKind = "tenant_agent"
 )
 
-// Defines values for ComponentsSchemasTeamAgentSessionSkipReason.
+// Defines values for ComponentsSchemasTenantAgentSessionSkipReason.
 const (
-	BudgetDay           ComponentsSchemasTeamAgentSessionSkipReason = "budget_day"
-	DataSharingNone     ComponentsSchemasTeamAgentSessionSkipReason = "data_sharing_none"
-	KillSwitch          ComponentsSchemasTeamAgentSessionSkipReason = "kill_switch"
-	ProviderUnavailable ComponentsSchemasTeamAgentSessionSkipReason = "provider_unavailable"
+	BudgetDay           ComponentsSchemasTenantAgentSessionSkipReason = "budget_day"
+	DataSharingNone     ComponentsSchemasTenantAgentSessionSkipReason = "data_sharing_none"
+	KillSwitch          ComponentsSchemasTenantAgentSessionSkipReason = "kill_switch"
+	ProviderUnavailable ComponentsSchemasTenantAgentSessionSkipReason = "provider_unavailable"
 )
 
-// Defines values for ComponentsSchemasTeamAgentSessionState.
+// Defines values for ComponentsSchemasTenantAgentSessionState.
 const (
-	ComponentsSchemasTeamAgentSessionStateCancelled       ComponentsSchemasTeamAgentSessionState = "cancelled"
-	ComponentsSchemasTeamAgentSessionStateCompleted       ComponentsSchemasTeamAgentSessionState = "completed"
-	ComponentsSchemasTeamAgentSessionStateExpired         ComponentsSchemasTeamAgentSessionState = "expired"
-	ComponentsSchemasTeamAgentSessionStateFailed          ComponentsSchemasTeamAgentSessionState = "failed"
-	ComponentsSchemasTeamAgentSessionStateRunning         ComponentsSchemasTeamAgentSessionState = "running"
-	ComponentsSchemasTeamAgentSessionStateSkipped         ComponentsSchemasTeamAgentSessionState = "skipped"
-	ComponentsSchemasTeamAgentSessionStateWaitingApproval ComponentsSchemasTeamAgentSessionState = "waiting_approval"
+	ComponentsSchemasTenantAgentSessionStateCancelled       ComponentsSchemasTenantAgentSessionState = "cancelled"
+	ComponentsSchemasTenantAgentSessionStateCompleted       ComponentsSchemasTenantAgentSessionState = "completed"
+	ComponentsSchemasTenantAgentSessionStateExpired         ComponentsSchemasTenantAgentSessionState = "expired"
+	ComponentsSchemasTenantAgentSessionStateFailed          ComponentsSchemasTenantAgentSessionState = "failed"
+	ComponentsSchemasTenantAgentSessionStateRunning         ComponentsSchemasTenantAgentSessionState = "running"
+	ComponentsSchemasTenantAgentSessionStateSkipped         ComponentsSchemasTenantAgentSessionState = "skipped"
+	ComponentsSchemasTenantAgentSessionStateWaitingApproval ComponentsSchemasTenantAgentSessionState = "waiting_approval"
 )
 
-// Defines values for ComponentsSchemasTeamAgentSpecDataSharing.
+// Defines values for ComponentsSchemasTenantAgentSpecDataSharing.
 const (
-	ComponentsSchemasTeamAgentSpecDataSharingLogs     ComponentsSchemasTeamAgentSpecDataSharing = "logs"
-	ComponentsSchemasTeamAgentSpecDataSharingMetadata ComponentsSchemasTeamAgentSpecDataSharing = "metadata"
-	ComponentsSchemasTeamAgentSpecDataSharingNone     ComponentsSchemasTeamAgentSpecDataSharing = "none"
+	ComponentsSchemasTenantAgentSpecDataSharingLogs     ComponentsSchemasTenantAgentSpecDataSharing = "logs"
+	ComponentsSchemasTenantAgentSpecDataSharingMetadata ComponentsSchemasTenantAgentSpecDataSharing = "metadata"
+	ComponentsSchemasTenantAgentSpecDataSharingNone     ComponentsSchemasTenantAgentSpecDataSharing = "none"
 )
 
-// Defines values for ComponentsSchemasTeamAgentSpecTriggersType.
+// Defines values for ComponentsSchemasTenantAgentSpecTriggersType.
 const (
-	ComponentsSchemasTeamAgentSpecTriggersTypeCronMissed       ComponentsSchemasTeamAgentSpecTriggersType = "cron.missed"
-	ComponentsSchemasTeamAgentSpecTriggersTypeLockHeld         ComponentsSchemasTeamAgentSpecTriggersType = "lock.held"
-	ComponentsSchemasTeamAgentSpecTriggersTypeManual           ComponentsSchemasTeamAgentSpecTriggersType = "manual"
-	ComponentsSchemasTeamAgentSpecTriggersTypePlacementMoved   ComponentsSchemasTeamAgentSpecTriggersType = "placement.moved"
-	ComponentsSchemasTeamAgentSpecTriggersTypeRunFailed        ComponentsSchemasTeamAgentSpecTriggersType = "run.failed"
-	ComponentsSchemasTeamAgentSpecTriggersTypeRunInterrupted   ComponentsSchemasTeamAgentSpecTriggersType = "run.interrupted"
-	ComponentsSchemasTeamAgentSpecTriggersTypeScanFailed       ComponentsSchemasTeamAgentSpecTriggersType = "scan.failed"
-	ComponentsSchemasTeamAgentSpecTriggersTypeSignatureRefused ComponentsSchemasTeamAgentSpecTriggersType = "signature.refused"
+	ComponentsSchemasTenantAgentSpecTriggersTypeCronMissed       ComponentsSchemasTenantAgentSpecTriggersType = "cron.missed"
+	ComponentsSchemasTenantAgentSpecTriggersTypeLockHeld         ComponentsSchemasTenantAgentSpecTriggersType = "lock.held"
+	ComponentsSchemasTenantAgentSpecTriggersTypeManual           ComponentsSchemasTenantAgentSpecTriggersType = "manual"
+	ComponentsSchemasTenantAgentSpecTriggersTypePlacementMoved   ComponentsSchemasTenantAgentSpecTriggersType = "placement.moved"
+	ComponentsSchemasTenantAgentSpecTriggersTypeRunFailed        ComponentsSchemasTenantAgentSpecTriggersType = "run.failed"
+	ComponentsSchemasTenantAgentSpecTriggersTypeRunInterrupted   ComponentsSchemasTenantAgentSpecTriggersType = "run.interrupted"
+	ComponentsSchemasTenantAgentSpecTriggersTypeScanFailed       ComponentsSchemasTenantAgentSpecTriggersType = "scan.failed"
+	ComponentsSchemasTenantAgentSpecTriggersTypeSignatureRefused ComponentsSchemasTenantAgentSpecTriggersType = "signature.refused"
 )
 
-// Defines values for ComponentsSchemasTeamCellState.
+// Defines values for ComponentsSchemasTenantCellState.
 const (
-	Moving        ComponentsSchemasTeamCellState = "moving"
-	NotCellHosted ComponentsSchemasTeamCellState = "notCellHosted"
-	Placed        ComponentsSchemasTeamCellState = "placed"
-	Rehydrating   ComponentsSchemasTeamCellState = "rehydrating"
-	Unplaced      ComponentsSchemasTeamCellState = "unplaced"
+	Moving        ComponentsSchemasTenantCellState = "moving"
+	NotCellHosted ComponentsSchemasTenantCellState = "notCellHosted"
+	Placed        ComponentsSchemasTenantCellState = "placed"
+	Rehydrating   ComponentsSchemasTenantCellState = "rehydrating"
+	Unplaced      ComponentsSchemasTenantCellState = "unplaced"
 )
 
-// Defines values for ComponentsSchemasTeamMemberRole.
+// Defines values for ComponentsSchemasTenantMemberRole.
 const (
-	ComponentsSchemasTeamMemberRoleActive  ComponentsSchemasTeamMemberRole = "active"
-	ComponentsSchemasTeamMemberRoleStandby ComponentsSchemasTeamMemberRole = "standby"
+	ComponentsSchemasTenantMemberRoleActive  ComponentsSchemasTenantMemberRole = "active"
+	ComponentsSchemasTenantMemberRoleStandby ComponentsSchemasTenantMemberRole = "standby"
 )
 
-// Defines values for ComponentsSchemasTeamPipelinesConcurrency.
+// Defines values for ComponentsSchemasTenantPipelinesConcurrency.
 const (
-	ComponentsSchemasTeamPipelinesConcurrencyAllow            ComponentsSchemasTeamPipelinesConcurrency = "allow"
-	ComponentsSchemasTeamPipelinesConcurrencyCancelInProgress ComponentsSchemasTeamPipelinesConcurrency = "cancelInProgress"
+	ComponentsSchemasTenantPipelinesConcurrencyAllow            ComponentsSchemasTenantPipelinesConcurrency = "allow"
+	ComponentsSchemasTenantPipelinesConcurrencyCancelInProgress ComponentsSchemasTenantPipelinesConcurrency = "cancelInProgress"
 )
 
-// Defines values for ComponentsSchemasTeamPipelinesCronCatchUp.
+// Defines values for ComponentsSchemasTenantPipelinesCronCatchUp.
 const (
-	None ComponentsSchemasTeamPipelinesCronCatchUp = "none"
-	One  ComponentsSchemasTeamPipelinesCronCatchUp = "one"
+	None ComponentsSchemasTenantPipelinesCronCatchUp = "none"
+	One  ComponentsSchemasTenantPipelinesCronCatchUp = "one"
 )
 
-// Defines values for ComponentsSchemasTeamPipelinesInterruptedRetry.
+// Defines values for ComponentsSchemasTenantPipelinesInterruptedRetry.
 const (
-	ComponentsSchemasTeamPipelinesInterruptedRetryAutomatic ComponentsSchemasTeamPipelinesInterruptedRetry = "automatic"
-	ComponentsSchemasTeamPipelinesInterruptedRetryManual    ComponentsSchemasTeamPipelinesInterruptedRetry = "manual"
+	ComponentsSchemasTenantPipelinesInterruptedRetryAutomatic ComponentsSchemasTenantPipelinesInterruptedRetry = "automatic"
+	ComponentsSchemasTenantPipelinesInterruptedRetryManual    ComponentsSchemasTenantPipelinesInterruptedRetry = "manual"
 )
 
 // Defines values for ComponentsSchemasUpdateCenterClosureEntrySource.
@@ -859,14 +859,14 @@ const (
 
 // Defines values for ListActivityParamsSource.
 const (
-	ListActivityParamsSourceApi       ListActivityParamsSource = "api"
-	ListActivityParamsSourceAssistant ListActivityParamsSource = "assistant"
-	ListActivityParamsSourceJenkins   ListActivityParamsSource = "jenkins"
-	ListActivityParamsSourceMcp       ListActivityParamsSource = "mcp"
-	ListActivityParamsSourceMite      ListActivityParamsSource = "mite"
-	ListActivityParamsSourceOperator  ListActivityParamsSource = "operator"
-	ListActivityParamsSourceTeamAgent ListActivityParamsSource = "team_agent"
-	ListActivityParamsSourceUser      ListActivityParamsSource = "user"
+	ListActivityParamsSourceApi         ListActivityParamsSource = "api"
+	ListActivityParamsSourceAssistant   ListActivityParamsSource = "assistant"
+	ListActivityParamsSourceJenkins     ListActivityParamsSource = "jenkins"
+	ListActivityParamsSourceMcp         ListActivityParamsSource = "mcp"
+	ListActivityParamsSourceMite        ListActivityParamsSource = "mite"
+	ListActivityParamsSourceOperator    ListActivityParamsSource = "operator"
+	ListActivityParamsSourceTenantAgent ListActivityParamsSource = "tenant_agent"
+	ListActivityParamsSourceUser        ListActivityParamsSource = "user"
 )
 
 // Defines values for ListActivityParamsSeverity.
@@ -896,15 +896,15 @@ const (
 	ApproveControllerJSONBodyActionRestart      ApproveControllerJSONBodyAction = "restart"
 )
 
-// Defines values for ListTeamAgentSessionsParamsState.
+// Defines values for ListTenantAgentSessionsParamsState.
 const (
-	Cancelled       ListTeamAgentSessionsParamsState = "cancelled"
-	Completed       ListTeamAgentSessionsParamsState = "completed"
-	Expired         ListTeamAgentSessionsParamsState = "expired"
-	Failed          ListTeamAgentSessionsParamsState = "failed"
-	Running         ListTeamAgentSessionsParamsState = "running"
-	Skipped         ListTeamAgentSessionsParamsState = "skipped"
-	WaitingApproval ListTeamAgentSessionsParamsState = "waiting_approval"
+	Cancelled       ListTenantAgentSessionsParamsState = "cancelled"
+	Completed       ListTenantAgentSessionsParamsState = "completed"
+	Expired         ListTenantAgentSessionsParamsState = "expired"
+	Failed          ListTenantAgentSessionsParamsState = "failed"
+	Running         ListTenantAgentSessionsParamsState = "running"
+	Skipped         ListTenantAgentSessionsParamsState = "skipped"
+	WaitingApproval ListTenantAgentSessionsParamsState = "waiting_approval"
 )
 
 // ComponentsSchemasAPICapabilitySet Resource-to-verb-to-allowed capability map.
@@ -1033,10 +1033,10 @@ type ComponentsSchemasAssistantErrorCode string
 type ComponentsSchemasAssistantLimits struct {
 	ApprovalExpiry *string `json:"approvalExpiry,omitempty"`
 	Budgets        *struct {
-		Session *int64 `json:"session,omitempty"`
-		Steps   *int   `json:"steps,omitempty"`
-		TeamDay *int64 `json:"teamDay,omitempty"`
-		UserDay *int64 `json:"userDay,omitempty"`
+		Session   *int64 `json:"session,omitempty"`
+		Steps     *int   `json:"steps,omitempty"`
+		TenantDay *int64 `json:"tenantDay,omitempty"`
+		UserDay   *int64 `json:"userDay,omitempty"`
 	} `json:"budgets,omitempty"`
 	Egress              *map[string]interface{} `json:"egress,omitempty"`
 	ExternalDataSharing *string                 `json:"externalDataSharing,omitempty"`
@@ -1089,7 +1089,7 @@ type ComponentsSchemasAssistantSession struct {
 	StartedAt        time.Time                                    `json:"startedAt"`
 	State            ComponentsSchemasAssistantSessionState       `json:"state"`
 	Steps            int                                          `json:"steps"`
-	Team             *string                                      `json:"team,omitempty"`
+	Tenant           *string                                      `json:"tenant,omitempty"`
 	Trigger          *string                                      `json:"trigger,omitempty"`
 }
 
@@ -1115,7 +1115,7 @@ type ComponentsSchemasAssistantSessionContext struct {
 	Job        *string `json:"job,omitempty"`
 	Route      *string `json:"route,omitempty"`
 	Run        *string `json:"run,omitempty"`
-	Team       *string `json:"team,omitempty"`
+	Tenant     *string `json:"tenant,omitempty"`
 }
 
 // ComponentsSchemasAssistantSessionCreateRequest Send either message or prompt, never both.
@@ -1707,7 +1707,7 @@ type ComponentsSchemasCatalogVariableType string
 
 // ComponentsSchemasCellGrant One grant that reaches a tenant. The jobs field is absent when the grant narrows nothing. An absent jobs and an empty jobs mean different things, so the field is never an empty array.
 type ComponentsSchemasCellGrant struct {
-	// Binding The VarroaRoleBinding name. For the federatedBinding source it names the JenkinsRoleBinding copy on this cell's cluster. Absent for the teamMembership source.
+	// Binding The VarroaRoleBinding name. For the federatedBinding source it names the JenkinsRoleBinding copy on this cell's cluster. Absent for the tenantMembership source.
 	Binding *string `json:"binding,omitempty"`
 
 	// FederatedFrom The core VarroaRoleBindings of a federated copy.
@@ -2648,7 +2648,7 @@ type ComponentsSchemasCreateRunNoteRequest struct {
 	SessionId *openapi_types.UUID `json:"sessionId,omitempty"`
 }
 
-// ComponentsSchemasCreateRunRequest POST /pipelines/{team}/jobs/{job}/runs. clientToken, a UUIDv7, makes the request idempotent: the BFF uses it as the run identifier. A request with no clientToken is not idempotent.
+// ComponentsSchemasCreateRunRequest POST /pipelines/{tenant}/jobs/{job}/runs. clientToken, a UUIDv7, makes the request idempotent: the BFF uses it as the run identifier. A request with no clientToken is not idempotent.
 type ComponentsSchemasCreateRunRequest struct {
 	ClientToken *openapi_types.UUID `json:"clientToken,omitempty"`
 
@@ -2719,7 +2719,7 @@ type ComponentsSchemasFleetLock struct {
 	Name  string `json:"name"`
 	RunId string `json:"runId"`
 
-	// RunLink The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the same link a run search result carries. Absent, not null, when the caller's own grant cannot read the row's own run.
+	// RunLink The run's own page path, /pipelines/{tenant}/{jobPath}/{runId}, the same link a run search result carries. Absent, not null, when the caller's own grant cannot read the row's own run.
 	RunLink *string                         `json:"runLink,omitempty"`
 	State   ComponentsSchemasFleetLockState `json:"state"`
 
@@ -2740,7 +2740,7 @@ type ComponentsSchemasFleetLockHolderCell struct {
 	Namespace string `json:"namespace"`
 }
 
-// ComponentsSchemasFleetLockListResponse GET /pipelines/{team}/locks and GET /locks. Both routes answer the rows in lock name order. In one name, the holder comes first, and the waiters follow in the order they began to wait.
+// ComponentsSchemasFleetLockListResponse GET /pipelines/{tenant}/locks and GET /locks. Both routes answer the rows in lock name order. In one name, the holder comes first, and the waiters follow in the order they began to wait.
 type ComponentsSchemasFleetLockListResponse struct {
 	Items []ComponentsSchemasFleetLock `json:"items"`
 }
@@ -2950,7 +2950,7 @@ type ComponentsSchemasInputSummaryEntry struct {
 
 // ComponentsSchemasJenkinsLink The Varroa page that a Jenkins item path resolves to.
 type ComponentsSchemasJenkinsLink struct {
-	// Link A dashboard path, such as /pipelines/team/job/runId.
+	// Link A dashboard path, such as /pipelines/tenant/job/runId.
 	Link string `json:"link"`
 }
 
@@ -3042,7 +3042,7 @@ type ComponentsSchemasJobBranchHead struct {
 	Revision *string `json:"revision,omitempty"`
 }
 
-// ComponentsSchemasJobBranchList GET /pipelines/{team}/jobs/{job}/branches. The inventory is up to ten minutes stale. A hibernated cell keeps its last export.
+// ComponentsSchemasJobBranchList GET /pipelines/{tenant}/jobs/{job}/branches. The inventory is up to ten minutes stale. A hibernated cell keeps its last export.
 type ComponentsSchemasJobBranchList struct {
 	Branches []ComponentsSchemasJobBranchHead `json:"branches"`
 
@@ -3396,7 +3396,7 @@ type ComponentsSchemasPipelineDependencyEdge struct {
 // ComponentsSchemasPipelineDependencyEdgeResult The result threshold the edge fires on.
 type ComponentsSchemasPipelineDependencyEdgeResult string
 
-// ComponentsSchemasPipelineJobDetail GET /pipelines/{team}/jobs/{job}.
+// ComponentsSchemasPipelineJobDetail GET /pipelines/{tenant}/jobs/{job}.
 type ComponentsSchemasPipelineJobDetail struct {
 	// Definition Where a job's pipeline script comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.
 	Definition *ComponentsSchemasPipelineDefinition `json:"definition,omitempty"`
@@ -3423,7 +3423,7 @@ type ComponentsSchemasPipelineJobDetail struct {
 	// Template Absent for a job with no catalog template (a Jenkinsfile job).
 	Template *ComponentsSchemasPipelineTemplateInfo `json:"template,omitempty"`
 
-	// Tenant The tenant noun the server authorizes against, from TenantRef.Tenant: a Team name for a Team tenant, or "<namespace>/<controller>" for a synthetic tenant.
+	// Tenant The tenant noun the server authorizes against, from TenantRef.Tenant: a Tenant name for a Tenant tenant, or "<namespace>/<controller>" for a synthetic tenant.
 	Tenant string `json:"tenant"`
 
 	// TenantFolder The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.
@@ -3440,7 +3440,7 @@ type ComponentsSchemasPipelineJobDetailHealth string
 // ComponentsSchemasPipelineJobDetailKind The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job.
 type ComponentsSchemasPipelineJobDetailKind string
 
-// ComponentsSchemasPipelineJobRetention One per-job window rule of a pipelines team.
+// ComponentsSchemasPipelineJobRetention One per-job window rule of a pipelines tenant.
 type ComponentsSchemasPipelineJobRetention struct {
 	// Days The window the rule names, in days, before the store cap.
 	Days int `json:"days"`
@@ -3452,7 +3452,7 @@ type ComponentsSchemasPipelineJobRetention struct {
 	Job string `json:"job"`
 }
 
-// ComponentsSchemasPipelineLast30Days The job's "Last 30 days" card, GET /pipelines/{team}/jobs/{job}.
+// ComponentsSchemasPipelineLast30Days The job's "Last 30 days" card, GET /pipelines/{tenant}/jobs/{job}.
 type ComponentsSchemasPipelineLast30Days struct {
 	// Builds Every run created in the window, whatever its status.
 	Builds int64 `json:"builds"`
@@ -3470,15 +3470,15 @@ type ComponentsSchemasPipelineLast30Days struct {
 	SlowestStage *ComponentsSchemasPipelineSlowestStage `json:"slowestStage"`
 }
 
-// ComponentsSchemasPipelineListResponse GET /pipelines/{team}: the job list, unioned with the catalog's declared jobs, plus the running-now strip.
+// ComponentsSchemasPipelineListResponse GET /pipelines/{tenant}: the job list, unioned with the catalog's declared jobs, plus the running-now strip.
 type ComponentsSchemasPipelineListResponse struct {
 	Items []ComponentsSchemasPipelineSummary `json:"items"`
 
-	// Retention The record-store windows that apply to one pipelines team.
+	// Retention The record-store windows that apply to one pipelines tenant.
 	Retention  ComponentsSchemasPipelineRetention `json:"retention"`
 	RunningNow []ComponentsSchemasRunningRun      `json:"runningNow"`
 
-	// TenantFolder The Jenkins folder that prefixes every job path in the response. It is the Team name for a placed pipelines tenant. It is the empty string for a controller tenant. The field is always present.
+	// TenantFolder The Jenkins folder that prefixes every job path in the response. It is the Tenant name for a placed pipelines tenant. It is the empty string for a controller tenant. The field is always present.
 	TenantFolder string `json:"tenantFolder"`
 
 	// Truncated True when any tenant's running-now page was full (50 rows), so the strip does not claim completeness.
@@ -3495,13 +3495,13 @@ type ComponentsSchemasPipelineMarkerFinding struct {
 // ComponentsSchemasPipelineMarkerFindingSeverity defines model for ComponentsSchemasPipelineMarkerFinding.Severity.
 type ComponentsSchemasPipelineMarkerFindingSeverity string
 
-// ComponentsSchemasPipelineMarkerValidateRequest POST /pipelines/{team}/markers/validate.
+// ComponentsSchemasPipelineMarkerValidateRequest POST /pipelines/{tenant}/markers/validate.
 type ComponentsSchemasPipelineMarkerValidateRequest struct {
 	// Marker The marker file's raw text, at most 64 KiB.
 	Marker string `json:"marker"`
 }
 
-// ComponentsSchemasPipelineMarkerValidateResponse findings is empty when the marker resolved against the team's delivered set and its values validated; templateName and templateVersion are then present.
+// ComponentsSchemasPipelineMarkerValidateResponse findings is empty when the marker resolved against the tenant's delivered set and its values validated; templateName and templateVersion are then present.
 type ComponentsSchemasPipelineMarkerValidateResponse struct {
 	Findings        []ComponentsSchemasPipelineMarkerFinding `json:"findings"`
 	TemplateName    *string                                  `json:"templateName,omitempty"`
@@ -3526,7 +3526,7 @@ type ComponentsSchemasPipelineParameterKind string
 // ComponentsSchemasPipelineParameterUiWidget defines model for ComponentsSchemasPipelineParameter.UiWidget.
 type ComponentsSchemasPipelineParameterUiWidget string
 
-// ComponentsSchemasPipelineRetention The record-store windows that apply to one pipelines team.
+// ComponentsSchemasPipelineRetention The record-store windows that apply to one pipelines tenant.
 type ComponentsSchemasPipelineRetention struct {
 	// EffectiveDays The window a job without a matching rule gets, in days.
 	EffectiveDays int `json:"effectiveDays"`
@@ -3575,32 +3575,6 @@ type ComponentsSchemasPipelineSummaryHealth string
 // ComponentsSchemasPipelineSummaryKind The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job. Any other job reports unknown.
 type ComponentsSchemasPipelineSummaryKind string
 
-// ComponentsSchemasPipelineTeam One row of GET /pipelines. cell and cellNamespace are set only on a placed row.
-type ComponentsSchemasPipelineTeam struct {
-	// Cell The slot-0 cell Controller that holds the tenant.
-	Cell *string `json:"cell,omitempty"`
-
-	// CellNamespace The namespace of that cell Controller.
-	CellNamespace *string `json:"cellNamespace,omitempty"`
-
-	// Cluster The cluster that holds the tenant's cell. An unplaced local Team names the local cluster. A local Team whose namespaces hold a controller, and which has no spec.pipelines, also names the local cluster.
-	Cluster string `json:"cluster"`
-
-	// Name The Team name, which is also its tenant name.
-	Name string `json:"name"`
-
-	// Placed True when a cell holds the tenant. A controller-namespace Team answers false.
-	Placed bool `json:"placed"`
-}
-
-// ComponentsSchemasPipelineTeamList GET /pipelines. The rows are in (name, cluster) order.
-type ComponentsSchemasPipelineTeamList struct {
-	Items []ComponentsSchemasPipelineTeam `json:"items"`
-
-	// RecordStore False when the record store is off or its schema is too old. The list then carries no Team that another cluster holds.
-	RecordStore bool `json:"recordStore"`
-}
-
 // ComponentsSchemasPipelineTemplateInfo The resolved catalog template for a job, read from the record store (marker-defined) or the items engine and catalog (items-declared). Absent from PipelineJobDetail for a job with no catalog template.
 // For source "marker": name, version, and asOfBuild are absent before the job's first run — markerPath and source are always present. markerRevision is the trusted revision the cell read the marker from, not the branch tip. For source "items": only name, version, and source are set.
 type ComponentsSchemasPipelineTemplateInfo struct {
@@ -3621,6 +3595,32 @@ type ComponentsSchemasPipelineTemplateSummary struct {
 	DisplayName *string `json:"displayName,omitempty"`
 	Name        string  `json:"name"`
 	Version     string  `json:"version"`
+}
+
+// ComponentsSchemasPipelineTenant One row of GET /pipelines. cell and cellNamespace are set only on a placed row.
+type ComponentsSchemasPipelineTenant struct {
+	// Cell The slot-0 cell Controller that holds the tenant.
+	Cell *string `json:"cell,omitempty"`
+
+	// CellNamespace The namespace of that cell Controller.
+	CellNamespace *string `json:"cellNamespace,omitempty"`
+
+	// Cluster The cluster that holds the tenant's cell. An unplaced local Tenant names the local cluster. A local Tenant whose namespaces hold a controller, and which has no spec.pipelines, also names the local cluster.
+	Cluster string `json:"cluster"`
+
+	// Name The Tenant name, which is also its tenant name.
+	Name string `json:"name"`
+
+	// Placed True when a cell holds the tenant. A controller-namespace Tenant answers false.
+	Placed bool `json:"placed"`
+}
+
+// ComponentsSchemasPipelineTenantList GET /pipelines. The rows are in (name, cluster) order.
+type ComponentsSchemasPipelineTenantList struct {
+	Items []ComponentsSchemasPipelineTenant `json:"items"`
+
+	// RecordStore False when the record store is off or its schema is too old. The list then carries no Tenant that another cluster holds.
+	RecordStore bool `json:"recordStore"`
 }
 
 // ComponentsSchemasPipelineTriggers defines model for components_schemas_PipelineTriggers.
@@ -4170,7 +4170,7 @@ type ComponentsSchemasRunDetail struct {
 	// Summary The one-line text the run attached to itself through varroa.summary. The plugin cuts the text at 512 UTF-8 bytes. This field is absent until the run calls varroa.summary.
 	Summary *string `json:"summary,omitempty"`
 
-	// Tenant The tenant noun the server authorizes against: the run row's stored tenant column. A Team name for a Team tenant, or "<namespace>/<controller>" for a synthetic tenant.
+	// Tenant The tenant noun the server authorizes against: the run row's stored tenant column. A Tenant name for a Tenant tenant, or "<namespace>/<controller>" for a synthetic tenant.
 	Tenant string `json:"tenant"`
 
 	// TenantFolder The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.
@@ -4288,7 +4288,7 @@ type ComponentsSchemasRunLinkPage struct {
 	NextCursor *string `json:"nextCursor,omitempty"`
 }
 
-// ComponentsSchemasRunListResponse GET /pipelines/{team}/jobs/{job}/runs, cross-tenant cursor-merged.
+// ComponentsSchemasRunListResponse GET /pipelines/{tenant}/jobs/{job}/runs, cross-tenant cursor-merged.
 type ComponentsSchemasRunListResponse struct {
 	Items      []ComponentsSchemasRunSummary `json:"items"`
 	NextCursor *string                       `json:"nextCursor,omitempty"`
@@ -4307,7 +4307,7 @@ type ComponentsSchemasRunNote struct {
 	Principal   string              `json:"principal"`
 	RunId       *openapi_types.UUID `json:"runId"`
 	SessionId   *openapi_types.UUID `json:"sessionId"`
-	Team        string              `json:"team"`
+	Tenant      string              `json:"tenant"`
 }
 
 // ComponentsSchemasRunNoteError A note refusal. The code names the cause when one applies.
@@ -4405,7 +4405,7 @@ type ComponentsSchemasRunSummaryTriggerSource string
 
 // ComponentsSchemasRunTestCase One stored test case of a run. The record store holds only failed and skipped cases, at most 500 for each run.
 type ComponentsSchemasRunTestCase struct {
-	// CaseKey The opaque case key the server makes from the class name and the test name. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on GET /pipelines/{team}/jobs/{job}/tests/{case}.
+	// CaseKey The opaque case key the server makes from the class name and the test name. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on GET /pipelines/{tenant}/jobs/{job}/tests/{case}.
 	CaseKey   string `json:"caseKey"`
 	ClassName string `json:"className"`
 
@@ -4509,10 +4509,10 @@ type ComponentsSchemasRunnerCondition struct {
 
 // ComponentsSchemasRunnerCreateRequest Request body for POST /runners.
 type ComponentsSchemasRunnerCreateRequest struct {
-	// Name metadata.name. Not generated: the operator names the machine, and the rendered node is <team>-<name>.
+	// Name metadata.name. Not generated: the operator names the machine, and the rendered node is <tenant>-<name>.
 	Name string `json:"name"`
 
-	// Spec A Runner's mutable configuration (spec.*). team and launcher are immutable after creation.
+	// Spec A Runner's mutable configuration (spec.*). tenant and launcher are immutable after creation.
 	Spec ComponentsSchemasRunnerSpec `json:"spec"`
 }
 
@@ -4520,16 +4520,16 @@ type ComponentsSchemasRunnerCreateRequest struct {
 type ComponentsSchemasRunnerEntry struct {
 	Name string `json:"name"`
 
-	// Spec A Runner's mutable configuration (spec.*). team and launcher are immutable after creation.
+	// Spec A Runner's mutable configuration (spec.*). tenant and launcher are immutable after creation.
 	Spec ComponentsSchemasRunnerSpec `json:"spec"`
 
 	// Status A Runner's observed state (status.*). status.token is present only for a caller holding runners:create; the BFF redacts it for every other caller (design D12).
 	Status ComponentsSchemasRunnerStatus `json:"status"`
 }
 
-// ComponentsSchemasRunnerSpec A Runner's mutable configuration (spec.*). team and launcher are immutable after creation.
+// ComponentsSchemasRunnerSpec A Runner's mutable configuration (spec.*). tenant and launcher are immutable after creation.
 type ComponentsSchemasRunnerSpec struct {
-	// CredentialRef Name of a Secret in the Team's agent namespace holding the SSH credential. Required for launcher ssh; forbidden for inbound.
+	// CredentialRef Name of a Secret in the Tenant's agent namespace holding the SSH credential. Required for launcher ssh; forbidden for inbound.
 	CredentialRef *string `json:"credentialRef,omitempty"`
 
 	// Host The SSH target. Required for launcher ssh; forbidden for inbound.
@@ -4538,7 +4538,7 @@ type ComponentsSchemasRunnerSpec struct {
 	// JavaPath An explicit java binary path for the ssh launcher.
 	JavaPath *string `json:"javaPath,omitempty"`
 
-	// Labels Unprefixed label suffixes; the operator prefixes each one with <team>-.
+	// Labels Unprefixed label suffixes; the operator prefixes each one with <tenant>-.
 	Labels *[]string `json:"labels,omitempty"`
 
 	// Launcher Connection direction. Immutable.
@@ -4553,8 +4553,8 @@ type ComponentsSchemasRunnerSpec struct {
 	// RemoteFS The agent work directory on the node.
 	RemoteFS string `json:"remoteFS"`
 
-	// Team The pipelines Team that owns this runner. Immutable.
-	Team string `json:"team"`
+	// Tenant The pipelines Tenant that owns this runner. Immutable.
+	Tenant string `json:"tenant"`
 }
 
 // ComponentsSchemasRunnerSpecLauncher Connection direction. Immutable.
@@ -4573,7 +4573,7 @@ type ComponentsSchemasRunnerStatus struct {
 	// LastSeen ISO 8601 time of the last online probe result.
 	LastSeen *string `json:"lastSeen,omitempty"`
 
-	// NodeName The rendered Jenkins node name, <team>-<runner name>.
+	// NodeName The rendered Jenkins node name, <tenant>-<runner name>.
 	NodeName           *string `json:"nodeName,omitempty"`
 	ObservedGeneration *int64  `json:"observedGeneration,omitempty"`
 
@@ -4581,7 +4581,7 @@ type ComponentsSchemasRunnerStatus struct {
 	Token *string `json:"token,omitempty"`
 }
 
-// ComponentsSchemasRunningRun One unfinished run for the team home's Running now card. currentStage names the top-level stage in progress. It is absent when no top-level stage is in progress: before the first stage, between two stages, and for a queued run.
+// ComponentsSchemasRunningRun One unfinished run for the tenant home's Running now card. currentStage names the top-level stage in progress. It is absent when no top-level stage is in progress: before the first stage, between two stages, and for a queued run.
 type ComponentsSchemasRunningRun struct {
 	Branch      *string `json:"branch,omitempty"`
 	BuildNumber *int64  `json:"buildNumber,omitempty"`
@@ -4603,7 +4603,7 @@ type ComponentsSchemasRunningRun struct {
 	TypicalDurationMs *int64 `json:"typicalDurationMs,omitempty"`
 }
 
-// ComponentsSchemasScanMultibranchRequest POST /pipelines/{team}/jobs/{job}/scan. Every field is optional.
+// ComponentsSchemasScanMultibranchRequest POST /pipelines/{tenant}/jobs/{job}/scan. Every field is optional.
 type ComponentsSchemasScanMultibranchRequest struct {
 	// Cluster Breaks a tie when the job path lies in more than one surviving tenant.
 	Cluster *string `json:"cluster,omitempty"`
@@ -4685,8 +4685,17 @@ type ComponentsSchemasSuspendBroodRequest struct {
 	Suspend bool `json:"suspend"`
 }
 
-// ComponentsSchemasTeamAgent defines model for components_schemas_TeamAgent.
-type ComponentsSchemasTeamAgent struct {
+// ComponentsSchemasTemplateCatalogCondition Status condition for catalog/composedbundle resources.
+type ComponentsSchemasTemplateCatalogCondition struct {
+	LastTransitionTime *string `json:"lastTransitionTime,omitempty"`
+	Message            *string `json:"message,omitempty"`
+	Reason             *string `json:"reason,omitempty"`
+	Status             string  `json:"status"`
+	Type               string  `json:"type"`
+}
+
+// ComponentsSchemasTenantAgent defines model for components_schemas_TenantAgent.
+type ComponentsSchemasTenantAgent struct {
 	Accepted         bool   `json:"accepted"`
 	Cluster          string `json:"cluster"`
 	DayLimit         int64  `json:"dayLimit"`
@@ -4694,12 +4703,12 @@ type ComponentsSchemasTeamAgent struct {
 	Namespace        string `json:"namespace"`
 	PendingApprovals int    `json:"pendingApprovals"`
 
-	// Spec The desired state of one TeamAgent. The acceptance rule picks the one object of a Team that runs.
-	Spec       ComponentsSchemasTeamAgentSpec `json:"spec"`
-	SpendToday int64                          `json:"spendToday"`
+	// Spec The desired state of one TenantAgent. The acceptance rule picks the one object of a Tenant that runs.
+	Spec       ComponentsSchemasTenantAgentSpec `json:"spec"`
+	SpendToday int64                            `json:"spendToday"`
 	Status     struct {
-		Conditions      *[]ComponentsSchemasTeamAgentCondition `json:"conditions,omitempty"`
-		InstructionsSHA *string                                `json:"instructionsSHA,omitempty"`
+		Conditions      *[]ComponentsSchemasTenantAgentCondition `json:"conditions,omitempty"`
+		InstructionsSHA *string                                  `json:"instructionsSHA,omitempty"`
 		LastSession     *struct {
 			At      *time.Time `json:"at,omitempty"`
 			Id      *string    `json:"id,omitempty"`
@@ -4709,19 +4718,19 @@ type ComponentsSchemasTeamAgent struct {
 		ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
 		SpendToday         *int64 `json:"spendToday,omitempty"`
 	} `json:"status"`
-	Team string `json:"team"`
+	Tenant string `json:"tenant"`
 }
 
-// ComponentsSchemasTeamAgentCapabilities defines model for components_schemas_TeamAgentCapabilities.
-type ComponentsSchemasTeamAgentCapabilities struct {
-	Never            []ComponentsSchemasTeamAgentCapability `json:"never"`
-	Reads            []ComponentsSchemasTeamAgentCapability `json:"reads"`
-	Unattended       []ComponentsSchemasTeamAgentCapability `json:"unattended"`
-	WritesByApproval []ComponentsSchemasTeamAgentCapability `json:"writesByApproval"`
+// ComponentsSchemasTenantAgentCapabilities defines model for components_schemas_TenantAgentCapabilities.
+type ComponentsSchemasTenantAgentCapabilities struct {
+	Never            []ComponentsSchemasTenantAgentCapability `json:"never"`
+	Reads            []ComponentsSchemasTenantAgentCapability `json:"reads"`
+	Unattended       []ComponentsSchemasTenantAgentCapability `json:"unattended"`
+	WritesByApproval []ComponentsSchemasTenantAgentCapability `json:"writesByApproval"`
 }
 
-// ComponentsSchemasTeamAgentCapability defines model for components_schemas_TeamAgentCapability.
-type ComponentsSchemasTeamAgentCapability struct {
+// ComponentsSchemasTenantAgentCapability defines model for components_schemas_TenantAgentCapability.
+type ComponentsSchemasTenantAgentCapability struct {
 	Description string `json:"description"`
 
 	// Kind The tool class read or write, or the output kind note, issue, or webhook on an output tool.
@@ -4729,118 +4738,118 @@ type ComponentsSchemasTeamAgentCapability struct {
 	Name string `json:"name"`
 }
 
-// ComponentsSchemasTeamAgentCondition defines model for components_schemas_TeamAgentCondition.
-type ComponentsSchemasTeamAgentCondition struct {
-	LastTransitionTime time.Time                                 `json:"lastTransitionTime"`
-	Message            *string                                   `json:"message,omitempty"`
-	ObservedGeneration *int64                                    `json:"observedGeneration,omitempty"`
-	Reason             string                                    `json:"reason"`
-	Status             ComponentsSchemasTeamAgentConditionStatus `json:"status"`
-	Type               string                                    `json:"type"`
+// ComponentsSchemasTenantAgentCondition defines model for components_schemas_TenantAgentCondition.
+type ComponentsSchemasTenantAgentCondition struct {
+	LastTransitionTime time.Time                                   `json:"lastTransitionTime"`
+	Message            *string                                     `json:"message,omitempty"`
+	ObservedGeneration *int64                                      `json:"observedGeneration,omitempty"`
+	Reason             string                                      `json:"reason"`
+	Status             ComponentsSchemasTenantAgentConditionStatus `json:"status"`
+	Type               string                                      `json:"type"`
 }
 
-// ComponentsSchemasTeamAgentConditionStatus defines model for ComponentsSchemasTeamAgentCondition.Status.
-type ComponentsSchemasTeamAgentConditionStatus string
+// ComponentsSchemasTenantAgentConditionStatus defines model for ComponentsSchemasTenantAgentCondition.Status.
+type ComponentsSchemasTenantAgentConditionStatus string
 
-// ComponentsSchemasTeamAgentError A Team agent refusal. The code names the cause, and error gives the text.
-type ComponentsSchemasTeamAgentError struct {
-	Code  ComponentsSchemasTeamAgentErrorCode `json:"code"`
-	Error string                              `json:"error"`
+// ComponentsSchemasTenantAgentError A Tenant agent refusal. The code names the cause, and error gives the text.
+type ComponentsSchemasTenantAgentError struct {
+	Code  ComponentsSchemasTenantAgentErrorCode `json:"code"`
+	Error string                                `json:"error"`
 }
 
-// ComponentsSchemasTeamAgentErrorCode defines model for ComponentsSchemasTeamAgentError.Code.
-type ComponentsSchemasTeamAgentErrorCode string
+// ComponentsSchemasTenantAgentErrorCode defines model for ComponentsSchemasTenantAgentError.Code.
+type ComponentsSchemasTenantAgentErrorCode string
 
-// ComponentsSchemasTeamAgentItem defines model for components_schemas_TeamAgentItem.
-type ComponentsSchemasTeamAgentItem struct {
+// ComponentsSchemasTenantAgentItem defines model for components_schemas_TenantAgentItem.
+type ComponentsSchemasTenantAgentItem struct {
 	Cluster string `json:"cluster"`
 
 	// Conditions The conditions whose status is not True.
-	Conditions          []ComponentsSchemasTeamAgentCondition `json:"conditions"`
-	Enabled             bool                                  `json:"enabled"`
-	FailedToday         int                                   `json:"failedToday"`
-	Name                string                                `json:"name"`
-	Namespace           string                                `json:"namespace"`
-	Paused              *ComponentsSchemasTeamAgentPaused     `json:"paused"`
-	SessionsToday       int                                   `json:"sessionsToday"`
-	SpendToday          int64                                 `json:"spendToday"`
-	Team                string                                `json:"team"`
-	UnattendedGranted   []string                              `json:"unattendedGranted"`
-	UnattendedRequested []string                              `json:"unattendedRequested"`
+	Conditions          []ComponentsSchemasTenantAgentCondition `json:"conditions"`
+	Enabled             bool                                    `json:"enabled"`
+	FailedToday         int                                     `json:"failedToday"`
+	Name                string                                  `json:"name"`
+	Namespace           string                                  `json:"namespace"`
+	Paused              *ComponentsSchemasTenantAgentPaused     `json:"paused"`
+	SessionsToday       int                                     `json:"sessionsToday"`
+	SpendToday          int64                                   `json:"spendToday"`
+	Tenant              string                                  `json:"tenant"`
+	UnattendedGranted   []string                                `json:"unattendedGranted"`
+	UnattendedRequested []string                                `json:"unattendedRequested"`
 }
 
-// ComponentsSchemasTeamAgentItemList defines model for components_schemas_TeamAgentItemList.
-type ComponentsSchemasTeamAgentItemList struct {
-	Items []ComponentsSchemasTeamAgentItem `json:"items"`
+// ComponentsSchemasTenantAgentItemList defines model for components_schemas_TenantAgentItemList.
+type ComponentsSchemasTenantAgentItemList struct {
+	Items []ComponentsSchemasTenantAgentItem `json:"items"`
 }
 
-// ComponentsSchemasTeamAgentPaused defines model for components_schemas_TeamAgentPaused.
-type ComponentsSchemasTeamAgentPaused struct {
+// ComponentsSchemasTenantAgentPaused defines model for components_schemas_TenantAgentPaused.
+type ComponentsSchemasTenantAgentPaused struct {
 	Message string `json:"message"`
 	Reason  string `json:"reason"`
 }
 
-// ComponentsSchemasTeamAgentRunRequest defines model for components_schemas_TeamAgentRunRequest.
-type ComponentsSchemasTeamAgentRunRequest struct {
-	// Job A job path under the Team. Empty names the whole Team.
+// ComponentsSchemasTenantAgentRunRequest defines model for components_schemas_TenantAgentRunRequest.
+type ComponentsSchemasTenantAgentRunRequest struct {
+	// Job A job path under the Tenant. Empty names the whole Tenant.
 	Job *string `json:"job,omitempty"`
 
 	// Run A run id to note in the request.
 	Run *string `json:"run,omitempty"`
 }
 
-// ComponentsSchemasTeamAgentSession defines model for components_schemas_TeamAgentSession.
-type ComponentsSchemasTeamAgentSession struct {
-	Cluster          string                                       `json:"cluster"`
-	CompletionTokens int64                                        `json:"completionTokens"`
-	Context          map[string]interface{}                       `json:"context"`
-	DataSharing      ComponentsSchemasTeamAgentSessionDataSharing `json:"dataSharing"`
-	EndedAt          *time.Time                                   `json:"endedAt"`
-	Id               string                                       `json:"id"`
-	KeySource        ComponentsSchemasTeamAgentSessionKeySource   `json:"keySource"`
-	Kind             ComponentsSchemasTeamAgentSessionKind        `json:"kind"`
-	Model            *string                                      `json:"model,omitempty"`
-	PendingApprovals []ComponentsSchemasAssistantApproval         `json:"pendingApprovals"`
-	Principal        string                                       `json:"principal"`
-	PromptTokens     int64                                        `json:"promptTokens"`
-	Provider         *string                                      `json:"provider,omitempty"`
-	SkipReason       *ComponentsSchemasTeamAgentSessionSkipReason `json:"skipReason"`
-	StartedAt        time.Time                                    `json:"startedAt"`
-	State            ComponentsSchemasTeamAgentSessionState       `json:"state"`
-	Steps            int                                          `json:"steps"`
-	Team             *string                                      `json:"team,omitempty"`
-	Trigger          *string                                      `json:"trigger,omitempty"`
+// ComponentsSchemasTenantAgentSession defines model for components_schemas_TenantAgentSession.
+type ComponentsSchemasTenantAgentSession struct {
+	Cluster          string                                         `json:"cluster"`
+	CompletionTokens int64                                          `json:"completionTokens"`
+	Context          map[string]interface{}                         `json:"context"`
+	DataSharing      ComponentsSchemasTenantAgentSessionDataSharing `json:"dataSharing"`
+	EndedAt          *time.Time                                     `json:"endedAt"`
+	Id               string                                         `json:"id"`
+	KeySource        ComponentsSchemasTenantAgentSessionKeySource   `json:"keySource"`
+	Kind             ComponentsSchemasTenantAgentSessionKind        `json:"kind"`
+	Model            *string                                        `json:"model,omitempty"`
+	PendingApprovals []ComponentsSchemasAssistantApproval           `json:"pendingApprovals"`
+	Principal        string                                         `json:"principal"`
+	PromptTokens     int64                                          `json:"promptTokens"`
+	Provider         *string                                        `json:"provider,omitempty"`
+	SkipReason       *ComponentsSchemasTenantAgentSessionSkipReason `json:"skipReason"`
+	StartedAt        time.Time                                      `json:"startedAt"`
+	State            ComponentsSchemasTenantAgentSessionState       `json:"state"`
+	Steps            int                                            `json:"steps"`
+	Tenant           *string                                        `json:"tenant,omitempty"`
+	Trigger          *string                                        `json:"trigger,omitempty"`
 }
 
-// ComponentsSchemasTeamAgentSessionDataSharing defines model for ComponentsSchemasTeamAgentSession.DataSharing.
-type ComponentsSchemasTeamAgentSessionDataSharing string
+// ComponentsSchemasTenantAgentSessionDataSharing defines model for ComponentsSchemasTenantAgentSession.DataSharing.
+type ComponentsSchemasTenantAgentSessionDataSharing string
 
-// ComponentsSchemasTeamAgentSessionKeySource defines model for ComponentsSchemasTeamAgentSession.KeySource.
-type ComponentsSchemasTeamAgentSessionKeySource string
+// ComponentsSchemasTenantAgentSessionKeySource defines model for ComponentsSchemasTenantAgentSession.KeySource.
+type ComponentsSchemasTenantAgentSessionKeySource string
 
-// ComponentsSchemasTeamAgentSessionKind defines model for ComponentsSchemasTeamAgentSession.Kind.
-type ComponentsSchemasTeamAgentSessionKind string
+// ComponentsSchemasTenantAgentSessionKind defines model for ComponentsSchemasTenantAgentSession.Kind.
+type ComponentsSchemasTenantAgentSessionKind string
 
-// ComponentsSchemasTeamAgentSessionSkipReason defines model for ComponentsSchemasTeamAgentSession.SkipReason.
-type ComponentsSchemasTeamAgentSessionSkipReason string
+// ComponentsSchemasTenantAgentSessionSkipReason defines model for ComponentsSchemasTenantAgentSession.SkipReason.
+type ComponentsSchemasTenantAgentSessionSkipReason string
 
-// ComponentsSchemasTeamAgentSessionState defines model for ComponentsSchemasTeamAgentSession.State.
-type ComponentsSchemasTeamAgentSessionState string
+// ComponentsSchemasTenantAgentSessionState defines model for ComponentsSchemasTenantAgentSession.State.
+type ComponentsSchemasTenantAgentSessionState string
 
-// ComponentsSchemasTeamAgentSessionList defines model for components_schemas_TeamAgentSessionList.
-type ComponentsSchemasTeamAgentSessionList struct {
-	Items      []ComponentsSchemasTeamAgentSession `json:"items"`
-	NextCursor string                              `json:"nextCursor"`
+// ComponentsSchemasTenantAgentSessionList defines model for components_schemas_TenantAgentSessionList.
+type ComponentsSchemasTenantAgentSessionList struct {
+	Items      []ComponentsSchemasTenantAgentSession `json:"items"`
+	NextCursor string                                `json:"nextCursor"`
 }
 
-// ComponentsSchemasTeamAgentSpec The desired state of one TeamAgent. The acceptance rule picks the one object of a Team that runs.
-type ComponentsSchemasTeamAgentSpec struct {
+// ComponentsSchemasTenantAgentSpec The desired state of one TenantAgent. The acceptance rule picks the one object of a Tenant that runs.
+type ComponentsSchemasTenantAgentSpec struct {
 	Budgets *struct {
 		Day     *int64 `json:"day,omitempty"`
 		Session *int64 `json:"session,omitempty"`
 	} `json:"budgets,omitempty"`
-	DataSharing  *ComponentsSchemasTeamAgentSpecDataSharing `json:"dataSharing,omitempty"`
-	Enabled      *bool                                      `json:"enabled,omitempty"`
+	DataSharing  *ComponentsSchemasTenantAgentSpecDataSharing `json:"dataSharing,omitempty"`
+	Enabled      *bool                                        `json:"enabled,omitempty"`
 	Instructions *struct {
 		Path   *string `json:"path,omitempty"`
 		Source string  `json:"source"`
@@ -4855,39 +4864,49 @@ type ComponentsSchemasTeamAgentSpec struct {
 		Notes   *bool `json:"notes,omitempty"`
 		Webhook *bool `json:"webhook,omitempty"`
 	} `json:"outputs,omitempty"`
-	Provider *string `json:"provider,omitempty"`
-	TeamRef  struct {
+	Provider  *string `json:"provider,omitempty"`
+	TenantRef struct {
 		Name string `json:"name"`
-	} `json:"teamRef"`
+	} `json:"tenantRef"`
 	Triggers *[]struct {
 		// Debounce A Go duration, such as 10m.
-		Debounce *string                                    `json:"debounce,omitempty"`
-		Type     ComponentsSchemasTeamAgentSpecTriggersType `json:"type"`
+		Debounce *string                                      `json:"debounce,omitempty"`
+		Type     ComponentsSchemasTenantAgentSpecTriggersType `json:"type"`
 	} `json:"triggers,omitempty"`
 	UnattendedWrites *[]string `json:"unattendedWrites,omitempty"`
 }
 
-// ComponentsSchemasTeamAgentSpecDataSharing defines model for ComponentsSchemasTeamAgentSpec.DataSharing.
-type ComponentsSchemasTeamAgentSpecDataSharing string
+// ComponentsSchemasTenantAgentSpecDataSharing defines model for ComponentsSchemasTenantAgentSpec.DataSharing.
+type ComponentsSchemasTenantAgentSpecDataSharing string
 
-// ComponentsSchemasTeamAgentSpecTriggersType defines model for ComponentsSchemasTeamAgentSpec.Triggers.Type.
-type ComponentsSchemasTeamAgentSpecTriggersType string
+// ComponentsSchemasTenantAgentSpecTriggersType defines model for ComponentsSchemasTenantAgentSpec.Triggers.Type.
+type ComponentsSchemasTenantAgentSpecTriggersType string
 
-// ComponentsSchemasTeamAgentUnattendedRequest defines model for components_schemas_TeamAgentUnattendedRequest.
-type ComponentsSchemasTeamAgentUnattendedRequest struct {
+// ComponentsSchemasTenantAgentUnattendedRequest defines model for components_schemas_TenantAgentUnattendedRequest.
+type ComponentsSchemasTenantAgentUnattendedRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
-// ComponentsSchemasTeamAgentUnattendedResult defines model for components_schemas_TeamAgentUnattendedResult.
-type ComponentsSchemasTeamAgentUnattendedResult struct {
+// ComponentsSchemasTenantAgentUnattendedResult defines model for components_schemas_TenantAgentUnattendedResult.
+type ComponentsSchemasTenantAgentUnattendedResult struct {
 	Enabled           bool     `json:"enabled"`
 	Name              string   `json:"name"`
 	Namespace         string   `json:"namespace"`
 	UnattendedGranted []string `json:"unattendedGranted"`
 }
 
-// ComponentsSchemasTeamCell The tenant's own view of the cell that hosts it. For the state notCellHosted only state is present. For the state unplaced every field other than state, reason, and warning is absent. The body carries no other tenant's name, job path, run, or count.
-type ComponentsSchemasTeamCell struct {
+// ComponentsSchemasTenantCapabilities One grant the caller holds on one pipelines tenant. A tenant name may appear in more than one entry, because the caller can hold two grants on it with different job globs; they are never merged.
+type ComponentsSchemasTenantCapabilities struct {
+	// Capabilities Resource-to-verb-to-allowed capability map.
+	Capabilities ComponentsSchemasAPICapabilitySet `json:"capabilities"`
+
+	// Jobs Folder-relative job globs the grant covers. Always an array, never null; an empty array means every job.
+	Jobs   []string `json:"jobs"`
+	Tenant string   `json:"tenant"`
+}
+
+// ComponentsSchemasTenantCell The tenant's own view of the cell that hosts it. For the state notCellHosted only state is present. For the state unplaced every field other than state, reason, and warning is absent. The body carries no other tenant's name, job path, run, or count.
+type ComponentsSchemasTenantCell struct {
 	// CanOpenCell True when the caller also holds the controller read grant on the cell. The hint gates no other field of this body.
 	CanOpenCell    bool    `json:"canOpenCell"`
 	Cell           *string `json:"cell,omitempty"`
@@ -4899,29 +4918,29 @@ type ComponentsSchemasTeamCell struct {
 	Jobs           *int64  `json:"jobs,omitempty"`
 
 	// Members One entry for each member of the tenant, ordered by role: active members by ascending slot first, then standbys by cell name. It is absent for unplaced and notCellHosted. Every other field of this body describes the tenant's slot 0.
-	Members   *[]ComponentsSchemasTeamCellMember `json:"members,omitempty"`
-	Namespace *string                            `json:"namespace,omitempty"`
+	Members   *[]ComponentsSchemasTenantCellMember `json:"members,omitempty"`
+	Namespace *string                              `json:"namespace,omitempty"`
 
 	// OtherTenantCount The number of other tenants on the cell. It is a count, never a list.
 	OtherTenantCount *int32  `json:"otherTenantCount,omitempty"`
 	Profile          *string `json:"profile,omitempty"`
 	QueueLength      *int64  `json:"queueLength,omitempty"`
 
-	// Reason The Team's Placed condition reason, verbatim.
-	Reason      *string                        `json:"reason,omitempty"`
-	RunningNow  *int64                         `json:"runningNow,omitempty"`
-	RunsLast24h *int64                         `json:"runsLast24h,omitempty"`
-	State       ComponentsSchemasTeamCellState `json:"state"`
+	// Reason The Tenant's Placed condition reason, verbatim.
+	Reason      *string                          `json:"reason,omitempty"`
+	RunningNow  *int64                           `json:"runningNow,omitempty"`
+	RunsLast24h *int64                           `json:"runsLast24h,omitempty"`
+	State       ComponentsSchemasTenantCellState `json:"state"`
 
-	// Warning The Team's TenantWarnings condition, verbatim, while its status is True. It is absent otherwise.
-	Warning *ComponentsSchemasTeamCellWarning `json:"warning,omitempty"`
+	// Warning The Tenant's TenantWarnings condition, verbatim, while its status is True. It is absent otherwise.
+	Warning *ComponentsSchemasTenantCellWarning `json:"warning,omitempty"`
 }
 
-// ComponentsSchemasTeamCellState defines model for ComponentsSchemasTeamCell.State.
-type ComponentsSchemasTeamCellState string
+// ComponentsSchemasTenantCellState defines model for ComponentsSchemasTenantCell.State.
+type ComponentsSchemasTenantCellState string
 
-// ComponentsSchemasTeamCellMember One member of the tenant, with that member's own four load counts. The counts apply the same grant narrowing the top-level counts apply. No entry names another tenant.
-type ComponentsSchemasTeamCellMember struct {
+// ComponentsSchemasTenantCellMember One member of the tenant, with that member's own four load counts. The counts apply the same grant narrowing the top-level counts apply. No entry names another tenant.
+type ComponentsSchemasTenantCellMember struct {
 	Cell          string `json:"cell"`
 	Cluster       string `json:"cluster"`
 	FailedLast24h int64  `json:"failedLast24h"`
@@ -4934,8 +4953,8 @@ type ComponentsSchemasTeamCellMember struct {
 	RunsLast24h int64  `json:"runsLast24h"`
 }
 
-// ComponentsSchemasTeamCellWarning The Team's TenantWarnings condition, verbatim, while its status is True. It is absent otherwise.
-type ComponentsSchemasTeamCellWarning struct {
+// ComponentsSchemasTenantCellWarning The Tenant's TenantWarnings condition, verbatim, while its status is True. It is absent otherwise.
+type ComponentsSchemasTenantCellWarning struct {
 	// Message The warning message, which names the fault.
 	Message string `json:"message"`
 
@@ -4943,8 +4962,8 @@ type ComponentsSchemasTeamCellWarning struct {
 	Reason string `json:"reason"`
 }
 
-// ComponentsSchemasTeamConcurrencyLimit A cap on the builds of a named set of jobs that run at once.
-type ComponentsSchemasTeamConcurrencyLimit struct {
+// ComponentsSchemasTenantConcurrencyLimit A cap on the builds of a named set of jobs that run at once.
+type ComponentsSchemasTenantConcurrencyLimit struct {
 	// Jobs Folder-relative job globs (*, **, ?).
 	Jobs []string `json:"jobs"`
 
@@ -4955,8 +4974,8 @@ type ComponentsSchemasTeamConcurrencyLimit struct {
 	Name string `json:"name"`
 }
 
-// ComponentsSchemasTeamCondition Status condition for a Team.
-type ComponentsSchemasTeamCondition struct {
+// ComponentsSchemasTenantCondition Status condition for a Tenant.
+type ComponentsSchemasTenantCondition struct {
 	// LastTransitionTime ISO 8601 last transition time.
 	LastTransitionTime *string `json:"lastTransitionTime,omitempty"`
 	Message            *string `json:"message,omitempty"`
@@ -4965,37 +4984,37 @@ type ComponentsSchemasTeamCondition struct {
 	Type               string  `json:"type"`
 }
 
-// ComponentsSchemasTeamEntry Full team object returned from get/list operations.
-type ComponentsSchemasTeamEntry struct {
+// ComponentsSchemasTenantEntry Full tenant object returned from get/list operations.
+type ComponentsSchemasTenantEntry struct {
 	// BindingRef Reference to the managed VarroaRoleBinding.
-	BindingRef  *string                           `json:"bindingRef,omitempty"`
-	Conditions  *[]ComponentsSchemasTeamCondition `json:"conditions,omitempty"`
-	DisplayName *string                           `json:"displayName,omitempty"`
+	BindingRef  *string                             `json:"bindingRef,omitempty"`
+	Conditions  *[]ComponentsSchemasTenantCondition `json:"conditions,omitempty"`
+	DisplayName *string                             `json:"displayName,omitempty"`
 
 	// GroupRef Reference to the managed VarroaRoleBinding group.
-	GroupRef           *string                                `json:"groupRef,omitempty"`
-	Members            *[]string                              `json:"members,omitempty"`
-	Name               string                                 `json:"name"`
-	NamespaceStates    *[]ComponentsSchemasTeamNamespaceState `json:"namespaceStates,omitempty"`
-	Namespaces         []string                               `json:"namespaces"`
-	ObservedGeneration *int64                                 `json:"observedGeneration,omitempty"`
+	GroupRef           *string                                  `json:"groupRef,omitempty"`
+	Members            *[]string                                `json:"members,omitempty"`
+	Name               string                                   `json:"name"`
+	NamespaceStates    *[]ComponentsSchemasTenantNamespaceState `json:"namespaceStates,omitempty"`
+	Namespaces         []string                                 `json:"namespaces"`
+	ObservedGeneration *int64                                   `json:"observedGeneration,omitempty"`
 
-	// Pipelines A Team's pipelines tenancy declaration (spec.pipelines). A Team that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.
-	Pipelines *ComponentsSchemasTeamPipelines `json:"pipelines,omitempty"`
+	// Pipelines A Tenant's pipelines tenancy declaration (spec.pipelines). A Tenant that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.
+	Pipelines *ComponentsSchemasTenantPipelines `json:"pipelines,omitempty"`
 
 	// Placement The cell a pipelines tenant is bound to (status.placement). Response-only: the placement pass is its only writer.
-	Placement           *ComponentsSchemasTeamPlacement `json:"placement,omitempty"`
-	ProvisionNamespaces *bool                           `json:"provisionNamespaces,omitempty"`
+	Placement           *ComponentsSchemasTenantPlacement `json:"placement,omitempty"`
+	ProvisionNamespaces *bool                             `json:"provisionNamespaces,omitempty"`
 
-	// Rehydration A pipelines tenant's build-record rehydration state (status.rehydration). Response-only: TeamReconciler is its only writer.
-	Rehydration *ComponentsSchemasTeamRehydration `json:"rehydration,omitempty"`
-	RoleRef     *string                           `json:"roleRef,omitempty"`
-	Subjects    *[]ComponentsSchemasSubjectRef    `json:"subjects,omitempty"`
+	// Rehydration A pipelines tenant's build-record rehydration state (status.rehydration). Response-only: TenantReconciler is its only writer.
+	Rehydration *ComponentsSchemasTenantRehydration `json:"rehydration,omitempty"`
+	RoleRef     *string                             `json:"roleRef,omitempty"`
+	Subjects    *[]ComponentsSchemasSubjectRef      `json:"subjects,omitempty"`
 }
 
-// ComponentsSchemasTeamExport One grant a pipelines tenant makes to other tenants: a job pattern or a list of lock patterns, plus the callers allowed to use it. Exactly one of job or locks is set.
-type ComponentsSchemasTeamExport struct {
-	// Callers Team names allowed to use this export.
+// ComponentsSchemasTenantExport One grant a pipelines tenant makes to other tenants: a job pattern or a list of lock patterns, plus the callers allowed to use it. Exactly one of job or locks is set.
+type ComponentsSchemasTenantExport struct {
+	// Callers Tenant names allowed to use this export.
 	Callers []string `json:"callers"`
 
 	// Job Folder-relative job glob this tenant exports. Exactly one of job or locks is set.
@@ -5005,8 +5024,8 @@ type ComponentsSchemasTeamExport struct {
 	Locks *[]string `json:"locks,omitempty"`
 }
 
-// ComponentsSchemasTeamJobRetention A run window for the jobs that match a folder-relative glob.
-type ComponentsSchemasTeamJobRetention struct {
+// ComponentsSchemasTenantJobRetention A run window for the jobs that match a folder-relative glob.
+type ComponentsSchemasTenantJobRetention struct {
 	// Job Folder-relative job glob. It must not start with /.
 	Job string `json:"job"`
 
@@ -5014,8 +5033,8 @@ type ComponentsSchemasTeamJobRetention struct {
 	Runs string `json:"runs"`
 }
 
-// ComponentsSchemasTeamMember One member of a pipelines tenant (status.placement.members). Response-only: the placement pass is its only writer.
-type ComponentsSchemasTeamMember struct {
+// ComponentsSchemasTenantMember One member of a pipelines tenant (status.placement.members). Response-only: the placement pass is its only writer.
+type ComponentsSchemasTenantMember struct {
 	// Applied True when the member's cell reports this tenant applied.
 	Applied *bool `json:"applied,omitempty"`
 
@@ -5026,30 +5045,30 @@ type ComponentsSchemasTeamMember struct {
 	CellNamespace *string `json:"cellNamespace,omitempty"`
 
 	// Role An active member holds one slot. A standby holds the folder, holds no slot, and runs no build.
-	Role *ComponentsSchemasTeamMemberRole `json:"role,omitempty"`
+	Role *ComponentsSchemasTenantMemberRole `json:"role,omitempty"`
 
 	// Slot The slot index. Set only on an active member.
 	Slot *int32 `json:"slot,omitempty"`
 }
 
-// ComponentsSchemasTeamMemberRole An active member holds one slot. A standby holds the folder, holds no slot, and runs no build.
-type ComponentsSchemasTeamMemberRole string
+// ComponentsSchemasTenantMemberRole An active member holds one slot. A standby holds the folder, holds no slot, and runs no build.
+type ComponentsSchemasTenantMemberRole string
 
-// ComponentsSchemasTeamNamespaceState State of a single namespace for a Team.
-type ComponentsSchemasTeamNamespaceState struct {
+// ComponentsSchemasTenantNamespaceState State of a single namespace for a Tenant.
+type ComponentsSchemasTenantNamespaceState struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
 }
 
-// ComponentsSchemasTeamNotifications Outward notifications of a pipelines tenant. The record store posts the completion webhook for each run.
-type ComponentsSchemasTeamNotifications struct {
+// ComponentsSchemasTenantNotifications Outward notifications of a pipelines tenant. The record store posts the completion webhook for each run.
+type ComponentsSchemasTenantNotifications struct {
 	// Webhook A completion webhook. The record store posts a signed JSON payload to url for each run this tenant completes. The signing key lives in the Secret that secretRef names, in the tenant's agent namespace.
-	Webhook *ComponentsSchemasTeamWebhook `json:"webhook,omitempty"`
+	Webhook *ComponentsSchemasTenantWebhook `json:"webhook,omitempty"`
 }
 
-// ComponentsSchemasTeamPipelines A Team's pipelines tenancy declaration (spec.pipelines). A Team that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.
-type ComponentsSchemasTeamPipelines struct {
-	// AgentNamespace Kubernetes namespace this tenant's agents run in. Must be one of the team's own namespaces. Required when pipelines is set.
+// ComponentsSchemasTenantPipelines A Tenant's pipelines tenancy declaration (spec.pipelines). A Tenant that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.
+type ComponentsSchemasTenantPipelines struct {
+	// AgentNamespace Kubernetes namespace this tenant's agents run in. Must be one of the tenant's own namespaces. Required when pipelines is set.
 	AgentNamespace string `json:"agentNamespace"`
 
 	// CellPool The CellPool the placement pass selects a cell from. Empty means the profile's default pool: the pool whose name equals profile. A tenant that needs a cell of its own names a pool whose maxTenantsPerCell is 1.
@@ -5059,31 +5078,31 @@ type ComponentsSchemasTeamPipelines struct {
 	ComposedBundleRef *ComponentsSchemasComposedBundleRef `json:"composedBundleRef,omitempty"`
 
 	// Concurrency This tenant's job concurrency policy. "allow" (default) runs builds side by side. "cancelInProgress" cancels the running build of the same job path when a new one starts.
-	Concurrency *ComponentsSchemasTeamPipelinesConcurrency `json:"concurrency,omitempty"`
+	Concurrency *ComponentsSchemasTenantPipelinesConcurrency `json:"concurrency,omitempty"`
 
 	// ConcurrencyLimits Named caps on how many builds of a set of this tenant's jobs run at one time. A build over a limit waits in the queue. A tenant pipelines admin may write this field.
-	ConcurrencyLimits *[]ComponentsSchemasTeamConcurrencyLimit `json:"concurrencyLimits,omitempty"`
+	ConcurrencyLimits *[]ComponentsSchemasTenantConcurrencyLimit `json:"concurrencyLimits,omitempty"`
 
 	// CronBackstop Turns the backstop cron scheduler on for this tenant. Default true.
 	CronBackstop *bool `json:"cronBackstop,omitempty"`
 
 	// CronCatchUp How many missed cron occurrences the backstop fires on wake. "one" (default) fires the newest missed occurrence. "none" fires nothing.
-	CronCatchUp *ComponentsSchemasTeamPipelinesCronCatchUp `json:"cronCatchUp,omitempty"`
+	CronCatchUp *ComponentsSchemasTenantPipelinesCronCatchUp `json:"cronCatchUp,omitempty"`
 
 	// CronGrace How long the backstop waits past a missed cron occurrence before it fires. Default 5m, range 1m to 60m.
 	CronGrace *string `json:"cronGrace,omitempty"`
 
 	// Exports Grants of this tenant's jobs and locks to other tenants. An absent list exports nothing.
-	Exports *[]ComponentsSchemasTeamExport `json:"exports,omitempty"`
+	Exports *[]ComponentsSchemasTenantExport `json:"exports,omitempty"`
 
 	// InterruptedRetry Whether an interrupted run retries on its own. "manual" (default) leaves the retry to a user. "automatic" retries once.
-	InterruptedRetry *ComponentsSchemasTeamPipelinesInterruptedRetry `json:"interruptedRetry,omitempty"`
+	InterruptedRetry *ComponentsSchemasTenantPipelinesInterruptedRetry `json:"interruptedRetry,omitempty"`
 
 	// Members The number of active slots this tenant runs. Each slot holds one cell, and a job runs only on its home slot's holder. Default 1. This field is not spec.members, which lists local usernames.
 	Members *int32 `json:"members,omitempty"`
 
 	// Notifications Outward notifications of a pipelines tenant. The record store posts the completion webhook for each run.
-	Notifications *ComponentsSchemasTeamNotifications `json:"notifications,omitempty"`
+	Notifications *ComponentsSchemasTenantNotifications `json:"notifications,omitempty"`
 
 	// Profile JenkinsVersionProfile the placement pass resolves a cell against. Required when pipelines is set.
 	Profile string `json:"profile"`
@@ -5095,32 +5114,32 @@ type ComponentsSchemasTeamPipelines struct {
 	RehydrateDeadline *string `json:"rehydrateDeadline,omitempty"`
 
 	// Retention Record-store windows for this tenant's runs. A job rule replaces the tenant window for the jobs it matches. The store-wide window caps both. Only an operator may set it.
-	Retention *ComponentsSchemasTeamPipelinesRetention `json:"retention,omitempty"`
+	Retention *ComponentsSchemasTenantPipelinesRetention `json:"retention,omitempty"`
 
 	// Standby The number of warm members this tenant keeps. A standby holds the folder and no slot. It takes a slot whose holder dies. Default 0.
 	Standby *int32 `json:"standby,omitempty"`
 }
 
-// ComponentsSchemasTeamPipelinesConcurrency This tenant's job concurrency policy. "allow" (default) runs builds side by side. "cancelInProgress" cancels the running build of the same job path when a new one starts.
-type ComponentsSchemasTeamPipelinesConcurrency string
+// ComponentsSchemasTenantPipelinesConcurrency This tenant's job concurrency policy. "allow" (default) runs builds side by side. "cancelInProgress" cancels the running build of the same job path when a new one starts.
+type ComponentsSchemasTenantPipelinesConcurrency string
 
-// ComponentsSchemasTeamPipelinesCronCatchUp How many missed cron occurrences the backstop fires on wake. "one" (default) fires the newest missed occurrence. "none" fires nothing.
-type ComponentsSchemasTeamPipelinesCronCatchUp string
+// ComponentsSchemasTenantPipelinesCronCatchUp How many missed cron occurrences the backstop fires on wake. "one" (default) fires the newest missed occurrence. "none" fires nothing.
+type ComponentsSchemasTenantPipelinesCronCatchUp string
 
-// ComponentsSchemasTeamPipelinesInterruptedRetry Whether an interrupted run retries on its own. "manual" (default) leaves the retry to a user. "automatic" retries once.
-type ComponentsSchemasTeamPipelinesInterruptedRetry string
+// ComponentsSchemasTenantPipelinesInterruptedRetry Whether an interrupted run retries on its own. "manual" (default) leaves the retry to a user. "automatic" retries once.
+type ComponentsSchemasTenantPipelinesInterruptedRetry string
 
-// ComponentsSchemasTeamPipelinesRetention Record-store windows for this tenant's runs. A job rule replaces the tenant window for the jobs it matches. The store-wide window caps both. Only an operator may set it.
-type ComponentsSchemasTeamPipelinesRetention struct {
+// ComponentsSchemasTenantPipelinesRetention Record-store windows for this tenant's runs. A job rule replaces the tenant window for the jobs it matches. The store-wide window caps both. Only an operator may set it.
+type ComponentsSchemasTenantPipelinesRetention struct {
 	// Jobs Per-job windows. The first rule whose job glob matches sets the window of that job.
-	Jobs *[]ComponentsSchemasTeamJobRetention `json:"jobs,omitempty"`
+	Jobs *[]ComponentsSchemasTenantJobRetention `json:"jobs,omitempty"`
 
 	// Runs The tenant window, in whole days, such as 30d. It shortens the store-wide window and never lengthens it.
 	Runs *string `json:"runs,omitempty"`
 }
 
-// ComponentsSchemasTeamPlacement The cell a pipelines tenant is bound to (status.placement). Response-only: the placement pass is its only writer.
-type ComponentsSchemasTeamPlacement struct {
+// ComponentsSchemasTenantPlacement The cell a pipelines tenant is bound to (status.placement). Response-only: the placement pass is its only writer.
+type ComponentsSchemasTenantPlacement struct {
 	// Cell Name of the bound cell Controller.
 	Cell *string `json:"cell,omitempty"`
 
@@ -5134,11 +5153,11 @@ type ComponentsSchemasTeamPlacement struct {
 	Generation *int64 `json:"generation,omitempty"`
 
 	// Members Every member of this tenant. The scalar fields above keep describing slot 0.
-	Members *[]ComponentsSchemasTeamMember `json:"members,omitempty"`
+	Members *[]ComponentsSchemasTenantMember `json:"members,omitempty"`
 }
 
-// ComponentsSchemasTeamRehydration A pipelines tenant's build-record rehydration state (status.rehydration). Response-only: TeamReconciler is its only writer.
-type ComponentsSchemasTeamRehydration struct {
+// ComponentsSchemasTenantRehydration A pipelines tenant's build-record rehydration state (status.rehydration). Response-only: TenantReconciler is its only writer.
+type ComponentsSchemasTenantRehydration struct {
 	// Attempts Rehydration retries since the last applied bundle.
 	Attempts *int32 `json:"attempts,omitempty"`
 
@@ -5164,21 +5183,21 @@ type ComponentsSchemasTeamRehydration struct {
 	UnseededJobs *int32 `json:"unseededJobs,omitempty"`
 }
 
-// ComponentsSchemasTeamRequest Request body for creating or updating a team.
-type ComponentsSchemasTeamRequest struct {
+// ComponentsSchemasTenantRequest Request body for creating or updating a tenant.
+type ComponentsSchemasTenantRequest struct {
 	DisplayName *string `json:"displayName,omitempty"`
 
 	// Members Direct member usernames.
 	Members *[]string `json:"members,omitempty"`
 
-	// Name Team name (ignored in body for updates).
+	// Name Tenant name (ignored in body for updates).
 	Name string `json:"name"`
 
-	// Namespaces Target namespaces for this team.
+	// Namespaces Target namespaces for this tenant.
 	Namespaces []string `json:"namespaces"`
 
-	// Pipelines A Team's pipelines tenancy declaration (spec.pipelines). A Team that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.
-	Pipelines *ComponentsSchemasTeamPipelines `json:"pipelines,omitempty"`
+	// Pipelines A Tenant's pipelines tenancy declaration (spec.pipelines). A Tenant that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.
+	Pipelines *ComponentsSchemasTenantPipelines `json:"pipelines,omitempty"`
 
 	// ProvisionNamespaces Whether to auto-provision namespaces.
 	ProvisionNamespaces *bool `json:"provisionNamespaces,omitempty"`
@@ -5190,17 +5209,26 @@ type ComponentsSchemasTeamRequest struct {
 	Subjects *[]ComponentsSchemasSubjectRef `json:"subjects,omitempty"`
 }
 
-// ComponentsSchemasTeamWebhook A completion webhook. The record store posts a signed JSON payload to url for each run this tenant completes. The signing key lives in the Secret that secretRef names, in the tenant's agent namespace.
-type ComponentsSchemasTeamWebhook struct {
+// ComponentsSchemasTenantScope One pipelines tenant name and the folder-relative job globs a binding covers. An absent jobs list covers every job.
+type ComponentsSchemasTenantScope struct {
+	// Jobs Jobs are folder-relative globs. An absent jobs list covers every job.
+	Jobs *[]string `json:"jobs,omitempty"`
+
+	// Name A tenant is a Tenant name.
+	Name string `json:"name"`
+}
+
+// ComponentsSchemasTenantWebhook A completion webhook. The record store posts a signed JSON payload to url for each run this tenant completes. The signing key lives in the Secret that secretRef names, in the tenant's agent namespace.
+type ComponentsSchemasTenantWebhook struct {
 	// SecretRef The Secret and data key that hold the HMAC signing key. The key defaults to hmac-key.
-	SecretRef ComponentsSchemasTeamWebhookSecret `json:"secretRef"`
+	SecretRef ComponentsSchemasTenantWebhookSecret `json:"secretRef"`
 
 	// Url Receiver endpoint. Starts with https:// or http://. Use https:// for a receiver outside the cluster.
 	Url string `json:"url"`
 }
 
-// ComponentsSchemasTeamWebhookSecret The Secret and data key that hold the HMAC signing key. The key defaults to hmac-key.
-type ComponentsSchemasTeamWebhookSecret struct {
+// ComponentsSchemasTenantWebhookSecret The Secret and data key that hold the HMAC signing key. The key defaults to hmac-key.
+type ComponentsSchemasTenantWebhookSecret struct {
 	// Key Data key that holds the signing key. Default hmac-key.
 	Key *string `json:"key,omitempty"`
 
@@ -5208,35 +5236,7 @@ type ComponentsSchemasTeamWebhookSecret struct {
 	Name string `json:"name"`
 }
 
-// ComponentsSchemasTemplateCatalogCondition Status condition for catalog/composedbundle resources.
-type ComponentsSchemasTemplateCatalogCondition struct {
-	LastTransitionTime *string `json:"lastTransitionTime,omitempty"`
-	Message            *string `json:"message,omitempty"`
-	Reason             *string `json:"reason,omitempty"`
-	Status             string  `json:"status"`
-	Type               string  `json:"type"`
-}
-
-// ComponentsSchemasTenantCapabilities One grant the caller holds on one pipelines tenant. A tenant name may appear in more than one entry, because the caller can hold two grants on it with different job globs; they are never merged.
-type ComponentsSchemasTenantCapabilities struct {
-	// Capabilities Resource-to-verb-to-allowed capability map.
-	Capabilities ComponentsSchemasAPICapabilitySet `json:"capabilities"`
-
-	// Jobs Folder-relative job globs the grant covers. Always an array, never null; an empty array means every job.
-	Jobs   []string `json:"jobs"`
-	Tenant string   `json:"tenant"`
-}
-
-// ComponentsSchemasTenantScope One pipelines tenant name and the folder-relative job globs a binding covers. An absent jobs list covers every job.
-type ComponentsSchemasTenantScope struct {
-	// Jobs Jobs are folder-relative globs. An absent jobs list covers every job.
-	Jobs *[]string `json:"jobs,omitempty"`
-
-	// Name A tenant is a Team name.
-	Name string `json:"name"`
-}
-
-// ComponentsSchemasTestCaseHistoryResponse GET /pipelines/{team}/jobs/{job}/tests/{case}. items holds the case's recent outcomes, newest first, within the record store retention window. The response holds no rate, no trend, and no flake score.
+// ComponentsSchemasTestCaseHistoryResponse GET /pipelines/{tenant}/jobs/{job}/tests/{case}. items holds the case's recent outcomes, newest first, within the record store retention window. The response holds no rate, no trend, and no flake score.
 type ComponentsSchemasTestCaseHistoryResponse struct {
 	Items []ComponentsSchemasTestCaseOutcome `json:"items"`
 }
@@ -5258,7 +5258,7 @@ type ComponentsSchemasTestCaseOutcome struct {
 	Result *string `json:"result,omitempty"`
 	RunId  string  `json:"runId"`
 
-	// RunLink The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the same link a fleet lock row carries.
+	// RunLink The run's own page path, /pipelines/{tenant}/{jobPath}/{runId}, the same link a fleet lock row carries.
 	RunLink string `json:"runLink"`
 
 	// Status The reporter's own status name. A skipped case carries SKIPPED.
@@ -5636,11 +5636,11 @@ type ComponentsParametersPrefix = string
 // ComponentsParametersRun defines model for components_parameters_run.
 type ComponentsParametersRun = openapi_types.UUID
 
-// ComponentsParametersTeam defines model for components_parameters_team.
-type ComponentsParametersTeam = string
+// ComponentsParametersTenant defines model for components_parameters_tenant.
+type ComponentsParametersTenant = string
 
-// ComponentsParametersTeamQuery defines model for components_parameters_teamQuery.
-type ComponentsParametersTeamQuery = string
+// ComponentsParametersTenantQuery defines model for components_parameters_tenantQuery.
+type ComponentsParametersTenantQuery = string
 
 // ComponentsResponsesApproveConflict Refusal of an approval. changes is present when the pending change is not the one the caller approved.
 type ComponentsResponsesApproveConflict = ComponentsSchemasApproveConflict
@@ -5718,7 +5718,7 @@ type ListAssistantSessionsParams struct {
 	Scope  *ListAssistantSessionsParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 	Kind   *string                           `form:"kind,omitempty" json:"kind,omitempty"`
 	Prompt *string                           `form:"prompt,omitempty" json:"prompt,omitempty"`
-	Team   *string                           `form:"team,omitempty" json:"team,omitempty"`
+	Tenant *string                           `form:"tenant,omitempty" json:"tenant,omitempty"`
 	State  *string                           `form:"state,omitempty" json:"state,omitempty"`
 	Cursor *string                           `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *int                              `form:"limit,omitempty" json:"limit,omitempty"`
@@ -5944,15 +5944,15 @@ type ChangeMyPasswordJSONBody struct {
 	OldPassword string `json:"oldPassword"`
 }
 
-// ListTeamAgentSessionsParams defines parameters for ListTeamAgentSessions.
-type ListTeamAgentSessionsParams struct {
-	State  *ListTeamAgentSessionsParamsState `form:"state,omitempty" json:"state,omitempty"`
-	Cursor *string                           `form:"cursor,omitempty" json:"cursor,omitempty"`
-	Limit  *int                              `form:"limit,omitempty" json:"limit,omitempty"`
+// ListTenantAgentSessionsParams defines parameters for ListTenantAgentSessions.
+type ListTenantAgentSessionsParams struct {
+	State  *ListTenantAgentSessionsParamsState `form:"state,omitempty" json:"state,omitempty"`
+	Cursor *string                             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int                                `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
-// ListTeamAgentSessionsParamsState defines parameters for ListTeamAgentSessions.
-type ListTeamAgentSessionsParamsState string
+// ListTenantAgentSessionsParamsState defines parameters for ListTenantAgentSessions.
+type ListTenantAgentSessionsParamsState string
 
 // ListRunsParams defines parameters for ListRuns.
 type ListRunsParams struct {
@@ -5971,8 +5971,8 @@ type ListJobTestCaseHistoryParams struct {
 
 // ListRunnersParams defines parameters for ListRunners.
 type ListRunnersParams struct {
-	// Team Team name filter for the runner list.
-	Team *ComponentsParametersTeamQuery `form:"team,omitempty" json:"team,omitempty"`
+	// Tenant Tenant name filter for the runner list.
+	Tenant *ComponentsParametersTenantQuery `form:"tenant,omitempty" json:"tenant,omitempty"`
 }
 
 // PatchRunnerApplicationMergePatchPlusJSONBody defines parameters for PatchRunner.
@@ -6024,7 +6024,7 @@ type SearchParams struct {
 
 // CreateStreamTicketJSONBody defines parameters for CreateStreamTicket.
 type CreateStreamTicketJSONBody struct {
-	// Scope The one stream the ticket opens. One of brood, activity, controller:{cluster}/{ns}/{name}, broodop:{ns}/{name}, run:{run_id}, or pipelines:{team}. A ticket opens the stream whose path maps onto the same scope, and no other.
+	// Scope The one stream the ticket opens. One of brood, activity, controller:{cluster}/{ns}/{name}, broodop:{ns}/{name}, run:{run_id}, or pipelines:{tenant}. A ticket opens the stream whose path maps onto the same scope, and no other.
 	Scope string `json:"scope"`
 }
 
@@ -6052,7 +6052,7 @@ type SetUserPasswordJSONBody struct {
 }
 
 // PutAgentUnattendedJSONRequestBody defines body for PutAgentUnattended for application/json ContentType.
-type PutAgentUnattendedJSONRequestBody = ComponentsSchemasTeamAgentUnattendedRequest
+type PutAgentUnattendedJSONRequestBody = ComponentsSchemasTenantAgentUnattendedRequest
 
 // DenyAssistantApprovalJSONRequestBody defines body for DenyAssistantApproval for application/json ContentType.
 type DenyAssistantApprovalJSONRequestBody = ComponentsSchemasAssistantDenyRequest
@@ -6180,8 +6180,8 @@ type ChangeMyPasswordJSONRequestBody ChangeMyPasswordJSONBody
 // UpdateMyPreferencesJSONRequestBody defines body for UpdateMyPreferences for application/json ContentType.
 type UpdateMyPreferencesJSONRequestBody = ComponentsSchemasPreferences
 
-// RunTeamAgentJSONRequestBody defines body for RunTeamAgent for application/json ContentType.
-type RunTeamAgentJSONRequestBody = ComponentsSchemasTeamAgentRunRequest
+// RunTenantAgentJSONRequestBody defines body for RunTenantAgent for application/json ContentType.
+type RunTenantAgentJSONRequestBody = ComponentsSchemasTenantAgentRunRequest
 
 // CreateRunJSONRequestBody defines body for CreateRun for application/json ContentType.
 type CreateRunJSONRequestBody = ComponentsSchemasCreateRunRequest
@@ -6228,11 +6228,11 @@ type RestartRunJSONRequestBody = ComponentsSchemasRestartRunRequest
 // CreateStreamTicketJSONRequestBody defines body for CreateStreamTicket for application/json ContentType.
 type CreateStreamTicketJSONRequestBody CreateStreamTicketJSONBody
 
-// CreateTeamJSONRequestBody defines body for CreateTeam for application/json ContentType.
-type CreateTeamJSONRequestBody = ComponentsSchemasTeamRequest
+// CreateTenantJSONRequestBody defines body for CreateTenant for application/json ContentType.
+type CreateTenantJSONRequestBody = ComponentsSchemasTenantRequest
 
-// UpdateTeamJSONRequestBody defines body for UpdateTeam for application/json ContentType.
-type UpdateTeamJSONRequestBody = ComponentsSchemasTeamRequest
+// UpdateTenantJSONRequestBody defines body for UpdateTenant for application/json ContentType.
+type UpdateTenantJSONRequestBody = ComponentsSchemasTenantRequest
 
 // UploadUpdateCenterPluginMultipartRequestBody defines body for UploadUpdateCenterPlugin for multipart/form-data ContentType.
 type UploadUpdateCenterPluginMultipartRequestBody UploadUpdateCenterPluginMultipartBody
@@ -7201,69 +7201,69 @@ type ClientInterface interface {
 
 	UpdateMyPreferences(ctx context.Context, body UpdateMyPreferencesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListPipelineTeams request
-	ListPipelineTeams(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListPipelineTenants request
+	ListPipelineTenants(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListPipelines request
-	ListPipelines(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ListPipelines(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetTeamAgent request
-	GetTeamAgent(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetTenantAgent request
+	GetTenantAgent(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetTeamAgentCapabilities request
-	GetTeamAgentCapabilities(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetTenantAgentCapabilities request
+	GetTenantAgentCapabilities(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// RunTeamAgentWithBody request with any body
-	RunTeamAgentWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// RunTenantAgentWithBody request with any body
+	RunTenantAgentWithBody(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	RunTeamAgent(ctx context.Context, team ComponentsParametersTeam, body RunTeamAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	RunTenantAgent(ctx context.Context, tenant ComponentsParametersTenant, body RunTenantAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListTeamAgentSessions request
-	ListTeamAgentSessions(ctx context.Context, team ComponentsParametersTeam, params *ListTeamAgentSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListTenantAgentSessions request
+	ListTenantAgentSessions(ctx context.Context, tenant ComponentsParametersTenant, params *ListTenantAgentSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetTeamCell request
-	GetTeamCell(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetTenantCell request
+	GetTenantCell(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetPipelineJob request
-	GetPipelineJob(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetPipelineJob(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListJobBranches request
-	ListJobBranches(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ListJobBranches(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListJobNotes request
-	ListJobNotes(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ListJobNotes(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListRuns request
-	ListRuns(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ListRuns(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateRunWithBody request with any body
-	CreateRunWithBody(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateRunWithBody(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	CreateRun(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateRun(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ScanMultibranchWithBody request with any body
-	ScanMultibranchWithBody(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ScanMultibranchWithBody(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	ScanMultibranch(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ScanMultibranch(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListJobTestCaseHistory request
-	ListJobTestCaseHistory(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ListJobTestCaseHistory(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListTeamFleetLocks request
-	ListTeamFleetLocks(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListTenantFleetLocks request
+	ListTenantFleetLocks(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ValidatePipelineMarkerWithBody request with any body
-	ValidatePipelineMarkerWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ValidatePipelineMarkerWithBody(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	ValidatePipelineMarker(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ValidatePipelineMarker(ctx context.Context, tenant ComponentsParametersTenant, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ProposePipelineWithBody request with any body
-	ProposePipelineWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ProposePipelineWithBody(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	ProposePipeline(ctx context.Context, team ComponentsParametersTeam, body ProposePipelineJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ProposePipeline(ctx context.Context, tenant ComponentsParametersTenant, body ProposePipelineJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// StreamTeamRuns request
-	StreamTeamRuns(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// StreamTenantRuns request
+	StreamTenantRuns(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListVarroaRoleBindings request
 	ListVarroaRoleBindings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -7389,24 +7389,24 @@ type ClientInterface interface {
 
 	CreateStreamTicket(ctx context.Context, body CreateStreamTicketJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListTeams request
-	ListTeams(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListTenants request
+	ListTenants(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateTeamWithBody request with any body
-	CreateTeamWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// CreateTenantWithBody request with any body
+	CreateTenantWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	CreateTeam(ctx context.Context, body CreateTeamJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateTenant(ctx context.Context, body CreateTenantJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// DeleteTeam request
-	DeleteTeam(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// DeleteTenant request
+	DeleteTenant(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetTeam request
-	GetTeam(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetTenant request
+	GetTenant(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// UpdateTeamWithBody request with any body
-	UpdateTeamWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// UpdateTenantWithBody request with any body
+	UpdateTenantWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	UpdateTeam(ctx context.Context, name ComponentsParametersName, body UpdateTeamJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	UpdateTenant(ctx context.Context, name ComponentsParametersName, body UpdateTenantJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetUpdateCenterStatus request
 	GetUpdateCenterStatus(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -9440,8 +9440,8 @@ func (c *Client) UpdateMyPreferences(ctx context.Context, body UpdateMyPreferenc
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListPipelineTeams(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListPipelineTeamsRequest(c.Server)
+func (c *Client) ListPipelineTenants(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListPipelineTenantsRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -9452,8 +9452,8 @@ func (c *Client) ListPipelineTeams(ctx context.Context, reqEditors ...RequestEdi
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListPipelines(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListPipelinesRequest(c.Server, team)
+func (c *Client) ListPipelines(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListPipelinesRequest(c.Server, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -9464,8 +9464,8 @@ func (c *Client) ListPipelines(ctx context.Context, team ComponentsParametersTea
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetTeamAgent(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetTeamAgentRequest(c.Server, team)
+func (c *Client) GetTenantAgent(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTenantAgentRequest(c.Server, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -9476,8 +9476,8 @@ func (c *Client) GetTeamAgent(ctx context.Context, team ComponentsParametersTeam
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetTeamAgentCapabilities(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetTeamAgentCapabilitiesRequest(c.Server, team)
+func (c *Client) GetTenantAgentCapabilities(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTenantAgentCapabilitiesRequest(c.Server, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -9488,8 +9488,8 @@ func (c *Client) GetTeamAgentCapabilities(ctx context.Context, team ComponentsPa
 	return c.Client.Do(req)
 }
 
-func (c *Client) RunTeamAgentWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewRunTeamAgentRequestWithBody(c.Server, team, contentType, body)
+func (c *Client) RunTenantAgentWithBody(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRunTenantAgentRequestWithBody(c.Server, tenant, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9500,8 +9500,8 @@ func (c *Client) RunTeamAgentWithBody(ctx context.Context, team ComponentsParame
 	return c.Client.Do(req)
 }
 
-func (c *Client) RunTeamAgent(ctx context.Context, team ComponentsParametersTeam, body RunTeamAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewRunTeamAgentRequest(c.Server, team, body)
+func (c *Client) RunTenantAgent(ctx context.Context, tenant ComponentsParametersTenant, body RunTenantAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRunTenantAgentRequest(c.Server, tenant, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9512,8 +9512,8 @@ func (c *Client) RunTeamAgent(ctx context.Context, team ComponentsParametersTeam
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListTeamAgentSessions(ctx context.Context, team ComponentsParametersTeam, params *ListTeamAgentSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListTeamAgentSessionsRequest(c.Server, team, params)
+func (c *Client) ListTenantAgentSessions(ctx context.Context, tenant ComponentsParametersTenant, params *ListTenantAgentSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListTenantAgentSessionsRequest(c.Server, tenant, params)
 	if err != nil {
 		return nil, err
 	}
@@ -9524,8 +9524,8 @@ func (c *Client) ListTeamAgentSessions(ctx context.Context, team ComponentsParam
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetTeamCell(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetTeamCellRequest(c.Server, team)
+func (c *Client) GetTenantCell(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTenantCellRequest(c.Server, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -9536,8 +9536,8 @@ func (c *Client) GetTeamCell(ctx context.Context, team ComponentsParametersTeam,
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetPipelineJob(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetPipelineJobRequest(c.Server, team, job)
+func (c *Client) GetPipelineJob(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPipelineJobRequest(c.Server, tenant, job)
 	if err != nil {
 		return nil, err
 	}
@@ -9548,8 +9548,8 @@ func (c *Client) GetPipelineJob(ctx context.Context, team ComponentsParametersTe
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListJobBranches(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListJobBranchesRequest(c.Server, team, job)
+func (c *Client) ListJobBranches(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListJobBranchesRequest(c.Server, tenant, job)
 	if err != nil {
 		return nil, err
 	}
@@ -9560,8 +9560,8 @@ func (c *Client) ListJobBranches(ctx context.Context, team ComponentsParametersT
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListJobNotes(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListJobNotesRequest(c.Server, team, job)
+func (c *Client) ListJobNotes(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListJobNotesRequest(c.Server, tenant, job)
 	if err != nil {
 		return nil, err
 	}
@@ -9572,8 +9572,8 @@ func (c *Client) ListJobNotes(ctx context.Context, team ComponentsParametersTeam
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListRuns(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListRunsRequest(c.Server, team, job, params)
+func (c *Client) ListRuns(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRunsRequest(c.Server, tenant, job, params)
 	if err != nil {
 		return nil, err
 	}
@@ -9584,8 +9584,8 @@ func (c *Client) ListRuns(ctx context.Context, team ComponentsParametersTeam, jo
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateRunWithBody(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateRunRequestWithBody(c.Server, team, job, contentType, body)
+func (c *Client) CreateRunWithBody(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateRunRequestWithBody(c.Server, tenant, job, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9596,8 +9596,8 @@ func (c *Client) CreateRunWithBody(ctx context.Context, team ComponentsParameter
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateRun(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateRunRequest(c.Server, team, job, body)
+func (c *Client) CreateRun(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateRunRequest(c.Server, tenant, job, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9608,8 +9608,8 @@ func (c *Client) CreateRun(ctx context.Context, team ComponentsParametersTeam, j
 	return c.Client.Do(req)
 }
 
-func (c *Client) ScanMultibranchWithBody(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewScanMultibranchRequestWithBody(c.Server, team, job, contentType, body)
+func (c *Client) ScanMultibranchWithBody(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewScanMultibranchRequestWithBody(c.Server, tenant, job, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9620,8 +9620,8 @@ func (c *Client) ScanMultibranchWithBody(ctx context.Context, team ComponentsPar
 	return c.Client.Do(req)
 }
 
-func (c *Client) ScanMultibranch(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewScanMultibranchRequest(c.Server, team, job, body)
+func (c *Client) ScanMultibranch(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewScanMultibranchRequest(c.Server, tenant, job, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9632,8 +9632,8 @@ func (c *Client) ScanMultibranch(ctx context.Context, team ComponentsParametersT
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListJobTestCaseHistory(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListJobTestCaseHistoryRequest(c.Server, team, job, pCase, params)
+func (c *Client) ListJobTestCaseHistory(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListJobTestCaseHistoryRequest(c.Server, tenant, job, pCase, params)
 	if err != nil {
 		return nil, err
 	}
@@ -9644,8 +9644,8 @@ func (c *Client) ListJobTestCaseHistory(ctx context.Context, team ComponentsPara
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListTeamFleetLocks(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListTeamFleetLocksRequest(c.Server, team)
+func (c *Client) ListTenantFleetLocks(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListTenantFleetLocksRequest(c.Server, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -9656,8 +9656,8 @@ func (c *Client) ListTeamFleetLocks(ctx context.Context, team ComponentsParamete
 	return c.Client.Do(req)
 }
 
-func (c *Client) ValidatePipelineMarkerWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewValidatePipelineMarkerRequestWithBody(c.Server, team, contentType, body)
+func (c *Client) ValidatePipelineMarkerWithBody(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewValidatePipelineMarkerRequestWithBody(c.Server, tenant, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9668,8 +9668,8 @@ func (c *Client) ValidatePipelineMarkerWithBody(ctx context.Context, team Compon
 	return c.Client.Do(req)
 }
 
-func (c *Client) ValidatePipelineMarker(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewValidatePipelineMarkerRequest(c.Server, team, body)
+func (c *Client) ValidatePipelineMarker(ctx context.Context, tenant ComponentsParametersTenant, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewValidatePipelineMarkerRequest(c.Server, tenant, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9680,8 +9680,8 @@ func (c *Client) ValidatePipelineMarker(ctx context.Context, team ComponentsPara
 	return c.Client.Do(req)
 }
 
-func (c *Client) ProposePipelineWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewProposePipelineRequestWithBody(c.Server, team, contentType, body)
+func (c *Client) ProposePipelineWithBody(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProposePipelineRequestWithBody(c.Server, tenant, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9692,8 +9692,8 @@ func (c *Client) ProposePipelineWithBody(ctx context.Context, team ComponentsPar
 	return c.Client.Do(req)
 }
 
-func (c *Client) ProposePipeline(ctx context.Context, team ComponentsParametersTeam, body ProposePipelineJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewProposePipelineRequest(c.Server, team, body)
+func (c *Client) ProposePipeline(ctx context.Context, tenant ComponentsParametersTenant, body ProposePipelineJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProposePipelineRequest(c.Server, tenant, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9704,8 +9704,8 @@ func (c *Client) ProposePipeline(ctx context.Context, team ComponentsParametersT
 	return c.Client.Do(req)
 }
 
-func (c *Client) StreamTeamRuns(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewStreamTeamRunsRequest(c.Server, team)
+func (c *Client) StreamTenantRuns(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStreamTenantRunsRequest(c.Server, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -10256,8 +10256,8 @@ func (c *Client) CreateStreamTicket(ctx context.Context, body CreateStreamTicket
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListTeams(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListTeamsRequest(c.Server)
+func (c *Client) ListTenants(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListTenantsRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -10268,8 +10268,8 @@ func (c *Client) ListTeams(ctx context.Context, reqEditors ...RequestEditorFn) (
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateTeamWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateTeamRequestWithBody(c.Server, contentType, body)
+func (c *Client) CreateTenantWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateTenantRequestWithBody(c.Server, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -10280,8 +10280,8 @@ func (c *Client) CreateTeamWithBody(ctx context.Context, contentType string, bod
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateTeam(ctx context.Context, body CreateTeamJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateTeamRequest(c.Server, body)
+func (c *Client) CreateTenant(ctx context.Context, body CreateTenantJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateTenantRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -10292,8 +10292,8 @@ func (c *Client) CreateTeam(ctx context.Context, body CreateTeamJSONRequestBody,
 	return c.Client.Do(req)
 }
 
-func (c *Client) DeleteTeam(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewDeleteTeamRequest(c.Server, name)
+func (c *Client) DeleteTenant(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteTenantRequest(c.Server, name)
 	if err != nil {
 		return nil, err
 	}
@@ -10304,8 +10304,8 @@ func (c *Client) DeleteTeam(ctx context.Context, name ComponentsParametersName, 
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetTeam(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetTeamRequest(c.Server, name)
+func (c *Client) GetTenant(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTenantRequest(c.Server, name)
 	if err != nil {
 		return nil, err
 	}
@@ -10316,8 +10316,8 @@ func (c *Client) GetTeam(ctx context.Context, name ComponentsParametersName, req
 	return c.Client.Do(req)
 }
 
-func (c *Client) UpdateTeamWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewUpdateTeamRequestWithBody(c.Server, name, contentType, body)
+func (c *Client) UpdateTenantWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateTenantRequestWithBody(c.Server, name, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -10328,8 +10328,8 @@ func (c *Client) UpdateTeamWithBody(ctx context.Context, name ComponentsParamete
 	return c.Client.Do(req)
 }
 
-func (c *Client) UpdateTeam(ctx context.Context, name ComponentsParametersName, body UpdateTeamJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewUpdateTeamRequest(c.Server, name, body)
+func (c *Client) UpdateTenant(ctx context.Context, name ComponentsParametersName, body UpdateTenantJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateTenantRequest(c.Server, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -11169,9 +11169,9 @@ func NewListAssistantSessionsRequest(server string, params *ListAssistantSession
 
 		}
 
-		if params.Team != nil {
+		if params.Tenant != nil {
 
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "team", runtime.ParamLocationQuery, *params.Team); err != nil {
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "tenant", runtime.ParamLocationQuery, *params.Tenant); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
@@ -16664,8 +16664,8 @@ func NewUpdateMyPreferencesRequestWithBody(server string, contentType string, bo
 	return req, nil
 }
 
-// NewListPipelineTeamsRequest generates requests for ListPipelineTeams
-func NewListPipelineTeamsRequest(server string) (*http.Request, error) {
+// NewListPipelineTenantsRequest generates requests for ListPipelineTenants
+func NewListPipelineTenantsRequest(server string) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -16692,12 +16692,12 @@ func NewListPipelineTeamsRequest(server string) (*http.Request, error) {
 }
 
 // NewListPipelinesRequest generates requests for ListPipelines
-func NewListPipelinesRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+func NewListPipelinesRequest(server string, tenant ComponentsParametersTenant) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -16725,13 +16725,13 @@ func NewListPipelinesRequest(server string, team ComponentsParametersTeam) (*htt
 	return req, nil
 }
 
-// NewGetTeamAgentRequest generates requests for GetTeamAgent
-func NewGetTeamAgentRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+// NewGetTenantAgentRequest generates requests for GetTenantAgent
+func NewGetTenantAgentRequest(server string, tenant ComponentsParametersTenant) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -16759,13 +16759,13 @@ func NewGetTeamAgentRequest(server string, team ComponentsParametersTeam) (*http
 	return req, nil
 }
 
-// NewGetTeamAgentCapabilitiesRequest generates requests for GetTeamAgentCapabilities
-func NewGetTeamAgentCapabilitiesRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+// NewGetTenantAgentCapabilitiesRequest generates requests for GetTenantAgentCapabilities
+func NewGetTenantAgentCapabilitiesRequest(server string, tenant ComponentsParametersTenant) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -16793,24 +16793,24 @@ func NewGetTeamAgentCapabilitiesRequest(server string, team ComponentsParameters
 	return req, nil
 }
 
-// NewRunTeamAgentRequest calls the generic RunTeamAgent builder with application/json body
-func NewRunTeamAgentRequest(server string, team ComponentsParametersTeam, body RunTeamAgentJSONRequestBody) (*http.Request, error) {
+// NewRunTenantAgentRequest calls the generic RunTenantAgent builder with application/json body
+func NewRunTenantAgentRequest(server string, tenant ComponentsParametersTenant, body RunTenantAgentJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewRunTeamAgentRequestWithBody(server, team, "application/json", bodyReader)
+	return NewRunTenantAgentRequestWithBody(server, tenant, "application/json", bodyReader)
 }
 
-// NewRunTeamAgentRequestWithBody generates requests for RunTeamAgent with any type of body
-func NewRunTeamAgentRequestWithBody(server string, team ComponentsParametersTeam, contentType string, body io.Reader) (*http.Request, error) {
+// NewRunTenantAgentRequestWithBody generates requests for RunTenantAgent with any type of body
+func NewRunTenantAgentRequestWithBody(server string, tenant ComponentsParametersTenant, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -16840,13 +16840,13 @@ func NewRunTeamAgentRequestWithBody(server string, team ComponentsParametersTeam
 	return req, nil
 }
 
-// NewListTeamAgentSessionsRequest generates requests for ListTeamAgentSessions
-func NewListTeamAgentSessionsRequest(server string, team ComponentsParametersTeam, params *ListTeamAgentSessionsParams) (*http.Request, error) {
+// NewListTenantAgentSessionsRequest generates requests for ListTenantAgentSessions
+func NewListTenantAgentSessionsRequest(server string, tenant ComponentsParametersTenant, params *ListTenantAgentSessionsParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -16928,13 +16928,13 @@ func NewListTeamAgentSessionsRequest(server string, team ComponentsParametersTea
 	return req, nil
 }
 
-// NewGetTeamCellRequest generates requests for GetTeamCell
-func NewGetTeamCellRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+// NewGetTenantCellRequest generates requests for GetTenantCell
+func NewGetTenantCellRequest(server string, tenant ComponentsParametersTenant) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -16963,12 +16963,12 @@ func NewGetTeamCellRequest(server string, team ComponentsParametersTeam) (*http.
 }
 
 // NewGetPipelineJobRequest generates requests for GetPipelineJob
-func NewGetPipelineJobRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob) (*http.Request, error) {
+func NewGetPipelineJobRequest(server string, tenant ComponentsParametersTenant, job ComponentsParametersJob) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -17004,12 +17004,12 @@ func NewGetPipelineJobRequest(server string, team ComponentsParametersTeam, job 
 }
 
 // NewListJobBranchesRequest generates requests for ListJobBranches
-func NewListJobBranchesRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob) (*http.Request, error) {
+func NewListJobBranchesRequest(server string, tenant ComponentsParametersTenant, job ComponentsParametersJob) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -17045,12 +17045,12 @@ func NewListJobBranchesRequest(server string, team ComponentsParametersTeam, job
 }
 
 // NewListJobNotesRequest generates requests for ListJobNotes
-func NewListJobNotesRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob) (*http.Request, error) {
+func NewListJobNotesRequest(server string, tenant ComponentsParametersTenant, job ComponentsParametersJob) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -17086,12 +17086,12 @@ func NewListJobNotesRequest(server string, team ComponentsParametersTeam, job Co
 }
 
 // NewListRunsRequest generates requests for ListRuns
-func NewListRunsRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams) (*http.Request, error) {
+func NewListRunsRequest(server string, tenant ComponentsParametersTenant, job ComponentsParametersJob, params *ListRunsParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -17229,23 +17229,23 @@ func NewListRunsRequest(server string, team ComponentsParametersTeam, job Compon
 }
 
 // NewCreateRunRequest calls the generic CreateRun builder with application/json body
-func NewCreateRunRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody) (*http.Request, error) {
+func NewCreateRunRequest(server string, tenant ComponentsParametersTenant, job ComponentsParametersJob, body CreateRunJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCreateRunRequestWithBody(server, team, job, "application/json", bodyReader)
+	return NewCreateRunRequestWithBody(server, tenant, job, "application/json", bodyReader)
 }
 
 // NewCreateRunRequestWithBody generates requests for CreateRun with any type of body
-func NewCreateRunRequestWithBody(server string, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader) (*http.Request, error) {
+func NewCreateRunRequestWithBody(server string, tenant ComponentsParametersTenant, job ComponentsParametersJob, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -17283,23 +17283,23 @@ func NewCreateRunRequestWithBody(server string, team ComponentsParametersTeam, j
 }
 
 // NewScanMultibranchRequest calls the generic ScanMultibranch builder with application/json body
-func NewScanMultibranchRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody) (*http.Request, error) {
+func NewScanMultibranchRequest(server string, tenant ComponentsParametersTenant, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewScanMultibranchRequestWithBody(server, team, job, "application/json", bodyReader)
+	return NewScanMultibranchRequestWithBody(server, tenant, job, "application/json", bodyReader)
 }
 
 // NewScanMultibranchRequestWithBody generates requests for ScanMultibranch with any type of body
-func NewScanMultibranchRequestWithBody(server string, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader) (*http.Request, error) {
+func NewScanMultibranchRequestWithBody(server string, tenant ComponentsParametersTenant, job ComponentsParametersJob, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -17337,12 +17337,12 @@ func NewScanMultibranchRequestWithBody(server string, team ComponentsParametersT
 }
 
 // NewListJobTestCaseHistoryRequest generates requests for ListJobTestCaseHistory
-func NewListJobTestCaseHistoryRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams) (*http.Request, error) {
+func NewListJobTestCaseHistoryRequest(server string, tenant ComponentsParametersTenant, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -17406,13 +17406,13 @@ func NewListJobTestCaseHistoryRequest(server string, team ComponentsParametersTe
 	return req, nil
 }
 
-// NewListTeamFleetLocksRequest generates requests for ListTeamFleetLocks
-func NewListTeamFleetLocksRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+// NewListTenantFleetLocksRequest generates requests for ListTenantFleetLocks
+func NewListTenantFleetLocksRequest(server string, tenant ComponentsParametersTenant) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -17441,23 +17441,23 @@ func NewListTeamFleetLocksRequest(server string, team ComponentsParametersTeam) 
 }
 
 // NewValidatePipelineMarkerRequest calls the generic ValidatePipelineMarker builder with application/json body
-func NewValidatePipelineMarkerRequest(server string, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody) (*http.Request, error) {
+func NewValidatePipelineMarkerRequest(server string, tenant ComponentsParametersTenant, body ValidatePipelineMarkerJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewValidatePipelineMarkerRequestWithBody(server, team, "application/json", bodyReader)
+	return NewValidatePipelineMarkerRequestWithBody(server, tenant, "application/json", bodyReader)
 }
 
 // NewValidatePipelineMarkerRequestWithBody generates requests for ValidatePipelineMarker with any type of body
-func NewValidatePipelineMarkerRequestWithBody(server string, team ComponentsParametersTeam, contentType string, body io.Reader) (*http.Request, error) {
+func NewValidatePipelineMarkerRequestWithBody(server string, tenant ComponentsParametersTenant, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -17488,23 +17488,23 @@ func NewValidatePipelineMarkerRequestWithBody(server string, team ComponentsPara
 }
 
 // NewProposePipelineRequest calls the generic ProposePipeline builder with application/json body
-func NewProposePipelineRequest(server string, team ComponentsParametersTeam, body ProposePipelineJSONRequestBody) (*http.Request, error) {
+func NewProposePipelineRequest(server string, tenant ComponentsParametersTenant, body ProposePipelineJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewProposePipelineRequestWithBody(server, team, "application/json", bodyReader)
+	return NewProposePipelineRequestWithBody(server, tenant, "application/json", bodyReader)
 }
 
 // NewProposePipelineRequestWithBody generates requests for ProposePipeline with any type of body
-func NewProposePipelineRequestWithBody(server string, team ComponentsParametersTeam, contentType string, body io.Reader) (*http.Request, error) {
+func NewProposePipelineRequestWithBody(server string, tenant ComponentsParametersTenant, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -17534,13 +17534,13 @@ func NewProposePipelineRequestWithBody(server string, team ComponentsParametersT
 	return req, nil
 }
 
-// NewStreamTeamRunsRequest generates requests for StreamTeamRuns
-func NewStreamTeamRunsRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+// NewStreamTenantRunsRequest generates requests for StreamTenantRuns
+func NewStreamTenantRunsRequest(server string, tenant ComponentsParametersTenant) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -17954,9 +17954,9 @@ func NewListRunnersRequest(server string, params *ListRunnersParams) (*http.Requ
 	if params != nil {
 		queryValues := queryURL.Query()
 
-		if params.Team != nil {
+		if params.Tenant != nil {
 
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "team", runtime.ParamLocationQuery, *params.Team); err != nil {
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "tenant", runtime.ParamLocationQuery, *params.Tenant); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
@@ -18979,8 +18979,8 @@ func NewCreateStreamTicketRequestWithBody(server string, contentType string, bod
 	return req, nil
 }
 
-// NewListTeamsRequest generates requests for ListTeams
-func NewListTeamsRequest(server string) (*http.Request, error) {
+// NewListTenantsRequest generates requests for ListTenants
+func NewListTenantsRequest(server string) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -18988,7 +18988,7 @@ func NewListTeamsRequest(server string) (*http.Request, error) {
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/api/v1/teams")
+	operationPath := fmt.Sprintf("/api/v1/tenants")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -19006,19 +19006,19 @@ func NewListTeamsRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
-// NewCreateTeamRequest calls the generic CreateTeam builder with application/json body
-func NewCreateTeamRequest(server string, body CreateTeamJSONRequestBody) (*http.Request, error) {
+// NewCreateTenantRequest calls the generic CreateTenant builder with application/json body
+func NewCreateTenantRequest(server string, body CreateTenantJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCreateTeamRequestWithBody(server, "application/json", bodyReader)
+	return NewCreateTenantRequestWithBody(server, "application/json", bodyReader)
 }
 
-// NewCreateTeamRequestWithBody generates requests for CreateTeam with any type of body
-func NewCreateTeamRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+// NewCreateTenantRequestWithBody generates requests for CreateTenant with any type of body
+func NewCreateTenantRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -19026,7 +19026,7 @@ func NewCreateTeamRequestWithBody(server string, contentType string, body io.Rea
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/api/v1/teams")
+	operationPath := fmt.Sprintf("/api/v1/tenants")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -19046,8 +19046,8 @@ func NewCreateTeamRequestWithBody(server string, contentType string, body io.Rea
 	return req, nil
 }
 
-// NewDeleteTeamRequest generates requests for DeleteTeam
-func NewDeleteTeamRequest(server string, name ComponentsParametersName) (*http.Request, error) {
+// NewDeleteTenantRequest generates requests for DeleteTenant
+func NewDeleteTenantRequest(server string, name ComponentsParametersName) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -19062,7 +19062,7 @@ func NewDeleteTeamRequest(server string, name ComponentsParametersName) (*http.R
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/api/v1/teams/%s", pathParam0)
+	operationPath := fmt.Sprintf("/api/v1/tenants/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -19080,8 +19080,8 @@ func NewDeleteTeamRequest(server string, name ComponentsParametersName) (*http.R
 	return req, nil
 }
 
-// NewGetTeamRequest generates requests for GetTeam
-func NewGetTeamRequest(server string, name ComponentsParametersName) (*http.Request, error) {
+// NewGetTenantRequest generates requests for GetTenant
+func NewGetTenantRequest(server string, name ComponentsParametersName) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -19096,7 +19096,7 @@ func NewGetTeamRequest(server string, name ComponentsParametersName) (*http.Requ
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/api/v1/teams/%s", pathParam0)
+	operationPath := fmt.Sprintf("/api/v1/tenants/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -19114,19 +19114,19 @@ func NewGetTeamRequest(server string, name ComponentsParametersName) (*http.Requ
 	return req, nil
 }
 
-// NewUpdateTeamRequest calls the generic UpdateTeam builder with application/json body
-func NewUpdateTeamRequest(server string, name ComponentsParametersName, body UpdateTeamJSONRequestBody) (*http.Request, error) {
+// NewUpdateTenantRequest calls the generic UpdateTenant builder with application/json body
+func NewUpdateTenantRequest(server string, name ComponentsParametersName, body UpdateTenantJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewUpdateTeamRequestWithBody(server, name, "application/json", bodyReader)
+	return NewUpdateTenantRequestWithBody(server, name, "application/json", bodyReader)
 }
 
-// NewUpdateTeamRequestWithBody generates requests for UpdateTeam with any type of body
-func NewUpdateTeamRequestWithBody(server string, name ComponentsParametersName, contentType string, body io.Reader) (*http.Request, error) {
+// NewUpdateTenantRequestWithBody generates requests for UpdateTenant with any type of body
+func NewUpdateTenantRequestWithBody(server string, name ComponentsParametersName, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -19141,7 +19141,7 @@ func NewUpdateTeamRequestWithBody(server string, name ComponentsParametersName, 
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/api/v1/teams/%s", pathParam0)
+	operationPath := fmt.Sprintf("/api/v1/tenants/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -20202,69 +20202,69 @@ type ClientWithResponsesInterface interface {
 
 	UpdateMyPreferencesWithResponse(ctx context.Context, body UpdateMyPreferencesJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateMyPreferencesResponse, error)
 
-	// ListPipelineTeamsWithResponse request
-	ListPipelineTeamsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPipelineTeamsResponse, error)
+	// ListPipelineTenantsWithResponse request
+	ListPipelineTenantsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPipelineTenantsResponse, error)
 
 	// ListPipelinesWithResponse request
-	ListPipelinesWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*ListPipelinesResponse, error)
+	ListPipelinesWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*ListPipelinesResponse, error)
 
-	// GetTeamAgentWithResponse request
-	GetTeamAgentWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamAgentResponse, error)
+	// GetTenantAgentWithResponse request
+	GetTenantAgentWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*GetTenantAgentResponse, error)
 
-	// GetTeamAgentCapabilitiesWithResponse request
-	GetTeamAgentCapabilitiesWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamAgentCapabilitiesResponse, error)
+	// GetTenantAgentCapabilitiesWithResponse request
+	GetTenantAgentCapabilitiesWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*GetTenantAgentCapabilitiesResponse, error)
 
-	// RunTeamAgentWithBodyWithResponse request with any body
-	RunTeamAgentWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RunTeamAgentResponse, error)
+	// RunTenantAgentWithBodyWithResponse request with any body
+	RunTenantAgentWithBodyWithResponse(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RunTenantAgentResponse, error)
 
-	RunTeamAgentWithResponse(ctx context.Context, team ComponentsParametersTeam, body RunTeamAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*RunTeamAgentResponse, error)
+	RunTenantAgentWithResponse(ctx context.Context, tenant ComponentsParametersTenant, body RunTenantAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*RunTenantAgentResponse, error)
 
-	// ListTeamAgentSessionsWithResponse request
-	ListTeamAgentSessionsWithResponse(ctx context.Context, team ComponentsParametersTeam, params *ListTeamAgentSessionsParams, reqEditors ...RequestEditorFn) (*ListTeamAgentSessionsResponse, error)
+	// ListTenantAgentSessionsWithResponse request
+	ListTenantAgentSessionsWithResponse(ctx context.Context, tenant ComponentsParametersTenant, params *ListTenantAgentSessionsParams, reqEditors ...RequestEditorFn) (*ListTenantAgentSessionsResponse, error)
 
-	// GetTeamCellWithResponse request
-	GetTeamCellWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamCellResponse, error)
+	// GetTenantCellWithResponse request
+	GetTenantCellWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*GetTenantCellResponse, error)
 
 	// GetPipelineJobWithResponse request
-	GetPipelineJobWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*GetPipelineJobResponse, error)
+	GetPipelineJobWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*GetPipelineJobResponse, error)
 
 	// ListJobBranchesWithResponse request
-	ListJobBranchesWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobBranchesResponse, error)
+	ListJobBranchesWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobBranchesResponse, error)
 
 	// ListJobNotesWithResponse request
-	ListJobNotesWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobNotesResponse, error)
+	ListJobNotesWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobNotesResponse, error)
 
 	// ListRunsWithResponse request
-	ListRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error)
+	ListRunsWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error)
 
 	// CreateRunWithBodyWithResponse request with any body
-	CreateRunWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRunResponse, error)
+	CreateRunWithBodyWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRunResponse, error)
 
-	CreateRunWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRunResponse, error)
+	CreateRunWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRunResponse, error)
 
 	// ScanMultibranchWithBodyWithResponse request with any body
-	ScanMultibranchWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error)
+	ScanMultibranchWithBodyWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error)
 
-	ScanMultibranchWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error)
+	ScanMultibranchWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error)
 
 	// ListJobTestCaseHistoryWithResponse request
-	ListJobTestCaseHistoryWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*ListJobTestCaseHistoryResponse, error)
+	ListJobTestCaseHistoryWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*ListJobTestCaseHistoryResponse, error)
 
-	// ListTeamFleetLocksWithResponse request
-	ListTeamFleetLocksWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*ListTeamFleetLocksResponse, error)
+	// ListTenantFleetLocksWithResponse request
+	ListTenantFleetLocksWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*ListTenantFleetLocksResponse, error)
 
 	// ValidatePipelineMarkerWithBodyWithResponse request with any body
-	ValidatePipelineMarkerWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error)
+	ValidatePipelineMarkerWithBodyWithResponse(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error)
 
-	ValidatePipelineMarkerWithResponse(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error)
+	ValidatePipelineMarkerWithResponse(ctx context.Context, tenant ComponentsParametersTenant, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error)
 
 	// ProposePipelineWithBodyWithResponse request with any body
-	ProposePipelineWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProposePipelineResponse, error)
+	ProposePipelineWithBodyWithResponse(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProposePipelineResponse, error)
 
-	ProposePipelineWithResponse(ctx context.Context, team ComponentsParametersTeam, body ProposePipelineJSONRequestBody, reqEditors ...RequestEditorFn) (*ProposePipelineResponse, error)
+	ProposePipelineWithResponse(ctx context.Context, tenant ComponentsParametersTenant, body ProposePipelineJSONRequestBody, reqEditors ...RequestEditorFn) (*ProposePipelineResponse, error)
 
-	// StreamTeamRunsWithResponse request
-	StreamTeamRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*StreamTeamRunsResponse, error)
+	// StreamTenantRunsWithResponse request
+	StreamTenantRunsWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*StreamTenantRunsResponse, error)
 
 	// ListVarroaRoleBindingsWithResponse request
 	ListVarroaRoleBindingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVarroaRoleBindingsResponse, error)
@@ -20390,24 +20390,24 @@ type ClientWithResponsesInterface interface {
 
 	CreateStreamTicketWithResponse(ctx context.Context, body CreateStreamTicketJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateStreamTicketResponse, error)
 
-	// ListTeamsWithResponse request
-	ListTeamsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListTeamsResponse, error)
+	// ListTenantsWithResponse request
+	ListTenantsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListTenantsResponse, error)
 
-	// CreateTeamWithBodyWithResponse request with any body
-	CreateTeamWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateTeamResponse, error)
+	// CreateTenantWithBodyWithResponse request with any body
+	CreateTenantWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateTenantResponse, error)
 
-	CreateTeamWithResponse(ctx context.Context, body CreateTeamJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateTeamResponse, error)
+	CreateTenantWithResponse(ctx context.Context, body CreateTenantJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateTenantResponse, error)
 
-	// DeleteTeamWithResponse request
-	DeleteTeamWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*DeleteTeamResponse, error)
+	// DeleteTenantWithResponse request
+	DeleteTenantWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*DeleteTenantResponse, error)
 
-	// GetTeamWithResponse request
-	GetTeamWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetTeamResponse, error)
+	// GetTenantWithResponse request
+	GetTenantWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetTenantResponse, error)
 
-	// UpdateTeamWithBodyWithResponse request with any body
-	UpdateTeamWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateTeamResponse, error)
+	// UpdateTenantWithBodyWithResponse request with any body
+	UpdateTenantWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateTenantResponse, error)
 
-	UpdateTeamWithResponse(ctx context.Context, name ComponentsParametersName, body UpdateTeamJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateTeamResponse, error)
+	UpdateTenantWithResponse(ctx context.Context, name ComponentsParametersName, body UpdateTenantJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateTenantResponse, error)
 
 	// GetUpdateCenterStatusWithResponse request
 	GetUpdateCenterStatusWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetUpdateCenterStatusResponse, error)
@@ -20494,7 +20494,7 @@ func (r ListActivityResponse) StatusCode() int {
 type ListAgentsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *ComponentsSchemasTeamAgentItemList
+	JSON200      *ComponentsSchemasTenantAgentItemList
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
 }
@@ -20518,12 +20518,12 @@ func (r ListAgentsResponse) StatusCode() int {
 type PutAgentUnattendedResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *ComponentsSchemasTeamAgentUnattendedResult
+	JSON200      *ComponentsSchemasTenantAgentUnattendedResult
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
-	JSON409      *ComponentsSchemasTeamAgentError
+	JSON409      *ComponentsSchemasTenantAgentError
 	JSON503      *ComponentsResponsesServiceUnavailable
 }
 
@@ -23628,16 +23628,16 @@ func (r UpdateMyPreferencesResponse) StatusCode() int {
 	return 0
 }
 
-type ListPipelineTeamsResponse struct {
+type ListPipelineTenantsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *ComponentsSchemasPipelineTeamList
+	JSON200      *ComponentsSchemasPipelineTenantList
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON500      *ComponentsResponsesInternal
 }
 
 // Status returns HTTPResponse.Status
-func (r ListPipelineTeamsResponse) Status() string {
+func (r ListPipelineTenantsResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -23645,7 +23645,7 @@ func (r ListPipelineTeamsResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListPipelineTeamsResponse) StatusCode() int {
+func (r ListPipelineTenantsResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -23679,16 +23679,16 @@ func (r ListPipelinesResponse) StatusCode() int {
 	return 0
 }
 
-type GetTeamAgentResponse struct {
+type GetTenantAgentResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *ComponentsSchemasTeamAgent
+	JSON200      *ComponentsSchemasTenantAgent
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON404      *ComponentsResponsesNotFound
 }
 
 // Status returns HTTPResponse.Status
-func (r GetTeamAgentResponse) Status() string {
+func (r GetTenantAgentResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -23696,24 +23696,24 @@ func (r GetTeamAgentResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetTeamAgentResponse) StatusCode() int {
+func (r GetTenantAgentResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetTeamAgentCapabilitiesResponse struct {
+type GetTenantAgentCapabilitiesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *ComponentsSchemasTeamAgentCapabilities
+	JSON200      *ComponentsSchemasTenantAgentCapabilities
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON404      *ComponentsResponsesNotFound
 	JSON503      *ComponentsSchemasAssistantError
 }
 
 // Status returns HTTPResponse.Status
-func (r GetTeamAgentCapabilitiesResponse) Status() string {
+func (r GetTenantAgentCapabilitiesResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -23721,30 +23721,30 @@ func (r GetTeamAgentCapabilitiesResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetTeamAgentCapabilitiesResponse) StatusCode() int {
+func (r GetTenantAgentCapabilitiesResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type RunTeamAgentResponse struct {
+type RunTenantAgentResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON202      *struct {
-		State RunTeamAgent202State `json:"state"`
+		State RunTenantAgent202State `json:"state"`
 	}
 	JSON400 *ComponentsResponsesBadRequest
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
 	JSON404 *ComponentsResponsesNotFound
-	JSON409 *ComponentsSchemasTeamAgentError
+	JSON409 *ComponentsSchemasTenantAgentError
 	JSON503 *ComponentsResponsesServiceUnavailable
 }
-type RunTeamAgent202State string
+type RunTenantAgent202State string
 
 // Status returns HTTPResponse.Status
-func (r RunTeamAgentResponse) Status() string {
+func (r RunTenantAgentResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -23752,17 +23752,17 @@ func (r RunTeamAgentResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r RunTeamAgentResponse) StatusCode() int {
+func (r RunTenantAgentResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type ListTeamAgentSessionsResponse struct {
+type ListTenantAgentSessionsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *ComponentsSchemasTeamAgentSessionList
+	JSON200      *ComponentsSchemasTenantAgentSessionList
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON404      *ComponentsResponsesNotFound
@@ -23770,7 +23770,7 @@ type ListTeamAgentSessionsResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListTeamAgentSessionsResponse) Status() string {
+func (r ListTenantAgentSessionsResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -23778,24 +23778,24 @@ func (r ListTeamAgentSessionsResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListTeamAgentSessionsResponse) StatusCode() int {
+func (r ListTenantAgentSessionsResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetTeamCellResponse struct {
+type GetTenantCellResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *ComponentsSchemasTeamCell
+	JSON200      *ComponentsSchemasTenantCell
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON404      *ComponentsResponsesNotFound
 	JSON503      *ComponentsResponsesServiceUnavailable
 }
 
 // Status returns HTTPResponse.Status
-func (r GetTeamCellResponse) Status() string {
+func (r GetTenantCellResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -23803,7 +23803,7 @@ func (r GetTeamCellResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetTeamCellResponse) StatusCode() int {
+func (r GetTenantCellResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -23992,7 +23992,7 @@ func (r ListJobTestCaseHistoryResponse) StatusCode() int {
 	return 0
 }
 
-type ListTeamFleetLocksResponse struct {
+type ListTenantFleetLocksResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *ComponentsSchemasFleetLockListResponse
@@ -24002,7 +24002,7 @@ type ListTeamFleetLocksResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListTeamFleetLocksResponse) Status() string {
+func (r ListTenantFleetLocksResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -24010,7 +24010,7 @@ func (r ListTeamFleetLocksResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListTeamFleetLocksResponse) StatusCode() int {
+func (r ListTenantFleetLocksResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -24075,7 +24075,7 @@ func (r ProposePipelineResponse) StatusCode() int {
 	return 0
 }
 
-type StreamTeamRunsResponse struct {
+type StreamTenantRunsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON401      *ComponentsResponsesUnauthorized
@@ -24084,7 +24084,7 @@ type StreamTeamRunsResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r StreamTeamRunsResponse) Status() string {
+func (r StreamTenantRunsResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -24092,7 +24092,7 @@ func (r StreamTeamRunsResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r StreamTeamRunsResponse) StatusCode() int {
+func (r StreamTenantRunsResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -24976,18 +24976,18 @@ func (r CreateStreamTicketResponse) StatusCode() int {
 	return 0
 }
 
-type ListTeamsResponse struct {
+type ListTenantsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *struct {
-		Items []ComponentsSchemasTeamEntry `json:"items"`
+		Items []ComponentsSchemasTenantEntry `json:"items"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
 }
 
 // Status returns HTTPResponse.Status
-func (r ListTeamsResponse) Status() string {
+func (r ListTenantsResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -24995,14 +24995,14 @@ func (r ListTeamsResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListTeamsResponse) StatusCode() int {
+func (r ListTenantsResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type CreateTeamResponse struct {
+type CreateTenantResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON201      *struct {
@@ -25015,7 +25015,7 @@ type CreateTeamResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r CreateTeamResponse) Status() string {
+func (r CreateTenantResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -25023,14 +25023,14 @@ func (r CreateTeamResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r CreateTeamResponse) StatusCode() int {
+func (r CreateTenantResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type DeleteTeamResponse struct {
+type DeleteTenantResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON401      *ComponentsResponsesUnauthorized
@@ -25039,7 +25039,7 @@ type DeleteTeamResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r DeleteTeamResponse) Status() string {
+func (r DeleteTenantResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -25047,24 +25047,24 @@ func (r DeleteTeamResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r DeleteTeamResponse) StatusCode() int {
+func (r DeleteTenantResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetTeamResponse struct {
+type GetTenantResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *ComponentsSchemasTeamEntry
+	JSON200      *ComponentsSchemasTenantEntry
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
 }
 
 // Status returns HTTPResponse.Status
-func (r GetTeamResponse) Status() string {
+func (r GetTenantResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -25072,14 +25072,14 @@ func (r GetTeamResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetTeamResponse) StatusCode() int {
+func (r GetTenantResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type UpdateTeamResponse struct {
+type UpdateTenantResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *struct {
@@ -25092,7 +25092,7 @@ type UpdateTeamResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r UpdateTeamResponse) Status() string {
+func (r UpdateTenantResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -25100,7 +25100,7 @@ func (r UpdateTeamResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r UpdateTeamResponse) StatusCode() int {
+func (r UpdateTenantResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -26946,80 +26946,80 @@ func (c *ClientWithResponses) UpdateMyPreferencesWithResponse(ctx context.Contex
 	return ParseUpdateMyPreferencesResponse(rsp)
 }
 
-// ListPipelineTeamsWithResponse request returning *ListPipelineTeamsResponse
-func (c *ClientWithResponses) ListPipelineTeamsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPipelineTeamsResponse, error) {
-	rsp, err := c.ListPipelineTeams(ctx, reqEditors...)
+// ListPipelineTenantsWithResponse request returning *ListPipelineTenantsResponse
+func (c *ClientWithResponses) ListPipelineTenantsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPipelineTenantsResponse, error) {
+	rsp, err := c.ListPipelineTenants(ctx, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseListPipelineTeamsResponse(rsp)
+	return ParseListPipelineTenantsResponse(rsp)
 }
 
 // ListPipelinesWithResponse request returning *ListPipelinesResponse
-func (c *ClientWithResponses) ListPipelinesWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*ListPipelinesResponse, error) {
-	rsp, err := c.ListPipelines(ctx, team, reqEditors...)
+func (c *ClientWithResponses) ListPipelinesWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*ListPipelinesResponse, error) {
+	rsp, err := c.ListPipelines(ctx, tenant, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParseListPipelinesResponse(rsp)
 }
 
-// GetTeamAgentWithResponse request returning *GetTeamAgentResponse
-func (c *ClientWithResponses) GetTeamAgentWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamAgentResponse, error) {
-	rsp, err := c.GetTeamAgent(ctx, team, reqEditors...)
+// GetTenantAgentWithResponse request returning *GetTenantAgentResponse
+func (c *ClientWithResponses) GetTenantAgentWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*GetTenantAgentResponse, error) {
+	rsp, err := c.GetTenantAgent(ctx, tenant, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseGetTeamAgentResponse(rsp)
+	return ParseGetTenantAgentResponse(rsp)
 }
 
-// GetTeamAgentCapabilitiesWithResponse request returning *GetTeamAgentCapabilitiesResponse
-func (c *ClientWithResponses) GetTeamAgentCapabilitiesWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamAgentCapabilitiesResponse, error) {
-	rsp, err := c.GetTeamAgentCapabilities(ctx, team, reqEditors...)
+// GetTenantAgentCapabilitiesWithResponse request returning *GetTenantAgentCapabilitiesResponse
+func (c *ClientWithResponses) GetTenantAgentCapabilitiesWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*GetTenantAgentCapabilitiesResponse, error) {
+	rsp, err := c.GetTenantAgentCapabilities(ctx, tenant, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseGetTeamAgentCapabilitiesResponse(rsp)
+	return ParseGetTenantAgentCapabilitiesResponse(rsp)
 }
 
-// RunTeamAgentWithBodyWithResponse request with arbitrary body returning *RunTeamAgentResponse
-func (c *ClientWithResponses) RunTeamAgentWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RunTeamAgentResponse, error) {
-	rsp, err := c.RunTeamAgentWithBody(ctx, team, contentType, body, reqEditors...)
+// RunTenantAgentWithBodyWithResponse request with arbitrary body returning *RunTenantAgentResponse
+func (c *ClientWithResponses) RunTenantAgentWithBodyWithResponse(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RunTenantAgentResponse, error) {
+	rsp, err := c.RunTenantAgentWithBody(ctx, tenant, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseRunTeamAgentResponse(rsp)
+	return ParseRunTenantAgentResponse(rsp)
 }
 
-func (c *ClientWithResponses) RunTeamAgentWithResponse(ctx context.Context, team ComponentsParametersTeam, body RunTeamAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*RunTeamAgentResponse, error) {
-	rsp, err := c.RunTeamAgent(ctx, team, body, reqEditors...)
+func (c *ClientWithResponses) RunTenantAgentWithResponse(ctx context.Context, tenant ComponentsParametersTenant, body RunTenantAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*RunTenantAgentResponse, error) {
+	rsp, err := c.RunTenantAgent(ctx, tenant, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseRunTeamAgentResponse(rsp)
+	return ParseRunTenantAgentResponse(rsp)
 }
 
-// ListTeamAgentSessionsWithResponse request returning *ListTeamAgentSessionsResponse
-func (c *ClientWithResponses) ListTeamAgentSessionsWithResponse(ctx context.Context, team ComponentsParametersTeam, params *ListTeamAgentSessionsParams, reqEditors ...RequestEditorFn) (*ListTeamAgentSessionsResponse, error) {
-	rsp, err := c.ListTeamAgentSessions(ctx, team, params, reqEditors...)
+// ListTenantAgentSessionsWithResponse request returning *ListTenantAgentSessionsResponse
+func (c *ClientWithResponses) ListTenantAgentSessionsWithResponse(ctx context.Context, tenant ComponentsParametersTenant, params *ListTenantAgentSessionsParams, reqEditors ...RequestEditorFn) (*ListTenantAgentSessionsResponse, error) {
+	rsp, err := c.ListTenantAgentSessions(ctx, tenant, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseListTeamAgentSessionsResponse(rsp)
+	return ParseListTenantAgentSessionsResponse(rsp)
 }
 
-// GetTeamCellWithResponse request returning *GetTeamCellResponse
-func (c *ClientWithResponses) GetTeamCellWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamCellResponse, error) {
-	rsp, err := c.GetTeamCell(ctx, team, reqEditors...)
+// GetTenantCellWithResponse request returning *GetTenantCellResponse
+func (c *ClientWithResponses) GetTenantCellWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*GetTenantCellResponse, error) {
+	rsp, err := c.GetTenantCell(ctx, tenant, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseGetTeamCellResponse(rsp)
+	return ParseGetTenantCellResponse(rsp)
 }
 
 // GetPipelineJobWithResponse request returning *GetPipelineJobResponse
-func (c *ClientWithResponses) GetPipelineJobWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*GetPipelineJobResponse, error) {
-	rsp, err := c.GetPipelineJob(ctx, team, job, reqEditors...)
+func (c *ClientWithResponses) GetPipelineJobWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*GetPipelineJobResponse, error) {
+	rsp, err := c.GetPipelineJob(ctx, tenant, job, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -27027,8 +27027,8 @@ func (c *ClientWithResponses) GetPipelineJobWithResponse(ctx context.Context, te
 }
 
 // ListJobBranchesWithResponse request returning *ListJobBranchesResponse
-func (c *ClientWithResponses) ListJobBranchesWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobBranchesResponse, error) {
-	rsp, err := c.ListJobBranches(ctx, team, job, reqEditors...)
+func (c *ClientWithResponses) ListJobBranchesWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobBranchesResponse, error) {
+	rsp, err := c.ListJobBranches(ctx, tenant, job, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -27036,8 +27036,8 @@ func (c *ClientWithResponses) ListJobBranchesWithResponse(ctx context.Context, t
 }
 
 // ListJobNotesWithResponse request returning *ListJobNotesResponse
-func (c *ClientWithResponses) ListJobNotesWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobNotesResponse, error) {
-	rsp, err := c.ListJobNotes(ctx, team, job, reqEditors...)
+func (c *ClientWithResponses) ListJobNotesWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobNotesResponse, error) {
+	rsp, err := c.ListJobNotes(ctx, tenant, job, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -27045,8 +27045,8 @@ func (c *ClientWithResponses) ListJobNotesWithResponse(ctx context.Context, team
 }
 
 // ListRunsWithResponse request returning *ListRunsResponse
-func (c *ClientWithResponses) ListRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error) {
-	rsp, err := c.ListRuns(ctx, team, job, params, reqEditors...)
+func (c *ClientWithResponses) ListRunsWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error) {
+	rsp, err := c.ListRuns(ctx, tenant, job, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -27054,16 +27054,16 @@ func (c *ClientWithResponses) ListRunsWithResponse(ctx context.Context, team Com
 }
 
 // CreateRunWithBodyWithResponse request with arbitrary body returning *CreateRunResponse
-func (c *ClientWithResponses) CreateRunWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRunResponse, error) {
-	rsp, err := c.CreateRunWithBody(ctx, team, job, contentType, body, reqEditors...)
+func (c *ClientWithResponses) CreateRunWithBodyWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRunResponse, error) {
+	rsp, err := c.CreateRunWithBody(ctx, tenant, job, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParseCreateRunResponse(rsp)
 }
 
-func (c *ClientWithResponses) CreateRunWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRunResponse, error) {
-	rsp, err := c.CreateRun(ctx, team, job, body, reqEditors...)
+func (c *ClientWithResponses) CreateRunWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRunResponse, error) {
+	rsp, err := c.CreateRun(ctx, tenant, job, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -27071,16 +27071,16 @@ func (c *ClientWithResponses) CreateRunWithResponse(ctx context.Context, team Co
 }
 
 // ScanMultibranchWithBodyWithResponse request with arbitrary body returning *ScanMultibranchResponse
-func (c *ClientWithResponses) ScanMultibranchWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error) {
-	rsp, err := c.ScanMultibranchWithBody(ctx, team, job, contentType, body, reqEditors...)
+func (c *ClientWithResponses) ScanMultibranchWithBodyWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error) {
+	rsp, err := c.ScanMultibranchWithBody(ctx, tenant, job, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParseScanMultibranchResponse(rsp)
 }
 
-func (c *ClientWithResponses) ScanMultibranchWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error) {
-	rsp, err := c.ScanMultibranch(ctx, team, job, body, reqEditors...)
+func (c *ClientWithResponses) ScanMultibranchWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error) {
+	rsp, err := c.ScanMultibranch(ctx, tenant, job, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -27088,34 +27088,34 @@ func (c *ClientWithResponses) ScanMultibranchWithResponse(ctx context.Context, t
 }
 
 // ListJobTestCaseHistoryWithResponse request returning *ListJobTestCaseHistoryResponse
-func (c *ClientWithResponses) ListJobTestCaseHistoryWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*ListJobTestCaseHistoryResponse, error) {
-	rsp, err := c.ListJobTestCaseHistory(ctx, team, job, pCase, params, reqEditors...)
+func (c *ClientWithResponses) ListJobTestCaseHistoryWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*ListJobTestCaseHistoryResponse, error) {
+	rsp, err := c.ListJobTestCaseHistory(ctx, tenant, job, pCase, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParseListJobTestCaseHistoryResponse(rsp)
 }
 
-// ListTeamFleetLocksWithResponse request returning *ListTeamFleetLocksResponse
-func (c *ClientWithResponses) ListTeamFleetLocksWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*ListTeamFleetLocksResponse, error) {
-	rsp, err := c.ListTeamFleetLocks(ctx, team, reqEditors...)
+// ListTenantFleetLocksWithResponse request returning *ListTenantFleetLocksResponse
+func (c *ClientWithResponses) ListTenantFleetLocksWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*ListTenantFleetLocksResponse, error) {
+	rsp, err := c.ListTenantFleetLocks(ctx, tenant, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseListTeamFleetLocksResponse(rsp)
+	return ParseListTenantFleetLocksResponse(rsp)
 }
 
 // ValidatePipelineMarkerWithBodyWithResponse request with arbitrary body returning *ValidatePipelineMarkerResponse
-func (c *ClientWithResponses) ValidatePipelineMarkerWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error) {
-	rsp, err := c.ValidatePipelineMarkerWithBody(ctx, team, contentType, body, reqEditors...)
+func (c *ClientWithResponses) ValidatePipelineMarkerWithBodyWithResponse(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error) {
+	rsp, err := c.ValidatePipelineMarkerWithBody(ctx, tenant, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParseValidatePipelineMarkerResponse(rsp)
 }
 
-func (c *ClientWithResponses) ValidatePipelineMarkerWithResponse(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error) {
-	rsp, err := c.ValidatePipelineMarker(ctx, team, body, reqEditors...)
+func (c *ClientWithResponses) ValidatePipelineMarkerWithResponse(ctx context.Context, tenant ComponentsParametersTenant, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error) {
+	rsp, err := c.ValidatePipelineMarker(ctx, tenant, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -27123,29 +27123,29 @@ func (c *ClientWithResponses) ValidatePipelineMarkerWithResponse(ctx context.Con
 }
 
 // ProposePipelineWithBodyWithResponse request with arbitrary body returning *ProposePipelineResponse
-func (c *ClientWithResponses) ProposePipelineWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProposePipelineResponse, error) {
-	rsp, err := c.ProposePipelineWithBody(ctx, team, contentType, body, reqEditors...)
+func (c *ClientWithResponses) ProposePipelineWithBodyWithResponse(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProposePipelineResponse, error) {
+	rsp, err := c.ProposePipelineWithBody(ctx, tenant, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParseProposePipelineResponse(rsp)
 }
 
-func (c *ClientWithResponses) ProposePipelineWithResponse(ctx context.Context, team ComponentsParametersTeam, body ProposePipelineJSONRequestBody, reqEditors ...RequestEditorFn) (*ProposePipelineResponse, error) {
-	rsp, err := c.ProposePipeline(ctx, team, body, reqEditors...)
+func (c *ClientWithResponses) ProposePipelineWithResponse(ctx context.Context, tenant ComponentsParametersTenant, body ProposePipelineJSONRequestBody, reqEditors ...RequestEditorFn) (*ProposePipelineResponse, error) {
+	rsp, err := c.ProposePipeline(ctx, tenant, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParseProposePipelineResponse(rsp)
 }
 
-// StreamTeamRunsWithResponse request returning *StreamTeamRunsResponse
-func (c *ClientWithResponses) StreamTeamRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*StreamTeamRunsResponse, error) {
-	rsp, err := c.StreamTeamRuns(ctx, team, reqEditors...)
+// StreamTenantRunsWithResponse request returning *StreamTenantRunsResponse
+func (c *ClientWithResponses) StreamTenantRunsWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*StreamTenantRunsResponse, error) {
+	rsp, err := c.StreamTenantRuns(ctx, tenant, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseStreamTeamRunsResponse(rsp)
+	return ParseStreamTenantRunsResponse(rsp)
 }
 
 // ListVarroaRoleBindingsWithResponse request returning *ListVarroaRoleBindingsResponse
@@ -27542,65 +27542,65 @@ func (c *ClientWithResponses) CreateStreamTicketWithResponse(ctx context.Context
 	return ParseCreateStreamTicketResponse(rsp)
 }
 
-// ListTeamsWithResponse request returning *ListTeamsResponse
-func (c *ClientWithResponses) ListTeamsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListTeamsResponse, error) {
-	rsp, err := c.ListTeams(ctx, reqEditors...)
+// ListTenantsWithResponse request returning *ListTenantsResponse
+func (c *ClientWithResponses) ListTenantsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListTenantsResponse, error) {
+	rsp, err := c.ListTenants(ctx, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseListTeamsResponse(rsp)
+	return ParseListTenantsResponse(rsp)
 }
 
-// CreateTeamWithBodyWithResponse request with arbitrary body returning *CreateTeamResponse
-func (c *ClientWithResponses) CreateTeamWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateTeamResponse, error) {
-	rsp, err := c.CreateTeamWithBody(ctx, contentType, body, reqEditors...)
+// CreateTenantWithBodyWithResponse request with arbitrary body returning *CreateTenantResponse
+func (c *ClientWithResponses) CreateTenantWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateTenantResponse, error) {
+	rsp, err := c.CreateTenantWithBody(ctx, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCreateTeamResponse(rsp)
+	return ParseCreateTenantResponse(rsp)
 }
 
-func (c *ClientWithResponses) CreateTeamWithResponse(ctx context.Context, body CreateTeamJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateTeamResponse, error) {
-	rsp, err := c.CreateTeam(ctx, body, reqEditors...)
+func (c *ClientWithResponses) CreateTenantWithResponse(ctx context.Context, body CreateTenantJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateTenantResponse, error) {
+	rsp, err := c.CreateTenant(ctx, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCreateTeamResponse(rsp)
+	return ParseCreateTenantResponse(rsp)
 }
 
-// DeleteTeamWithResponse request returning *DeleteTeamResponse
-func (c *ClientWithResponses) DeleteTeamWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*DeleteTeamResponse, error) {
-	rsp, err := c.DeleteTeam(ctx, name, reqEditors...)
+// DeleteTenantWithResponse request returning *DeleteTenantResponse
+func (c *ClientWithResponses) DeleteTenantWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*DeleteTenantResponse, error) {
+	rsp, err := c.DeleteTenant(ctx, name, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseDeleteTeamResponse(rsp)
+	return ParseDeleteTenantResponse(rsp)
 }
 
-// GetTeamWithResponse request returning *GetTeamResponse
-func (c *ClientWithResponses) GetTeamWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetTeamResponse, error) {
-	rsp, err := c.GetTeam(ctx, name, reqEditors...)
+// GetTenantWithResponse request returning *GetTenantResponse
+func (c *ClientWithResponses) GetTenantWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetTenantResponse, error) {
+	rsp, err := c.GetTenant(ctx, name, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseGetTeamResponse(rsp)
+	return ParseGetTenantResponse(rsp)
 }
 
-// UpdateTeamWithBodyWithResponse request with arbitrary body returning *UpdateTeamResponse
-func (c *ClientWithResponses) UpdateTeamWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateTeamResponse, error) {
-	rsp, err := c.UpdateTeamWithBody(ctx, name, contentType, body, reqEditors...)
+// UpdateTenantWithBodyWithResponse request with arbitrary body returning *UpdateTenantResponse
+func (c *ClientWithResponses) UpdateTenantWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateTenantResponse, error) {
+	rsp, err := c.UpdateTenantWithBody(ctx, name, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseUpdateTeamResponse(rsp)
+	return ParseUpdateTenantResponse(rsp)
 }
 
-func (c *ClientWithResponses) UpdateTeamWithResponse(ctx context.Context, name ComponentsParametersName, body UpdateTeamJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateTeamResponse, error) {
-	rsp, err := c.UpdateTeam(ctx, name, body, reqEditors...)
+func (c *ClientWithResponses) UpdateTenantWithResponse(ctx context.Context, name ComponentsParametersName, body UpdateTenantJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateTenantResponse, error) {
+	rsp, err := c.UpdateTenant(ctx, name, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseUpdateTeamResponse(rsp)
+	return ParseUpdateTenantResponse(rsp)
 }
 
 // GetUpdateCenterStatusWithResponse request returning *GetUpdateCenterStatusResponse
@@ -27816,7 +27816,7 @@ func ParseListAgentsResponse(rsp *http.Response) (*ListAgentsResponse, error) {
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest ComponentsSchemasTeamAgentItemList
+		var dest ComponentsSchemasTenantAgentItemList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -27856,7 +27856,7 @@ func ParsePutAgentUnattendedResponse(rsp *http.Response) (*PutAgentUnattendedRes
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest ComponentsSchemasTeamAgentUnattendedResult
+		var dest ComponentsSchemasTenantAgentUnattendedResult
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -27891,7 +27891,7 @@ func ParsePutAgentUnattendedResponse(rsp *http.Response) (*PutAgentUnattendedRes
 		response.JSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest ComponentsSchemasTeamAgentError
+		var dest ComponentsSchemasTenantAgentError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -33668,22 +33668,22 @@ func ParseUpdateMyPreferencesResponse(rsp *http.Response) (*UpdateMyPreferencesR
 	return response, nil
 }
 
-// ParseListPipelineTeamsResponse parses an HTTP response from a ListPipelineTeamsWithResponse call
-func ParseListPipelineTeamsResponse(rsp *http.Response) (*ListPipelineTeamsResponse, error) {
+// ParseListPipelineTenantsResponse parses an HTTP response from a ListPipelineTenantsWithResponse call
+func ParseListPipelineTenantsResponse(rsp *http.Response) (*ListPipelineTenantsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListPipelineTeamsResponse{
+	response := &ListPipelineTenantsResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest ComponentsSchemasPipelineTeamList
+		var dest ComponentsSchemasPipelineTenantList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -33769,22 +33769,22 @@ func ParseListPipelinesResponse(rsp *http.Response) (*ListPipelinesResponse, err
 	return response, nil
 }
 
-// ParseGetTeamAgentResponse parses an HTTP response from a GetTeamAgentWithResponse call
-func ParseGetTeamAgentResponse(rsp *http.Response) (*GetTeamAgentResponse, error) {
+// ParseGetTenantAgentResponse parses an HTTP response from a GetTenantAgentWithResponse call
+func ParseGetTenantAgentResponse(rsp *http.Response) (*GetTenantAgentResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetTeamAgentResponse{
+	response := &GetTenantAgentResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest ComponentsSchemasTeamAgent
+		var dest ComponentsSchemasTenantAgent
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -33809,22 +33809,22 @@ func ParseGetTeamAgentResponse(rsp *http.Response) (*GetTeamAgentResponse, error
 	return response, nil
 }
 
-// ParseGetTeamAgentCapabilitiesResponse parses an HTTP response from a GetTeamAgentCapabilitiesWithResponse call
-func ParseGetTeamAgentCapabilitiesResponse(rsp *http.Response) (*GetTeamAgentCapabilitiesResponse, error) {
+// ParseGetTenantAgentCapabilitiesResponse parses an HTTP response from a GetTenantAgentCapabilitiesWithResponse call
+func ParseGetTenantAgentCapabilitiesResponse(rsp *http.Response) (*GetTenantAgentCapabilitiesResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetTeamAgentCapabilitiesResponse{
+	response := &GetTenantAgentCapabilitiesResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest ComponentsSchemasTeamAgentCapabilities
+		var dest ComponentsSchemasTenantAgentCapabilities
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -33856,15 +33856,15 @@ func ParseGetTeamAgentCapabilitiesResponse(rsp *http.Response) (*GetTeamAgentCap
 	return response, nil
 }
 
-// ParseRunTeamAgentResponse parses an HTTP response from a RunTeamAgentWithResponse call
-func ParseRunTeamAgentResponse(rsp *http.Response) (*RunTeamAgentResponse, error) {
+// ParseRunTenantAgentResponse parses an HTTP response from a RunTenantAgentWithResponse call
+func ParseRunTenantAgentResponse(rsp *http.Response) (*RunTenantAgentResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &RunTeamAgentResponse{
+	response := &RunTenantAgentResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -33872,7 +33872,7 @@ func ParseRunTeamAgentResponse(rsp *http.Response) (*RunTeamAgentResponse, error
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
 		var dest struct {
-			State RunTeamAgent202State `json:"state"`
+			State RunTenantAgent202State `json:"state"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
@@ -33908,7 +33908,7 @@ func ParseRunTeamAgentResponse(rsp *http.Response) (*RunTeamAgentResponse, error
 		response.JSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest ComponentsSchemasTeamAgentError
+		var dest ComponentsSchemasTenantAgentError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -33926,22 +33926,22 @@ func ParseRunTeamAgentResponse(rsp *http.Response) (*RunTeamAgentResponse, error
 	return response, nil
 }
 
-// ParseListTeamAgentSessionsResponse parses an HTTP response from a ListTeamAgentSessionsWithResponse call
-func ParseListTeamAgentSessionsResponse(rsp *http.Response) (*ListTeamAgentSessionsResponse, error) {
+// ParseListTenantAgentSessionsResponse parses an HTTP response from a ListTenantAgentSessionsWithResponse call
+func ParseListTenantAgentSessionsResponse(rsp *http.Response) (*ListTenantAgentSessionsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListTeamAgentSessionsResponse{
+	response := &ListTenantAgentSessionsResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest ComponentsSchemasTeamAgentSessionList
+		var dest ComponentsSchemasTenantAgentSessionList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -33980,22 +33980,22 @@ func ParseListTeamAgentSessionsResponse(rsp *http.Response) (*ListTeamAgentSessi
 	return response, nil
 }
 
-// ParseGetTeamCellResponse parses an HTTP response from a GetTeamCellWithResponse call
-func ParseGetTeamCellResponse(rsp *http.Response) (*GetTeamCellResponse, error) {
+// ParseGetTenantCellResponse parses an HTTP response from a GetTenantCellWithResponse call
+func ParseGetTenantCellResponse(rsp *http.Response) (*GetTenantCellResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetTeamCellResponse{
+	response := &GetTenantCellResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest ComponentsSchemasTeamCell
+		var dest ComponentsSchemasTenantCell
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -34405,15 +34405,15 @@ func ParseListJobTestCaseHistoryResponse(rsp *http.Response) (*ListJobTestCaseHi
 	return response, nil
 }
 
-// ParseListTeamFleetLocksResponse parses an HTTP response from a ListTeamFleetLocksWithResponse call
-func ParseListTeamFleetLocksResponse(rsp *http.Response) (*ListTeamFleetLocksResponse, error) {
+// ParseListTenantFleetLocksResponse parses an HTTP response from a ListTenantFleetLocksWithResponse call
+func ParseListTenantFleetLocksResponse(rsp *http.Response) (*ListTenantFleetLocksResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListTeamFleetLocksResponse{
+	response := &ListTenantFleetLocksResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -34602,15 +34602,15 @@ func ParseProposePipelineResponse(rsp *http.Response) (*ProposePipelineResponse,
 	return response, nil
 }
 
-// ParseStreamTeamRunsResponse parses an HTTP response from a StreamTeamRunsWithResponse call
-func ParseStreamTeamRunsResponse(rsp *http.Response) (*StreamTeamRunsResponse, error) {
+// ParseStreamTenantRunsResponse parses an HTTP response from a StreamTenantRunsWithResponse call
+func ParseStreamTenantRunsResponse(rsp *http.Response) (*StreamTenantRunsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &StreamTeamRunsResponse{
+	response := &StreamTenantRunsResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -36351,15 +36351,15 @@ func ParseCreateStreamTicketResponse(rsp *http.Response) (*CreateStreamTicketRes
 	return response, nil
 }
 
-// ParseListTeamsResponse parses an HTTP response from a ListTeamsWithResponse call
-func ParseListTeamsResponse(rsp *http.Response) (*ListTeamsResponse, error) {
+// ParseListTenantsResponse parses an HTTP response from a ListTenantsWithResponse call
+func ParseListTenantsResponse(rsp *http.Response) (*ListTenantsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListTeamsResponse{
+	response := &ListTenantsResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -36367,7 +36367,7 @@ func ParseListTeamsResponse(rsp *http.Response) (*ListTeamsResponse, error) {
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
-			Items []ComponentsSchemasTeamEntry `json:"items"`
+			Items []ComponentsSchemasTenantEntry `json:"items"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
@@ -36393,15 +36393,15 @@ func ParseListTeamsResponse(rsp *http.Response) (*ListTeamsResponse, error) {
 	return response, nil
 }
 
-// ParseCreateTeamResponse parses an HTTP response from a CreateTeamWithResponse call
-func ParseCreateTeamResponse(rsp *http.Response) (*CreateTeamResponse, error) {
+// ParseCreateTenantResponse parses an HTTP response from a CreateTenantWithResponse call
+func ParseCreateTenantResponse(rsp *http.Response) (*CreateTenantResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &CreateTeamResponse{
+	response := &CreateTenantResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -36449,15 +36449,15 @@ func ParseCreateTeamResponse(rsp *http.Response) (*CreateTeamResponse, error) {
 	return response, nil
 }
 
-// ParseDeleteTeamResponse parses an HTTP response from a DeleteTeamWithResponse call
-func ParseDeleteTeamResponse(rsp *http.Response) (*DeleteTeamResponse, error) {
+// ParseDeleteTenantResponse parses an HTTP response from a DeleteTenantWithResponse call
+func ParseDeleteTenantResponse(rsp *http.Response) (*DeleteTenantResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &DeleteTeamResponse{
+	response := &DeleteTenantResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -36489,22 +36489,22 @@ func ParseDeleteTeamResponse(rsp *http.Response) (*DeleteTeamResponse, error) {
 	return response, nil
 }
 
-// ParseGetTeamResponse parses an HTTP response from a GetTeamWithResponse call
-func ParseGetTeamResponse(rsp *http.Response) (*GetTeamResponse, error) {
+// ParseGetTenantResponse parses an HTTP response from a GetTenantWithResponse call
+func ParseGetTenantResponse(rsp *http.Response) (*GetTenantResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetTeamResponse{
+	response := &GetTenantResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest ComponentsSchemasTeamEntry
+		var dest ComponentsSchemasTenantEntry
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -36536,15 +36536,15 @@ func ParseGetTeamResponse(rsp *http.Response) (*GetTeamResponse, error) {
 	return response, nil
 }
 
-// ParseUpdateTeamResponse parses an HTTP response from a UpdateTeamWithResponse call
-func ParseUpdateTeamResponse(rsp *http.Response) (*UpdateTeamResponse, error) {
+// ParseUpdateTenantResponse parses an HTTP response from a UpdateTenantWithResponse call
+func ParseUpdateTenantResponse(rsp *http.Response) (*UpdateTenantResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &UpdateTeamResponse{
+	response := &UpdateTenantResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

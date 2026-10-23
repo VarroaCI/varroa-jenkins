@@ -161,6 +161,8 @@ helm upgrade varroa oci://ghcr.io/varroaci/charts/varroa \
 
 Verify the Helm revision, control-plane pods, and existing controllers. Upgrading the control plane does not change `Controller.spec.version`.
 
+The 0.7.0 release renames the pipelines tenant objects. An installation with pipelines tenants follows the [0.6 to 0.7 upgrade](../operations/upgrade-0-6-to-0-7.md) before it runs this upgrade.
+
 To keep earlier values, use `--reset-then-reuse-values`. The chart refuses `--reuse-values`, which drops the encryption defaults.
 
 ### Bus credentials and GitOps renders

@@ -20,7 +20,7 @@ import (
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/accept"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/accept"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
 
@@ -98,14 +98,14 @@ func (guardBlobStore) NewRangeReader(_ context.Context, _ string, _, _ int64) (i
 }
 
 // guardTenantResolver is a fixed-answer api.TenantResolver for
-// run_pipeline: every team resolves to the one write-admitted tenant
+// run_pipeline: every tenant resolves to the one write-admitted tenant
 // guardAuthorizer's wildcard grant covers, and folder "" admits any job
 // path.
 type guardTenantResolver struct{ ref api.TenantRef }
 
-func (g *guardTenantResolver) Resolve(_ context.Context, _ *auth.Claims, team string) ([]api.TenantRef, error) {
-	if team == "proposal-team" {
-		return []api.TenantRef{{Tenant: team, Team: team, Folder: team, Cluster: "core"}}, nil
+func (g *guardTenantResolver) Resolve(_ context.Context, _ *auth.Claims, tenant string) ([]api.TenantRef, error) {
+	if tenant == "proposal-team" {
+		return []api.TenantRef{{Tenant: tenant, TenantName: tenant, Folder: tenant, Cluster: "core"}}, nil
 	}
 	return []api.TenantRef{g.ref}, nil
 }
@@ -206,15 +206,15 @@ func guardEmitDeps(t *testing.T, sink activity.EventSink) *api.Dependencies {
 		// publish.
 		RecordStore: &guardRecordReader{},
 		TenantResolver: &guardTenantResolver{ref: api.TenantRef{
-			Tenant: "team-a/obj", Team: "obj", Namespace: "team-a", Controller: "obj",
+			Tenant: "team-a/obj", TenantName: "obj", Namespace: "team-a", Controller: "obj",
 		}},
 		MiteRegistry: &guardTransport{},
 		// replay_run reads the source run's script replica.
 		BlobStore: guardBlobStore{},
 		// release_fleet_lock asks the recorder through this seam.
 		FleetLockReleaser: guardFleetLockReleaser{},
-		// The Team agent tools answer through these seams.
-		TeamAgents:      guardTeamAgents{},
+		// The Tenant agent tools answer through these seams.
+		TenantAgents:    guardTenantAgents{},
 		ForgeRelay:      guardForge{},
 		WebhookEnqueuer: guardWebhooks{},
 		RunNotePoster:   guardNotePoster{},
@@ -222,38 +222,40 @@ func guardEmitDeps(t *testing.T, sink activity.EventSink) *api.Dependencies {
 	}
 }
 
-// guardTeamAgents holds one accepted TeamAgent for team obj in namespace
+// guardTenantAgents holds one accepted TenantAgent for tenant obj in namespace
 // team-a, with every output on.
-type guardTeamAgents struct{}
+type guardTenantAgents struct{}
 
-func (guardTeamAgents) teamAgent() v1alpha1.TeamAgent {
-	var ta v1alpha1.TeamAgent
+func (guardTenantAgents) tenantAgent() v1alpha1.TenantAgent {
+	var ta v1alpha1.TenantAgent
 	ta.Name = "triage"
 	ta.Namespace = "team-a"
 	ta.UID = "uid-triage"
-	ta.Spec.TeamRef.Name = "obj"
+	ta.Spec.TenantRef.Name = "obj"
 	ta.Spec.Outputs.Notes = true
 	ta.Spec.Outputs.Webhook = true
-	ta.Spec.Outputs.Issues = &v1alpha1.TeamAgentIssueOutput{Repo: "https://git.example.org/x/y", Forge: "gitea"}
+	ta.Spec.Outputs.Issues = &v1alpha1.TenantAgentIssueOutput{Repo: "https://git.example.org/x/y", Forge: "gitea"}
 	return ta
 }
 
-func (g guardTeamAgents) List() []v1alpha1.TeamAgent { return []v1alpha1.TeamAgent{g.teamAgent()} }
+func (g guardTenantAgents) List() []v1alpha1.TenantAgent {
+	return []v1alpha1.TenantAgent{g.tenantAgent()}
+}
 
-func (g guardTeamAgents) ByUID(uid string) (*v1alpha1.TeamAgent, bool) {
-	ta := g.teamAgent()
+func (g guardTenantAgents) ByUID(uid string) (*v1alpha1.TenantAgent, bool) {
+	ta := g.tenantAgent()
 	return &ta, string(ta.UID) == uid
 }
 
-func (g guardTeamAgents) AcceptInput() accept.Input {
-	return accept.Input{TeamAgents: g.List(), ReleaseNamespace: "team-a"}
+func (g guardTenantAgents) AcceptInput() accept.Input {
+	return accept.Input{TenantAgents: g.List(), ReleaseNamespace: "team-a"}
 }
 
-func (guardTeamAgents) CatalogSource(string, string) (*v1alpha1.CatalogSource, bool) {
+func (guardTenantAgents) CatalogSource(string, string) (*v1alpha1.CatalogSource, bool) {
 	return nil, false
 }
 
-func (guardTeamAgents) Synced() bool { return true }
+func (guardTenantAgents) Synced() bool { return true }
 
 // guardForge answers every forge call with success.
 type guardForge struct{}
@@ -277,8 +279,8 @@ func (guardForge) PullRequest(context.Context, string, forgeapi.PullRequestReque
 // guardWebhooks answers every enqueue with success.
 type guardWebhooks struct{}
 
-func (guardWebhooks) Enqueue(context.Context, recordstore.TeamAgentWebhookRequest) (recordstore.TeamAgentWebhookResponse, error) {
-	return recordstore.TeamAgentWebhookResponse{OK: true, DeliveryID: "delivery-1"}, nil
+func (guardWebhooks) Enqueue(context.Context, recordstore.TenantAgentWebhookRequest) (recordstore.TenantAgentWebhookResponse, error) {
+	return recordstore.TenantAgentWebhookResponse{OK: true, DeliveryID: "delivery-1"}, nil
 }
 
 // guardNotePoster answers every note post as a new note.
@@ -406,21 +408,21 @@ func guardArgsFor(name string) map[string]interface{} {
 		// ProfileCandidates (cluster-scoped, direct store)
 		"promote_version_candidate": {"name": obj},
 		// Pipelines (record store + tenant resolver + mite transport)
-		"run_pipeline":       {"team": "team-a", "job": "build"},
+		"run_pipeline":       {"tenant": "team-a", "job": "build"},
 		"proceed_run_input":  {"run": obj, "input": "in-1"},
 		"abort_run_input":    {"run": obj, "input": "in-1"},
 		"replay_run":         {"run": guardReplayRunID, "script": "echo 'edited'"},
-		"scan_multibranch":   {"team": "team-a", "job": "build"},
+		"scan_multibranch":   {"tenant": "team-a", "job": "build"},
 		"restart_run":        {"run": guardReplayRunID, "stage": "deploy"},
 		"release_fleet_lock": {"name": "team-a/obj/deploy", "runId": obj, "reason": "the old pod is gone"},
 		// CellPools (cluster-scoped, direct store)
 		"update_cell_pool": {"name": obj, "warm": 2},
-		// Team agent writes (the fakes in guardEmitDeps answer them)
-		"post_note":    {"team": "obj", "job": "build", "body": "the build failed at deploy"},
-		"open_issue":   {"team": "obj", "title": "deploy failed", "body": "see the run"},
-		"send_webhook": {"team": "obj", "body": map[string]any{"status": "failed"}},
-		// The proposal tool answers through its own team (see guardTenantResolver).
-		"open_pull_request": {"team": "proposal-team", "repo": "https://git.example.org/x/y", "branch": "varroa/propose-pipeline",
+		// Tenant agent writes (the fakes in guardEmitDeps answer them)
+		"post_note":    {"tenant": "obj", "job": "build", "body": "the build failed at deploy"},
+		"open_issue":   {"tenant": "obj", "title": "deploy failed", "body": "see the run"},
+		"send_webhook": {"tenant": "obj", "body": map[string]any{"status": "failed"}},
+		// The proposal tool answers through its own tenant (see guardTenantResolver).
+		"open_pull_request": {"tenant": "proposal-team", "repo": "https://git.example.org/x/y", "branch": "varroa/propose-pipeline",
 			"title": "t", "files": []map[string]any{{"path": "Jenkinsfile", "content": "pipeline {}"}}},
 	}
 	args, ok := byName[name]

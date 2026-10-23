@@ -12,22 +12,22 @@ import (
 const defaultPort = 22
 
 // reservedTenantLabel is the fence's only attribution signal (design D4):
-// the token varroa-tenant-<team>, read as an exact whole-token match. Every
+// the token varroa-tenant-<tenant>, read as an exact whole-token match. Every
 // rendered node carries it first.
-func reservedTenantLabel(team string) string {
-	return "varroa-tenant-" + team
+func reservedTenantLabel(tenant string) string {
+	return "varroa-tenant-" + tenant
 }
 
 // renderNode builds one jenkins.nodes entry for a delivered runner, per
 // design D3. The caller filters to delivered runners: this function renders
 // whatever it is given.
 func renderNode(runner *v1alpha1.Runner) map[string]any {
-	team := runner.Spec.Team
+	tenant := runner.Spec.Tenant
 
 	labels := make([]string, 0, 2+len(runner.Spec.Labels))
-	labels = append(labels, reservedTenantLabel(team), team+"-runner")
+	labels = append(labels, reservedTenantLabel(tenant), tenant+"-runner")
 	for _, l := range runner.Spec.Labels {
-		labels = append(labels, team+"-"+l)
+		labels = append(labels, tenant+"-"+l)
 	}
 
 	numExecutors := runner.Spec.NumExecutors
@@ -36,7 +36,7 @@ func renderNode(runner *v1alpha1.Runner) map[string]any {
 	}
 
 	permanent := map[string]any{
-		"name":              team + "-" + runner.Name,
+		"name":              tenant + "-" + runner.Name,
 		"labelString":       strings.Join(labels, " "),
 		"remoteFS":          runner.Spec.RemoteFS,
 		"numExecutors":      numExecutors,

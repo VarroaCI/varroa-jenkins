@@ -150,8 +150,8 @@ spec:
               value: {{ include "varroa.assistant.config" . | quote }}
 {{- end }}
 {{- if .Values.agentRunner.enabled }}
-            - name: VARROA_TEAM_AGENT_KEY_FILE
-              value: /etc/varroa/team-agent-key/key
+            - name: VARROA_TENANT_AGENT_KEY_FILE
+              value: /etc/varroa/tenant-agent-key/key
 {{- end }}
 {{- if .Values.recordStore.enabled }}
             - name: VARROA_ACTIVITY_RETENTION_DAYS
@@ -194,8 +194,8 @@ spec:
               mountPath: /etc/nats-creds
               readOnly: true
 {{- if .Values.agentRunner.enabled }}
-            - name: team-agent-key
-              mountPath: /etc/varroa/team-agent-key
+            - name: tenant-agent-key
+              mountPath: /etc/varroa/tenant-agent-key
               readOnly: true
 {{- end }}
 {{- if .Values.assistant.enabled }}
@@ -235,9 +235,9 @@ spec:
           secret:
             secretName: varroa-nats-creds
 {{- if .Values.agentRunner.enabled }}
-        - name: team-agent-key
+        - name: tenant-agent-key
           secret:
-            secretName: varroa-team-agent-signing-key
+            secretName: varroa-tenant-agent-signing-key
             items:
               - key: key
                 path: key

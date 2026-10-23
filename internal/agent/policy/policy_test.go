@@ -64,7 +64,7 @@ func TestTarget(t *testing.T) {
 	if kind != agent.TargetRun || ref != "r-1" {
 		t.Fatalf("run = (%s, %q)", kind, ref)
 	}
-	kind, ref = Target("run_pipeline", json.RawMessage(`{"team":"acme","job":"deploy"}`))
+	kind, ref = Target("run_pipeline", json.RawMessage(`{"tenant":"acme","job":"deploy"}`))
 	if kind != agent.TargetJob || ref != "acme/deploy" {
 		t.Fatalf("job = (%s, %q)", kind, ref)
 	}

@@ -10,8 +10,8 @@ const (
 	VerbCheck       = "check"
 	VerbRead        = "read"
 	VerbPullRequest = "pullrequest"
-	// VerbIssue opens an issue for a Team agent. The operator shard that owns
-	// the Team answers it.
+	// VerbIssue opens an issue for a Tenant agent. The operator shard that owns
+	// the Tenant answers it.
 	VerbIssue = "issue"
 )
 
@@ -46,7 +46,7 @@ const (
 	// work time, for example after a wait in the operator queue. No forge call was made.
 	CodeRequestExpired = "request_expired"
 	// CodePullRequestBusy refuses a pull request while another pull request for
-	// the same Team runs on the shard owner. No forge call was made. The caller
+	// the same Tenant runs on the shard owner. No forge call was made. The caller
 	// can call again.
 	CodePullRequestBusy = "pull_request_busy"
 	CodeInvalidRequest  = "invalid_request"
@@ -61,23 +61,23 @@ type Status struct {
 	Error string `json:"error,omitempty"`
 }
 
-// TeamAgentRef names the TeamAgent object that asks for an issue. The UID
+// TenantAgentRef names the TenantAgent object that asks for an issue. The UID
 // must match the stored object.
-type TeamAgentRef struct {
+type TenantAgentRef struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
 	UID       string `json:"uid"`
 }
 
-// IssueRequest asks the operator to open an issue for a Team agent.
+// IssueRequest asks the operator to open an issue for a Tenant agent.
 type IssueRequest struct {
-	Team      string       `json:"team"`
-	TeamAgent TeamAgentRef `json:"teamagent"`
-	Title     string       `json:"title"`
-	Body      string       `json:"body"`
-	Labels    []string     `json:"labels,omitempty"`
-	Actor     string       `json:"actor"`
-	SessionID string       `json:"session_id"`
+	Tenant      string         `json:"tenant"`
+	TenantAgent TenantAgentRef `json:"tenantagent"`
+	Title       string         `json:"title"`
+	Body        string         `json:"body"`
+	Labels      []string       `json:"labels,omitempty"`
+	Actor       string         `json:"actor"`
+	SessionID   string         `json:"session_id"`
 	// Deadline is the time when the requester stops waiting for the reply. The
 	// operator refuses a request that has too little time left before it, and
 	// makes no forge call.
@@ -93,8 +93,8 @@ type IssueReply struct {
 
 // CheckRequest asks whether a repository can take a proposal.
 type CheckRequest struct {
-	Team string `json:"team"`
-	Repo string `json:"repo"`
+	Tenant string `json:"tenant"`
+	Repo   string `json:"repo"`
 }
 
 // CheckReply reports the result of a check.
@@ -109,7 +109,7 @@ type CheckReply struct {
 
 // ReadRequest asks for a directory listing or a file of a repository.
 type ReadRequest struct {
-	Team     string `json:"team"`
+	Tenant   string `json:"tenant"`
 	Repo     string `json:"repo"`
 	Path     string `json:"path"`
 	Revision string `json:"revision,omitempty"`
@@ -157,7 +157,7 @@ type File struct {
 // PullRequestRequest asks the operator to open a pull request. Its handler is
 // added with the pullrequest verb.
 type PullRequestRequest struct {
-	Team          string `json:"team"`
+	Tenant        string `json:"tenant"`
 	Repo          string `json:"repo"`
 	Branch        string `json:"branch"`
 	Title         string `json:"title"`
@@ -184,7 +184,7 @@ type PullRequestReply struct {
 // of one build. The recorder sends it when it ends a run that Jenkins never
 // completes. It has no reply: the operator logs the outcome.
 type CommitStatusRequest struct {
-	Team        string `json:"team"`
+	Tenant      string `json:"tenant"`
 	Repo        string `json:"repo"`
 	SHA         string `json:"sha"`
 	JobPath     string `json:"jobPath"`

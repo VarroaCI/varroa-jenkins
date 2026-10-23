@@ -55,8 +55,8 @@ func subscribeLedgerActions(conn *bus.Conn, cluster, queue string, handler bus.S
 type ledgerActionRunner interface {
 	SendImperativeCommand(ctx context.Context, namespace, name string, cmd *mitev1.ImperativeCommand) error
 	WakeHibernatedController(ctx context.Context, namespace, name string)
-	ReleaseRunAgentPods(ctx context.Context, team, namespace string, names []string)
-	ReleaseInstanceAgentPods(ctx context.Context, team, namespace string, keep []string, refreshedBefore time.Time)
+	ReleaseRunAgentPods(ctx context.Context, tenant, namespace string, names []string)
+	ReleaseInstanceAgentPods(ctx context.Context, tenant, namespace string, keep []string, refreshedBefore time.Time)
 }
 
 // commitStatusEnder ends the pending commit statuses of one build. The
@@ -159,7 +159,7 @@ func endCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatu
 	fctx, cancel := context.WithTimeout(ctx, forgeRequestTimeout)
 	defer cancel()
 	written, err := forge.EndPendingStatus(fctx, forgeapi.CommitStatusRequest{
-		Team:        action.Tenant,
+		Tenant:      action.Tenant,
 		Repo:        action.Repo,
 		SHA:         action.Revision,
 		JobPath:     action.JobPath,

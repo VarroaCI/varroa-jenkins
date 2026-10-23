@@ -17,7 +17,7 @@ const rehydrationPageSize = 32
 // "every job path the tenant holds a job_numbers row or a completed run
 // for" — asking for no records, only the path list. It then pages those
 // paths in batches of at most rehydrationPageSize, each carrying perJob
-// (Team.spec.pipelines.rehydrateBuilds), and returns every job's answer
+// (Tenant.spec.pipelines.rehydrateBuilds), and returns every job's answer
 // from the paging replies combined.
 //
 // A tenant the enumeration answers empty (no job path at all) answers

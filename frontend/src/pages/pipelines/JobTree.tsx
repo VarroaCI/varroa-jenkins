@@ -9,12 +9,12 @@ import styles from "./JobTree.module.css";
 
 const enc = (s: string) => encodeURIComponent(s);
 
-function jobHref(team: string, jobPath: string): string {
-  return `/pipelines/${enc(team)}/${enc(jobPath)}`;
+function jobHref(tenant: string, jobPath: string): string {
+  return `/pipelines/${enc(tenant)}/${enc(jobPath)}`;
 }
 
-function runHref(team: string, jobPath: string, runId: string): string {
-  return `${jobHref(team, jobPath)}/${enc(runId)}`;
+function runHref(tenant: string, jobPath: string, runId: string): string {
+  return `${jobHref(tenant, jobPath)}/${enc(runId)}`;
 }
 
 /** formatDuration renders a millisecond span as the two coarsest non-zero
@@ -103,13 +103,13 @@ function countLabel(node: JobTreeNode): string {
  * not build.
  */
 function FolderRow({
-  team,
+  tenant,
   folder,
   node,
   open,
   onToggle,
 }: {
-  team: string;
+  tenant: string;
   folder: string;
   node: JobTreeNode;
   open: boolean;
@@ -146,7 +146,7 @@ function FolderRow({
             />
           </button>
           {node.kind === "multibranch" || node.kind === "organizationFolder" ? (
-            <Link className={styles.nodeName} to={jobHref(team, folder ? `${folder}/${node.path}` : node.path)}>
+            <Link className={styles.nodeName} to={jobHref(tenant, folder ? `${folder}/${node.path}` : node.path)}>
               {node.name}
             </Link>
           ) : (
@@ -181,11 +181,11 @@ function PendingBadge() {
 
 /** JobRow renders one job node. It shows its own path segment, and carries
  * the whole job path in text only a screen reader reads. */
-function JobRow({ team, node, item }: { team: string; node: JobTreeNode; item: PipelineSummary }) {
+function JobRow({ tenant, node, item }: { tenant: string; node: JobTreeNode; item: PipelineSummary }) {
   return (
     <tr className={styles.row} style={rowStyle(node.depth)}>
       <td className={`${styles.nameCell} ${styles.pipelineCell}`}>
-        <Link to={jobHref(team, item.jobPath)}>{node.name}</Link>
+        <Link to={jobHref(tenant, item.jobPath)}>{node.name}</Link>
         <span className={styles.hiddenPath}>{item.jobPath}</span>
         {item.pending && <PendingBadge />}
       </td>
@@ -194,7 +194,7 @@ function JobRow({ team, node, item }: { team: string; node: JobTreeNode; item: P
       </td>
       <td>
         {item.lastBuild ? (
-          <Link to={runHref(team, item.jobPath, item.lastBuild.runId)}>
+          <Link to={runHref(tenant, item.jobPath, item.lastBuild.runId)}>
             #{item.lastBuild.buildNumber ?? "—"}
           </Link>
         ) : (
@@ -230,13 +230,13 @@ function JobRow({ team, node, item }: { team: string; node: JobTreeNode; item: P
  * the reader sees.
  */
 export default function JobTree({
-  team,
+  tenant,
   folder,
   rows,
   openPaths,
   onToggle,
 }: {
-  team: string;
+  tenant: string;
   /** The tenant folder prefix. Node paths are folder-relative. */
   folder: string;
   rows: JobTreeNode[];
@@ -249,14 +249,14 @@ export default function JobTree({
         isFoldable(node) ? (
           <FolderRow
             key={node.path}
-            team={team}
+            tenant={tenant}
             folder={folder}
             node={node}
             open={openPaths.has(node.path)}
             onToggle={onToggle}
           />
         ) : (
-          <JobRow key={node.path} team={team} node={node} item={node.summary!} />
+          <JobRow key={node.path} tenant={tenant} node={node} item={node.summary!} />
         ),
       )}
     </>

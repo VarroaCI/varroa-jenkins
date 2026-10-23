@@ -142,7 +142,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     expect(screen.getByText(/ComposedBundle/i)).toBeInTheDocument();
   });
@@ -153,10 +153,10 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByRole("button", { name: /← Back$/ }));
-    expect(screen.getByPlaceholderText("team-web-builds")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("tenant-web-builds")).toBeInTheDocument();
   });
 
   it("navigates through all 5 steps", async () => {
@@ -166,7 +166,7 @@ describe("ControllerWizard", () => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
 
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("None"));
     await user.click(screen.getByRole("button", { name: /continue.*resources/i }));
@@ -220,7 +220,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("None"));
     await user.click(screen.getByRole("button", { name: /continue.*resources/i }));
@@ -241,7 +241,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("None"));
     await user.click(screen.getByRole("button", { name: /continue.*resources/i }));
@@ -268,7 +268,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("None"));
     await user.click(screen.getByRole("button", { name: /continue.*resources/i }));
@@ -287,7 +287,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("None"));
     await user.click(screen.getByRole("button", { name: /continue.*resources/i }));
@@ -312,7 +312,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("None"));
     await user.click(screen.getByRole("button", { name: /continue.*resources/i }));
@@ -347,7 +347,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("Compose new"));
     await user.click(screen.getByRole("button", { name: /preview merged jcasc/i }));
@@ -366,7 +366,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("Compose new"));
     await user.click(screen.getByRole("button", { name: /preview merged jcasc/i }));
@@ -404,7 +404,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
 
     // Existing mode is the default; select the bundle from another namespace.
@@ -450,7 +450,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("None"));
     await user.click(screen.getByRole("button", { name: /continue.*resources/i }));
@@ -494,7 +494,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("None"));
     await user.click(screen.getByRole("button", { name: /continue.*resources/i }));
@@ -581,7 +581,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("Compose new"));
     await user.click(screen.getByText(/Add catalog item/));
@@ -590,7 +590,7 @@ describe("ControllerWizard", () => {
   it("groups catalog picker items by namespace, platform first, with badges", async () => {
     mockListCatalogItems.mockResolvedValue({
       items: [
-        mkItem("teamx-item", "team-x", "TeamX Item"),
+        mkItem("teamx-item", "team-x", "TenantX Item"),
         mkItem("platform-theme", "varroa-system", "Platform Theme"),
         mkItem("tenant-lib", "varroa", "Tenant Lib"),
       ],
@@ -728,7 +728,7 @@ describe("ControllerWizard", () => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
 
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "ci");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "ci");
 
     // Pick dev-cluster from the cluster picker (first combobox)
     const clusterSelect = screen.getAllByRole("combobox")[0];
@@ -782,7 +782,7 @@ describe("ControllerWizard", () => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
 
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("None"));
     await user.click(screen.getByRole("button", { name: /continue.*resources/i }));
@@ -880,7 +880,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("Compose new"));
     await user.click(screen.getByText(/Add catalog item/));
@@ -977,7 +977,7 @@ describe("ControllerWizard", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
     });
-    await user.type(screen.getByPlaceholderText("team-web-builds"), "my-ctrl");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "my-ctrl");
     await user.click(screen.getByRole("button", { name: /continue.*bundle/i }));
     await user.click(screen.getByText("None"));
     await user.click(screen.getByRole("button", { name: /continue.*resources/i }));

@@ -1,4 +1,4 @@
-.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-generated-test check-comments check-outbound outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
+.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-generated-test check-comments check-outbound check-terminology outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
 
 GIT_SHA=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -67,7 +67,7 @@ generate-crds:
 
 check-crds:
 	$(MAKE) generate-crds
-	hack/check-generated.sh generate-crds charts/varroa/crds api/v1alpha1/teamagent_types.go
+	hack/check-generated.sh generate-crds charts/varroa/crds api/v1alpha1/tenantagent_types.go
 
 check-comments:
 	go run ./hack/checkcomments .
@@ -76,6 +76,10 @@ check-comments:
 # from hack/checkoutbound/inventory.yaml.
 check-outbound:
 	go run ./hack/checkoutbound .
+
+# Fails on a tracked text hit of the old product word outside the allowlist.
+check-terminology:
+	hack/check-terminology.sh
 
 # Regenerates docs/security/outbound-connections.md from the inventory.
 outbound-doc:

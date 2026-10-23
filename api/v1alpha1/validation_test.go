@@ -79,7 +79,7 @@ func TestValidateJenkinsRole(t *testing.T) {
 		{
 			name: "valid Item role",
 			role: &JenkinsRole{
-				ObjectMeta: metav1.ObjectMeta{Name: "varroa:team-dev"},
+				ObjectMeta: metav1.ObjectMeta{Name: "varroa:tenant-dev"},
 				Spec: JenkinsRoleSpec{
 					RoleType:    "Item",
 					Permissions: []string{"hudson.model.Item.Build", "hudson.model.Item.Read"},
@@ -194,7 +194,7 @@ func TestValidateJenkinsRoleBinding(t *testing.T) {
 		{
 			name: "valid binding with Folder scope",
 			binding: &JenkinsRoleBinding{
-				ObjectMeta: metav1.ObjectMeta{Name: "team-folder-binding"},
+				ObjectMeta: metav1.ObjectMeta{Name: "tenant-folder-binding"},
 				Spec: JenkinsRoleBindingSpec{
 					RoleRef:      "varroa:developer",
 					Subjects:     []SubjectRef{{Kind: "User", Name: "alice"}},

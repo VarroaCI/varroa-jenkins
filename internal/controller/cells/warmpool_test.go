@@ -154,12 +154,12 @@ func newProfile() *v1alpha1.JenkinsVersionProfile {
 	}
 }
 
-func pipelinesTeam() *v1alpha1.Team {
-	return &v1alpha1.Team{
+func pipelinesTenant() *v1alpha1.Tenant {
+	return &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "team-a"},
-		Spec: v1alpha1.TeamSpec{
+		Spec: v1alpha1.TenantSpec{
 			Namespaces: []string{"default"},
-			Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Pipelines: &v1alpha1.TenantPipelinesSpec{
 				Profile:        testProfileName,
 				AgentNamespace: "default",
 			},
@@ -278,7 +278,7 @@ func poolReady(t *testing.T, pool *v1alpha1.CellPool) *metav1.Condition {
 // TestCellPool_FillsToWarm covers "The pool fills to its warm target".
 func TestCellPool_FillsToWarm(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(2))
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant(), newPool(2))
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -307,7 +307,7 @@ func TestCellPool_FillsToWarm(t *testing.T) {
 func TestCellPool_DrainsToWarm(t *testing.T) {
 	store := crdstore.NewFake()
 	crdstore.MustSeed(store,
-		newProfile(), pipelinesTeam(), newPool(1),
+		newProfile(), pipelinesTenant(), newPool(1),
 		poolCellNamed("cell-lts-2-555-0", testProfileName, nil),
 		poolCellNamed("cell-lts-2-555-1", testProfileName, nil),
 		poolCellNamed("cell-lts-2-555-2", testProfileName, nil),
@@ -358,7 +358,7 @@ func TestCellPool_NeverDeletesAPlacedCell(t *testing.T) {
 func TestCellPool_WarmZeroColdStart(t *testing.T) {
 	ctx := context.Background()
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(0))
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant(), newPool(0))
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 
 	// Tick 1: one unplaced tenant, no free cell — create one.
@@ -382,11 +382,11 @@ func TestCellPool_WarmZeroColdStart(t *testing.T) {
 	// longer free, and desiredFree falls back to warm.
 	placed := poolCellNamed("cell-lts-2-555-0", testProfileName, []string{"team-a"})
 	crdstore.MustSeed(store, placed)
-	team := pipelinesTeam()
-	team.Status.Placement = &v1alpha1.TeamPlacementStatus{
+	tenant := pipelinesTenant()
+	tenant.Status.Placement = &v1alpha1.TenantPlacementStatus{
 		Cell: "cell-lts-2-555-0", CellNamespace: testOperatorNamespace,
 	}
-	crdstore.MustSeed(store, team)
+	crdstore.MustSeed(store, tenant)
 	if err := r.Reconcile(ctx); err != nil {
 		t.Fatalf("tick 3: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestCellPool_WarmZeroColdStart(t *testing.T) {
 	// Tick 4: the tenant leaves its only cell, so the pass deletes it.
 	free := poolCellNamed("cell-lts-2-555-0", testProfileName, nil)
 	crdstore.MustSeed(store, free)
-	empty := pipelinesTeam()
+	empty := pipelinesTenant()
 	empty.Spec.Pipelines = nil
 	crdstore.MustSeed(store, empty)
 	if err := r.Reconcile(ctx); err != nil {
@@ -414,7 +414,7 @@ func TestCellPool_CapStopsTheFill(t *testing.T) {
 	pool := newPool(5)
 	pool.Spec.MaxCells = 3
 	crdstore.MustSeed(store,
-		newProfile(), pipelinesTeam(), pool,
+		newProfile(), pipelinesTenant(), pool,
 		poolCellNamed("cell-lts-2-555-0", testProfileName, nil),
 		poolCellNamed("cell-lts-2-555-1", testProfileName, nil),
 		poolCellNamed("cell-lts-2-555-2", testProfileName, nil),
@@ -579,7 +579,7 @@ func TestCellPool_TemplateEditRollsFreeCellsOnly(t *testing.T) {
 // sizes it in the same tick.
 func TestCellPool_FirstTenantCreatesAndSizesAPool(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam())
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant())
 
 	r := newReconciler(store, WarmPoolConfig{
 		Enabled:            true,
@@ -613,7 +613,7 @@ func TestCellPool_FirstTenantCreatesAndSizesAPool(t *testing.T) {
 // clamped up, so the operator never writes a spec the CRD refuses.
 func TestCellPool_SeededMaxTenantsClampedToOne(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam())
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant())
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, PerProfile: 0, MaxTenantsPerCell: 0})
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -629,7 +629,7 @@ func TestCellPool_SeededMaxTenantsClampedToOne(t *testing.T) {
 func TestCellPool_OperatorEditIsNeverOverwritten(t *testing.T) {
 	store := crdstore.NewFake()
 	edited := newPool(5)
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), edited)
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant(), edited)
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, PerProfile: 1, MaxTenantsPerCell: 10})
 	for i := 0; i < 2; i++ {
@@ -646,7 +646,7 @@ func TestCellPool_OperatorEditIsNeverOverwritten(t *testing.T) {
 // creates nothing".
 func TestCellPool_AutoCreationOffCreatesNothing(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam())
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant())
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: false, PerProfile: 3, MaxTenantsPerCell: 10})
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -669,7 +669,7 @@ func TestCellPool_AutoCreationOffCreatesNothing(t *testing.T) {
 // request.
 func TestCellPool_HandAppliedPoolWorksWithAutoCreationOff(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(2))
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant(), newPool(2))
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: false, PerProfile: 0, MaxTenantsPerCell: 10})
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -878,19 +878,19 @@ func versionedCell(name, uid, resourceVersion string, tenants []string) *v1alpha
 	return c
 }
 
-// placedTeam returns a Team whose status.placement fences the named cell.
-func placedTeam(name, cell string) *v1alpha1.Team {
-	return &v1alpha1.Team{
+// placedTenant returns a Tenant whose status.placement fences the named cell.
+func placedTenant(name, cell string) *v1alpha1.Tenant {
+	return &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: v1alpha1.TeamSpec{
+		Spec: v1alpha1.TenantSpec{
 			Namespaces: []string{"default"},
-			Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Pipelines: &v1alpha1.TenantPipelinesSpec{
 				Profile:        testProfileName,
 				AgentNamespace: "default",
 			},
 		},
-		Status: v1alpha1.TeamStatus{
-			Placement: &v1alpha1.TeamPlacementStatus{
+		Status: v1alpha1.TenantStatus{
+			Placement: &v1alpha1.TenantPlacementStatus{
 				Cell: cell, CellNamespace: testOperatorNamespace,
 			},
 		},
@@ -931,7 +931,7 @@ func TestCellPool_DrainSkipsACellAPlacementFenceNames(t *testing.T) {
 	store := crdstore.NewFake()
 	cell := versionedCell("cell-lts-2-555-1", "uid-1", "1", nil)
 	crdstore.MustSeed(store, newProfile(), newPool(0), cell,
-		placedTeam("payments", "cell-lts-2-555-1"))
+		placedTenant("payments", "cell-lts-2-555-1"))
 
 	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
 	pool := getPool(t, store, testProfileName)
@@ -1032,7 +1032,7 @@ func TestCellPool_DeletedPoolHoldsTheFinalizerWhileACellSurvives(t *testing.T) {
 	crdstore.MustSeed(store, newProfile(), deleting,
 		versionedCell("cell-lts-2-555-0", "uid-0", "1", nil),
 		versionedCell("cell-lts-2-555-1", "uid-1", "1", nil),
-		placedTeam("payments", "cell-lts-2-555-1"))
+		placedTenant("payments", "cell-lts-2-555-1"))
 
 	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -1257,7 +1257,7 @@ func TestCellPool_FillGateRefusals(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			store := crdstore.NewFake()
-			crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(1))
+			crdstore.MustSeed(store, newProfile(), pipelinesTenant(), newPool(1))
 
 			r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 			tc.mutate(r)
@@ -1282,7 +1282,7 @@ func TestCellPool_FillGateRefusals(t *testing.T) {
 // reads the issuer Secret and never the pool's own artifact Secret.
 func TestCellPool_STSModeFillsWithoutPoolSecret(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(1))
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant(), newPool(1))
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	r.Config.ArtifactSecretBase = ""
@@ -1309,7 +1309,7 @@ func TestCellPool_RefusedFillStillRestampsFreeCells(t *testing.T) {
 	store := crdstore.NewFake()
 	free := poolCellNamed("cell-lts-2-555-0", testProfileName, nil)
 	free.Spec.Version = "2.400"
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(2), free)
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant(), newPool(2), free)
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	r.Config.ClaimGate = "0"
@@ -1375,7 +1375,7 @@ func TestCellPool_RefusedFillOutranksCap(t *testing.T) {
 // Secret exists with non-empty data.
 func TestCellPool_SecretCreatedAfterRefusalAdmitsFill(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(1))
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant(), newPool(1))
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	fake := &fakeSecretReader{}
@@ -1404,7 +1404,7 @@ func TestCellPool_SecretCreatedAfterRefusalAdmitsFill(t *testing.T) {
 // created for the requested profile, and the fill creates no cell.
 func TestCellPool_WithoutArtifactSecretFillsNothing(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam())
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant())
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	r.Secrets = &fakeSecretReader{}
@@ -1583,7 +1583,7 @@ func TestEnsurePoolSecrets_NoMasterKeyIsAFault(t *testing.T) {
 // a wanted fill.
 func TestEnsurePoolSecrets_RefusesTheFill(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(1))
+	crdstore.MustSeed(store, newProfile(), pipelinesTenant(), newPool(1))
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	fake := r.Secrets.(*fakeSecretReader)

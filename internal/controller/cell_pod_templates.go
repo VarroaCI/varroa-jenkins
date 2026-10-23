@@ -41,7 +41,7 @@ type tenantPodTemplateEntry struct {
 // BundleKeysIgnored warning for jenkins.yaml content it does not use, and
 // one PodTemplateSkipped warning for each template it does not lift. It
 // never returns an error: one tenant's content must not fail the cell.
-func liftTenantPodTemplates(team, agentNamespace, jenkinsYAML string, vars bundle.Variables) tenantPodTemplateLift {
+func liftTenantPodTemplates(tenant, agentNamespace, jenkinsYAML string, vars bundle.Variables) tenantPodTemplateLift {
 	var lift tenantPodTemplateLift
 	if strings.TrimSpace(jenkinsYAML) == "" {
 		return lift
@@ -50,8 +50,8 @@ func liftTenantPodTemplates(team, agentNamespace, jenkinsYAML string, vars bundl
 	var doc map[string]any
 	if err := yaml.Unmarshal([]byte(jenkinsYAML), &doc); err != nil {
 		lift.Warnings = append(lift.Warnings, v1alpha1.TenantWarning{
-			Tenant:  team,
-			Reason:  v1alpha1.TeamReasonBundleKeysIgnored,
+			Tenant:  tenant,
+			Reason:  v1alpha1.TenantReasonBundleKeysIgnored,
 			Message: fmt.Sprintf("tenant bundle key %q does not parse: %v", "jenkins.yaml", err),
 		})
 		return lift
@@ -61,8 +61,8 @@ func liftTenantPodTemplates(team, agentNamespace, jenkinsYAML string, vars bundl
 	if len(residue) > 0 {
 		sort.Strings(residue)
 		lift.Warnings = append(lift.Warnings, v1alpha1.TenantWarning{
-			Tenant: team,
-			Reason: v1alpha1.TeamReasonBundleKeysIgnored,
+			Tenant: tenant,
+			Reason: v1alpha1.TenantReasonBundleKeysIgnored,
 			Message: fmt.Sprintf("tenant bundle key %q is ignored on a cell except its pod templates: %s",
 				"jenkins.yaml", strings.Join(residue, ", ")),
 		})
@@ -70,8 +70,8 @@ func liftTenantPodTemplates(team, agentNamespace, jenkinsYAML string, vars bundl
 
 	skip := func(label, cause string) {
 		lift.Warnings = append(lift.Warnings, v1alpha1.TenantWarning{
-			Tenant:  team,
-			Reason:  v1alpha1.TeamReasonPodTemplateSkipped,
+			Tenant:  tenant,
+			Reason:  v1alpha1.TenantReasonPodTemplateSkipped,
 			Message: label + ": " + cause,
 		})
 	}
@@ -137,13 +137,13 @@ func liftTenantPodTemplates(team, agentNamespace, jenkinsYAML string, vars bundl
 			delete(raw, key)
 		}
 		if inherit, ok := raw["inheritFrom"].(string); ok {
-			raw["inheritFrom"] = rewriteInheritFrom(team, inherit, seen)
+			raw["inheritFrom"] = rewriteInheritFrom(tenant, inherit, seen)
 		}
 		lift.Templates = append(lift.Templates, bundle.TenantCloudTemplate{
-			Name:           team + "-" + k.name,
+			Name:           tenant + "-" + k.name,
 			Namespace:      agentNamespace,
-			ServiceAccount: tenantAgentServiceAccountName(team),
-			Labels:         rewriteTenantLabel(team, tenantLabel),
+			ServiceAccount: tenantAgentServiceAccountName(tenant),
+			Labels:         rewriteTenantLabel(tenant, tenantLabel),
 			Raw:            raw,
 		})
 	}
@@ -287,30 +287,30 @@ func holdsInterpolation(v any) bool {
 }
 
 // rewriteTenantLabel renders a lifted template's label: the reserved node
-// label the agent fence reads, then one "<team>-<token>" for each token of
+// label the agent fence reads, then one "<tenant>-<token>" for each token of
 // the tenant's label, in the tenant's order. It drops a tenant token that
 // starts with "varroa-tenant-", so a tenant cannot claim another tenant's
 // reserved label.
-func rewriteTenantLabel(team, tenantLabel string) string {
-	tokens := []string{tenantNodeLabel(team)}
+func rewriteTenantLabel(tenant, tenantLabel string) string {
+	tokens := []string{tenantNodeLabel(tenant)}
 	for _, tok := range strings.Fields(tenantLabel) {
 		if strings.HasPrefix(tok, "varroa-tenant-") {
 			continue
 		}
-		tokens = append(tokens, team+"-"+tok)
+		tokens = append(tokens, tenant+"-"+tok)
 	}
 	return strings.Join(tokens, " ")
 }
 
 // rewriteInheritFrom renames each token of an inheritFrom value that names
-// a kept template to that template's "<team>-<name>" form. The lift renames
+// a kept template to that template's "<tenant>-<name>" form. The lift renames
 // every kept template, so a token left as written names nothing on the
 // tenant cloud. Every other token stays as written.
-func rewriteInheritFrom(team, inheritFrom string, keptNames map[string]bool) string {
+func rewriteInheritFrom(tenant, inheritFrom string, keptNames map[string]bool) string {
 	tokens := strings.Fields(inheritFrom)
 	for i, tok := range tokens {
 		if keptNames[tok] {
-			tokens[i] = team + "-" + tok
+			tokens[i] = tenant + "-" + tok
 		}
 	}
 	return strings.Join(tokens, " ")

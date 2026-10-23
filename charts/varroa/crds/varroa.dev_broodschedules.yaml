@@ -223,7 +223,7 @@ spec:
                       names:
                         description: |-
                           Names is a list of target controller names. Exactly one of names or selector must be set.
-                          In the team namespace, bare names; in the operator namespace, "ns/name" format.
+                          In the tenant namespace, bare names; in the operator namespace, "ns/name" format.
                         items:
                           type: string
                         type: array

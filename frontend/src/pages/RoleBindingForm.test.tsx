@@ -17,7 +17,7 @@ const mockListRoles = vi.fn();
 const mockGetRoleBinding = vi.fn();
 const mockCreateRoleBinding = vi.fn();
 const mockUpdateRoleBinding = vi.fn();
-const mockListTeams = vi.fn().mockResolvedValue([]);
+const mockListTenants = vi.fn().mockResolvedValue([]);
 const mockListPipelines = vi.fn().mockResolvedValue({
   items: [],
   runningNow: [],
@@ -29,7 +29,7 @@ vi.mock("../api/client", () => ({
   getRoleBinding: (...args: unknown[]) => mockGetRoleBinding(...args),
   createRoleBinding: (...args: unknown[]) => mockCreateRoleBinding(...args),
   updateRoleBinding: (...args: unknown[]) => mockUpdateRoleBinding(...args),
-  listTeams: (...args: unknown[]) => mockListTeams(...args),
+  listTenants: (...args: unknown[]) => mockListTenants(...args),
   listPipelines: (...args: unknown[]) => mockListPipelines(...args),
 }));
 
@@ -48,7 +48,7 @@ const existingBinding = createRoleBinding({
   spec: {
     subjects: [{ kind: "User", name: "alice" }],
     roleRef: "varroa:admin",
-    scope: { namespaces: ["team-a"], controllerSelector: { matchLabels: { team: "frontend" } } },
+    scope: { namespaces: ["team-a"], controllerSelector: { matchLabels: { tenant: "frontend" } } },
   },
 });
 
@@ -97,7 +97,7 @@ describe("RoleBindingForm — create mode", () => {
     await user.type(getNameInput(), "new-binding");
     // Fill in subject name
     const subjectInputs = screen.getAllByPlaceholderText("Subject name");
-    await user.type(subjectInputs[0], "dev-team");
+    await user.type(subjectInputs[0], "dev-tenant");
     // Select role
     await user.selectOptions(screen.getAllByRole("combobox")[1], "varroa:admin");
 
@@ -281,7 +281,7 @@ describe("RoleBindingForm — the tenants dimension", () => {
     vi.clearAllMocks();
     mockParams.name = "my-binding";
     mockListRoles.mockResolvedValue({ items: availableRoles });
-    mockListTeams.mockResolvedValue([]);
+    mockListTenants.mockResolvedValue([]);
     mockListPipelines.mockResolvedValue({
       items: [],
       runningNow: [],
@@ -312,7 +312,7 @@ describe("RoleBindingForm — the tenants dimension", () => {
           roleRef: "varroa:admin",
           scope: {
             controllerSelector: {
-              matchLabels: { team: "frontend" },
+              matchLabels: { tenant: "frontend" },
               matchExpressions: [{ key: "tier", operator: "In", values: ["gold"] }],
             },
           },

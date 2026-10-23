@@ -434,15 +434,15 @@ export interface JenkinsRoleBindingList {
   items: JenkinsRoleBinding[];
 }
 
-// ---- Team pipelines tenancy (spec.pipelines / status.placement) ----
+// ---- Tenant pipelines tenancy (spec.pipelines / status.placement) ----
 
 /**
- * A Team's pipelines tenancy declaration (spec.pipelines). A Team that sets
+ * A Tenant's pipelines tenancy declaration (spec.pipelines). A Tenant that sets
  * this becomes a pipelines tenant: one top-level folder on exactly one cell.
  */
-export interface TeamPipelines {
+export interface TenantPipelines {
   /** Named caps on builds of a set of jobs. A tenant pipelines admin may write this field. */
-  concurrencyLimits?: TeamConcurrencyLimit[];
+  concurrencyLimits?: TenantConcurrencyLimit[];
   /** JenkinsVersionProfile the placement pass resolves a cell against. Required. */
   profile: string;
   /**
@@ -451,10 +451,10 @@ export interface TeamPipelines {
    * that needs a cell of its own names a pool whose maxTenantsPerCell is 1.
    */
   cellPool?: string;
-  /** Kubernetes namespace this tenant's agents run in. Must be one of the team's own namespaces. Required. */
+  /** Kubernetes namespace this tenant's agents run in. Must be one of the tenant's own namespaces. Required. */
   agentNamespace: string;
   /**
-   * The ComposedBundle this tenant's items come from. A Team is
+   * The ComposedBundle this tenant's items come from. A Tenant is
    * cluster-scoped and has no namespace to default to, so the caller sets
    * both name and namespace explicitly.
    */
@@ -495,7 +495,7 @@ export interface TeamPipelines {
    */
   cronGrace?: string;
   /**
-   * Active slot count. Default 1, range 1 to 16. This field is not the team's member list.
+   * Active slot count. Default 1, range 1 to 16. This field is not the tenant's member list.
    */
   members?: number;
   /** Warm standby members. Default 0, range 0 to 8. */
@@ -504,28 +504,28 @@ export interface TeamPipelines {
    * Grants of this tenant's jobs and locks to other tenants. An absent
    * list exports nothing.
    */
-  exports?: TeamExport[];
+  exports?: TenantExport[];
   /** Outward notifications. The completion webhook is set through the API, not the form. */
-  notifications?: TeamNotifications;
+  notifications?: TenantNotifications;
   /** Record-store windows for this tenant's runs. Only an operator sets it. */
-  retention?: TeamPipelinesRetention;
+  retention?: TenantPipelinesRetention;
 }
 
 /** Outward notifications of a pipelines tenant. */
-export interface TeamNotifications {
+export interface TenantNotifications {
   /** Completion webhook. The record store posts a signed payload for each run. */
-  webhook?: TeamWebhook;
+  webhook?: TenantWebhook;
 }
 
 /** A completion webhook. The signing key lives in the Secret that secretRef names. */
-export interface TeamWebhook {
+export interface TenantWebhook {
   /** Receiver endpoint. Starts with https:// or http://. */
   url: string;
   secretRef: { name: string; key?: string };
 }
 
 /** A cap on the builds of a named set of jobs that run at once. */
-export interface TeamConcurrencyLimit {
+export interface TenantConcurrencyLimit {
   name: string;
   /** Folder-relative job globs (*, **, ?). */
   jobs: string[];
@@ -549,15 +549,15 @@ export interface RunWaitEntry extends RunWait {
 }
 
 /** The tenant window and the per-job rules of spec.pipelines.retention. */
-export interface TeamPipelinesRetention {
+export interface TenantPipelinesRetention {
   /** Tenant window in whole days, such as "30d". Shortens the store window only. */
   runs?: string;
   /** Per-job windows. The first matching glob sets the window of that job. */
-  jobs?: TeamJobRetention[];
+  jobs?: TenantJobRetention[];
 }
 
 /** One per-job window rule of spec.pipelines.retention. */
-export interface TeamJobRetention {
+export interface TenantJobRetention {
   /** Folder-relative job glob. It must not start with /. */
   job: string;
   /** Job window in whole days, such as "7d". */
@@ -569,12 +569,12 @@ export interface TeamJobRetention {
  * list of lock patterns, plus the callers allowed to use it. Exactly one
  * of job or locks is set.
  */
-export interface TeamExport {
+export interface TenantExport {
   /** Folder-relative job glob this tenant exports. Exactly one of job or locks is set. */
   job?: string;
   /** Prefix-relative lock-name globs this tenant exports. Exactly one of job or locks is set. */
   locks?: string[];
-  /** Team names allowed to use this export. */
+  /** Tenant names allowed to use this export. */
   callers: string[];
 }
 
@@ -582,7 +582,7 @@ export interface TeamExport {
  * The cell a pipelines tenant is bound to (status.placement). Response-only:
  * the placement pass is its only writer.
  */
-export interface TeamPlacement {
+export interface TenantPlacement {
   /** Cluster the bound cell runs in. */
   cluster?: string;
   /** Name of the bound cell Controller. */
@@ -596,11 +596,11 @@ export interface TeamPlacement {
    * slot 0, so a page that renders the member list shows every cell and
    * not slot 0's alone.
    */
-  members?: TeamMember[];
+  members?: TenantMember[];
 }
 
 /** One member of a pipelines tenant (status.placement.members). */
-export interface TeamMember {
+export interface TenantMember {
   /** Name of the cell Controller that holds this member. */
   cell?: string;
   /** Namespace of that cell Controller. */
@@ -614,20 +614,20 @@ export interface TeamMember {
 }
 
 /**
- * teamMemberLabel renders one member for a listing: the cell name, and the
+ * tenantMemberLabel renders one member for a listing: the cell name, and the
  * slot or the standby role. A tenant with no member list falls back to the
  * scalar placement, so a single-member tenant reads as it always has.
  */
-export function teamMemberLabel(member: TeamMember): string {
+export function tenantMemberLabel(member: TenantMember): string {
   const role = member.role === "standby" ? "standby" : `slot ${member.slot ?? 0}`;
   return `${member.cell ?? "?"} (${role})`;
 }
 
 /**
  * A pipelines tenant's build-record rehydration state (status.rehydration).
- * Response-only: TeamReconciler is its only writer.
+ * Response-only: TenantReconciler is its only writer.
  */
-export interface TeamRehydration {
+export interface TenantRehydration {
   /** Placement generation this state was built for. */
   generation?: number;
   /** Cell pod UID this state was built for. */
@@ -1706,7 +1706,7 @@ export interface RunSummary {
 }
 
 /**
- * One unfinished run for the team home's Running now card. currentStage
+ * One unfinished run for the tenant home's Running now card. currentStage
  * names the top-level stage in progress. It is absent when no top-level
  * stage is in progress: before the first stage, between two stages, and
  * for a queued run.
@@ -1754,20 +1754,20 @@ export interface PipelineSummary {
   medianQueueWaitMs?: number;
 }
 
-/** GET /pipelines/{team}: the job list plus the running-now strip. */
+/** GET /pipelines/{tenant}: the job list plus the running-now strip. */
 export interface PipelineListResponse {
   items: PipelineSummary[];
   runningNow: RunningRun[];
   /** The Jenkins folder that prefixes every job path in the response. It is
-   * the Team name for a placed pipelines tenant, and the empty string for a
+   * the Tenant name for a placed pipelines tenant, and the empty string for a
    * controller tenant. The field is always present. */
   tenantFolder: string;
   truncated: boolean;
-  /** The record-store windows that apply to this team. */
+  /** The record-store windows that apply to this tenant. */
   retention: PipelineRetention;
 }
 
-/** The record-store run windows of one pipelines team, in whole days. */
+/** The record-store run windows of one pipelines tenant, in whole days. */
 export interface PipelineRetention {
   /** The store-wide window. It caps every other window. */
   storeDays: number;
@@ -1933,7 +1933,7 @@ export interface PipelineDependencies {
   downstream: PipelineDependencyEdge[];
 }
 
-/** GET /pipelines/{team}/jobs/{job}. */
+/** GET /pipelines/{tenant}/jobs/{job}. */
 export interface PipelineJobDetail {
   /** Queued runs of this job that a concurrency cap holds. */
   waiting?: RunWaitEntry[];
@@ -1946,9 +1946,9 @@ export interface PipelineJobDetail {
    * a root-hosted tenant. jobPath carries this prefix; strip it before
    * matching a grant's folder-relative job glob. */
   tenantFolder: string;
-  /** The tenant noun the server authorizes against: a Team name for a
-   * Team tenant, or "<namespace>/<controller>" for a synthetic tenant.
-   * Pass this, not the URL team segment, to canAccessTenantPipeline. */
+  /** The tenant noun the server authorizes against: a Tenant name for a
+   * Tenant tenant, or "<namespace>/<controller>" for a synthetic tenant.
+   * Pass this, not the URL tenant segment, to canAccessTenantPipeline. */
   tenant: string;
   health: PipelineHealth;
   lastBuild?: RunSummary;
@@ -1963,14 +1963,14 @@ export interface PipelineJobDetail {
   dependencies: PipelineDependencies;
 }
 
-/** GET /pipelines/{team}/jobs/{job}/runs, cross-tenant cursor-merged. */
+/** GET /pipelines/{tenant}/jobs/{job}/runs, cross-tenant cursor-merged. */
 export interface RunListResponse {
   items: RunSummary[];
   nextCursor?: string;
 }
 
 /**
- * POST /pipelines/{team}/jobs/{job}/runs. clientToken, a UUIDv7, makes the
+ * POST /pipelines/{tenant}/jobs/{job}/runs. clientToken, a UUIDv7, makes the
  * request idempotent: the BFF uses it as the run identifier. A request with
  * no clientToken is not idempotent.
  */
@@ -2019,9 +2019,9 @@ export interface RunDetail {
    * matching a grant's folder-relative job glob. */
   tenantFolder: string;
   /** The tenant noun the server authorizes against: the run row's
-   * stored tenant column. A Team name for a Team tenant, or
+   * stored tenant column. A Tenant name for a Tenant tenant, or
    * "<namespace>/<controller>" for a synthetic tenant. Pass this, not
-   * the URL team segment, to canAccessTenantPipeline. */
+   * the URL tenant segment, to canAccessTenantPipeline. */
   tenant: string;
   status: string;
   buildNumber?: number;
@@ -2314,7 +2314,7 @@ export interface TestCaseOutcome {
   runLink: string;
 }
 
-/** GET /pipelines/{team}/jobs/{job}/tests/{case}. Newest first. */
+/** GET /pipelines/{tenant}/jobs/{job}/tests/{case}. Newest first. */
 export interface TestCaseHistoryResponse {
   items: TestCaseOutcome[];
 }
@@ -2326,10 +2326,10 @@ export interface RunChangeListResponse {
   items: RunChange[];
 }
 
-// ---- Live run notifications (the team run stream) ----
+// ---- Live run notifications (the tenant run stream) ----
 
 /**
- * One frame of the team run stream, named "run", "stage", "lock",
+ * One frame of the tenant run stream, named "run", "stage", "lock",
  * "input", or "wait". The recorder publishes the frame, so every field keeps its
  * snake_case name. The stream sends no first frame and replays nothing, so
  * a page refetches when its stream opens. A page reads a frame to decide
@@ -2386,7 +2386,7 @@ export interface FleetLock {
   acquiredAt?: string;
 }
 
-/** The items envelope of GET /pipelines/{team}/locks and GET /locks. */
+/** The items envelope of GET /pipelines/{tenant}/locks and GET /locks. */
 export interface FleetLockListResponse {
   items: FleetLock[];
 }
@@ -2488,13 +2488,13 @@ export interface RunLogEndEvent {
 // ---- Runners (external agents; design D1, D12) ----
 
 /**
- * A Runner's mutable configuration (spec.*). team and launcher are
+ * A Runner's mutable configuration (spec.*). tenant and launcher are
  * immutable after creation.
  */
 export interface RunnerSpec {
-  team: string;
+  tenant: string;
   launcher: "ssh" | "inbound";
-  /** Unprefixed label suffixes; the operator prefixes each one with <team>-. */
+  /** Unprefixed label suffixes; the operator prefixes each one with <tenant>-. */
   labels?: string[];
   remoteFS: string;
   numExecutors?: number;
@@ -2502,7 +2502,7 @@ export interface RunnerSpec {
   host?: string;
   /** The SSH port. Required for launcher ssh; forbidden for inbound. */
   port?: number;
-  /** Name of a Secret in the Team's agent namespace holding the SSH
+  /** Name of a Secret in the Tenant's agent namespace holding the SSH
    * credential. Required for launcher ssh; forbidden for inbound. */
   credentialRef?: string;
   javaPath?: string;
@@ -2614,7 +2614,7 @@ export interface CellUsageListResponse {
  * One row of GET /pipelines, the landing-page list. cell and cellNamespace
  * are set only on a placed row.
  */
-export interface PipelineTeam {
+export interface PipelineTenant {
   name: string;
   cluster: string;
   cell?: string;
@@ -2624,23 +2624,23 @@ export interface PipelineTeam {
 
 /**
  * The body of GET /pipelines. recordStore is false when the list carries
- * no Team that another cluster holds, because the record store is off.
+ * no Tenant that another cluster holds, because the record store is off.
  */
-export interface PipelineTeamList {
-  items: PipelineTeam[];
+export interface PipelineTenantList {
+  items: PipelineTenant[];
   recordStore: boolean;
 }
 
-/** The placement state of a team's pipelines tenant. */
-export type TeamCellState = "placed" | "moving" | "rehydrating" | "unplaced" | "notCellHosted";
+/** The placement state of a tenant's pipelines tenant. */
+export type TenantCellState = "placed" | "moving" | "rehydrating" | "unplaced" | "notCellHosted";
 
 /**
  * The tenant's own view of the cell that hosts it. For the states unplaced
  * and notCellHosted every field other than state and reason is absent. The
  * body carries no other tenant's name, job path, run, or count.
  */
-export interface TeamCell {
-  state: TeamCellState;
+export interface TenantCell {
+  state: TenantCellState;
   reason?: string;
   cell?: string;
   namespace?: string;
@@ -2667,9 +2667,9 @@ export interface TeamCell {
    * for unplaced and notCellHosted. Every other field of this body
    * describes the tenant's slot 0.
    */
-  members?: TeamCellMember[];
+  members?: TenantCellMember[];
   /**
-   * The Team's TenantWarnings condition, verbatim, while its status is True.
+   * The Tenant's TenantWarnings condition, verbatim, while its status is True.
    * Absent otherwise.
    */
   warning?: { reason: string; message: string };
@@ -2680,7 +2680,7 @@ export interface TeamCell {
  * counts apply the same grant narrowing the top-level counts apply, and no
  * entry names another tenant.
  */
-export interface TeamCellMember {
+export interface TenantCellMember {
   cell: string;
   namespace: string;
   cluster: string;
@@ -2815,7 +2815,7 @@ export interface CellPoolScaleRequest {
 
 /** Where a grant on a tenant comes from. */
 export type CellGrantSource =
-  | "teamMembership"
+  | "tenantMembership"
   | "tenantScopedBinding"
   | "federatedBinding"
   | "clusterWideBinding";
@@ -2833,7 +2833,7 @@ export interface CellGrantSubject {
  */
 export interface CellGrant {
   source: CellGrantSource;
-  /** The VarroaRoleBinding name. For federatedBinding, the JenkinsRoleBinding copy. Absent for teamMembership. */
+  /** The VarroaRoleBinding name. For federatedBinding, the JenkinsRoleBinding copy. Absent for tenantMembership. */
   binding?: string;
   /** The VarroaRole of the grant. For federatedBinding, the source VarroaRole. */
   roleRef: string;

@@ -6,12 +6,12 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
-func placedTeam(name, cell, cellNamespace string) *v1alpha1.Team {
-	return &v1alpha1.Team{
+func placedTenant(name, cell, cellNamespace string) *v1alpha1.Tenant {
+	return &v1alpha1.Tenant{
 		ObjectMeta: metaObj(name),
-		Spec:       v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{AgentNamespace: "agents"}},
-		Status: v1alpha1.TeamStatus{
-			Placement: &v1alpha1.TeamPlacementStatus{
+		Spec:       v1alpha1.TenantSpec{Pipelines: &v1alpha1.TenantPipelinesSpec{AgentNamespace: "agents"}},
+		Status: v1alpha1.TenantStatus{
+			Placement: &v1alpha1.TenantPlacementStatus{
 				Cluster:       "core",
 				Cell:          cell,
 				CellNamespace: cellNamespace,
@@ -20,11 +20,11 @@ func placedTeam(name, cell, cellNamespace string) *v1alpha1.Team {
 	}
 }
 
-func sshRunner(name, team string) *v1alpha1.Runner {
+func sshRunner(name, tenant string) *v1alpha1.Runner {
 	return &v1alpha1.Runner{
 		ObjectMeta: metaObj(name),
 		Spec: v1alpha1.RunnerSpec{
-			Team:          team,
+			Tenant:        tenant,
 			Launcher:      launcherSSH,
 			RemoteFS:      "/home/jenkins",
 			Host:          "10.0.0.1",
@@ -48,7 +48,7 @@ func inboundRunner() *v1alpha1.Runner {
 	return &v1alpha1.Runner{
 		ObjectMeta: metaObj("agent-1"),
 		Spec: v1alpha1.RunnerSpec{
-			Team:     "payments",
+			Tenant:   "payments",
 			Launcher: launcherInbound,
 			RemoteFS: "/home/jenkins",
 		},
@@ -61,56 +61,56 @@ func TestEvaluateRunner_Reasons(t *testing.T) {
 	tests := []struct {
 		name       string
 		runner     *v1alpha1.Runner
-		team       *v1alpha1.Team
+		tenant     *v1alpha1.Tenant
 		wantReason string
 	}{
 		{
-			name:       "team not found",
+			name:       "tenant not found",
 			runner:     sshRunner("win-1", "payments"),
-			team:       nil,
-			wantReason: ReasonTeamNotFound,
+			tenant:     nil,
+			wantReason: ReasonTenantNotFound,
 		},
 		{
-			name:   "team not pipelines",
+			name:   "tenant not pipelines",
 			runner: sshRunner("win-1", "payments"),
-			team: &v1alpha1.Team{
+			tenant: &v1alpha1.Tenant{
 				ObjectMeta: metaObj("payments"),
-				Spec:       v1alpha1.TeamSpec{},
+				Spec:       v1alpha1.TenantSpec{},
 			},
-			wantReason: ReasonTeamNotPipelines,
+			wantReason: ReasonTenantNotPipelines,
 		},
 		{
 			name: "launcher unsupported",
 			runner: &v1alpha1.Runner{
 				ObjectMeta: metaObj("win-1"),
-				Spec:       v1alpha1.RunnerSpec{Team: "payments", Launcher: "winrm", RemoteFS: "/x"},
+				Spec:       v1alpha1.RunnerSpec{Tenant: "payments", Launcher: "winrm", RemoteFS: "/x"},
 			},
-			team:       placedTeam("payments", "cell-a", "varroa-system"),
+			tenant:     placedTenant("payments", "cell-a", "varroa-system"),
 			wantReason: ReasonLauncherUnsupported,
 		},
 		{
-			name:       "team name unsupported",
+			name:       "tenant name unsupported",
 			runner:     sshRunner("win-1", "pay.roll"),
-			team:       placedTeam("pay.roll", "cell-a", "varroa-system"),
-			wantReason: ReasonTeamNameUnsupported,
+			tenant:     placedTenant("pay.roll", "cell-a", "varroa-system"),
+			wantReason: ReasonTenantNameUnsupported,
 		},
 		{
 			name:       "runner name unsupported",
 			runner:     sshRunner("win.1", "payments"),
-			team:       placedTeam("payments", "cell-a", "varroa-system"),
+			tenant:     placedTenant("payments", "cell-a", "varroa-system"),
 			wantReason: ReasonRunnerNameUnsupported,
 		},
 		{
 			name:       "awaiting placement",
 			runner:     sshRunner("win-1", "payments"),
-			team:       &v1alpha1.Team{ObjectMeta: metaObj("payments"), Spec: v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{}}},
+			tenant:     &v1alpha1.Tenant{ObjectMeta: metaObj("payments"), Spec: v1alpha1.TenantSpec{Pipelines: &v1alpha1.TenantPipelinesSpec{}}},
 			wantReason: ReasonAwaitingPlacement,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			eval := evaluateRunner(tt.runner, tt.team)
+			eval := evaluateRunner(tt.runner, tt.tenant)
 			if eval.Reason != tt.wantReason {
 				t.Fatalf("Reason = %q, want %q", eval.Reason, tt.wantReason)
 			}
@@ -121,26 +121,26 @@ func TestEvaluateRunner_Reasons(t *testing.T) {
 	}
 }
 
-// TestEvaluateRunner_MissingAndNonPipelinesDiffer proves the two team faults
-// carry distinct reasons, per the spec's "A missing Team and a non-pipelines
-// Team differ" scenario.
+// TestEvaluateRunner_MissingAndNonPipelinesDiffer proves the two tenant faults
+// carry distinct reasons, per the spec's "A missing Tenant and a non-pipelines
+// Tenant differ" scenario.
 func TestEvaluateRunner_MissingAndNonPipelinesDiffer(t *testing.T) {
 	missing := evaluateRunner(sshRunner("a", "ghost"), nil)
 	nonPipelines := evaluateRunner(sshRunner("b", "search"),
-		&v1alpha1.Team{ObjectMeta: metaObj("search")})
+		&v1alpha1.Tenant{ObjectMeta: metaObj("search")})
 
-	if missing.Reason != ReasonTeamNotFound {
-		t.Fatalf("missing team reason = %q, want %q", missing.Reason, ReasonTeamNotFound)
+	if missing.Reason != ReasonTenantNotFound {
+		t.Fatalf("missing tenant reason = %q, want %q", missing.Reason, ReasonTenantNotFound)
 	}
-	if nonPipelines.Reason != ReasonTeamNotPipelines {
-		t.Fatalf("non-pipelines team reason = %q, want %q", nonPipelines.Reason, ReasonTeamNotPipelines)
+	if nonPipelines.Reason != ReasonTenantNotPipelines {
+		t.Fatalf("non-pipelines tenant reason = %q, want %q", nonPipelines.Reason, ReasonTenantNotPipelines)
 	}
 }
 
 // TestEvaluateRunner_Delivered proves a fully valid, placed runner delivers
 // with no reason.
 func TestEvaluateRunner_Delivered(t *testing.T) {
-	eval := evaluateRunner(sshRunner("win-1", "payments"), placedTeam("payments", "cell-a", "varroa-system"))
+	eval := evaluateRunner(sshRunner("win-1", "payments"), placedTenant("payments", "cell-a", "varroa-system"))
 	if !eval.Delivered {
 		t.Fatalf("Delivered = false, reason %q", eval.Reason)
 	}
@@ -156,7 +156,7 @@ func TestEvaluateRunner_Delivered(t *testing.T) {
 }
 
 // TestEvaluateRunner_NodeNameAlwaysComputed proves status.nodeName is
-// derived even for a runner that names no Team (tick step 3 runs before the
+// derived even for a runner that names no Tenant (tick step 3 runs before the
 // fault chain).
 func TestEvaluateRunner_NodeNameAlwaysComputed(t *testing.T) {
 	eval := evaluateRunner(sshRunner("win-1", "ghost"), nil)

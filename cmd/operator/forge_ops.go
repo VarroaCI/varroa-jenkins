@@ -49,7 +49,7 @@ const forgeIssueMinBudget = 10 * time.Second
 
 // forgeConcurrency limits the forge requests that one replica runs at a
 // time on one verb subject. forge.pullrequest also takes a lock for each
-// Team, so two calls for one Team never race on one branch. The Team lock
+// Tenant, so two calls for one Tenant never race on one branch. The Tenant lock
 // refuses a second call at once instead of waiting for the first.
 const forgeConcurrency = 4
 
@@ -66,7 +66,7 @@ type forgeOps interface {
 type shardEnterer func(ctx context.Context, key string) (context.Context, func(), bool)
 
 // handleForgeCheck answers one operator.<cluster>.forge.check request. A
-// replica that does not own the Team's shard returns nil, so it sends no
+// replica that does not own the Tenant's shard returns nil, so it sends no
 // reply.
 func handleForgeCheck(ctx context.Context, logger *slog.Logger, ops forgeOps, enter shardEnterer, data []byte) []byte {
 	var req forgeapi.CheckRequest
@@ -74,7 +74,7 @@ func handleForgeCheck(ctx context.Context, logger *slog.Logger, ops forgeOps, en
 		logger.Warn("forge check decode failed", "error", err)
 		return encodeForgeReply(forgeapi.CheckReply{Status: invalidForgeStatus()})
 	}
-	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Team))
+	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Tenant))
 	if !ok {
 		return nil
 	}
@@ -92,7 +92,7 @@ func handleForgeRead(ctx context.Context, logger *slog.Logger, ops forgeOps, ent
 		logger.Warn("forge read decode failed", "error", err)
 		return encodeForgeReply(forgeapi.ReadReply{Status: invalidForgeStatus()})
 	}
-	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Team))
+	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Tenant))
 	if !ok {
 		return nil
 	}
@@ -104,14 +104,14 @@ func handleForgeRead(ctx context.Context, logger *slog.Logger, ops forgeOps, ent
 
 // handleForgeIssue answers one operator.<cluster>.forge.issue request. The
 // ownership rule is the same as handleForgeCheck: the shard owner of the
-// Team's key opens the issue, and no other replica replies.
+// Tenant's key opens the issue, and no other replica replies.
 func handleForgeIssue(ctx context.Context, logger *slog.Logger, ops forgeOps, enter shardEnterer, releaseNamespace string, data []byte) []byte {
 	var req forgeapi.IssueRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		logger.Warn("forge issue decode failed", "error", err)
 		return encodeForgeReply(forgeapi.IssueReply{Status: invalidForgeStatus()})
 	}
-	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Team))
+	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Tenant))
 	if !ok {
 		return nil
 	}
@@ -122,7 +122,7 @@ func handleForgeIssue(ctx context.Context, logger *slog.Logger, ops forgeOps, en
 	now := time.Now()
 	work, ok := forgeWorkDeadline(now, req.Deadline, forgeIssueReserve, forgeRequestTimeout, forgeIssueMinBudget)
 	if !ok {
-		logger.Info("forge issue has too little time left", "team", req.Team, "left", req.Deadline.Sub(now).Round(time.Second))
+		logger.Info("forge issue has too little time left", "tenant", req.Tenant, "left", req.Deadline.Sub(now).Round(time.Second))
 		return encodeForgeReply(forgeapi.IssueReply{Status: forgeapi.Status{Code: forgeapi.CodeRequestExpired,
 			Error: "too little time was left for the issue, so none was opened. Call again."}})
 	}
@@ -133,16 +133,16 @@ func handleForgeIssue(ctx context.Context, logger *slog.Logger, ops forgeOps, en
 
 // handleForgePullRequest answers one operator.<cluster>.forge.pullrequest
 // request. The ownership rule is the same as handleForgeCheck. One request for
-// each Team runs at a time on the replica. A second request for a Team is
+// each Tenant runs at a time on the replica. A second request for a Tenant is
 // refused at once with pull_request_busy, so a request never holds a bus slot
-// while it waits for a Team.
+// while it waits for a Tenant.
 func handleForgePullRequest(ctx context.Context, logger *slog.Logger, ops forgeOps, enter shardEnterer, locks *keylock.KeyLock, data []byte) []byte {
 	var req forgeapi.PullRequestRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		logger.Warn("forge pullrequest decode failed", "error", err)
 		return encodeForgeReply(forgeapi.PullRequestReply{Status: invalidForgeStatus()})
 	}
-	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Team))
+	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Tenant))
 	if !ok {
 		return nil
 	}
@@ -153,14 +153,14 @@ func handleForgePullRequest(ctx context.Context, logger *slog.Logger, ops forgeO
 	now := time.Now()
 	work, ok := forgeWorkDeadline(now, req.Deadline, forgePullRequestReserve, forgePullRequestTimeout, forgePullRequestMinBudget)
 	if !ok {
-		logger.Info("forge pullrequest has too little time left", "team", req.Team, "left", req.Deadline.Sub(now).Round(time.Second))
+		logger.Info("forge pullrequest has too little time left", "tenant", req.Tenant, "left", req.Deadline.Sub(now).Round(time.Second))
 		return pullRequestExpired()
 	}
-	key := forgeops.ShardKey(req.Team)
+	key := forgeops.ShardKey(req.Tenant)
 	if !locks.TryLock(key) {
-		logger.Info("forge pullrequest refused, another pull request for the Team runs", "team", req.Team)
+		logger.Info("forge pullrequest refused, another pull request for the Tenant runs", "tenant", req.Tenant)
 		return encodeForgeReply(forgeapi.PullRequestReply{Status: forgeapi.Status{Code: forgeapi.CodePullRequestBusy,
-			Error: "another pull request for this Team is running, so none was opened. Call again after it ends."}})
+			Error: "another pull request for this Tenant is running, so none was opened. Call again after it ends."}})
 	}
 	defer locks.Unlock(key)
 	rctx, cancel := context.WithDeadline(wctx, work)
@@ -205,7 +205,7 @@ func encodeForgeReply(v any) []byte {
 }
 
 // forgeRunner serves one forge verb on every replica. It subscribes with no
-// queue group, because only the Team's shard owner may answer, and a queue
+// queue group, because only the Tenant's shard owner may answer, and a queue
 // group could hand the request to a replica that does not hold the shard.
 type forgeRunner struct {
 	busConn *bus.Conn

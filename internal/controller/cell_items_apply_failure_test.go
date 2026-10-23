@@ -35,7 +35,7 @@ func TestItemsApplyFailureWarningsAttributesTenant(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("warnings = %+v, want one entry", got)
 	}
-	if got[0].Tenant != "payments" || got[0].Reason != v1alpha1.TeamReasonItemsApplyFailed {
+	if got[0].Tenant != "payments" || got[0].Reason != v1alpha1.TenantReasonItemsApplyFailed {
 		t.Errorf("warning = %+v, want payments/ItemsApplyFailed", got[0])
 	}
 	if got[0].Message == "" {
@@ -120,7 +120,7 @@ func itemsFailureCount(cr *v1alpha1.Controller, tenant string) int {
 		return n
 	}
 	for _, w := range cr.Status.Cell.TenantWarnings {
-		if w.Tenant == tenant && w.Reason == v1alpha1.TeamReasonItemsApplyFailed {
+		if w.Tenant == tenant && w.Reason == v1alpha1.TenantReasonItemsApplyFailed {
 			n++
 		}
 	}
@@ -172,7 +172,7 @@ func TestCellItemsApplyPathlessFailureKeepsTenantWarning(t *testing.T) {
 	rec.miteTransport = transport
 	cr := newItemsFailureCell("hash-1")
 	cr.Status.Cell.TenantWarnings = []v1alpha1.TenantWarning{{
-		Tenant: "payments", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "create payments/repos: boom",
+		Tenant: "payments", Reason: v1alpha1.TenantReasonItemsApplyFailed, Message: "create payments/repos: boom",
 	}}
 
 	// A parse error names no item. The refused item is still refused, so
@@ -193,7 +193,7 @@ func TestCellItemsApplyStaleHashKeepsTenantWarning(t *testing.T) {
 	rec.miteTransport = transport
 	cr := newItemsFailureCell("hash-2")
 	cr.Status.Cell.TenantWarnings = []v1alpha1.TenantWarning{{
-		Tenant: "payments", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "earlier failure",
+		Tenant: "payments", Reason: v1alpha1.TenantReasonItemsApplyFailed, Message: "earlier failure",
 	}}
 
 	// The result answers an earlier desired state. Its hash no longer
@@ -212,7 +212,7 @@ func TestCellItemsApplyFailureReplacesEveryTenantWarning(t *testing.T) {
 	rec.miteTransport = transport
 	cr := newItemsFailureCell("hash-1")
 	cr.Status.Cell.TenantWarnings = []v1alpha1.TenantWarning{{
-		Tenant: "payments", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "create payments/repos: boom",
+		Tenant: "payments", Reason: v1alpha1.TenantReasonItemsApplyFailed, Message: "create payments/repos: boom",
 	}}
 
 	// The walk covers every tenant. A result that refuses only a search item

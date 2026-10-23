@@ -1,5 +1,5 @@
 // TranscriptStream streams one session over SSE and folds its frames into a
-// transcript model. It renders nothing. The drawer and the full-page Team
+// transcript model. It renders nothing. The drawer and the full-page Tenant
 // agent transcript both use it.
 import { useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";

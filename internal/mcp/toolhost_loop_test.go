@@ -85,8 +85,8 @@ func (p *loopScript) Stream(context.Context, provider.Key, provider.Request) (<-
 
 type loopTenants struct{}
 
-func (loopTenants) RunTenant(context.Context, string) (string, error)  { return "", nil }
-func (loopTenants) TeamTenant(context.Context, string) (string, error) { return "", nil }
+func (loopTenants) RunTenant(context.Context, string) (string, error)    { return "", nil }
+func (loopTenants) TenantTenant(context.Context, string) (string, error) { return "", nil }
 
 // runLoopOn runs one session through host and returns its event types.
 func runLoopOn(t *testing.T, host loop.ToolHost) []agent.EventType {

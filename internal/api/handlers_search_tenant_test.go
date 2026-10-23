@@ -53,12 +53,12 @@ func TestSearchRecords_RunColocatedTenantAbsent(t *testing.T) {
 			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "u"}},
 			RoleRef:  "dev",
 			Scope: &v1alpha1.VarroaRoleBindingScope{
-				ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "team-a"}},
+				ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"tenant": "team-a"}},
 			},
 		}},
 	}
 	ctrl := &v1alpha1.Controller{
-		ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a", Labels: map[string]string{"team": "team-a"}},
+		ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a", Labels: map[string]string{"tenant": "team-a"}},
 	}
 	a := NewAuthorizer(testResolverWithController(pipelinesRoles(), bindings, ctrl), false)
 	server := NewServer(&Dependencies{Logger: slog.Default(), Authorizer: a, RecordStore: reader})
@@ -157,10 +157,10 @@ func TestSearchRecords_RunTenantScopedNoControllersReadPushesDown(t *testing.T) 
 		}},
 	}
 	// EffectivePermissions' Tenants partition (Resolver.TenantGrants)
-	// enumerates existing Team CRDs, so the test needs one named
+	// enumerates existing Tenant CRDs, so the test needs one named
 	// "team-a" for the tenant-scoped binding above to surface.
-	teams := []*v1alpha1.Team{{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}}}
-	a := NewAuthorizer(testResolverWithTeams(pipelinesRoles(), bindings, teams), false)
+	tenants := []*v1alpha1.Tenant{{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}}}
+	a := NewAuthorizer(testResolverWithTenants(pipelinesRoles(), bindings, tenants), false)
 	server := NewServer(&Dependencies{Logger: slog.Default(), Authorizer: a, RecordStore: reader})
 	claims := &auth.Claims{Subject: "u"}
 
@@ -189,15 +189,15 @@ func TestSearchRecords_RunTenantScopedNoControllersReadPushesDown(t *testing.T) 
 	}
 }
 
-// TestSearchRecords_RunDeletedTeamTenantScopedBindingStillPushesDown
+// TestSearchRecords_RunDeletedTenantTenantScopedBindingStillPushesDown
 // proves a "run" row tenanted on "team-gone" stays present when the
-// caller holds a tenant-scoped binding naming "team-gone" but no Team
+// caller holds a tenant-scoped binding naming "team-gone" but no Tenant
 // object of that name exists. Resolver.TenantGrants enumerates existing
-// Team objects only, so it cannot see this binding's tenant; the
+// Tenant objects only, so it cannot see this binding's tenant; the
 // pushdown must still carry the name through perms.Scopes, since
 // CanReadRun's binding path (path 2 of D4) authorizes the row directly
-// regardless of whether the Team exists.
-func TestSearchRecords_RunDeletedTeamTenantScopedBindingStillPushesDown(t *testing.T) {
+// regardless of whether the Tenant exists.
+func TestSearchRecords_RunDeletedTenantTenantScopedBindingStillPushesDown(t *testing.T) {
 	reader := &fixedSearchReader{results: recordstore.SearchResults{
 		Runs: []recordstore.RunSearchResult{
 			{RunID: "r-a", Cluster: "core", Namespace: "ns-a", Cell: "cell-a", Tenant: "team-gone", JobPath: "team-gone/svc/build"},
@@ -210,14 +210,14 @@ func TestSearchRecords_RunDeletedTeamTenantScopedBindingStillPushesDown(t *testi
 			Scope:    &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "team-gone"}}},
 		}},
 	}
-	// No Team named "team-gone" is seeded: the Team was deleted, but the
+	// No Tenant named "team-gone" is seeded: the Tenant was deleted, but the
 	// binding and the historical run row it authorized both remain.
 	a := NewAuthorizer(testResolver(pipelinesRoles(), bindings), false)
 	server := NewServer(&Dependencies{Logger: slog.Default(), Authorizer: a, RecordStore: reader})
 	claims := &auth.Claims{Subject: "u"}
 
 	if !a.CanReadRun(claims, RunTenantRow{Tenant: "team-gone", JobPath: "team-gone/svc/build"}) {
-		t.Fatal("want CanReadRun to admit the row directly through the binding path, Team or not")
+		t.Fatal("want CanReadRun to admit the row directly through the binding path, Tenant or not")
 	}
 
 	got := server.searchRecords(context.Background(), claims, "query", "")
@@ -228,7 +228,7 @@ func TestSearchRecords_RunDeletedTeamTenantScopedBindingStillPushesDown(t *testi
 		}
 	}
 	if !found {
-		t.Fatalf("got %+v, want the run row tenanted team-gone present even with no Team object", got)
+		t.Fatalf("got %+v, want the run row tenanted team-gone present even with no Tenant object", got)
 	}
 
 	tenantSeen := false

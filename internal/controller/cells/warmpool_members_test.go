@@ -13,12 +13,12 @@ import (
 // scalar cell alone.
 func TestFencedCellsCoversEveryMember(t *testing.T) {
 	slot0, slot1 := int32(0), int32(1)
-	placement := &v1alpha1.TeamPlacementStatus{
+	placement := &v1alpha1.TenantPlacementStatus{
 		Cell: "cell-a", CellNamespace: "cells-ns",
-		Members: []v1alpha1.TeamMemberStatus{
-			{Cell: "cell-a", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: &slot0},
-			{Cell: "cell-b", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: &slot1},
-			{Cell: "cell-c", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleStandby},
+		Members: []v1alpha1.TenantMemberStatus{
+			{Cell: "cell-a", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive, Slot: &slot0},
+			{Cell: "cell-b", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive, Slot: &slot1},
+			{Cell: "cell-c", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleStandby},
 		},
 	}
 
@@ -40,30 +40,30 @@ func TestFencedCellsCoversEveryMember(t *testing.T) {
 // stop a pool with no warm cell from creating one once slot 0 binds, and
 // every other slot would stay pending for good.
 func TestUnmetMemberDemandCountsEverySlotAndStandby(t *testing.T) {
-	team := slotTeam(2, 1)
+	tenant := slotTenant(2, 1)
 	owned := map[string]bool{"cell-a": true, "cell-b": true, "cell-c": true}
 
-	unplaced := &v1alpha1.Team{Spec: team.Spec}
+	unplaced := &v1alpha1.Tenant{Spec: tenant.Spec}
 	if got := unmetMemberDemand(unplaced, owned); got != 3 {
 		t.Fatalf("an unplaced tenant asks for %d cells, want 3", got)
 	}
 
 	slot0 := int32(0)
-	team.Status.Placement = &v1alpha1.TeamPlacementStatus{
+	tenant.Status.Placement = &v1alpha1.TenantPlacementStatus{
 		Cell: "cell-a", CellNamespace: "cells-ns",
-		Members: []v1alpha1.TeamMemberStatus{
-			{Cell: "cell-a", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: &slot0},
+		Members: []v1alpha1.TenantMemberStatus{
+			{Cell: "cell-a", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive, Slot: &slot0},
 		},
 	}
-	if got := unmetMemberDemand(team, owned); got != 2 {
+	if got := unmetMemberDemand(tenant, owned); got != 2 {
 		t.Fatalf("a tenant holding slot 0 asks for %d more cells, want 2", got)
 	}
 
 	slot1 := int32(1)
-	team.Status.Placement.Members = append(team.Status.Placement.Members,
-		v1alpha1.TeamMemberStatus{Cell: "cell-b", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: &slot1},
-		v1alpha1.TeamMemberStatus{Cell: "cell-c", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleStandby})
-	if got := unmetMemberDemand(team, owned); got != 0 {
+	tenant.Status.Placement.Members = append(tenant.Status.Placement.Members,
+		v1alpha1.TenantMemberStatus{Cell: "cell-b", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive, Slot: &slot1},
+		v1alpha1.TenantMemberStatus{Cell: "cell-c", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleStandby})
+	if got := unmetMemberDemand(tenant, owned); got != 0 {
 		t.Fatalf("a fully placed tenant asks for %d more cells, want 0", got)
 	}
 }
@@ -71,13 +71,13 @@ func TestUnmetMemberDemandCountsEverySlotAndStandby(t *testing.T) {
 // TestUnmetMemberDemandReadsTheScalarForAnEmptyList asserts a tenant the
 // pass has not written a member list for counts one bound member.
 func TestUnmetMemberDemandReadsTheScalarForAnEmptyList(t *testing.T) {
-	team := slotTeam(1, 0)
-	team.Status.Placement = &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns"}
+	tenant := slotTenant(1, 0)
+	tenant.Status.Placement = &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns"}
 
-	if got := unmetMemberDemand(team, map[string]bool{"cell-a": true}); got != 0 {
+	if got := unmetMemberDemand(tenant, map[string]bool{"cell-a": true}); got != 0 {
 		t.Fatalf("a placed single-member tenant asks for %d cells, want 0", got)
 	}
-	if got := unmetMemberDemand(team, map[string]bool{"cell-other": true}); got != 1 {
+	if got := unmetMemberDemand(tenant, map[string]bool{"cell-other": true}); got != 1 {
 		t.Fatalf("a tenant on an unowned cell asks for %d cells, want 1", got)
 	}
 }
@@ -85,15 +85,15 @@ func TestUnmetMemberDemandReadsTheScalarForAnEmptyList(t *testing.T) {
 // TestUnmetMemberDemandIgnoresACellAnotherPoolOwns asserts a member on a
 // cell this pool does not own leaves its demand on this pool unmet.
 func TestUnmetMemberDemandIgnoresACellAnotherPoolOwns(t *testing.T) {
-	team := slotTeam(2, 0)
+	tenant := slotTenant(2, 0)
 	slot0 := int32(0)
-	team.Status.Placement = &v1alpha1.TeamPlacementStatus{
+	tenant.Status.Placement = &v1alpha1.TenantPlacementStatus{
 		Cell: "cell-elsewhere", CellNamespace: "other-ns",
-		Members: []v1alpha1.TeamMemberStatus{
-			{Cell: "cell-elsewhere", CellNamespace: "other-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: &slot0},
+		Members: []v1alpha1.TenantMemberStatus{
+			{Cell: "cell-elsewhere", CellNamespace: "other-ns", Role: v1alpha1.TenantMemberRoleActive, Slot: &slot0},
 		},
 	}
-	if got := unmetMemberDemand(team, map[string]bool{"cell-a": true}); got != 2 {
+	if got := unmetMemberDemand(tenant, map[string]bool{"cell-a": true}); got != 2 {
 		t.Fatalf("a tenant on another pool's cell asks for %d cells, want 2", got)
 	}
 }
@@ -122,12 +122,12 @@ func filledCell(name string, tenants ...string) *v1alpha1.Controller {
 
 // memberOn builds one member status on the named cell. A nil slot is a
 // standby.
-func memberOn(cell string, slot *int32) v1alpha1.TeamMemberStatus {
-	role := v1alpha1.TeamMemberRoleActive
+func memberOn(cell string, slot *int32) v1alpha1.TenantMemberStatus {
+	role := v1alpha1.TenantMemberRoleActive
 	if slot == nil {
-		role = v1alpha1.TeamMemberRoleStandby
+		role = v1alpha1.TenantMemberRoleStandby
 	}
-	return v1alpha1.TeamMemberStatus{
+	return v1alpha1.TenantMemberStatus{
 		Cell: cell, CellNamespace: testOperatorNamespace, Role: role, Slot: slot,
 	}
 }
@@ -141,20 +141,20 @@ func memberOn(cell string, slot *int32) v1alpha1.TeamMemberStatus {
 // cell could take it.
 func TestPoolCreatesACellWhenEveryCellHoldsAMember(t *testing.T) {
 	r := &WarmPoolReconciler{Config: WarmPoolConfig{MaxTenantsPerCell: 10}}
-	team := slotTeam(2, 1)
-	team.Status.Placement = &v1alpha1.TeamPlacementStatus{
+	tenant := slotTenant(2, 1)
+	tenant.Status.Placement = &v1alpha1.TenantPlacementStatus{
 		Cell: "cell-0", CellNamespace: testOperatorNamespace,
-		Members: []v1alpha1.TeamMemberStatus{
+		Members: []v1alpha1.TenantMemberStatus{
 			memberOn("cell-0", intPtr(0)),
 			memberOn("cell-1", intPtr(1)),
 		},
 	}
 	owned := []*v1alpha1.Controller{
-		filledCell("cell-0", team.Name, "other"),
-		filledCell("cell-1", team.Name),
+		filledCell("cell-0", tenant.Name, "other"),
+		filledCell("cell-1", tenant.Name),
 	}
 
-	got := r.desiredFreeCount(poolFillPool(), owned, []*v1alpha1.Team{team}, 10)
+	got := r.desiredFreeCount(poolFillPool(), owned, []*v1alpha1.Tenant{tenant}, 10)
 	if got != 1 {
 		t.Fatalf("desired free cells = %d, want 1 for the unreplaced standby", got)
 	}
@@ -164,21 +164,21 @@ func TestPoolCreatesACellWhenEveryCellHoldsAMember(t *testing.T) {
 // holds no member of the tenant still offsets that tenant's demand.
 func TestPoolCreatesNoCellWhenOneCellCanTakeTheMember(t *testing.T) {
 	r := &WarmPoolReconciler{Config: WarmPoolConfig{MaxTenantsPerCell: 10}}
-	team := slotTeam(2, 1)
-	team.Status.Placement = &v1alpha1.TeamPlacementStatus{
+	tenant := slotTenant(2, 1)
+	tenant.Status.Placement = &v1alpha1.TenantPlacementStatus{
 		Cell: "cell-0", CellNamespace: testOperatorNamespace,
-		Members: []v1alpha1.TeamMemberStatus{
+		Members: []v1alpha1.TenantMemberStatus{
 			memberOn("cell-0", intPtr(0)),
 			memberOn("cell-1", intPtr(1)),
 		},
 	}
 	owned := []*v1alpha1.Controller{
-		filledCell("cell-0", team.Name),
-		filledCell("cell-1", team.Name),
+		filledCell("cell-0", tenant.Name),
+		filledCell("cell-1", tenant.Name),
 		filledCell("cell-2", "other"),
 	}
 
-	got := r.desiredFreeCount(poolFillPool(), owned, []*v1alpha1.Team{team}, 10)
+	got := r.desiredFreeCount(poolFillPool(), owned, []*v1alpha1.Tenant{tenant}, 10)
 	if got != 0 {
 		t.Fatalf("desired free cells = %d, want 0 while a cell can take the standby", got)
 	}
@@ -189,19 +189,19 @@ func TestPoolCreatesNoCellWhenOneCellCanTakeTheMember(t *testing.T) {
 // and an unplaced one is offset by a cell with spare capacity.
 func TestPoolFillKeepsTheSingleMemberArithmetic(t *testing.T) {
 	r := &WarmPoolReconciler{Config: WarmPoolConfig{MaxTenantsPerCell: 10}}
-	placed := slotTeam(1, 0)
-	placed.Status.Placement = &v1alpha1.TeamPlacementStatus{
+	placed := slotTenant(1, 0)
+	placed.Status.Placement = &v1alpha1.TenantPlacementStatus{
 		Cell: "cell-0", CellNamespace: testOperatorNamespace,
 	}
 	owned := []*v1alpha1.Controller{filledCell("cell-0", placed.Name)}
-	if got := r.desiredFreeCount(poolFillPool(), owned, []*v1alpha1.Team{placed}, 10); got != 0 {
+	if got := r.desiredFreeCount(poolFillPool(), owned, []*v1alpha1.Tenant{placed}, 10); got != 0 {
 		t.Fatalf("desired free cells = %d, want 0 for a placed single-member tenant", got)
 	}
 
-	unplaced := slotTeam(1, 0)
+	unplaced := slotTenant(1, 0)
 	unplaced.Name = "unplaced"
 	spare := []*v1alpha1.Controller{filledCell("cell-0", "other")}
-	if got := r.desiredFreeCount(poolFillPool(), spare, []*v1alpha1.Team{unplaced}, 10); got != 0 {
+	if got := r.desiredFreeCount(poolFillPool(), spare, []*v1alpha1.Tenant{unplaced}, 10); got != 0 {
 		t.Fatalf("desired free cells = %d, want 0 while a cell has spare capacity", got)
 	}
 }
@@ -211,18 +211,18 @@ func TestPoolFillKeepsTheSingleMemberArithmetic(t *testing.T) {
 // tenant.
 func TestPoolFillGivesOneCellOneMemberOfEachTenant(t *testing.T) {
 	r := &WarmPoolReconciler{Config: WarmPoolConfig{MaxTenantsPerCell: 10}}
-	first := slotTeam(2, 0)
-	first.Status.Placement = &v1alpha1.TeamPlacementStatus{
+	first := slotTenant(2, 0)
+	first.Status.Placement = &v1alpha1.TenantPlacementStatus{
 		Cell: "cell-0", CellNamespace: testOperatorNamespace,
-		Members: []v1alpha1.TeamMemberStatus{memberOn("cell-0", intPtr(0))},
+		Members: []v1alpha1.TenantMemberStatus{memberOn("cell-0", intPtr(0))},
 	}
-	second := slotTeam(1, 0)
+	second := slotTenant(1, 0)
 	second.Name = "billing"
 	owned := []*v1alpha1.Controller{filledCell("cell-0", first.Name)}
 
 	// first lacks slot 1, which cell-0 cannot take because it holds slot 0
 	// already. second lacks its only member, which cell-0 can take.
-	got := r.desiredFreeCount(poolFillPool(), owned, []*v1alpha1.Team{first, second}, 10)
+	got := r.desiredFreeCount(poolFillPool(), owned, []*v1alpha1.Tenant{first, second}, 10)
 	if got != 1 {
 		t.Fatalf("desired free cells = %d, want 1", got)
 	}

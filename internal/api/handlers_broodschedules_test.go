@@ -155,7 +155,7 @@ func TestBroodScheduleHandlers_CreateTenancyViolationNamespaces(t *testing.T) {
 	ss := &stubBroodSchedules{}
 	srv := newBroodScheduleTestServer(ss)
 
-	// Team namespace with namespaces set → tenancy violation.
+	// Tenant namespace with namespaces set → tenancy violation.
 	body := `{"namespace":"team-ns","name":"test-sched","spec":{"schedule":"*/5 * * * *","waitForCompletion":true,"template":{"targets":{"names":["ctrl-1"],"namespaces":["other-ns"]},"action":{"verb":"reconcile"}}}}`
 	req := httptest.NewRequest(http.MethodPost, "/brood-schedules", strings.NewReader(body))
 	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{Subject: "admin", Groups: []string{"admins"}}))
@@ -170,14 +170,14 @@ func TestBroodScheduleHandlers_CreateTenancyViolationMultiCluster(t *testing.T) 
 	ss := &stubBroodSchedules{}
 	srv := newBroodScheduleTestServer(ss)
 
-	// Team namespace with 2+ clusters → tenancy violation.
+	// Tenant namespace with 2+ clusters → tenancy violation.
 	body := `{"namespace":"team-ns","name":"test-sched","spec":{"schedule":"*/5 * * * *","waitForCompletion":true,"template":{"targets":{"names":["ctrl-1"]},"action":{"verb":"reconcile"},"clusters":["c1","c2"]}}}`
 	req := httptest.NewRequest(http.MethodPost, "/brood-schedules", strings.NewReader(body))
 	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{Subject: "admin", Groups: []string{"admins"}}))
 	w := httptest.NewRecorder()
 	srv.handleBroodSchedules(w, req)
 	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 for multi-cluster in team ns, got %d: %s", w.Code, w.Body.String())
+		t.Errorf("expected 400 for multi-cluster in tenant ns, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

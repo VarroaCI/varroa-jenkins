@@ -29,7 +29,7 @@ import (
 const probeTokenTTL = 60 * time.Second
 
 // tokenBytes is the mint size for an inbound runner's door token: 16 bytes
-// of crypto/rand rendered as hex, matching Team.status.pipelines.webhookToken.
+// of crypto/rand rendered as hex, matching Tenant.status.pipelines.webhookToken.
 const tokenBytes = 16
 
 // OperatorTokenSigner mints the operator's short-lived direct-to-Jenkins
@@ -108,7 +108,7 @@ func (r *Reconciler) serviceURL(cr *v1alpha1.Controller) string {
 	return CellServiceURL(cr)
 }
 
-// Tick runs one pass of design D2's ten-step algorithm. It lists every Team
+// Tick runs one pass of design D2's ten-step algorithm. It lists every Tenant
 // and every Runner; a list failure is an early transport fault and the tick
 // returns with no per-runner processing and no status patch, so
 // observedGeneration never advances on it. Otherwise it evaluates and
@@ -117,9 +117,9 @@ func (r *Reconciler) serviceURL(cr *v1alpha1.Controller) string {
 func (r *Reconciler) Tick(ctx context.Context) TickResult {
 	log := r.logger()
 
-	teams, err := crdstore.List[v1alpha1.Team](ctx, r.Backend, "", "")
+	tenants, err := crdstore.List[v1alpha1.Tenant](ctx, r.Backend, "", "")
 	if err != nil {
-		log.Warn("runner tick: list teams failed", "error", err)
+		log.Warn("runner tick: list tenants failed", "error", err)
 		return TickResult{}
 	}
 	runnerList, err := crdstore.List[v1alpha1.Runner](ctx, r.Backend, "", "")
@@ -128,9 +128,9 @@ func (r *Reconciler) Tick(ctx context.Context) TickResult {
 		return TickResult{}
 	}
 
-	teamsByName := make(map[string]*v1alpha1.Team, len(teams))
-	for _, t := range teams {
-		teamsByName[t.Name] = t
+	tenantsByName := make(map[string]*v1alpha1.Tenant, len(tenants))
+	for _, t := range tenants {
+		tenantsByName[t.Name] = t
 	}
 
 	now := time.Now()
@@ -138,8 +138,8 @@ func (r *Reconciler) Tick(ctx context.Context) TickResult {
 	cellSet := make(map[CellKey]bool)
 
 	for _, runner := range runnerList {
-		team := teamsByName[runner.Spec.Team]
-		eval := r.evaluateWithCredential(ctx, runner, team)
+		tenant := tenantsByName[runner.Spec.Tenant]
+		eval := r.evaluateWithCredential(ctx, runner, tenant)
 		r.applyTick(ctx, runner, eval, now, log)
 
 		if eval.Cell != "" && eval.CellNamespace != "" {
@@ -183,14 +183,14 @@ func (r *Reconciler) Tick(ctx context.Context) TickResult {
 // CredentialMissing or CredentialMalformed on a fault. BuildContribution
 // applies the same read for the same runner on its own separate call, so
 // the reported status and the rendered node set can never disagree.
-func (r *Reconciler) evaluateWithCredential(ctx context.Context, runner *v1alpha1.Runner, team *v1alpha1.Team) evaluation {
-	eval := evaluateRunner(runner, team)
+func (r *Reconciler) evaluateWithCredential(ctx context.Context, runner *v1alpha1.Runner, tenant *v1alpha1.Tenant) evaluation {
+	eval := evaluateRunner(runner, tenant)
 	if !eval.Delivered || runner.Spec.Launcher != launcherSSH {
 		return eval
 	}
 	agentNamespace := ""
-	if team != nil && team.Spec.Pipelines != nil {
-		agentNamespace = team.Spec.Pipelines.AgentNamespace
+	if tenant != nil && tenant.Spec.Pipelines != nil {
+		agentNamespace = tenant.Spec.Pipelines.AgentNamespace
 	}
 	if _, fault := readCredential(ctx, r.Secrets, runner, agentNamespace); fault != nil {
 		eval.Delivered = false
@@ -296,7 +296,7 @@ func upsertReadyCondition(existing []v1alpha1.RunnerCondition, status metav1.Con
 }
 
 // mintToken returns 16 bytes of crypto/rand as hex, matching
-// Team.status.pipelines.webhookToken's mint rule.
+// Tenant.status.pipelines.webhookToken's mint rule.
 func mintToken() (string, error) {
 	buf := make([]byte, tokenBytes)
 	if _, err := rand.Read(buf); err != nil {

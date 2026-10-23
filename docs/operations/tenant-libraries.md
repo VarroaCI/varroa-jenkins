@@ -75,7 +75,7 @@ A library needs `defaultVersion`, `allowVersionOverride: true`, or both. Without
 
 ## Held folders
 
-A tenant with one of these faults is held. Its folder is not loaded. The `Team` reports `TenantWarnings=True` with reason `ItemsHeld`, and the message gives the reason:
+A tenant with one of these faults is held. Its folder is not loaded. The `Tenant` reports `TenantWarnings=True` with reason `ItemsHeld`, and the message gives the reason:
 
 - The retriever sets no source, sets two sources, or misses a required field.
 - A credential ID is not provided by a tenant Secret or by a folder credential that the library can see.

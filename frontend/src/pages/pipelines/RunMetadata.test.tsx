@@ -27,7 +27,7 @@ function renderMeta(run: RunDetail) {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <RunMetadata run={run} team="team-a" job="svc/main" />
+        <RunMetadata run={run} tenant="team-a" job="svc/main" />
       </MemoryRouter>
     </QueryClientProvider>,
   );

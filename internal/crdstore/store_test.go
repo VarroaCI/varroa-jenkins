@@ -34,7 +34,7 @@ func TestRegistry_AllTypesResolve(t *testing.T) {
 		{"ControllerClass", GVRFor[v1alpha1.ControllerClass]},
 		{"JenkinsVersionProfile", GVRFor[v1alpha1.JenkinsVersionProfile]},
 		{"Group", GVRFor[v1alpha1.Group]},
-		{"Team", GVRFor[v1alpha1.Team]},
+		{"Tenant", GVRFor[v1alpha1.Tenant]},
 		{"Runner", GVRFor[v1alpha1.Runner]},
 		{"UpdateCenter", GVRFor[v1alpha1.UpdateCenter]},
 	}
@@ -82,16 +82,16 @@ func TestRoundTrip_ClusterScoped(t *testing.T) {
 	ctx := context.Background()
 	f := NewFake()
 
-	want := &v1alpha1.Team{
+	want := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "platform-team"},
-		Spec: v1alpha1.TeamSpec{
-			DisplayName: "Platform Team",
+		Spec: v1alpha1.TenantSpec{
+			DisplayName: "Platform Tenant",
 			Members:     []string{"alice", "bob"},
 		},
 	}
 	MustSeed(f, want)
 
-	got, err := Get[v1alpha1.Team](ctx, f, "platform-team", "")
+	got, err := Get[v1alpha1.Tenant](ctx, f, "platform-team", "")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

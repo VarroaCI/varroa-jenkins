@@ -24,15 +24,15 @@ func addLocksGroup(root *cobra.Command) {
 	}
 
 	listCmd := &cobra.Command{
-		Use:   "list [--team TEAM]",
-		Short: "List the fleet locks of every tenant, or of one team",
+		Use:   "list [--tenant TENANT]",
+		Short: "List the fleet locks of every tenant, or of one tenant",
 		Long: "List the fleet locks. With no flag, the command reads every lock of every cluster\n" +
-			"through GET /locks, which needs the cluster-wide fleetlocks:read verb. With --team,\n" +
-			"it reads the locks of one team's tenants through GET /pipelines/{team}/locks.",
+			"through GET /locks, which needs the cluster-wide fleetlocks:read verb. With --tenant,\n" +
+			"it reads the locks of one tenant's tenants through GET /pipelines/{tenant}/locks.",
 		Args: cobra.NoArgs,
 		RunE: runLocksList,
 	}
-	listCmd.Flags().String("team", "", "list only the locks of this team's tenants")
+	listCmd.Flags().String("tenant", "", "list only the locks of this tenant's tenants")
 	locksCmd.AddCommand(listCmd)
 
 	releaseCmd := &cobra.Command{
@@ -101,8 +101,8 @@ func holderCellOf(resp *client.ReleaseFleetLockResponse) *client.ComponentsSchem
 
 // runLocksList implements "varroactl locks list".
 func runLocksList(cmd *cobra.Command, _ []string) error {
-	team, _ := cmd.Flags().GetString("team")
-	team = strings.TrimSpace(team)
+	tenant, _ := cmd.Flags().GetString("tenant")
+	tenant = strings.TrimSpace(tenant)
 
 	c, err := apiClient(cmd)
 	if err != nil {
@@ -114,7 +114,7 @@ func runLocksList(cmd *cobra.Command, _ []string) error {
 		body   []byte
 		ok     bool
 	)
-	if team == "" {
+	if tenant == "" {
 		resp, err := c.ListAllFleetLocksWithResponse(cmd.Context())
 		if err != nil {
 			return err
@@ -124,7 +124,7 @@ func runLocksList(cmd *cobra.Command, _ []string) error {
 			items = resp.JSON200.Items
 		}
 	} else {
-		resp, err := c.ListTeamFleetLocksWithResponse(cmd.Context(), team)
+		resp, err := c.ListTenantFleetLocksWithResponse(cmd.Context(), tenant)
 		if err != nil {
 			return err
 		}

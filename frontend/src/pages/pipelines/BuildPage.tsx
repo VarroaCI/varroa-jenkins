@@ -15,7 +15,7 @@ import {
   proceedRunInput,
   rerunRun,
   runLogUrl,
-  teamRunStreamUrl,
+  tenantRunStreamUrl,
   downloadRunArtifact,
 } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
@@ -98,8 +98,8 @@ const TRIGGER_REASON_SENTENCES: Record<string, string> = {
   TRIGGER_UNREACHABLE: "The trigger did not reach the controller's Jenkins.",
   CLAIM_EXPIRED: "The build did not get a build number in time, so it did not start.",
   CLAIM_ABANDONED: "The build got a build number, but it did not start in time.",
-  FENCED: "The controller that received the trigger no longer hosts this team.",
-  CROSS_TENANT: "Another team may not start this job.",
+  FENCED: "The controller that received the trigger no longer hosts this tenant.",
+  CROSS_TENANT: "Another tenant may not start this job.",
   INVALID_KEY: "The build request was not valid.",
   THROTTLED: "The record store refused the build because of a limit.",
   NOT_HOME: "The job moved to another cell before the build started, so the build did not run.",
@@ -263,20 +263,20 @@ export function testsSummary(t?: { total: number; failed: number; skipped: numbe
 }
 
 export default function BuildPage() {
-  const { team, job, run: runId } = useParams<{ team: string; job: string; run: string }>();
+  const { tenant, job, run: runId } = useParams<{ tenant: string; job: string; run: string }>();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const requested = !!(location.state as { requested?: boolean } | null)?.requested;
 
-  // The team's stream carries every run of the team.
+  // The tenant's stream carries every run of the tenant.
   // The notifier coalesces per run, so a lock frame for this run can stand
   // in for a stage frame. The page reads its own record on any of them,
   // wait frames included.
   const { lastEvent: runEvent, readyState: runStreamReady } = useEventStream<RunNotification>(
-    team ? teamRunStreamUrl(team) : null,
-    team ? `pipelines:${team}` : null,
+    tenant ? tenantRunStreamUrl(tenant) : null,
+    tenant ? `pipelines:${tenant}` : null,
     ["run", "stage", "lock", "input", "wait"],
   );
   const streamOpen = runStreamReady === "open";
@@ -440,9 +440,9 @@ export default function BuildPage() {
   });
   const [restartOpen, setRestartOpen] = useState(false);
   const neighborsQuery = useQuery({
-    queryKey: ["run-neighbors", team, job],
-    queryFn: () => listRuns(team!, job!, { limit: 100 }),
-    enabled: !!team && !!job,
+    queryKey: ["run-neighbors", tenant, job],
+    queryFn: () => listRuns(tenant!, job!, { limit: 100 }),
+    enabled: !!tenant && !!job,
   });
 
   const cancelMutation = useMutation({
@@ -479,9 +479,9 @@ export default function BuildPage() {
     mutationFn: () => rerunRun(run!.runId),
     onSuccess: (res) => {
       toast("Re-run requested");
-      if (team && job) {
+      if (tenant && job) {
         navigate(
-          `/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}/${encodeURIComponent(res.runId)}`,
+          `/pipelines/${encodeURIComponent(tenant)}/${encodeURIComponent(job)}/${encodeURIComponent(res.runId)}`,
           { state: { requested: true } },
         );
       }
@@ -521,15 +521,15 @@ export default function BuildPage() {
 
   const openAdjacentBuild = useCallback(
     (direction: "older" | "newer") => {
-      if (!run || !team || !job) return;
+      if (!run || !tenant || !job) return;
       const target = neighbors[direction];
       if (!target) return;
       const tabSuffix = isTabId(tabParam) ? `?tab=${tabParam}` : "";
       navigate(
-        `/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}/${encodeURIComponent(target.runId)}${tabSuffix}`,
+        `/pipelines/${encodeURIComponent(tenant)}/${encodeURIComponent(job)}/${encodeURIComponent(target.runId)}${tabSuffix}`,
       );
     },
-    [run, team, job, neighbors, tabParam, navigate],
+    [run, tenant, job, neighbors, tabParam, navigate],
   );
 
   useEffect(() => {
@@ -589,11 +589,11 @@ export default function BuildPage() {
   const testReport = testsQuery.data?.report;
 
   const docTitle =
-    !run || !team
+    !run || !tenant
       ? null
       : run.result === "TRIGGER_FAILED"
-        ? notStartedTitle(team, run.tenantFolder, run.jobPath)
-        : buildTitle(team, run, describeRunState(run).label);
+        ? notStartedTitle(tenant, run.tenantFolder, run.jobPath)
+        : buildTitle(tenant, run, describeRunState(run).label);
   useDocumentTitle(docTitle);
 
   if (status === "loading") {
@@ -654,8 +654,8 @@ export default function BuildPage() {
   if (run.result === "TRIGGER_FAILED") {
     return (
       <div className={styles.page}>
-        {team && (
-          <JobBreadcrumbs team={team} tenantFolder={run.tenantFolder} jobPath={run.jobPath} current="Not started" />
+        {tenant && (
+          <JobBreadcrumbs tenant={tenant} tenantFolder={run.tenantFolder} jobPath={run.jobPath} current="Not started" />
         )}
         <div className={styles.triggerFailed} role="alert">
           <h1>Build not started</h1>
@@ -698,9 +698,9 @@ export default function BuildPage() {
   return (
     <div className={styles.page}>
       <div className={styles.head}>
-        {team && (
+        {tenant && (
           <JobBreadcrumbs
-            team={team}
+            tenant={tenant}
             tenantFolder={run.tenantFolder}
             jobPath={run.jobPath}
             current={`#${run.buildNumber ?? "?"}`}
@@ -749,7 +749,7 @@ export default function BuildPage() {
             </span>
           </nav>
         </div>
-        <RunMetadata run={run} team={team} job={job} />
+        <RunMetadata run={run} tenant={tenant} job={job} />
         {/* The summary row renders the run's own summary line. It hides
             itself when the record carries no summary. */}
         {run.summary && (
@@ -794,9 +794,9 @@ export default function BuildPage() {
         <div className={styles.interruptedBanner} role="alert">
           <span>Interrupted{run.interruptedReason ? `: ${run.interruptedReason}` : ": reason not available"}.</span>
           {!run.startedAt && <span> The build never started on the cell.</span>}
-          {run.retryRunId && team && job && (
+          {run.retryRunId && tenant && job && (
             <a
-              href={`/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}/${encodeURIComponent(run.retryRunId)}`}
+              href={`/pipelines/${encodeURIComponent(tenant)}/${encodeURIComponent(job)}/${encodeURIComponent(run.retryRunId)}`}
             >
               View retry
             </a>
@@ -848,12 +848,12 @@ export default function BuildPage() {
           )}
           {/* The list names the digest's own failed cases. It holds at most
               ten entries, and it is absent when the digest names no case. */}
-          {!!run.digest.failedTests?.cases?.length && team && job && (
+          {!!run.digest.failedTests?.cases?.length && tenant && job && (
             <ul className={styles.digestCases} aria-label="Failed test cases">
               {run.digest.failedTests.cases.map((c) => (
                 <li key={`${c.suite}/${c.caseKey}`}>
                   <Link
-                    to={testCaseHref(team, job, c.caseKey)}
+                    to={testCaseHref(tenant, job, c.caseKey)}
                     state={{ className: c.className, name: c.name } satisfies TestCaseLinkState}
                     className={styles.mono}
                   >
@@ -975,7 +975,7 @@ export default function BuildPage() {
               </button>
             </div>
           )}
-          {caseRows.length > 0 && team && job && (
+          {caseRows.length > 0 && tenant && job && (
             <div className={styles.tableScroll}>
               <table className={styles.table} aria-label="Test cases">
                 <thead>
@@ -1004,7 +1004,7 @@ export default function BuildPage() {
                         )}
                         <td>
                           <Link
-                            to={testCaseHref(team, job, c.caseKey)}
+                            to={testCaseHref(tenant, job, c.caseKey)}
                             state={{ className: c.className, name: c.name } satisfies TestCaseLinkState}
                           >
                             {breakablePath(c.name)}
@@ -1070,9 +1070,9 @@ export default function BuildPage() {
           onClose={() => setRestartOpen(false)}
           onSubmitted={(newRunId) => {
             setRestartOpen(false);
-            if (team && job) {
+            if (tenant && job) {
               navigate(
-                `/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}/${encodeURIComponent(newRunId)}`,
+                `/pipelines/${encodeURIComponent(tenant)}/${encodeURIComponent(job)}/${encodeURIComponent(newRunId)}`,
                 { state: { requested: true } },
               );
             }
@@ -1087,9 +1087,9 @@ export default function BuildPage() {
           onClose={() => setReplayOpen(false)}
           onSubmitted={(newRunId) => {
             setReplayOpen(false);
-            if (team && job) {
+            if (tenant && job) {
               navigate(
-                `/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}/${encodeURIComponent(newRunId)}`,
+                `/pipelines/${encodeURIComponent(tenant)}/${encodeURIComponent(job)}/${encodeURIComponent(newRunId)}`,
                 { state: { requested: true } },
               );
             }

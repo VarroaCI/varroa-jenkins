@@ -26,8 +26,8 @@ type SessionKind string
 
 // The session kinds.
 const (
-	KindAssistant SessionKind = "assistant"
-	KindTeamAgent SessionKind = "team_agent"
+	KindAssistant   SessionKind = "assistant"
+	KindTenantAgent SessionKind = "tenant_agent"
 )
 
 // EventType is the type of one session event.
@@ -144,8 +144,8 @@ const (
 	TriggerManual = "manual"
 
 	ActivitySourceAssistant = "assistant"
-	// ActivitySourceTeamAgent stamps activity written by a Team agent session.
-	ActivitySourceTeamAgent = "team_agent"
+	// ActivitySourceTenantAgent stamps activity written by a Tenant agent session.
+	ActivitySourceTenantAgent = "tenant_agent"
 
 	// MaxRunningSessions caps the sessions one principal runs at once. The
 	// create path counts running rows against it; a race between two creates
@@ -159,7 +159,7 @@ const (
 	NoTenantToken = "_none"
 
 	CtxRoute      = "route"
-	CtxTeam       = "team"
+	CtxTenant     = "tenant"
 	CtxJob        = "job"
 	CtxRun        = "run"
 	CtxController = "controller"
@@ -200,7 +200,7 @@ func SessionStates() []SessionState {
 }
 
 // SessionKinds lists every session kind in registry order.
-func SessionKinds() []SessionKind { return []SessionKind{KindAssistant, KindTeamAgent} }
+func SessionKinds() []SessionKind { return []SessionKind{KindAssistant, KindTenantAgent} }
 
 // EventTypes lists every event type in registry order.
 func EventTypes() []EventType {
@@ -248,7 +248,7 @@ func ToolClasses() []ToolClass { return []ToolClass{ClassRead, ClassWrite} }
 
 // ClientContextKeys lists the context keys a client may set.
 func ClientContextKeys() []string {
-	return []string{CtxRoute, CtxTeam, CtxJob, CtxRun, CtxController, CtxCell}
+	return []string{CtxRoute, CtxTenant, CtxJob, CtxRun, CtxController, CtxCell}
 }
 
 // ServerContextKeys lists the context keys only the server may set.
@@ -271,28 +271,28 @@ type ToolResult struct {
 
 // Session is one agent session row.
 type Session struct {
-	ID                  uuid.UUID
-	Kind                SessionKind
-	Principal           string
-	Team                string
-	Cluster             string
-	Trigger             string
-	Context             map[string]any
-	Provider            string
-	Model               string
-	KeySource           KeySource
-	DataSharing         DataSharing
-	InstructionsSHA     *string
-	TeamAgentGeneration *int64
-	State               SessionState
-	SkipReason          SkipReason
-	PromptTokens        int64
-	CompletionTokens    int64
-	Steps               int
-	LeaseOwner          string
-	LeaseExpiresAt      *time.Time
-	StartedAt           time.Time
-	EndedAt             *time.Time
+	ID                    uuid.UUID
+	Kind                  SessionKind
+	Principal             string
+	Tenant                string
+	Cluster               string
+	Trigger               string
+	Context               map[string]any
+	Provider              string
+	Model                 string
+	KeySource             KeySource
+	DataSharing           DataSharing
+	InstructionsSHA       *string
+	TenantAgentGeneration *int64
+	State                 SessionState
+	SkipReason            SkipReason
+	PromptTokens          int64
+	CompletionTokens      int64
+	Steps                 int
+	LeaseOwner            string
+	LeaseExpiresAt        *time.Time
+	StartedAt             time.Time
+	EndedAt               *time.Time
 }
 
 // Tokens returns the prompt and completion tokens of the session together.
@@ -357,15 +357,15 @@ type Settings struct {
 	Model       string
 	DataSharing DataSharing
 
-	// TeamAgentUnattended maps a TeamAgent's namespace/name to its grant.
+	// TenantAgentUnattended maps a TenantAgent's namespace/name to its grant.
 	// Only the global scope carries it.
-	TeamAgentUnattended map[string]UnattendedGrant
+	TenantAgentUnattended map[string]UnattendedGrant
 
 	UpdatedAt time.Time
 	UpdatedBy string
 }
 
-// UnattendedGrant names the write tools that one TeamAgent may run without an
+// UnattendedGrant names the write tools that one TenantAgent may run without an
 // approval. UID pins the grant to one object, so a recreated object with the
 // same name gets no grant.
 type UnattendedGrant struct {

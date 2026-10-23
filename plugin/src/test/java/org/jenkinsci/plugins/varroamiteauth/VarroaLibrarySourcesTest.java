@@ -43,7 +43,7 @@ public class VarroaLibrarySourcesTest {
         }
 
         public String getRepoOwner() {
-            return "team";
+            return "tenant";
         }
 
         public String getRepository() {
@@ -126,7 +126,7 @@ public class VarroaLibrarySourcesTest {
         VarroaLibrarySources.Source source = VarroaLibrarySources.fromRetriever(
                 new Retriever(new GiteaSCMSource()));
 
-        assertEquals("https://git.example.com/team/lib", source.repositoryUrl);
+        assertEquals("https://git.example.com/tenant/lib", source.repositoryUrl);
         assertEquals("gitea", source.forge);
     }
 
@@ -188,7 +188,7 @@ public class VarroaLibrarySourcesTest {
     public void revisionForKeepsPathCaseDistinct() {
         BuildData checkout = new BuildData(List.of("https://github.com/team/lib"));
 
-        assertEquals("", VarroaLibrarySources.revisionFor("https://github.com/Team/Lib", List.of(checkout)));
+        assertEquals("", VarroaLibrarySources.revisionFor("https://github.com/Tenant/Lib", List.of(checkout)));
     }
 
     @Test

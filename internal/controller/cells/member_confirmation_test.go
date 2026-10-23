@@ -20,34 +20,34 @@ func deadFor(dead []DeadInstance, instance string) *DeadInstance {
 
 // rolledMemberInputs builds a tenant whose slot 1 cell kept its name and
 // reports a new pod instance, which is what a hard pod delete produces.
-func rolledMemberInputs(t *testing.T) (Inputs, *v1alpha1.Team, *v1alpha1.TeamStatus, *[]AnnounceRequest) {
+func rolledMemberInputs(t *testing.T) (Inputs, *v1alpha1.Tenant, *v1alpha1.TenantStatus, *[]AnnounceRequest) {
 	t.Helper()
 	in := testInputs()
-	team := slotTeam(2, 0)
-	slotZero := appliedCell("cell-0", team.Name)
-	rolled := appliedCell("cell-2", team.Name)
+	tenant := slotTenant(2, 0)
+	slotZero := appliedCell("cell-0", tenant.Name)
+	rolled := appliedCell("cell-2", tenant.Name)
 	rolled.Instance = "fa69db7a"
 	in.Cells = []CellCandidate{slotZero, rolled}
 
-	status := placedWithMembers([]v1alpha1.TeamMemberStatus{
-		memberStatus("cell-0", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-2", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
+		memberStatus("cell-0", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-2", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	})
 	memberSeen := fixedNow.Add(-2 * time.Minute)
 	in.LastSync = &SyncCache{
 		Cell: "cell-0", CellNamespace: "cells-ns", Generation: 3, CellInstance: "uid-cell-0",
 		At: fixedNow.Add(-time.Minute),
 		Members: []AnnounceMember{
-			{Cell: "cell-0", Namespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive,
+			{Cell: "cell-0", Namespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive,
 				Slot: intPtr(0), Instance: "uid-cell-0"},
-			{Cell: "cell-2", Namespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive,
+			{Cell: "cell-2", Namespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive,
 				Slot: intPtr(1), Instance: "2918db60", LastSeenAt: &memberSeen},
 		},
 	}
 
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
-	return in, team, status, &seen
+	return in, tenant, status, &seen
 }
 
 // TestMemberRollCarriesAConfirmation asserts a member whose cell keeps its
@@ -58,9 +58,9 @@ func rolledMemberInputs(t *testing.T) (Inputs, *v1alpha1.Team, *v1alpha1.TeamSta
 // intent of it is re-fired. The run instead waits out the five-minute
 // moved window and is marked interrupted.
 func TestMemberRollCarriesAConfirmation(t *testing.T) {
-	in, team, status, seen := rolledMemberInputs(t)
+	in, tenant, status, seen := rolledMemberInputs(t)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(*seen) != 1 {
@@ -81,12 +81,12 @@ func TestMemberRollCarriesAConfirmation(t *testing.T) {
 // TestMemberRollCarriesItsOwnLastSeen asserts the entry's LastSeenAt is
 // that member's own presence reading, not slot 0's clock.
 func TestMemberRollCarriesItsOwnLastSeen(t *testing.T) {
-	in, team, status, seen := rolledMemberInputs(t)
+	in, tenant, status, seen := rolledMemberInputs(t)
 	memberSeen := *in.LastSync.Members[1].LastSeenAt
 	scalarSeen := fixedNow.Add(-30 * time.Second)
 	in.LastSync.CellLastSeenAt = &scalarSeen
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	entry := deadFor((*seen)[0].DeadInstances, "2918db60")
@@ -102,12 +102,12 @@ func TestMemberRollCarriesItsOwnLastSeen(t *testing.T) {
 // before the member reading existed falls back to the tenant's scalar
 // reading.
 func TestMemberRollFallsBackToTheScalarLastSeen(t *testing.T) {
-	in, team, status, seen := rolledMemberInputs(t)
+	in, tenant, status, seen := rolledMemberInputs(t)
 	in.LastSync.Members[1].LastSeenAt = nil
 	scalarSeen := fixedNow.Add(-30 * time.Second)
 	in.LastSync.CellLastSeenAt = &scalarSeen
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	entry := deadFor((*seen)[0].DeadInstances, "2918db60")
@@ -118,11 +118,11 @@ func TestMemberRollFallsBackToTheScalarLastSeen(t *testing.T) {
 
 // departedMemberInputs builds the tenant of rolledMemberInputs after its
 // slot 1 cell left the candidate set. A fresh cell takes the slot.
-func departedMemberInputs(t *testing.T) (Inputs, *v1alpha1.Team, *v1alpha1.TeamStatus, *[]AnnounceRequest) {
+func departedMemberInputs(t *testing.T) (Inputs, *v1alpha1.Tenant, *v1alpha1.TenantStatus, *[]AnnounceRequest) {
 	t.Helper()
-	in, team, status, seen := rolledMemberInputs(t)
-	in.Cells = []CellCandidate{appliedCell("cell-0", team.Name), readyCell("cell-new")}
-	return in, team, status, seen
+	in, tenant, status, seen := rolledMemberInputs(t)
+	in.Cells = []CellCandidate{appliedCell("cell-0", tenant.Name), readyCell("cell-new")}
+	return in, tenant, status, seen
 }
 
 // TestADepartedMemberWithNoPodIsConfirmedGone asserts a member whose cell
@@ -134,10 +134,10 @@ func departedMemberInputs(t *testing.T) (Inputs, *v1alpha1.Team, *v1alpha1.TeamS
 // receives the slot's armed run, and the sweep marks that run interrupted
 // five minutes later.
 func TestADepartedMemberWithNoPodIsConfirmedGone(t *testing.T) {
-	in, team, status, seen := departedMemberInputs(t)
+	in, tenant, status, seen := departedMemberInputs(t)
 	in.DepartedPods = map[string]bool{"cells-ns/cell-2": true}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	entry := deadFor((*seen)[0].DeadInstances, "2918db60")
@@ -153,10 +153,10 @@ func TestADepartedMemberWithNoPodIsConfirmedGone(t *testing.T) {
 // departed member whose pod still exists carries no confirmation. Such a
 // pod can serve builds for its whole termination grace.
 func TestADepartedMemberThatStillTerminatesCarriesNoConfirmation(t *testing.T) {
-	in, team, status, seen := departedMemberInputs(t)
+	in, tenant, status, seen := departedMemberInputs(t)
 	in.DepartedPods = map[string]bool{"cells-ns/cell-2": false}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	entry := deadFor((*seen)[0].DeadInstances, "2918db60")
@@ -172,10 +172,10 @@ func TestADepartedMemberThatStillTerminatesCarriesNoConfirmation(t *testing.T) {
 // member the caller could not read carries no confirmation, so an API
 // failure never confirms a live pod gone.
 func TestADepartedMemberWithNoReadingCarriesNoConfirmation(t *testing.T) {
-	in, team, status, seen := departedMemberInputs(t)
+	in, tenant, status, seen := departedMemberInputs(t)
 	in.DepartedPods = nil
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	entry := deadFor((*seen)[0].DeadInstances, "2918db60")
@@ -190,12 +190,12 @@ func TestADepartedMemberWithNoReadingCarriesNoConfirmation(t *testing.T) {
 // TestSlotZeroConfirmationIsUnchanged asserts the scalar path still stamps
 // slot 0's replaced instance with this tick's clock.
 func TestSlotZeroConfirmationIsUnchanged(t *testing.T) {
-	in, team, status, seen := rolledMemberInputs(t)
-	rolledZero := appliedCell("cell-0", team.Name)
+	in, tenant, status, seen := rolledMemberInputs(t)
+	rolledZero := appliedCell("cell-0", tenant.Name)
 	rolledZero.Instance = "uid-cell-0-new"
 	in.Cells[0] = rolledZero
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	entry := deadFor((*seen)[0].DeadInstances, "uid-cell-0")
@@ -210,13 +210,13 @@ func TestSlotZeroConfirmationIsUnchanged(t *testing.T) {
 // TestALiveMemberReportsNoDeadInstance asserts an unchanged member reports
 // nothing, so a steady tick never confirms a live pod gone.
 func TestALiveMemberReportsNoDeadInstance(t *testing.T) {
-	in, team, status, seen := rolledMemberInputs(t)
+	in, tenant, status, seen := rolledMemberInputs(t)
 	// cell-2 keeps the instance the cache names.
-	steady := appliedCell("cell-2", team.Name)
+	steady := appliedCell("cell-2", tenant.Name)
 	steady.Instance = "2918db60"
 	in.Cells[1] = steady
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(*seen) == 0 {
@@ -232,13 +232,13 @@ func TestALiveMemberReportsNoDeadInstance(t *testing.T) {
 // confirmation when the caller's pod read answers no pod. The evidence and
 // the consequence are the members' own.
 func TestADepartedSlotZeroCellIsConfirmedGone(t *testing.T) {
-	in, team, status, seen := rolledMemberInputs(t)
+	in, tenant, status, seen := rolledMemberInputs(t)
 	// cell-0 leaves the candidate set, and a fresh cell takes slot 0.
-	in.Cells = []CellCandidate{appliedCell("cell-2", team.Name), readyCell("cell-new")}
+	in.Cells = []CellCandidate{appliedCell("cell-2", tenant.Name), readyCell("cell-new")}
 	in.Cells[0].Instance = "2918db60"
 	in.DepartedPods = map[string]bool{"cells-ns/cell-0": true}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	entry := deadFor((*seen)[0].DeadInstances, "uid-cell-0")
@@ -254,12 +254,12 @@ func TestADepartedSlotZeroCellIsConfirmedGone(t *testing.T) {
 // scalar path keeps the five-minute moved window when the caller confirms
 // nothing.
 func TestADepartedSlotZeroCellWithNoReadingCarriesNoConfirmation(t *testing.T) {
-	in, team, status, seen := rolledMemberInputs(t)
-	in.Cells = []CellCandidate{appliedCell("cell-2", team.Name), readyCell("cell-new")}
+	in, tenant, status, seen := rolledMemberInputs(t)
+	in.Cells = []CellCandidate{appliedCell("cell-2", tenant.Name), readyCell("cell-new")}
 	in.Cells[0].Instance = "2918db60"
 	in.DepartedPods = nil
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	entry := deadFor((*seen)[0].DeadInstances, "uid-cell-0")

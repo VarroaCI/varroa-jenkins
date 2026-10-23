@@ -14,18 +14,18 @@ func TestPlacementCells(t *testing.T) {
 	}
 	cases := []struct {
 		name      string
-		placement *TeamPlacementStatus
+		placement *TenantPlacementStatus
 		want      []types.NamespacedName
 	}{
 		{name: "nil placement", placement: nil, want: nil},
 		{
 			name:      "scalar only",
-			placement: &TeamPlacementStatus{Cell: "c0", CellNamespace: "ns"},
+			placement: &TenantPlacementStatus{Cell: "c0", CellNamespace: "ns"},
 			want:      []types.NamespacedName{cell("ns", "c0")},
 		},
 		{
 			name: "active out of order then standbys out of key order",
-			placement: &TeamPlacementStatus{Cell: "c0", CellNamespace: "ns", Members: []TeamMemberStatus{
+			placement: &TenantPlacementStatus{Cell: "c0", CellNamespace: "ns", Members: []TenantMemberStatus{
 				{Cell: "s-b", CellNamespace: "ns"},
 				{Cell: "a2", CellNamespace: "ns", Slot: slot(2)},
 				{Cell: "s-a", CellNamespace: "ns"},
@@ -38,21 +38,21 @@ func TestPlacementCells(t *testing.T) {
 		},
 		{
 			name: "scalar cell repeated as slot 0 appears once",
-			placement: &TeamPlacementStatus{Cell: "c0", CellNamespace: "ns", Members: []TeamMemberStatus{
+			placement: &TenantPlacementStatus{Cell: "c0", CellNamespace: "ns", Members: []TenantMemberStatus{
 				{Cell: "c0", CellNamespace: "ns", Slot: slot(0)},
 			}},
 			want: []types.NamespacedName{cell("ns", "c0")},
 		},
 		{
 			name: "member with empty cell name is skipped",
-			placement: &TeamPlacementStatus{Cell: "c0", CellNamespace: "ns", Members: []TeamMemberStatus{
+			placement: &TenantPlacementStatus{Cell: "c0", CellNamespace: "ns", Members: []TenantMemberStatus{
 				{CellNamespace: "ns", Slot: slot(1)},
 			}},
 			want: []types.NamespacedName{cell("ns", "c0")},
 		},
 		{
 			name: "same name in two namespaces gives both cells",
-			placement: &TeamPlacementStatus{Cell: "c0", CellNamespace: "ns-a", Members: []TeamMemberStatus{
+			placement: &TenantPlacementStatus{Cell: "c0", CellNamespace: "ns-a", Members: []TenantMemberStatus{
 				{Cell: "c0", CellNamespace: "ns-b"},
 			}},
 			want: []types.NamespacedName{cell("ns-a", "c0"), cell("ns-b", "c0")},

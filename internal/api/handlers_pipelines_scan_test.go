@@ -13,7 +13,7 @@ import (
 func postScan(t *testing.T, srv *Server, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	req := doWriteRequest("/pipelines/ci/jobs/svc/main/scan",
-		map[string]string{"team": "ci", "job": "svc/main"}, testClaims(), body)
+		map[string]string{"tenant": "ci", "job": "svc/main"}, testClaims(), body)
 	rec := httptest.NewRecorder()
 	srv.handleScanMultibranch(rec, req)
 	return rec

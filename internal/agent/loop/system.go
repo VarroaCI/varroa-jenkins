@@ -29,7 +29,7 @@ func SystemText(base string, sc map[string]any, level agent.DataSharing) string 
 	if !strings.HasSuffix(guide.Text, "\n") {
 		b.WriteString("\n")
 	}
-	keys := []string{agent.CtxRoute, agent.CtxRun, agent.CtxJob, agent.CtxTeam,
+	keys := []string{agent.CtxRoute, agent.CtxRun, agent.CtxJob, agent.CtxTenant,
 		agent.CtxController, agent.CtxCell, agent.CtxRepo}
 	for _, k := range keys {
 		v, ok := sc[k].(string)

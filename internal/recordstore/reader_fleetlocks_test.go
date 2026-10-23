@@ -212,8 +212,8 @@ func TestReaderListFleetLocks_OwnerIsExactNotPrefix(t *testing.T) {
 		"team-pay", "team-pay/deploy", "held", readerLockClock)
 	seedReaderLockOwned(t, db, "team-pay/ci/deploy-prod", "team-pay/ci", "run-ci", testCluster,
 		"team-pay/ci", "deploy", "held", readerLockClock.Add(time.Minute))
-	seedReaderLockOwned(t, db, "teamXpay/deploy-prod", "teamXpay", "run-x", testCluster,
-		"teamXpay", "teamXpay/deploy", "held", readerLockClock.Add(2*time.Minute))
+	seedReaderLockOwned(t, db, "tenantXpay/deploy-prod", "tenantXpay", "run-x", testCluster,
+		"tenantXpay", "tenantXpay/deploy", "held", readerLockClock.Add(2*time.Minute))
 
 	cases := []struct {
 		tenant string
@@ -221,7 +221,7 @@ func TestReaderListFleetLocks_OwnerIsExactNotPrefix(t *testing.T) {
 	}{
 		{"team-pay", []string{"run-pay"}},
 		{"team-pay/ci", []string{"run-ci"}},
-		{"team_pay", nil},
+		{"tenant_pay", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.tenant, func(t *testing.T) {

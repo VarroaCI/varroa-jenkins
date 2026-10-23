@@ -13,7 +13,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
-// concurrencyCancelInProgress is the Team.spec.pipelines.concurrency
+// concurrencyCancelInProgress is the Tenant.spec.pipelines.concurrency
 // value that makes a granted claim cancel its group's older runs.
 const concurrencyCancelInProgress = "cancelInProgress"
 

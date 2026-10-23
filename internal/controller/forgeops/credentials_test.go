@@ -83,7 +83,7 @@ func TestChooseCredential_IDOrder(t *testing.T) {
 	}
 }
 
-func TestChooseCredential_NoTeam(t *testing.T) {
+func TestChooseCredential_NoTenant(t *testing.T) {
 	fx := newFixture(t, "agents-payments")
 	_, err := fx.ops.chooseCredential(context.Background(), "missing", testHost)
 	if got := codeOf(t, err); got != forgeapi.CodeNoMatchingCredential {

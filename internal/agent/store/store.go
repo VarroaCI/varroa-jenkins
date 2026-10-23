@@ -106,7 +106,7 @@ type SessionQuery struct {
 	Principal string
 	Kind      agent.SessionKind
 	Prompt    string
-	Team      string
+	Tenant    string
 	State     agent.SessionState
 	Limit     int
 	Cursor    string
@@ -246,12 +246,12 @@ type Store interface {
 	Sweep(ctx context.Context) (expired, lost []SweptSession, err error)
 	GetSettings(ctx context.Context, scope string) (agent.Settings, error)
 	PutSettings(ctx context.Context, scope string, p SettingsPatch, by string) (agent.Settings, error)
-	// SetInstructionsSHA records the revision a Team agent session read and
+	// SetInstructionsSHA records the revision a Tenant agent session read and
 	// appends one event, in one write. The lease owner must hold a running session.
 	SetInstructionsSHA(ctx context.Context, id uuid.UUID, owner, sha string, ev agent.EventInput) error
-	// PutTeamAgentUnattended sets one TeamAgent's unattended grant, or removes it
+	// PutTenantAgentUnattended sets one TenantAgent's unattended grant, or removes it
 	// when grant is nil. It writes the global scope only.
-	PutTeamAgentUnattended(ctx context.Context, key string, grant *agent.UnattendedGrant, by string) error
+	PutTenantAgentUnattended(ctx context.Context, key string, grant *agent.UnattendedGrant, by string) error
 }
 
 // SweptSession names one session that a sweep ended, and the sequence number

@@ -7,12 +7,12 @@ metadata:
     app.kubernetes.io/component: varroa-agent
     {{- include "varroa.labels" . | nindent 4 }}
 rules:
-  # The cache watches TeamAgent, Team, and CatalogSource objects in every
-  # namespace. The status ticker writes only the TeamAgent status.
+  # The cache watches TenantAgent, Tenant, and CatalogSource objects in every
+  # namespace. The status ticker writes only the TenantAgent status.
   - apiGroups: ["varroa.dev"]
-    resources: ["teamagents", "teams", "catalogsources"]
+    resources: ["tenantagents", "tenants", "catalogsources"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["varroa.dev"]
-    resources: ["teamagents/status"]
+    resources: ["tenantagents/status"]
     verbs: ["update", "patch"]
 {{- end }}

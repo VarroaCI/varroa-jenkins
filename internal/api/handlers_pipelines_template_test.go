@@ -98,7 +98,7 @@ func getPipelineJobTemplate(t *testing.T, client *fakeResourceClient, reader *fa
 	authz := pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a")
 	srv := pipelinesTestServer(client, authz, reader, nil)
 	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/ctrl-a/jobs/"+jobPath,
-		map[string]string{"team": "ctrl-a", "job": jobPath})
+		map[string]string{"tenant": "ctrl-a", "job": jobPath})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -192,12 +192,12 @@ func TestHandleGetPipelineJob_ItemsDeclaredTemplate(t *testing.T) {
 	}
 }
 
-// TestHandleGetPipelineJob_PlacedTeamTemplateFromTenantBundle asserts
-// design D13 on the job-detail path: a placed Team's items-declared job
-// resolves its template version against the Team's own tenant bundle
+// TestHandleGetPipelineJob_PlacedTenantTemplateFromTenantBundle asserts
+// design D13 on the job-detail path: a placed Tenant's items-declared job
+// resolves its template version against the Tenant's own tenant bundle
 // (spec.pipelines.composedBundleRef), not the cell's, so a version the
 // cell bundle does not carry is still found.
-func TestHandleGetPipelineJob_PlacedTeamTemplateFromTenantBundle(t *testing.T) {
+func TestHandleGetPipelineJob_PlacedTenantTemplateFromTenantBundle(t *testing.T) {
 	client := newFakeResourceClient()
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {
@@ -218,7 +218,7 @@ func TestHandleGetPipelineJob_PlacedTeamTemplateFromTenantBundle(t *testing.T) {
 	client.configMaps = map[string]map[string]string{
 		// The cell's own composed items.yaml carries the cell's items only.
 		// The tenant's items and templates come from the tenant bundle; the
-		// cell re-roots the items under the Team folder when it assembles.
+		// cell re-roots the items under the Tenant folder when it assembles.
 		"bundle-cell-content": {"items.yaml": "items:\n  - kind: pipeline\n    name: hello-varroa\n"},
 		"bundle-tenant-content": {
 			"items.yaml": `
@@ -230,17 +230,17 @@ items:
         template: payments-template
         templateVersion: "1"
 `,
-			"pipeline-templates.yaml": placedTeamMarkerTemplatesYAML("payments-template", "1.4.0"),
+			"pipeline-templates.yaml": placedTenantMarkerTemplatesYAML("payments-template", "1.4.0"),
 		},
 	}
-	seedTeam(t, client.crdStore, placedTeamObjectWithBundle("payments", "core", "test-ns", "ctrl-a", "bundle-tenant", "test-ns"))
+	seedTenant(t, client.crdStore, placedTenantObjectWithBundle("payments", "core", "test-ns", "ctrl-a", "test-ns"))
 
 	authz := resolverAuthorizer("payments")
 	reader := newFakeRecordReader()
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Fsvc-items",
-		map[string]string{"team": "payments", "job": "payments/svc-items"})
+		map[string]string{"tenant": "payments", "job": "payments/svc-items"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -269,11 +269,11 @@ func TestHandleGetPipelineJob_JenkinsfileJobHasNoTemplate(t *testing.T) {
 	}
 }
 
-// TestPlacedTeamListsTenantItemsNotCellItems asserts that a placed Team's
+// TestPlacedTenantListsTenantItemsNotCellItems asserts that a placed Tenant's
 // pipeline surface reads the tenant's own bundle items.yaml, re-rooted
-// under the Team folder, and never the cell's bundle: a warm cell carries
+// under the Tenant folder, and never the cell's bundle: a warm cell carries
 // the starter bundle, whose root-level items belong to no tenant.
-func TestPlacedTeamListsTenantItemsNotCellItems(t *testing.T) {
+func TestPlacedTenantListsTenantItemsNotCellItems(t *testing.T) {
 	client := newFakeResourceClient()
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {
@@ -295,10 +295,10 @@ func TestPlacedTeamListsTenantItemsNotCellItems(t *testing.T) {
 		"bundle-cell-content":   {"items.yaml": "items:\n  - kind: pipeline\n    name: hello-varroa\n"},
 		"bundle-tenant-content": {"items.yaml": "items:\n  - kind: pipeline\n    name: app-x\n    definition:\n      script: \"pipeline {}\"\n    parameters:\n      - string:\n          name: ENV\n          defaultValue: staging\n"},
 	}
-	seedTeam(t, client.crdStore, placedTeamObjectWithBundle("payments", "core", "test-ns", "ctrl-a", "bundle-tenant", "test-ns"))
+	seedTenant(t, client.crdStore, placedTenantObjectWithBundle("payments", "core", "test-ns", "ctrl-a", "test-ns"))
 	srv := pipelinesTestServer(client, resolverAuthorizer("payments"), newFakeRecordReader(), nil)
 
-	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/payments", map[string]string{"team": "payments"})
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/payments", map[string]string{"tenant": "payments"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -317,7 +317,7 @@ func TestPlacedTeamListsTenantItemsNotCellItems(t *testing.T) {
 	}
 
 	rec = doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Fapp-x",
-		map[string]string{"team": "payments", "job": "payments/app-x"})
+		map[string]string{"tenant": "payments", "job": "payments/app-x"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("detail status = %d, body = %s", rec.Code, rec.Body.String())
 	}

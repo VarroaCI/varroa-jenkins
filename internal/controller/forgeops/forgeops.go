@@ -1,6 +1,6 @@
 // Package forgeops answers the operator forge verbs: check, read, issue, and
-// pullrequest. A request names a Team and a repository. The operator on the Team's shard
-// owner reads the Team's tenant credentials, picks one that may push, and
+// pullrequest. A request names a Tenant and a repository. The operator on the Tenant's shard
+// owner reads the Tenant's tenant credentials, picks one that may push, and
 // calls the forge. The package never imports internal/controller.
 package forgeops
 
@@ -62,9 +62,9 @@ func New(store crdstore.Backend, secrets SecretReader, h *http.Client, logger *s
 	}
 }
 
-// ShardKey returns the ring key of a Team. Every forge verb and every
-// Team-owned operation keys on this one form.
-func ShardKey(team string) string { return "team/" + team }
+// ShardKey returns the ring key of a Tenant. Every forge verb and every
+// Tenant-owned operation keys on this one form.
+func ShardKey(tenant string) string { return "tenant/" + tenant }
 
 // replyError is a reply code with its message. Its text never holds a
 // response body or a credential value.
@@ -122,14 +122,14 @@ func forgeFailure(err error, credID string) error {
 // a base branch with a commit, no Jenkinsfile, and no proposal branch.
 func (o *Ops) Check(ctx context.Context, req forgeapi.CheckRequest) forgeapi.CheckReply {
 	fail := func(err error) forgeapi.CheckReply { return forgeapi.CheckReply{Status: asStatus(err)} }
-	if req.Team == "" {
-		return fail(replyErr(forgeapi.CodeInvalidRequest, "team is required"))
+	if req.Tenant == "" {
+		return fail(replyErr(forgeapi.CodeInvalidRequest, "tenant is required"))
 	}
 	repo, err := forgeurl.NormalizeRepoURL(req.Repo)
 	if err != nil {
 		return fail(replyErr(forgeapi.CodeRepoURLInvalid, "%v", err))
 	}
-	creds, err := o.chooseCredential(ctx, req.Team, repo.Host)
+	creds, err := o.chooseCredential(ctx, req.Tenant, repo.Host)
 	if err != nil {
 		return fail(err)
 	}
@@ -181,8 +181,8 @@ func (o *Ops) Check(ctx context.Context, req forgeapi.CheckRequest) forgeapi.Che
 // Every request check runs before the first forge call.
 func (o *Ops) Read(ctx context.Context, req forgeapi.ReadRequest) forgeapi.ReadReply {
 	fail := func(err error) forgeapi.ReadReply { return forgeapi.ReadReply{Status: asStatus(err)} }
-	if req.Team == "" {
-		return fail(replyErr(forgeapi.CodeInvalidRequest, "team is required"))
+	if req.Tenant == "" {
+		return fail(replyErr(forgeapi.CodeInvalidRequest, "tenant is required"))
 	}
 	repo, err := forgeurl.NormalizeRepoURL(req.Repo)
 	if err != nil {
@@ -200,7 +200,7 @@ func (o *Ops) Read(ctx context.Context, req forgeapi.ReadRequest) forgeapi.ReadR
 	if req.Limit != 0 && (req.Limit < 1 || req.Limit > forgeapi.MaxRead) {
 		return fail(replyErr(forgeapi.CodeInvalidRequest, "limit must be 1 to %d", forgeapi.MaxRead))
 	}
-	creds, err := o.chooseCredential(ctx, req.Team, repo.Host)
+	creds, err := o.chooseCredential(ctx, req.Tenant, repo.Host)
 	if err != nil {
 		return fail(err)
 	}

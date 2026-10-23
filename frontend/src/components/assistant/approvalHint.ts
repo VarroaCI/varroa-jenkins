@@ -36,9 +36,9 @@ export function approveBlockReason(
     }
     case "job": {
       const slash = a.targetRef.indexOf("/");
-      const team = slash < 0 ? a.targetRef : a.targetRef.slice(0, slash);
+      const tenant = slash < 0 ? a.targetRef : a.targetRef.slice(0, slash);
       const job = slash < 0 ? "" : a.targetRef.slice(slash + 1);
-      return canAccessTenantPipeline(perms, team, "write", job)
+      return canAccessTenantPipeline(perms, tenant, "write", job)
         ? null
         : "You cannot write to this job's pipeline.";
     }

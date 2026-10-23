@@ -89,10 +89,10 @@ func TestHandleGetRun_SurvivesDeletedCell(t *testing.T) {
 	}
 }
 
-// TestHandleGetRun_TenantFolderForPlacedTeam asserts a run stored under
-// a placed Team's tenant (no "/", per rbac.ParseTenant) carries that
-// Team name as tenantFolder.
-func TestHandleGetRun_TenantFolderForPlacedTeam(t *testing.T) {
+// TestHandleGetRun_TenantFolderForPlacedTenant asserts a run stored under
+// a placed Tenant's tenant (no "/", per rbac.ParseTenant) carries that
+// Tenant name as tenantFolder.
+func TestHandleGetRun_TenantFolderForPlacedTenant(t *testing.T) {
 	reader := newFakeRecordReader()
 	reader.runs["r1"] = recordstore.Run{RunID: "r1", Cluster: "core", Tenant: "payments", JobPath: "payments/app-a", Status: "COMPLETED"}
 	client := newFakeResourceClient()
@@ -111,7 +111,7 @@ func TestHandleGetRun_TenantFolderForPlacedTeam(t *testing.T) {
 		t.Fatalf("tenantFolder = %q, want %q", detail.TenantFolder, "payments")
 	}
 	if detail.Tenant != "payments" {
-		t.Fatalf("tenant = %q, want %q for a Team tenant", detail.Tenant, "payments")
+		t.Fatalf("tenant = %q, want %q for a Tenant tenant", detail.Tenant, "payments")
 	}
 }
 
@@ -339,14 +339,14 @@ func TestPipelinesPaths_Answer503(t *testing.T) {
 		values     map[string]string
 		wantStatus int
 	}{
-		{"listPipelines-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListPipelines }, "/pipelines/ctrl-a", map[string]string{"team": "ctrl-a"}, http.StatusServiceUnavailable},
-		{"getPipelineJob-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleGetPipelineJob }, "/pipelines/ctrl-a/jobs/j", map[string]string{"team": "ctrl-a", "job": "j"}, http.StatusServiceUnavailable},
-		{"listRuns-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListRuns }, "/pipelines/ctrl-a/jobs/j/runs", map[string]string{"team": "ctrl-a", "job": "j"}, http.StatusServiceUnavailable},
+		{"listPipelines-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListPipelines }, "/pipelines/ctrl-a", map[string]string{"tenant": "ctrl-a"}, http.StatusServiceUnavailable},
+		{"getPipelineJob-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleGetPipelineJob }, "/pipelines/ctrl-a/jobs/j", map[string]string{"tenant": "ctrl-a", "job": "j"}, http.StatusServiceUnavailable},
+		{"listRuns-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListRuns }, "/pipelines/ctrl-a/jobs/j/runs", map[string]string{"tenant": "ctrl-a", "job": "j"}, http.StatusServiceUnavailable},
 		{"getRun-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleGetRun }, "/runs/r1", map[string]string{"run": "r1"}, http.StatusServiceUnavailable},
 		{"listRunArtifacts-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListRunArtifacts }, "/runs/r1/artifacts", map[string]string{"run": "r1"}, http.StatusServiceUnavailable},
 		{"listRunTests-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListRunTests }, "/runs/r1/tests", map[string]string{"run": "r1"}, http.StatusServiceUnavailable},
 		{"listRunChanges-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListRunChanges }, "/runs/r1/changes", map[string]string{"run": "r1"}, http.StatusServiceUnavailable},
-		{"listJobTestCaseHistory-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListJobTestCaseHistory }, "/pipelines/ctrl-a/jobs/j/tests/C%2Fn", map[string]string{"team": "ctrl-a", "job": "j", "case": "C/n"}, http.StatusServiceUnavailable},
+		{"listJobTestCaseHistory-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListJobTestCaseHistory }, "/pipelines/ctrl-a/jobs/j/tests/C%2Fn", map[string]string{"tenant": "ctrl-a", "job": "j", "case": "C/n"}, http.StatusServiceUnavailable},
 		{"downloadRunArtifact-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleDownloadRunArtifact }, "/runs/r1/artifacts/a.txt", map[string]string{"run": "r1", "path": "a.txt"}, http.StatusServiceUnavailable},
 
 		// A plain run read needs no blob store: a nil store only drops the
@@ -358,8 +358,8 @@ func TestPipelinesPaths_Answer503(t *testing.T) {
 		// The artifact download needs one.
 		{"downloadRunArtifact-nilBlobStore", newFakeRecordReaderWithRun(), nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleDownloadRunArtifact }, "/runs/r1/artifacts/a.txt", map[string]string{"run": "r1", "path": "a.txt"}, http.StatusServiceUnavailable},
 
-		{"listPipelines-schemaTooOld", schemaTooOldReader, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListPipelines }, "/pipelines/ctrl-a", map[string]string{"team": "ctrl-a"}, http.StatusServiceUnavailable},
-		{"listJobTestCaseHistory-schemaTooOld", schemaTooOldReader, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListJobTestCaseHistory }, "/pipelines/ctrl-a/jobs/j/tests/C%2Fn", map[string]string{"team": "ctrl-a", "job": "j", "case": "C/n"}, http.StatusServiceUnavailable},
+		{"listPipelines-schemaTooOld", schemaTooOldReader, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListPipelines }, "/pipelines/ctrl-a", map[string]string{"tenant": "ctrl-a"}, http.StatusServiceUnavailable},
+		{"listJobTestCaseHistory-schemaTooOld", schemaTooOldReader, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListJobTestCaseHistory }, "/pipelines/ctrl-a/jobs/j/tests/C%2Fn", map[string]string{"tenant": "ctrl-a", "job": "j", "case": "C/n"}, http.StatusServiceUnavailable},
 		{"getRun-schemaTooOld", schemaTooOldReader, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleGetRun }, "/runs/r1", map[string]string{"run": "r1"}, http.StatusServiceUnavailable},
 	}
 

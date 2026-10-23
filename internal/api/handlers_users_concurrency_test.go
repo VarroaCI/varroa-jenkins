@@ -100,7 +100,7 @@ func TestHandleCreateUser_ExistingNameAnswers409(t *testing.T) {
 			Namespace: "varroa-system",
 			Labels: map[string]string{
 				v1alpha1.LabelManagedBy: v1alpha1.ManagedByLocal,
-				"team":                  "ops",
+				"tenant":                "ops",
 			},
 			Annotations: map[string]string{v1alpha1.AnnotationOIDCFormerIdentifiers: `["bob"]`},
 		},
@@ -121,7 +121,7 @@ func TestHandleCreateUser_ExistingNameAnswers409(t *testing.T) {
 	if got.Spec.Email != "alice@example.com" {
 		t.Errorf("email = %q, want alice@example.com", got.Spec.Email)
 	}
-	if got.Labels["team"] != "ops" || got.Labels[v1alpha1.LabelManagedBy] != v1alpha1.ManagedByLocal {
+	if got.Labels["tenant"] != "ops" || got.Labels[v1alpha1.LabelManagedBy] != v1alpha1.ManagedByLocal {
 		t.Errorf("labels = %v, want the existing labels", got.Labels)
 	}
 	if got.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers] != `["bob"]` {

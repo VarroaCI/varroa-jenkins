@@ -1,6 +1,6 @@
 metadata:
   name: ci-00000000-cell
-  namespace: team-a
+  namespace: tenant-a
 spec:
   egress:
   - ports:

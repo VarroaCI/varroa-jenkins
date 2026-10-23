@@ -49,17 +49,17 @@ cluster:
   name: core
 
 # ---------------------------------------------------------------------------
-# Cells — multi-tenant Jenkins controllers that host more than one team.
+# Cells — multi-tenant Jenkins controllers that host more than one tenant.
 # ---------------------------------------------------------------------------
 # Each value below is the default of a CellPool the operator creates. It
 # configures no live pool. To change a live pool, edit the CellPool object
 # with kubectl, with varroactl scale, or through the dashboard. A Helm
 # upgrade never rewrites the spec of a pool that already exists.
 cells:
-  # Cells the operator keeps ready for placement, so a new Team does not
+  # Cells the operator keeps ready for placement, so a new Tenant does not
   # wait on a StatefulSet to boot.
   warmPool:
-    # -- Create a CellPool for each profile a pipelines Team requests. Off by
+    # -- Create a CellPool for each profile a pipelines Tenant requests. Off by
     # default: no pool and no cell exist until an operator turns this on or
     # applies a CellPool by hand.
     enabled: false
@@ -392,8 +392,8 @@ dex:
     #       loadAllGroups: true
     #
     # Example — Forgejo or Gitea (gitea connector):
-    # Groups arrive as "<org>" and "<org>:<team>", for example "acme:Owners".
-    # A user on no team of an org gets no group for that org.
+    # Groups arrive as "<org>" and "<org>:<tenant>", for example "acme:Owners".
+    # A user on no tenant of an org gets no group for that org.
     # useLoginAsID makes the forge login the identity.
     # connectors:
     #   - type: gitea
@@ -1166,12 +1166,12 @@ assistant:
   budgets:
     session: 200000
     userDay: 1000000
-    teamDay: 2000000
+    tenantDay: 2000000
     steps: 32
   # -- How long an approval waits for a person before it expires. Use m or h.
   approvalExpiry: 24h
-# -- Team agent runner: the varroa-agent Deployment that runs sessions for
-# Team agent objects. Needs assistant, recordStore, and bff enabled. Core
+# -- Tenant agent runner: the varroa-agent Deployment that runs sessions for
+# Tenant agent objects. Needs assistant, recordStore, and bff enabled. Core
 # install only; a hive member renders nothing.
 agentRunner:
   # -- Render the varroa-agent Deployment and its RBAC, NATS user, and policy.

@@ -4135,7 +4135,7 @@ spec:
                                 type: string
                               tenant:
                                 description: |-
-                                  Tenant is the Team name that owns the job. Empty when the plugin
+                                  Tenant is the Tenant name that owns the job. Empty when the plugin
                                   cannot resolve a tenant.
                                 type: string
                             required:
@@ -4168,7 +4168,7 @@ spec:
                     items:
                       description: |-
                         CellPendingTenant is one placement claim on a cell. The placement pass
-                        writes it before it writes the Team fence, so a pool drain that re-read
+                        writes it before it writes the Tenant fence, so a pool drain that re-read
                         the cell earlier cannot delete the cell the tenant is about to use.
                       properties:
                         claimedAt:
@@ -4179,7 +4179,7 @@ spec:
                           format: date-time
                           type: string
                         tenant:
-                          description: Tenant is the Team name this claim belongs
+                          description: Tenant is the Tenant name this claim belongs
                             to.
                           type: string
                       required:
@@ -4268,7 +4268,7 @@ spec:
                           format: int32
                           type: integer
                         tenant:
-                          description: Tenant is the Team name this entry belongs
+                          description: Tenant is the Tenant name this entry belongs
                             to.
                           type: string
                         truncated:
@@ -4320,7 +4320,7 @@ spec:
                           description: Reason names the warning class.
                           type: string
                         tenant:
-                          description: Tenant is the Team name the warning is about.
+                          description: Tenant is the Tenant name the warning is about.
                           type: string
                       required:
                       - message
@@ -4331,7 +4331,7 @@ spec:
                     type: array
                   tenants:
                     description: |-
-                      Tenants lists the Team names the placement pass has bound to this
+                      Tenants lists the Tenant names the placement pass has bound to this
                       cell.
                     items:
                       type: string

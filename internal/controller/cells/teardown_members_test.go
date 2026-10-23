@@ -16,19 +16,19 @@ import (
 // drops them.
 func TestTeardownWaitsForAMemberWhenTheScalarCellIsGone(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	team.Spec.Pipelines = nil
-	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
-	stillApplied := readyCell("cell-b", team.Name)
-	stillApplied.AppliedTenants = []string{team.Name}
+	tenant := slotTenant(2, 0)
+	tenant.Spec.Pipelines = nil
+	tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
+	stillApplied := readyCell("cell-b", tenant.Name)
+	stillApplied.AppliedTenants = []string{tenant.Name}
 	// The scalar cell, cell-a, is absent from the candidate set.
 	in.Cells = []CellCandidate{stillApplied}
-	status := placedWithMembers([]v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	})
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
@@ -36,17 +36,17 @@ func TestTeardownWaitsForAMemberWhenTheScalarCellIsGone(t *testing.T) {
 		t.Fatal("teardown released the finalizer while a member still holds the tenant")
 	}
 	cond := condition(status)
-	if cond == nil || cond.Reason != v1alpha1.TeamReasonTenantTeardownPending {
+	if cond == nil || cond.Reason != v1alpha1.TenantReasonTenantTeardownPending {
 		t.Fatalf("condition = %+v, want TenantTeardownPending", cond)
 	}
 	patch := patchFor(out, "cell-b")
-	if patch == nil || containsString(patch.Tenants, team.Name) {
+	if patch == nil || containsString(patch.Tenants, tenant.Name) {
 		t.Fatalf("the surviving member took no removal patch: %+v", out.CellPatches)
 	}
 
 	// The member drains, and the next tick completes the teardown.
 	in.Cells = []CellCandidate{readyCell("cell-b")}
-	out, err = Place(context.Background(), in, team, status)
+	out, err = Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place after the drain: %v", err)
 	}
@@ -63,16 +63,16 @@ func TestTeardownWaitsForAMemberWhenTheScalarCellIsGone(t *testing.T) {
 // completes the teardown at once.
 func TestTeardownEndsWhenTheScalarCellIsGoneAndEveryMemberDrained(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
-	team.Spec.Pipelines = nil
-	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+	tenant := slotTenant(2, 0)
+	tenant.Spec.Pipelines = nil
+	tenant.Finalizers = []string{v1alpha1.TenantFinalizerTenantPlacement}
 	in.Cells = []CellCandidate{readyCell("cell-b")}
-	status := placedWithMembers([]v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	})
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}

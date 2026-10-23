@@ -45,7 +45,7 @@ type Dependencies struct {
 	KeyVerifier  *apikey.Verifier
 	TicketIssuer *auth.TicketIssuer
 	Broadcaster  sse.EventSource
-	// RunFanout carries live run notifications to the team run stream. It is
+	// RunFanout carries live run notifications to the tenant run stream. It is
 	// nil in tests that do not exercise that stream.
 	RunFanout         sse.RunEventSource
 	LogBuffer         *logbuffer.LogBuffer
@@ -122,9 +122,9 @@ type Dependencies struct {
 	// the record store or the bus is off, so the note write answers 503.
 	RunNotePoster RunNotePoster
 
-	// TeamAgents is the cached view of the TeamAgent, Team, and CatalogSource
-	// objects. Nil turns the Team agent tools off.
-	TeamAgents TeamAgentSource
+	// TenantAgents is the cached view of the TenantAgent, Tenant, and CatalogSource
+	// objects. Nil turns the Tenant agent tools off.
+	TenantAgents TenantAgentSource
 	// ForgeRelay sends forge checks, reads, pull requests, and issues to the
 	// operator of a cluster. Nil turns the forge-backed routes and tools off.
 	ForgeRelay ForgeRelay
@@ -151,7 +151,7 @@ type Dependencies struct {
 	// path must check for nil before use.
 	BlobStore blob.Store
 
-	// TenantResolver maps a pipelines {team} URL segment onto record-store
+	// TenantResolver maps a pipelines {tenant} URL segment onto record-store
 	// tenants. Nil in tests that do not exercise the pipelines surface.
 	TenantResolver TenantResolver
 

@@ -25,16 +25,16 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
 - `register.go` — `addKnownTypes` is the single registration list. Kinds:
   `Controller`, `VarroaRole`/`VarroaRoleBinding`, `JenkinsRole`/`JenkinsRoleBinding`,
   `User`, `Group`, `PodTemplate`, `CatalogSource`, `CatalogItem`,
-  `ComposedBundle`, `ProvisioningDefaults`, `JenkinsVersionProfile`, `Team`,
-  `BroodOperation`, `BroodSchedule`, `Runner`, `TeamAgent`, `CellPool`. New Kind → add here + `zz_generated.deepcopy.go`.
+  `ComposedBundle`, `ProvisioningDefaults`, `JenkinsVersionProfile`, `Tenant`,
+  `BroodOperation`, `BroodSchedule`, `Runner`, `TenantAgent`, `CellPool`. New Kind → add here + `zz_generated.deepcopy.go`.
   `BuildMetric` does not exist: build records live in the record store
   (`internal/recordstore`), not a CRD.
-  `TeamAgent` is namespaced. Its `unattendedWrites` enum is generated from
-  `policy.UnattendedEligible` by `hack/gen-teamagent-enum`, which
+  `TenantAgent` is namespaced. Its `unattendedWrites` enum is generated from
+  `policy.UnattendedEligible` by `hack/gen-tenantagent-enum`, which
   `go generate ./api/v1alpha1/...` runs. `make generate-crds` runs it first.
   `TestUnattendedEnumMatchesPolicy` fails on a stale marker.
-  `Runner` is cluster-scoped, like `Team`: it binds one external machine to one
-  pipelines tenant (`RunnerSpec.Team`), immutable `team` and `launcher`
+  `Runner` is cluster-scoped, like `Tenant`: it binds one external machine to one
+  pipelines tenant (`RunnerSpec.Tenant`), immutable `tenant` and `launcher`
   (`ssh`/`inbound`), and six CEL `XValidation` rules. `RunnerSpec.Labels`
   carries `+kubebuilder:validation:MaxItems=64` and
   `+kubebuilder:validation:items:MaxLength=63` — a bound the label-token CEL
@@ -78,8 +78,8 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
 
   `cell.go` `CellHoldsTenant` is the per-cell "cell holds tenant" read. `cell.go`
   `PlacementCells` is the member reading order for the hold and warning reads: the
-  condition fold and `controller.TeamHeld` (the `bundles.teamcontent` reply and the BFF
-  local read). The member list views (`orderedTeamMembers`, `memberCellRefs`) keep their own order. The cell's `heldTenants` scan
+  condition fold and `controller.TenantHeld` (the `bundles.tenantcontent` reply and the BFF
+  local read). The member list views (`orderedTenantMembers`, `memberCellRefs`) keep their own order. The cell's `heldTenants` scan
   (`cell_items_assembly.go`) repeats the same rule for the cell's own drain; change
   both together.
 
@@ -133,7 +133,7 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   operator+BFF, including `ExternalURL`, the one builder of a controller's external URL. `bundleref.go` — `EffectiveBundleRef`/`StarterBundleName`, the
   one answer to "which ComposedBundle is this Controller using?"; it lives here
   precisely because the operator, the BFF, and brood filtering all need it.
-  `labels.go`/`team_consts.go` — label/annotation/condition string constants;
+  `labels.go`/`tenant_consts.go` — label/annotation/condition string constants;
   add new ones here, not as literals at call sites.
 - Policy decisions that both the operator enforces and the BFF pre-checks are
   methods on the policy type itself (`BroodPolicy.ExecuteGroovyAllowed`), not
@@ -141,17 +141,17 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   the disagreement is invisible until someone bypasses the BFF. Every such
   method must be nil-receiver safe: the CRDs carrying them are optional, and
   absence must mean the permissive default.
-  `TeamPipelinesSpec.Retention` (`*TeamPipelinesRetention`) sets the
+  `TenantPipelinesSpec.Retention` (`*TenantPipelinesRetention`) sets the
   record-store run windows: a tenant `runs` window and up to 64 `jobs`
-  rules (`TeamJobRetention`). Only an operator may write it.
-  `TeamPipelinesSpec.Exports` (`[]TeamExport`, at most 64 entries) lists the
+  rules (`TenantJobRetention`). Only an operator may write it.
+  `TenantPipelinesSpec.Exports` (`[]TenantExport`, at most 64 entries) lists the
   grants a pipelines tenant makes to other tenants: each entry names exactly
   one of `job` (a folder-relative job glob) or `locks` (bare
-  lock-name globs), plus `callers` (at least one Team name). The CEL rules on
-  `TeamExport` enforce the exactly-one-of, the non-empty job/locks/caller
+  lock-name globs), plus `callers` (at least one Tenant name). The CEL rules on
+  `TenantExport` enforce the exactly-one-of, the non-empty job/locks/caller
   entries, and that `job` never starts with `/`; the matching OpenAPI schema
-  (`TeamExport` in `components/schemas.yaml`, referenced from
-  `TeamPipelines.exports`) mirrors the same shape and requires `callers`.
+  (`TenantExport` in `components/schemas.yaml`, referenced from
+  `TenantPipelines.exports`) mirrors the same shape and requires `callers`.
 - CEL rule tests (`crd_cel_test.go`) load each generated CRD from
   `charts/varroa/crds/` and run its `x-kubernetes-validations` through the
   apiserver validator (`k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel`).
@@ -160,10 +160,10 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   missing case. `schemaShadowed` lists the only rules exempt from a reject case:
   the schema refuses the value first. Add an entry only with a reason.
   A rule that reads an optional field without `has()` fails with `evaluating rule`.
-- `Profile` and `AgentNamespace` in `TeamPipelinesSpec`, and `Callers` in
-  `TeamExport`, are required in the CRD schema (`+kubebuilder:validation:Required`).
+- `Profile` and `AgentNamespace` in `TenantPipelinesSpec`, and `Callers` in
+  `TenantExport`, are required in the CRD schema (`+kubebuilder:validation:Required`).
   A pipelines block names a profile and an agent namespace. An export names callers.
-  The OpenAPI `TeamPipelines` schema requires both, with `minLength: 1`, and `TeamExport`
+  The OpenAPI `TenantPipelines` schema requires both, with `minLength: 1`, and `TenantExport`
   requires `callers`.
 - `zz_generated.deepcopy.go` — header claims controller-gen, but **never run
   `controller-gen object`** — nukes this file on this type set. Hand-add
@@ -194,7 +194,7 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   {ns}/{name}/plugins` serves the full classified inventory from the read
   model, cross-checked against the status.
 
-- `Team.spec.pipelines.concurrencyLimits` and `CellPool.spec.maxRunsPerTenant` are the concurrency cap fields. A tenant pipelines admin may write `concurrencyLimits` only. The cell pool field is operator-only.
+- `Tenant.spec.pipelines.concurrencyLimits` and `CellPool.spec.maxRunsPerTenant` are the concurrency cap fields. A tenant pipelines admin may write `concurrencyLimits` only. The cell pool field is operator-only.
 
 ## Work Guidance
 

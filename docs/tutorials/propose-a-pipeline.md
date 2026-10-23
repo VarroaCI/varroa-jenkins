@@ -6,12 +6,12 @@ review the file, approve the proposal, and merge the pull request on the forge.
 ## Before you start
 
 - The assistant is on with a provider, and your switch is on.
-- The team is placed on a cell and has no job yet.
-- You hold the tenant write grant for the team.
+- The tenant is placed on a cell and has no job yet.
+- You hold the tenant write grant for the tenant.
 
 ## Add a forge credential
 
-Create a Secret in the team's agent namespace, `spec.pipelines.agentNamespace`. Set the label
+Create a Secret in the tenant's agent namespace, `spec.pipelines.agentNamespace`. Set the label
 `varroa.dev/tenant-credential: "true"`. Set the annotations `varroa.dev/credential-id`,
 `varroa.dev/credential-kind` (`usernamePassword` or `secretText`), and
 `varroa.dev/allowed-hosts`, for example `git.example.org`. The token needs write access to contents and pull requests.
@@ -19,7 +19,7 @@ If the cell has a `gitEgress` policy, list the forge address there.
 
 ## Propose and review
 
-1. On the team home, select **Propose a pipeline from a repo**.
+1. On the tenant home, select **Propose a pipeline from a repo**.
 2. Enter the repository URL, and select
    **Propose**.
 3. Read each file in full. Then select **Approve** or **Deny**.
@@ -53,8 +53,8 @@ The proposal route answers these codes.
 | `kill_switch` | 503 | Wait for the assistant to resume. |
 | `invalid_request` | 400 | Send a body with a `repo` field only. |
 | `internal` | 500 | Retry. Report the code if it repeats. |
-| `not_found` | 404 | Check the repository URL and the team. |
-| (no code) | 403 or 404 | Check the team name and your write grant. |
+| `not_found` | 404 | Check the repository URL and the tenant. |
+| (no code) | 403 or 404 | Check the tenant name and your write grant. |
 
 ### Errors at approval
 
@@ -64,5 +64,5 @@ A failed approval shows the code at the start of the error text.
 |---|---|
 | `proposal_base_moved` | The base branch moved after the check. Start a new proposal. |
 | `request_expired` | Approve the call again. |
-| `pull_request_busy` | Another pull request for the team runs. Wait, then approve the call again. |
+| `pull_request_busy` | Another pull request for the tenant runs. Wait, then approve the call again. |
 

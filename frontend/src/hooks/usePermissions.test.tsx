@@ -374,7 +374,7 @@ describe("canAccessTenantPipeline", () => {
   // The glob grammar itself is covered once, in src/lib/jobglob.test.ts.
   // That file holds the corpus the Go evaluator's own test mirrors.
 
-  it("refuses a Team tenant with no matching entry (no fallback)", () => {
+  it("refuses a Tenant tenant with no matching entry (no fallback)", () => {
     const perms = {
       global: { pipelines: { read: true } },
       scopes: [],

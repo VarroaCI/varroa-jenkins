@@ -28,10 +28,10 @@ const (
 	prBranch = "varroa/propose-pipeline"
 )
 
-// prArgs returns valid open_pull_request arguments for team proposal-team.
+// prArgs returns valid open_pull_request arguments for tenant proposal-team.
 func prArgs() map[string]any {
 	return map[string]any{
-		"team":   "proposal-team",
+		"tenant": "proposal-team",
 		"repo":   prRepo,
 		"branch": prBranch,
 		"title":  "Add a Jenkinsfile proposed by Varroa",
@@ -40,12 +40,12 @@ func prArgs() map[string]any {
 	}
 }
 
-// proposeDeps returns the team agent deps with the forge fake and a sink.
-func proposeDeps(t *testing.T) (*api.Dependencies, *teamAgentFakes, *recordingSink) {
+// proposeDeps returns the tenant agent deps with the forge fake and a sink.
+func proposeDeps(t *testing.T) (*api.Dependencies, *tenantAgentFakes, *recordingSink) {
 	t.Helper()
-	f := newTeamAgentFakes()
+	f := newTenantAgentFakes()
 	sink := &recordingSink{}
-	return teamAgentDeps(t, f, sink), f, sink
+	return tenantAgentDeps(t, f, sink), f, sink
 }
 
 // readerOnlyClaims is a person with the read check on proposal-team and no
@@ -80,7 +80,7 @@ func sessionDeps(t *testing.T, deps *api.Dependencies) string {
 	sess := agent.Session{
 		ID: id, Kind: agent.KindAssistant, Principal: guardClaims.Subject, Cluster: "core",
 		State: agent.StateRunning, Trigger: agent.TriggerManual,
-		Context:  map[string]any{agent.CtxRepo: prRepo, agent.CtxTeam: "proposal-team", "baseRevision": "1111111111111111111111111111111111111111"},
+		Context:  map[string]any{agent.CtxRepo: prRepo, agent.CtxTenant: "proposal-team", "baseRevision": "1111111111111111111111111111111111111111"},
 		Provider: "smoke", Model: "m1", KeySource: agent.KeySourceChart, DataSharing: agent.DataLogs,
 		StartedAt: time.Now(),
 	}
@@ -140,11 +140,11 @@ func TestOpenPullRequest_ToolErrors(t *testing.T) {
 		name   string
 		mutate func(args map[string]any)
 		claims func() (*auth.Claims, *api.Authorizer)
-		team   string
+		tenant string
 		code   string
 		relay  bool
 	}{
-		{name: "team not found", team: "nope", code: "not_found"},
+		{name: "tenant not found", tenant: "nope", code: "not_found"},
 		{name: "read only", claims: readerOnlyClaims, code: "forbidden"},
 		{name: "repo url", mutate: func(a map[string]any) { a["repo"] = "http://git.example.org/x/y" }, code: "repo_url_invalid"},
 		{name: "branch dots", mutate: func(a map[string]any) { a["branch"] = "..x" }, code: "invalid_argument"},
@@ -185,18 +185,18 @@ func TestOpenPullRequest_ToolErrors(t *testing.T) {
 				claims, authz = c.claims()
 				deps.Authorizer = authz
 			}
-			if c.team == "" {
-				c.team = "proposal-team"
+			if c.tenant == "" {
+				c.tenant = "proposal-team"
 			}
 			args := prArgs()
-			args["team"] = c.team
+			args["tenant"] = c.tenant
 			if c.mutate != nil {
 				c.mutate(args)
 			}
 			if c.relay {
 				f.prReply = forgeapi.PullRequestReply{Status: forgeapi.Status{Code: c.code, Error: "refused"}}
 			}
-			text, failed := callTeamTool(t, deps, claims, "open_pull_request", args)
+			text, failed := callTenantTool(t, deps, claims, "open_pull_request", args)
 			if !failed || !strings.Contains(text, c.code+": ") {
 				t.Fatalf("want error code %s, got failed=%v text=%s", c.code, failed, text)
 			}
@@ -214,7 +214,7 @@ func TestOpenPullRequest_ToolErrors(t *testing.T) {
 // the commit message, and the activity source of a call outside a session.
 func TestOpenPullRequest_OutsideSessionBodyAndCommit(t *testing.T) {
 	deps, f, sink := proposeDeps(t)
-	text, failed := callTeamTool(t, deps, guardClaims, "open_pull_request", prArgs())
+	text, failed := callTenantTool(t, deps, guardClaims, "open_pull_request", prArgs())
 	if failed {
 		t.Fatalf("call failed: %s", text)
 	}
@@ -229,7 +229,7 @@ func TestOpenPullRequest_OutsideSessionBodyAndCommit(t *testing.T) {
 	if req.CommitMessage != "Add a Jenkinsfile proposed by Varroa" {
 		t.Fatalf("commit message = %q", req.CommitMessage)
 	}
-	if req.Repo != prRepo || req.Team != "proposal-team" || req.Branch != prBranch {
+	if req.Repo != prRepo || req.Tenant != "proposal-team" || req.Branch != prBranch {
 		t.Fatalf("relay request = %+v", req)
 	}
 	if len(sink.events) == 0 {
@@ -286,7 +286,7 @@ func TestOpenPullRequest_InSessionForeignRepo(t *testing.T) {
 func TestOpenPullRequest_ReplyErrorIsToolError(t *testing.T) {
 	deps, f, sink := proposeDeps(t)
 	f.prReply = forgeapi.PullRequestReply{Status: forgeapi.Status{Code: "proposal_branch_exists", Error: "branch exists"}}
-	text, failed := callTeamTool(t, deps, guardClaims, "open_pull_request", prArgs())
+	text, failed := callTenantTool(t, deps, guardClaims, "open_pull_request", prArgs())
 	if !failed || !strings.Contains(text, "proposal_branch_exists: branch exists") {
 		t.Fatalf("failed=%v text=%s", failed, text)
 	}
@@ -300,7 +300,7 @@ func TestOpenPullRequest_ReplyErrorIsToolError(t *testing.T) {
 func TestOpenPullRequest_RelayTimeoutAnswersOperatorTimeout(t *testing.T) {
 	deps, f, _ := proposeDeps(t)
 	f.prErr = fmt.Errorf("forge pullrequest request: %w", nats.ErrTimeout)
-	text, failed := callTeamTool(t, deps, guardClaims, "open_pull_request", prArgs())
+	text, failed := callTenantTool(t, deps, guardClaims, "open_pull_request", prArgs())
 	if !failed || !strings.Contains(text, "operator_timeout: ") || !strings.Contains(text, "can exist") || strings.Contains(text, "forge_unreachable") {
 		t.Fatalf("failed=%v text=%s", failed, text)
 	}
@@ -311,7 +311,7 @@ func TestOpenPullRequest_RelayTimeoutAnswersOperatorTimeout(t *testing.T) {
 func TestOpenPullRequest_RelayOtherErrorStaysForgeUnreachable(t *testing.T) {
 	deps, f, _ := proposeDeps(t)
 	f.prErr = errors.New("boom")
-	text, failed := callTeamTool(t, deps, guardClaims, "open_pull_request", prArgs())
+	text, failed := callTenantTool(t, deps, guardClaims, "open_pull_request", prArgs())
 	if !failed || !strings.Contains(text, "forge_unreachable: ") {
 		t.Fatalf("failed=%v text=%s", failed, text)
 	}
@@ -322,7 +322,7 @@ func TestOpenPullRequest_RelayOtherErrorStaysForgeUnreachable(t *testing.T) {
 func TestOpenPullRequest_NoResponderAnswersOperatorUnavailable(t *testing.T) {
 	deps, f, _ := proposeDeps(t)
 	f.prErr = fmt.Errorf("forge pullrequest request: %w", nats.ErrNoResponders)
-	text, failed := callTeamTool(t, deps, guardClaims, "open_pull_request", prArgs())
+	text, failed := callTenantTool(t, deps, guardClaims, "open_pull_request", prArgs())
 	if !failed || !strings.Contains(text, "operator_unavailable: ") || !strings.Contains(text, "No branch or pull request was created") || strings.Contains(text, "operator_timeout") {
 		t.Fatalf("failed=%v text=%s", failed, text)
 	}
@@ -331,11 +331,11 @@ func TestOpenPullRequest_NoResponderAnswersOperatorUnavailable(t *testing.T) {
 // TestReadRepoFile_InSessionForeignRepoRefused checks that a session reads
 // only its own repo.
 func TestReadRepoFile_InSessionForeignRepoRefused(t *testing.T) {
-	f := newTeamAgentFakes()
-	deps := teamAgentDeps(t, f, &recordingSink{})
+	f := newTenantAgentFakes()
+	deps := tenantAgentDeps(t, f, &recordingSink{})
 	sid := sessionDeps(t, deps)
 	text, failed := callInSession(t, deps, sid, "read_repo_file", map[string]any{
-		"team": "obj", "path": "x.md", "repo": "https://git.example.org/other",
+		"tenant": "obj", "path": "x.md", "repo": "https://git.example.org/other",
 	})
 	if !failed || !strings.Contains(text, "repo outside the session") {
 		t.Fatalf("failed=%v text=%s", failed, text)
@@ -348,11 +348,11 @@ func TestReadRepoFile_InSessionForeignRepoRefused(t *testing.T) {
 // TestReadRepoFile_InSessionDefaultsToSessionRepo checks that a read without
 // a repo reads the session's repo.
 func TestReadRepoFile_InSessionDefaultsToSessionRepo(t *testing.T) {
-	f := newTeamAgentFakes()
+	f := newTenantAgentFakes()
 	f.readReply.ReadDir = &forgeapi.ReadDir{Entries: []forgeapi.DirEntry{{Name: "go.mod"}}}
-	deps := teamAgentDeps(t, f, &recordingSink{})
+	deps := tenantAgentDeps(t, f, &recordingSink{})
 	sid := sessionDeps(t, deps)
-	text, failed := callInSession(t, deps, sid, "read_repo_file", map[string]any{"team": "obj", "path": "."})
+	text, failed := callInSession(t, deps, sid, "read_repo_file", map[string]any{"tenant": "obj", "path": "."})
 	if failed || !strings.Contains(text, "go.mod") {
 		t.Fatalf("failed=%v text=%s", failed, text)
 	}
@@ -361,15 +361,15 @@ func TestReadRepoFile_InSessionDefaultsToSessionRepo(t *testing.T) {
 	}
 }
 
-// TestReadRepoFile_RepoWorksWithoutTeamAgentCache checks that a read that
-// names a repo does not need the Team agent cache.
-func TestReadRepoFile_RepoWorksWithoutTeamAgentCache(t *testing.T) {
-	f := newTeamAgentFakes()
+// TestReadRepoFile_RepoWorksWithoutTenantAgentCache checks that a read that
+// names a repo does not need the Tenant agent cache.
+func TestReadRepoFile_RepoWorksWithoutTenantAgentCache(t *testing.T) {
+	f := newTenantAgentFakes()
 	f.readReply.ReadDir = &forgeapi.ReadDir{Entries: []forgeapi.DirEntry{{Name: "go.mod"}}}
-	deps := teamAgentDeps(t, f, &recordingSink{})
-	deps.TeamAgents = nil
-	text, failed := callTeamTool(t, deps, guardClaims, "read_repo_file", map[string]any{
-		"team": "obj", "path": ".", "repo": prRepo,
+	deps := tenantAgentDeps(t, f, &recordingSink{})
+	deps.TenantAgents = nil
+	text, failed := callTenantTool(t, deps, guardClaims, "read_repo_file", map[string]any{
+		"tenant": "obj", "path": ".", "repo": prRepo,
 	})
 	if failed || !strings.Contains(text, "go.mod") {
 		t.Fatalf("failed=%v text=%s", failed, text)

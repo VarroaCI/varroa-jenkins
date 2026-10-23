@@ -48,8 +48,8 @@ type Reader interface {
 	// longest waiting first.
 	ListJobRunWaits(ctx context.Context, cluster, tenant, jobPath string) ([]RunWait, error)
 
-	// TeamAgentSpend answers the Team agent rollup row of a Team on one UTC day.
-	TeamAgentSpend(ctx context.Context, team string, day time.Time) (TeamAgentSpendRow, error)
+	// TenantAgentSpend answers the Tenant agent rollup row of a Tenant on one UTC day.
+	TenantAgentSpend(ctx context.Context, tenant string, day time.Time) (TenantAgentSpendRow, error)
 
 	// TenantRetention answers the tenant's record-store windows. A tenant
 	// with no placement row, or no retention key, answers the zero policy.
@@ -168,7 +168,7 @@ type Reader interface {
 
 	// ListJobNotes answers the newest notes of one job, newest first,
 	// limited to limit rows (1 to 10; other values fall back to 10).
-	ListJobNotes(ctx context.Context, cluster, team, jobPath string, limit int) ([]RunNote, error)
+	ListJobNotes(ctx context.Context, cluster, tenant, jobPath string, limit int) ([]RunNote, error)
 
 	// ListAllFleetLocks answers every fleet_locks row of every cluster,
 	// with no tenant filter.
@@ -177,7 +177,7 @@ type Reader interface {
 	// ListTenantPlacements answers the slot-0 coordinate of every
 	// placement row of tenant, one row for each cluster. A member
 	// cluster's operator writes its tenants' rows through the core
-	// recorder, so this is the core's only view of a Team placed there.
+	// recorder, so this is the core's only view of a Tenant placed there.
 	ListTenantPlacements(ctx context.Context, tenant string) ([]TenantPlacement, error)
 
 	// ListAllTenantPlacements answers the slot-0 coordinate of every

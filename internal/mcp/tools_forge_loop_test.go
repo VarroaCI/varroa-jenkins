@@ -72,7 +72,7 @@ func loopRuntime(t *testing.T, deps *api.Dependencies, turns ...[]provider.Delta
 			Models: []string{"m1"}, Trust: agent.TrustInternal, Default: true,
 		}},
 		ExternalDataSharing: agent.DataLogs,
-		Budgets:             provider.Budgets{Session: 100000, UserDay: 1000000, TeamDay: 1000000, Steps: 32},
+		Budgets:             provider.Budgets{Session: 100000, UserDay: 1000000, TenantDay: 1000000, Steps: 32},
 		ApprovalExpiryText:  "1h",
 		ApprovalExpiry:      time.Hour,
 	}
@@ -134,7 +134,7 @@ type loopSession struct {
 
 // proposeArgs returns the open_pull_request arguments that the model sends.
 func proposeArgs(repo string) string {
-	return `{"team":"proposal-team","repo":"` + repo + `","branch":"varroa/propose-pipeline",` +
+	return `{"tenant":"proposal-team","repo":"` + repo + `","branch":"varroa/propose-pipeline",` +
 		`"title":"Add a Jenkinsfile proposed by Varroa","body":"why",` +
 		`"files":[{"path":"Jenkinsfile","content":"pipeline {}"}]}`
 }
@@ -177,7 +177,7 @@ func TestProposeLoop_ApproveOpensAndResumes(t *testing.T) {
 	deps, f, _ := proposeDeps(t)
 	f.readReply.ReadDir = &forgeapi.ReadDir{Entries: []forgeapi.DirEntry{{Name: "go.mod", Type: "file"}}}
 	rt := loopRuntime(t, deps,
-		loopCall("read_repo_file", `{"team":"proposal-team","path":".","repo":"`+prRepo+`"}`),
+		loopCall("read_repo_file", `{"tenant":"proposal-team","path":".","repo":"`+prRepo+`"}`),
 		loopCall("open_pull_request", proposeArgs(prRepo)),
 		loopText("the pull request is open"),
 	)

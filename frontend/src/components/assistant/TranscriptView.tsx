@@ -1,6 +1,6 @@
 // TranscriptView renders the rows of a transcript model: the user turns, the
 // assistant turns, the tool calls, and the errors. The caller passes the
-// approval actions, so the drawer and the Team agent page decide differently.
+// approval actions, so the drawer and the Tenant agent page decide differently.
 import type { ReactNode } from "react";
 import { Markdown } from "./Markdown";
 import { callLabel, cutUtf8, type TranscriptModel } from "./transcript";

@@ -5,20 +5,20 @@ base:
   metadata:
     name: runner-a
   spec:
-    team: team-a
+    tenant: tenant-a
     launcher: inbound
     remoteFS: /work
 cases:
-  - name: team changed
+  - name: tenant changed
     rule: |-
-      self.team == oldSelf.team
+      self.tenant == oldSelf.tenant
     field: spec
     old: {}
-    new: {spec: {team: team-b}}
+    new: {spec: {tenant: tenant-b}}
     want: reject
-  - name: numExecutors changed with team unchanged
+  - name: numExecutors changed with tenant unchanged
     rule: |-
-      self.team == oldSelf.team
+      self.tenant == oldSelf.tenant
     field: spec
     old: {}
     new: {spec: {numExecutors: 2}}
@@ -90,5 +90,5 @@ cases:
     rule: |-
       !has(self.labels) || self.labels.all(l, l.matches(r'^[A-Za-z0-9_.-]+$'))
     field: spec
-    new: {spec: {labels: ["team-a.v1_x"]}}
+    new: {spec: {labels: ["tenant-a.v1_x"]}}
     want: accept

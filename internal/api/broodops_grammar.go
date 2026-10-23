@@ -53,7 +53,7 @@ func validateAndPartition(req broodCreateRequest, localCluster string, known fun
 		ns = operatorNS
 	}
 
-	isTeamMode := ns != operatorNS
+	isTenantMode := ns != operatorNS
 
 	// Track whether the user explicitly set clusters (including empty array).
 	explicitClusters := req.Clusters != nil
@@ -115,9 +115,9 @@ func validateAndPartition(req broodCreateRequest, localCluster string, known fun
 		return nil, fmt.Errorf("cannot mix bare names with ns/name qualified names")
 	}
 
-	// Rule: 3-token names in team mode.
-	if isTeamMode && has3Token {
-		return nil, fmt.Errorf("cluster-qualified names not allowed in team namespace mode")
+	// Rule: 3-token names in tenant mode.
+	if isTenantMode && has3Token {
+		return nil, fmt.Errorf("cluster-qualified names not allowed in tenant namespace mode")
 	}
 
 	// Rule: clusters alongside qualified names (only when user explicitly set clusters).
@@ -140,9 +140,9 @@ func validateAndPartition(req broodCreateRequest, localCluster string, known fun
 		}
 	}
 
-	// Rule: team mode with >1 cluster.
-	if isTeamMode && len(clusters) > 1 {
-		return nil, fmt.Errorf("team namespace mode supports at most one target cluster")
+	// Rule: tenant mode with >1 cluster.
+	if isTenantMode && len(clusters) > 1 {
+		return nil, fmt.Errorf("tenant namespace mode supports at most one target cluster")
 	}
 
 	// Rule: unknown cluster anywhere.

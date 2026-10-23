@@ -93,9 +93,9 @@ func TestApproveRestart_ProceedsWhenOnlyTenantHomesChanged(t *testing.T) {
 	rec.homesFunc = func(context.Context, cells.HomesRequest) (cells.HomesResult, error) {
 		return cells.HomesResult{JobHomes: homes}, nil
 	}
-	crdstore.MustSeed(client.store, &v1alpha1.Team{
+	crdstore.MustSeed(client.store, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "team-a"},
-		Spec:       v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{}},
+		Spec:       v1alpha1.TenantSpec{Pipelines: &v1alpha1.TenantPipelinesSpec{}},
 	})
 	cr := testController("cell", "ns", v1alpha1.ControllerPhaseConnected)
 	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}

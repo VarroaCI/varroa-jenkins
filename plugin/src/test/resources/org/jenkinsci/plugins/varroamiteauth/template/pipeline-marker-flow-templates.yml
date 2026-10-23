@@ -21,12 +21,12 @@ unclassified:
             def message = varroaParams.message ?: ''
             echo 'template ran goVersion=' + varroaParams.goVersion + ' message=' + message
           }
-      - name: "team-a-only"
+      - name: "tenant-a-only"
         version: "1.0.0"
-        folder: "team-a"
+        folder: "tenant-a"
         parameters: |
           type: object
           additionalProperties: false
         uiSchema: |
           ui:order: ["*"]
-        jenkinsfile: "node { echo 'team-a template ran' }"
+        jenkinsfile: "node { echo 'tenant-a template ran' }"

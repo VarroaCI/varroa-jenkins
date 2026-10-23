@@ -34,7 +34,7 @@ func TestEnsureGrantsClientRunNotesSelectOnly(t *testing.T) {
 	if err := conn.QueryRowContext(ctx, `SELECT count(*) FROM varroa.run_notes`).Scan(&n); err != nil {
 		t.Fatalf("select run_notes as varroa_client: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO varroa.run_notes (id, cluster, team, job_path, principal, body)
+	if _, err := conn.ExecContext(ctx, `INSERT INTO varroa.run_notes (id, cluster, tenant, job_path, principal, body)
 		VALUES (gen_random_uuid(), 'c', 't', 'j', 'p', 'x')`); err == nil {
 		t.Fatal("insert on run_notes succeeded as varroa_client")
 	}

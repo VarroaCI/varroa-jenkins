@@ -3,7 +3,7 @@
 // handlers call, so each tool calls the seam itself"). Every method
 // here is a thin wrapper over the unexported core the matching HTTP
 // handler already uses — handlers_pipelines.go's listRunsMerged and
-// resolveTeamTenants, handlers_pipelines_write.go's createRun, and
+// resolveTenantTenants, handlers_pipelines_write.go's createRun, and
 // handlers_runs.go's runByID — so the MCP surface and the REST surface
 // share one implementation of every rule. The exported result types
 // below (RunSummary, RunListResult, RunDetail, RunStage) restate the
@@ -163,11 +163,11 @@ func (s *Server) readerServiceError(err error, action string) *ServiceError {
 // fresh run identifier for every call (design D3a: "a request that
 // carries no clientToken gets one the BFF mints as a UUIDv7"). It
 // authorizes with the tenant write check, exactly as
-// POST /pipelines/{team}/jobs/{job}/runs does. targetCluster is the
+// POST /pipelines/{tenant}/jobs/{job}/runs does. targetCluster is the
 // cluster the command actually reached, for the caller's own activity
 // audit; it is empty whenever serr is set.
-func (s *Server) RunPipeline(ctx context.Context, claims *auth.Claims, team, jobPath, cluster string, parameters map[string]string) (runID, intentKey, targetCluster string, serr *ServiceError) {
-	runID, intentKey, ref, serr := s.createRun(ctx, claims, team, jobPath, "", cluster, parameters)
+func (s *Server) RunPipeline(ctx context.Context, claims *auth.Claims, tenant, jobPath, cluster string, parameters map[string]string) (runID, intentKey, targetCluster string, serr *ServiceError) {
+	runID, intentKey, ref, serr := s.createRun(ctx, claims, tenant, jobPath, "", cluster, parameters)
 	return runID, intentKey, ref.Cluster, serr
 }
 
@@ -201,12 +201,12 @@ func (s *Server) ReplayRun(ctx context.Context, claims *auth.Claims, runID, scri
 }
 
 // ScanMultibranch is the scan_multibranch MCP tool's entry into POST
-// /pipelines/{team}/jobs/{job}/scan. It authorizes with the tenant write
+// /pipelines/{tenant}/jobs/{job}/scan. It authorizes with the tenant write
 // check, exactly as the HTTP path does. targetCluster is the cluster of the
 // home member the command reached, for the caller's own activity audit; it
 // is empty whenever serr is set.
-func (s *Server) ScanMultibranch(ctx context.Context, claims *auth.Claims, team, jobPath, cluster string) (scanID, targetCluster string, serr *ServiceError) {
-	scanID, target, serr := s.scanMultibranch(ctx, claims, team, jobPath, cluster)
+func (s *Server) ScanMultibranch(ctx context.Context, claims *auth.Claims, tenant, jobPath, cluster string) (scanID, targetCluster string, serr *ServiceError) {
+	scanID, target, serr := s.scanMultibranch(ctx, claims, tenant, jobPath, cluster)
 	if serr != nil {
 		return "", "", serr
 	}
@@ -236,11 +236,11 @@ func (s *Server) AbortRunInput(ctx context.Context, claims *auth.Claims, runID, 
 // the tool, not here. The four filters are separate strings, not
 // handlers_pipelines.go's unexported listRunsFilters, because that type
 // cannot appear in another package's call to an exported method.
-func (s *Server) ListRuns(ctx context.Context, claims *auth.Claims, team, jobPath, branch, result, actor, cause string, limit int, cursor string) (RunListResult, *ServiceError, error) {
+func (s *Server) ListRuns(ctx context.Context, claims *auth.Claims, tenant, jobPath, branch, result, actor, cause string, limit int, cursor string) (RunListResult, *ServiceError, error) {
 	if s.deps.RecordStore == nil {
 		return RunListResult{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}, nil
 	}
-	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	refs, serr := s.resolveTenantTenants(ctx, claims, tenant)
 	if serr != nil {
 		return RunListResult{}, serr, nil
 	}
@@ -415,16 +415,16 @@ type FleetLockRow struct {
 	AcquiredAt   *time.Time `json:"acquiredAt,omitempty"`
 }
 
-// ListFleetLocks is the list_fleet_locks MCP tool's entry into the team
-// lock read. It is the same read GET /pipelines/{team}/locks serves, so
+// ListFleetLocks is the list_fleet_locks MCP tool's entry into the tenant
+// lock read. It is the same read GET /pipelines/{tenant}/locks serves, so
 // the tool and the route authorize a caller and shape a row
 // identically. The tenant read check answers for every resolved tenant,
-// and a team the caller may read on no tenant answers not found.
-func (s *Server) ListFleetLocks(ctx context.Context, claims *auth.Claims, team string) ([]FleetLockRow, *ServiceError) {
+// and a tenant the caller may read on no tenant answers not found.
+func (s *Server) ListFleetLocks(ctx context.Context, claims *auth.Claims, tenant string) ([]FleetLockRow, *ServiceError) {
 	if s.deps.RecordStore == nil {
 		return nil, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
 	}
-	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	refs, serr := s.resolveTenantTenants(ctx, claims, tenant)
 	if serr != nil {
 		return nil, serr
 	}
@@ -435,10 +435,10 @@ func (s *Server) ListFleetLocks(ctx context.Context, claims *auth.Claims, team s
 		}
 	}
 	if len(admitted) == 0 {
-		return nil, &ServiceError{Status: http.StatusNotFound, Message: "team not found"}
+		return nil, &ServiceError{Status: http.StatusNotFound, Message: "tenant not found"}
 	}
 
-	rows, err := s.listTeamFleetLocks(ctx, claims, admitted)
+	rows, err := s.listTenantFleetLocks(ctx, claims, admitted)
 	if serr := s.readerServiceError(err, "list fleet locks"); serr != nil {
 		return nil, serr
 	}

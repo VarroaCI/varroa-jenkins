@@ -25,7 +25,7 @@ const (
 // gone. Only a true answer releases the deferred branch jobs of the
 // repository. The operator's forge answerer implements it.
 type RepoGoneProber interface {
-	RepositoryGone(ctx context.Context, team, repoURL string) bool
+	RepositoryGone(ctx context.Context, tenant, repoURL string) bool
 }
 
 // repoScan is one failed-scan folder of a tenant, with its repository URL.

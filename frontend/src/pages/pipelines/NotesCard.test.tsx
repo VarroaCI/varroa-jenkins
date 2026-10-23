@@ -101,7 +101,7 @@ describe("NotesCard job mode", () => {
         createRunNote({ runId: null, body: "job note" }),
       ],
     });
-    renderCard(<NotesCard mode="job" team="payments" job="payments/api" />, "/pipelines/payments/payments%2Fapi");
+    renderCard(<NotesCard mode="job" tenant="payments" job="payments/api" />, "/pipelines/payments/payments%2Fapi");
     const link = await screen.findByRole("link", { name: "Build #7" });
     expect(link.getAttribute("href")).toContain("/pipelines/payments/payments%2Fapi/");
     expect(screen.getByText("Job note")).toBeTruthy();
@@ -110,7 +110,7 @@ describe("NotesCard job mode", () => {
 
   it("renders nothing when the job has no notes", async () => {
     vi.mocked(client.listJobNotes).mockResolvedValue({ items: [] });
-    const { container } = renderCard(<NotesCard mode="job" team="payments" job="payments/api" />);
+    const { container } = renderCard(<NotesCard mode="job" tenant="payments" job="payments/api" />);
     await waitFor(() => expect(client.listJobNotes).toHaveBeenCalled());
     expect(container.textContent).toBe("");
   });

@@ -20,23 +20,23 @@ func TestEffective(t *testing.T) {
 		want agent.DataSharing
 	}{
 		{"external with default ceiling is metadata", Inputs{
-			User: agent.DataLogs, Team: "acme", TenantLevels: levels,
+			User: agent.DataLogs, Tenant: "acme", TenantLevels: levels,
 			Trust: agent.TrustExternal, ExternalCeiling: agent.DataMetadata,
 		}, agent.DataMetadata},
 		{"internal provider takes logs", Inputs{
-			User: agent.DataLogs, Team: "acme", TenantLevels: levels, Trust: agent.TrustInternal,
+			User: agent.DataLogs, Tenant: "acme", TenantLevels: levels, Trust: agent.TrustInternal,
 		}, agent.DataLogs},
 		{"tenant without an entry is logs", Inputs{
-			User: agent.DataLogs, Team: "other", TenantLevels: levels, Trust: agent.TrustInternal,
+			User: agent.DataLogs, Tenant: "other", TenantLevels: levels, Trust: agent.TrustInternal,
 		}, agent.DataLogs},
-		{"empty team is logs", Inputs{
-			User: agent.DataLogs, Team: "", TenantLevels: levels, Trust: agent.TrustInternal,
+		{"empty tenant is logs", Inputs{
+			User: agent.DataLogs, Tenant: "", TenantLevels: levels, Trust: agent.TrustInternal,
 		}, agent.DataLogs},
 		{"empty user level counts as logs", Inputs{
-			Team: "acme", TenantLevels: levels, Trust: agent.TrustInternal,
+			Tenant: "acme", TenantLevels: levels, Trust: agent.TrustInternal,
 		}, agent.DataLogs},
 		{"tenant none wins", Inputs{
-			User: agent.DataLogs, Team: "acme",
+			User: agent.DataLogs, Tenant: "acme",
 			TenantLevels: map[string]agent.DataSharing{"acme": agent.DataNone}, Trust: agent.TrustInternal,
 		}, agent.DataNone},
 	}
@@ -118,11 +118,11 @@ func TestFilterStripsLogTail(t *testing.T) {
 	}
 }
 
-// stubResolver maps runs and teams to tenants.
+// stubResolver maps runs and tenants to tenants.
 type stubResolver struct {
-	runs  map[string]string
-	teams map[string]string
-	err   error
+	runs    map[string]string
+	tenants map[string]string
+	err     error
 }
 
 func (s stubResolver) RunTenant(_ context.Context, runID string) (string, error) {
@@ -132,11 +132,11 @@ func (s stubResolver) RunTenant(_ context.Context, runID string) (string, error)
 	return s.runs[runID], nil
 }
 
-func (s stubResolver) TeamTenant(_ context.Context, team string) (string, error) {
+func (s stubResolver) TenantTenant(_ context.Context, tenant string) (string, error) {
 	if s.err != nil {
 		return "", s.err
 	}
-	return s.teams[team], nil
+	return s.tenants[tenant], nil
 }
 
 func TestCheckLoweredTenantLevelAppliesNextCall(t *testing.T) {
@@ -161,25 +161,25 @@ func TestCheckLoweredTenantLevelAppliesNextCall(t *testing.T) {
 	}
 }
 
-func TestCheckUsesRunThenTeam(t *testing.T) {
+func TestCheckUsesRunThenTenant(t *testing.T) {
 	t.Parallel()
 
 	r := stubResolver{
-		runs:  map[string]string{"r-1": "from-run"},
-		teams: map[string]string{"acme": "from-team"},
+		runs:    map[string]string{"r-1": "from-run"},
+		tenants: map[string]string{"acme": "from-tenant"},
 	}
-	levels := map[string]agent.DataSharing{"from-run": agent.DataNone, "from-team": agent.DataMetadata}
+	levels := map[string]agent.DataSharing{"from-run": agent.DataNone, "from-tenant": agent.DataMetadata}
 
 	both, err := Check(context.Background(), r, levels, agent.DataLogs, "get_run",
-		json.RawMessage(`{"run":"r-1","team":"acme"}`))
+		json.RawMessage(`{"run":"r-1","tenant":"acme"}`))
 	if err != nil || both.Tenant != "from-run" {
-		t.Fatalf("run and team = (%+v, %v), want the run's tenant", both, err)
+		t.Fatalf("run and tenant = (%+v, %v), want the run's tenant", both, err)
 	}
 
-	onlyTeam, err := Check(context.Background(), r, levels, agent.DataLogs, "list_runs",
-		json.RawMessage(`{"team":"acme"}`))
-	if err != nil || onlyTeam.Tenant != "from-team" || onlyTeam.Level != agent.DataMetadata {
-		t.Fatalf("team only = (%+v, %v), want metadata for the team's tenant", onlyTeam, err)
+	onlyTenant, err := Check(context.Background(), r, levels, agent.DataLogs, "list_runs",
+		json.RawMessage(`{"tenant":"acme"}`))
+	if err != nil || onlyTenant.Tenant != "from-tenant" || onlyTenant.Level != agent.DataMetadata {
+		t.Fatalf("tenant only = (%+v, %v), want metadata for the tenant's tenant", onlyTenant, err)
 	}
 
 	none, err := Check(context.Background(), r, levels, agent.DataLogs, "list_controllers", json.RawMessage(`{}`))

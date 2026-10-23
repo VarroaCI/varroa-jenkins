@@ -91,7 +91,7 @@ func (s *Server) handleControllerJenkinsLink(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// A cell hosts Teams as top-level folders, so the first job segment can
+	// A cell hosts Tenants as top-level folders, so the first job segment can
 	// name the tenant. A dedicated controller names its tenant namespace/name.
 	var candidates []string
 	if i := strings.Index(jobPath, "/"); i > 0 {
@@ -132,9 +132,9 @@ func (s *Server) handleControllerJenkinsLink(w http.ResponseWriter, r *http.Requ
 		s.writeJSONError(w, http.StatusInternalServerError, "resolve tenant")
 		return
 	}
-	link := searchJobLink(ref.Team, run.JobPath)
+	link := searchJobLink(ref.TenantName, run.JobPath)
 	if build > 0 {
-		link = searchRunLink(ref.Team, run.JobPath, run.RunID)
+		link = searchRunLink(ref.TenantName, run.JobPath, run.RunID)
 	}
 	s.writeJSON(w, http.StatusOK, jenkinsLinkJSON{Link: link})
 }

@@ -30,9 +30,9 @@ func NewRouter(deps *Dependencies) http.Handler {
 	// Groups list/create (admin) + detail dispatch (delete).
 	mux.HandleFunc("/groups", srv.HandleGroups)
 	mux.HandleFunc("/groups/", srv.HandleGroupDispatch)
-	// Teams list/create (admin) + detail dispatch (get/update/delete).
-	mux.HandleFunc("/teams", srv.HandleTeams)
-	mux.HandleFunc("/teams/", srv.HandleTeamDispatch)
+	// Tenants list/create (admin) + detail dispatch (get/update/delete).
+	mux.HandleFunc("/tenants", srv.HandleTenants)
+	mux.HandleFunc("/tenants/", srv.HandleTenantDispatch)
 	// Runners: external agent registration (list/create) + detail dispatch
 	// (get/patch/delete). Runner is cluster-scoped, so no namespace segment.
 	mux.HandleFunc("/runners", srv.HandleRunners)
@@ -116,27 +116,27 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("GET /cells/{namespace}/{name}/usage", srv.handleCellUsage)
 	mux.HandleFunc("GET /cells/{namespace}/{name}/grants", srv.handleCellGrants)
 
-	// Pipelines: the landing-page team list, team-scoped job listing,
+	// Pipelines: the landing-page tenant list, tenant-scoped job listing,
 	// job detail, run list/create, and one test case's history.
-	mux.HandleFunc("GET /pipelines", srv.handleListPipelineTeams)
-	mux.HandleFunc("GET /pipelines/{team}", srv.handleListPipelines)
-	mux.HandleFunc("GET /pipelines/{team}/jobs/{job}", srv.handleGetPipelineJob)
-	mux.HandleFunc("GET /pipelines/{team}/jobs/{job}/branches", srv.handleListJobBranches)
+	mux.HandleFunc("GET /pipelines", srv.handleListPipelineTenants)
+	mux.HandleFunc("GET /pipelines/{tenant}", srv.handleListPipelines)
+	mux.HandleFunc("GET /pipelines/{tenant}/jobs/{job}", srv.handleGetPipelineJob)
+	mux.HandleFunc("GET /pipelines/{tenant}/jobs/{job}/branches", srv.handleListJobBranches)
 
-	mux.HandleFunc("GET /pipelines/{team}/jobs/{job}/notes", srv.handleListJobNotes)
-	mux.HandleFunc("GET /pipelines/{team}/jobs/{job}/runs", srv.handleListRuns)
-	mux.HandleFunc("POST /pipelines/{team}/jobs/{job}/runs", srv.handleCreateRun)
-	mux.HandleFunc("POST /pipelines/{team}/jobs/{job}/scan", srv.handleScanMultibranch)
-	mux.HandleFunc("GET /pipelines/{team}/jobs/{job}/tests/{case}", srv.handleListJobTestCaseHistory)
-	mux.HandleFunc("POST /pipelines/{team}/markers/validate", srv.handleValidatePipelineMarker)
-	mux.HandleFunc("GET /pipelines/{team}/cell", srv.handleGetTeamCell)
-	mux.HandleFunc("POST /pipelines/{team}/propose", srv.handleProposePipeline)
-	mux.HandleFunc("GET /pipelines/{team}/locks", srv.handleListTeamFleetLocks)
-	mux.HandleFunc("GET /pipelines/{team}/stream", srv.handleTeamRunStream)
-	mux.HandleFunc("GET /pipelines/{team}/agent", srv.handleGetTeamAgent)
-	mux.HandleFunc("GET /pipelines/{team}/agent/sessions", srv.handleListTeamAgentSessions)
-	mux.HandleFunc("GET /pipelines/{team}/agent/capabilities", srv.handleTeamAgentCapabilities)
-	mux.HandleFunc("POST /pipelines/{team}/agent/run", srv.handleRunTeamAgent)
+	mux.HandleFunc("GET /pipelines/{tenant}/jobs/{job}/notes", srv.handleListJobNotes)
+	mux.HandleFunc("GET /pipelines/{tenant}/jobs/{job}/runs", srv.handleListRuns)
+	mux.HandleFunc("POST /pipelines/{tenant}/jobs/{job}/runs", srv.handleCreateRun)
+	mux.HandleFunc("POST /pipelines/{tenant}/jobs/{job}/scan", srv.handleScanMultibranch)
+	mux.HandleFunc("GET /pipelines/{tenant}/jobs/{job}/tests/{case}", srv.handleListJobTestCaseHistory)
+	mux.HandleFunc("POST /pipelines/{tenant}/markers/validate", srv.handleValidatePipelineMarker)
+	mux.HandleFunc("GET /pipelines/{tenant}/cell", srv.handleGetTenantCell)
+	mux.HandleFunc("POST /pipelines/{tenant}/propose", srv.handleProposePipeline)
+	mux.HandleFunc("GET /pipelines/{tenant}/locks", srv.handleListTenantFleetLocks)
+	mux.HandleFunc("GET /pipelines/{tenant}/stream", srv.handleTenantRunStream)
+	mux.HandleFunc("GET /pipelines/{tenant}/agent", srv.handleGetTenantAgent)
+	mux.HandleFunc("GET /pipelines/{tenant}/agent/sessions", srv.handleListTenantAgentSessions)
+	mux.HandleFunc("GET /pipelines/{tenant}/agent/capabilities", srv.handleTenantAgentCapabilities)
+	mux.HandleFunc("POST /pipelines/{tenant}/agent/run", srv.handleRunTenantAgent)
 	mux.HandleFunc("GET /agents", srv.handleListAgents)
 	mux.HandleFunc("PUT /agents/{namespace}/{name}/unattended", srv.handlePutAgentUnattended)
 	// Runs: detail, log stream, artifacts, tests, changes, downstream, script, restart,

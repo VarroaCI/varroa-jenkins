@@ -57,7 +57,7 @@ var (
 	provisioningDefaultsGVR  = schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "provisioningdefaults"}
 	userGVR                  = schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "users"}
 	groupGVR                 = schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "groups"}
-	teamGVR                  = schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "teams"}
+	tenantGVR                = schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "tenants"}
 	jenkinsVersionProfileGVR = schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "jenkinsversionprofiles"}
 	controllerClassGVR       = schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "controllerclasses"}
 	updateCentersGVR         = schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "updatecenters"}
@@ -770,7 +770,7 @@ func (c *ClientsetClient) CreateService(ctx context.Context, name, namespace str
 // CreateService cannot serve this call: it derives the selector by trimming
 // a "-svc" suffix off the name, and an agent Service name carries no such
 // suffix. The write is skipped when the live object already matches, so a
-// Team tick never bumps resourceVersion on a converged Service.
+// Tenant tick never bumps resourceVersion on a converged Service.
 func (c *ClientsetClient) CreateOrUpdateTenantService(ctx context.Context, name, namespace, selectorApp string) error {
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
@@ -1452,7 +1452,7 @@ func (c *ClientsetClient) PatchSecretData(ctx context.Context, name, namespace s
 // CopyImagePullSecret copies a docker-registry-type Secret from one namespace
 // to another, preserving Type and Data. An equality guard skips the write when
 // the destination is already converged, so repeated calls (which run on every
-// Team's every 30s tick) do not bump resourceVersion unnecessarily.
+// Tenant's every 30s tick) do not bump resourceVersion unnecessarily.
 func (c *ClientsetClient) CopyImagePullSecret(ctx context.Context, srcNamespace, dstNamespace, name string) error {
 	if srcNamespace == dstNamespace {
 		return nil
@@ -1468,7 +1468,7 @@ func (c *ClientsetClient) CopyImagePullSecret(ctx context.Context, srcNamespace,
 	existing, err := secrets.Get(ctx, name, metav1.GetOptions{})
 	if err == nil {
 		// Skip the write when already converged (same rationale as CreateService
-		// above): this runs on every Team's every 30s tick, and must not bump
+		// above): this runs on every Tenant's every 30s tick, and must not bump
 		// resourceVersion on a namespace that's already in sync.
 		if existing.Type == src.Type && reflect.DeepEqual(existing.Data, src.Data) {
 			return nil
@@ -5387,68 +5387,68 @@ func (c *ClientsetClient) DeleteGroupCRD(ctx context.Context, name string) error
 	return err
 }
 
-// ListTeamCRDs lists all Team CRDs (cluster-scoped).
-func (c *ClientsetClient) ListTeamCRDs(ctx context.Context) ([]*v1alpha1.Team, error) {
-	list, err := c.dynamic.Resource(teamGVR).List(ctx, metav1.ListOptions{})
+// ListTenantCRDs lists all Tenant CRDs (cluster-scoped).
+func (c *ClientsetClient) ListTenantCRDs(ctx context.Context) ([]*v1alpha1.Tenant, error) {
+	list, err := c.dynamic.Resource(tenantGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
-	var teams []*v1alpha1.Team
+	var tenants []*v1alpha1.Tenant
 	for _, item := range list.Items {
-		t := &v1alpha1.Team{}
+		t := &v1alpha1.Tenant{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, t); err != nil {
-			return nil, fmt.Errorf("convert team: %w", err)
+			return nil, fmt.Errorf("convert tenant: %w", err)
 		}
-		teams = append(teams, t)
+		tenants = append(tenants, t)
 	}
-	return teams, nil
+	return tenants, nil
 }
 
-// GetTeamCRD fetches a single Team CRD by name (cluster-scoped).
-func (c *ClientsetClient) GetTeamCRD(ctx context.Context, name string) (*v1alpha1.Team, error) {
-	obj, err := c.dynamic.Resource(teamGVR).Get(ctx, name, metav1.GetOptions{})
+// GetTenantCRD fetches a single Tenant CRD by name (cluster-scoped).
+func (c *ClientsetClient) GetTenantCRD(ctx context.Context, name string) (*v1alpha1.Tenant, error) {
+	obj, err := c.dynamic.Resource(tenantGVR).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
-	t := &v1alpha1.Team{}
+	t := &v1alpha1.Tenant{}
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, t); err != nil {
-		return nil, fmt.Errorf("convert team: %w", err)
+		return nil, fmt.Errorf("convert tenant: %w", err)
 	}
 	return t, nil
 }
 
-// ApplyTeamCRD creates or updates a Team CRD (cluster-scoped).
-func (c *ClientsetClient) ApplyTeamCRD(ctx context.Context, cr *v1alpha1.Team) error {
+// ApplyTenantCRD creates or updates a Tenant CRD (cluster-scoped).
+func (c *ClientsetClient) ApplyTenantCRD(ctx context.Context, cr *v1alpha1.Tenant) error {
 	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(cr)
 	if err != nil {
-		return fmt.Errorf("convert team to unstructured: %w", err)
+		return fmt.Errorf("convert tenant to unstructured: %w", err)
 	}
 	u := &unstructured.Unstructured{Object: obj}
 	u.SetAPIVersion("varroa.dev/v1alpha1")
-	u.SetKind("Team")
-	_, err = c.dynamic.Resource(teamGVR).Create(ctx, u, metav1.CreateOptions{})
+	u.SetKind("Tenant")
+	_, err = c.dynamic.Resource(tenantGVR).Create(ctx, u, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
-		existing, getErr := c.dynamic.Resource(teamGVR).Get(ctx, cr.Name, metav1.GetOptions{})
+		existing, getErr := c.dynamic.Resource(tenantGVR).Get(ctx, cr.Name, metav1.GetOptions{})
 		if getErr != nil {
-			return fmt.Errorf("get existing team for update: %w", getErr)
+			return fmt.Errorf("get existing tenant for update: %w", getErr)
 		}
 		u.SetResourceVersion(existing.GetResourceVersion())
-		_, err = c.dynamic.Resource(teamGVR).Update(ctx, u, metav1.UpdateOptions{})
+		_, err = c.dynamic.Resource(tenantGVR).Update(ctx, u, metav1.UpdateOptions{})
 	}
 	return err
 }
 
-// DeleteTeamCRD deletes a Team CRD. Idempotent: not-found is not an error.
-func (c *ClientsetClient) DeleteTeamCRD(ctx context.Context, name string) error {
-	err := c.dynamic.Resource(teamGVR).Delete(ctx, name, metav1.DeleteOptions{})
+// DeleteTenantCRD deletes a Tenant CRD. Idempotent: not-found is not an error.
+func (c *ClientsetClient) DeleteTenantCRD(ctx context.Context, name string) error {
+	err := c.dynamic.Resource(tenantGVR).Delete(ctx, name, metav1.DeleteOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
 	return err
 }
 
-// PatchTeamStatus patches the status subresource of a Team CRD (cluster-scoped).
-func (c *ClientsetClient) PatchTeamStatus(ctx context.Context, name string, status *v1alpha1.TeamStatus) error {
+// PatchTenantStatus patches the status subresource of a Tenant CRD (cluster-scoped).
+func (c *ClientsetClient) PatchTenantStatus(ctx context.Context, name string, status *v1alpha1.TenantStatus) error {
 	if status == nil {
 		return fmt.Errorf("status must not be nil")
 	}
@@ -5457,9 +5457,9 @@ func (c *ClientsetClient) PatchTeamStatus(ctx context.Context, name string, stat
 	}
 	patchBytes, err := json.Marshal(statusMap)
 	if err != nil {
-		return fmt.Errorf("marshal team status patch: %w", err)
+		return fmt.Errorf("marshal tenant status patch: %w", err)
 	}
-	_, err = c.dynamic.Resource(teamGVR).Patch(
+	_, err = c.dynamic.Resource(tenantGVR).Patch(
 		ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status",
 	)
 	return err

@@ -11,7 +11,7 @@ type TenantRef struct {
 	Namespace  string
 	Controller string
 	Tenant     string
-	Team       string
+	TenantName string
 	Folder     string
 }
 
@@ -25,16 +25,16 @@ type RunTenantRow struct {
 
 // TenantRefFromTenant builds a reference from a stored or resolved tenant
 // value. Cluster is empty. Namespace and Controller are filled for a
-// synthetic (single-controller) tenant, and stay empty for a Team tenant.
+// synthetic (single-controller) tenant, and stay empty for a Tenant tenant.
 func TenantRefFromTenant(tenant string) (TenantRef, error) {
 	parsed, err := rbac.ParseTenant(tenant)
 	if err != nil {
 		return TenantRef{}, err
 	}
 	ref := TenantRef{
-		Tenant: tenant,
-		Team:   tenantTeamName(parsed),
-		Folder: parsed.Folder,
+		Tenant:     tenant,
+		TenantName: tenantTenantName(parsed),
+		Folder:     parsed.Folder,
 	}
 	if parsed.Kind == rbac.TenantController {
 		ref.Namespace = parsed.Namespace
@@ -44,7 +44,7 @@ func TenantRefFromTenant(tenant string) (TenantRef, error) {
 }
 
 // TenantRefFromRow builds a reference from a record row's four identity
-// columns: cluster, namespace, cell, and tenant. Team and Folder come from
+// columns: cluster, namespace, cell, and tenant. Tenant and Folder come from
 // parsing tenant, not from the row.
 func TenantRefFromRow(cluster, namespace, cell, tenant string) (TenantRef, error) {
 	parsed, err := rbac.ParseTenant(tenant)
@@ -56,16 +56,16 @@ func TenantRefFromRow(cluster, namespace, cell, tenant string) (TenantRef, error
 		Namespace:  namespace,
 		Controller: cell,
 		Tenant:     tenant,
-		Team:       tenantTeamName(parsed),
+		TenantName: tenantTenantName(parsed),
 		Folder:     parsed.Folder,
 	}, nil
 }
 
-// tenantTeamName returns the Team name for a pipelines tenant and the
+// tenantTenantName returns the Tenant name for a pipelines tenant and the
 // controller name for a synthetic tenant, matching C4's resolver table.
-func tenantTeamName(parsed rbac.ParsedTenant) string {
-	if parsed.Kind == rbac.TenantTeam {
-		return parsed.Team
+func tenantTenantName(parsed rbac.ParsedTenant) string {
+	if parsed.Kind == rbac.TenantTenant {
+		return parsed.Tenant
 	}
 	return parsed.Controller
 }

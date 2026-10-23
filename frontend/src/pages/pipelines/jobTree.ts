@@ -2,7 +2,7 @@ import type { PipelineSummary, RunningRun } from "../../types";
 import { stripTenantFolder } from "./jobPath";
 
 /**
- * A node of the team home's folder tree. The kind set is complete: a
+ * A node of the tenant home's folder tree. The kind set is complete: a
  * "folder" node is a path segment that no item declares, a "multibranch"
  * node is an item the API reports as multibranch, an "organizationFolder"
  * node is an item the API reports as an organization folder, and a "job"
@@ -65,9 +65,9 @@ function nodeKindFor(item: PipelineSummary): JobNodeKind {
 }
 
 /**
- * buildJobTree builds the folder tree the team home renders. It strips
+ * buildJobTree builds the folder tree the tenant home renders. It strips
  * `tenantFolder` from every job path first, so a controller tenant, whose
- * folder is empty, and a placed team both produce folder-relative nodes.
+ * folder is empty, and a placed tenant both produce folder-relative nodes.
  *
  * An item whose job path equals `tenantFolder` leaves an empty remainder.
  * That item is the container, not a job, and produces no node.

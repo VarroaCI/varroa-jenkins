@@ -13,11 +13,11 @@ sections describe.
 - Owns: the `Controller` CR phase state machine, ComposedBundle→mite desired-state
   resolution and hashing, plugin-set/version-profile resolution, orchestration of
   RBAC-CRD reconciliation (built-in role seeding, JenkinsRole/JenkinsRoleBinding→mite
-  push), Group/Team/User CRD reconciliation, fleet-wide BroodOperation/BroodSchedule
+  push), Group/Tenant/User CRD reconciliation, fleet-wide BroodOperation/BroodSchedule
   reconcilers, webhook replay, seeding of the built-in starter bundle (`starter.go`),
   the K8s resource builders (StatefulSet/Service/Ingress/ConfigMap/Secret) in
   `clientset_client.go`, the pipelines-tenant cell machinery (`cells/`,
-  `cell_*.go`, `cells_config.go`) that binds a `Team` to a shared,
+  `cell_*.go`, `cells_config.go`) that binds a `Tenant` to a shared,
   multi-tenant Jenkins cell, and build-record rehydration rendering
   (`rehydrate/`).
 - Does not own: the mite gRPC server/transport (`internal/mite`), JCasC composition
@@ -187,7 +187,7 @@ sections describe.
 - `NotifyCommandResult` (`controller_controller.go`) enqueues an owned reconcile when a
   desired-state result applies its rehydration seed. It skips a result with deferred
   jobs, a rehydration error, or no applied seed, because the tick paces the bundle resend.
-  `CellSeedStateChanged` (`cell_rehydration_entry.go`) decides the Team ticker wake.
+  `CellSeedStateChanged` (`cell_rehydration_entry.go`) decides the Tenant ticker wake.
 - Phase dispatch is `reconcileController` (`controller_controller.go:1278`): handles
   deletion/finalization first, then `PowerState` `Stopped`/`Hibernated` short-circuits
   (scale StatefulSet to 0 through `scaleTickToZero` and `ScaleStatefulSetToZero`), then dispatches on
@@ -530,10 +530,10 @@ sections describe.
   cluster's own RBAC resolver (`ConfigCRUD.Grants`) for each requested tenant,
   in request order. `CellTenantGrantsReport` is the one shaper for the wire
   type; the BFF's local path calls it too. A reply above `ListPageBudget` fails.
-- **Team bundle content reply.** `config_crud_teambundle.go` answers
-  `bundles.teamcontent` for a member-placed Team's pipeline read. It returns the
+- **Tenant bundle content reply.** `config_crud_tenantbundle.go` answers
+  `bundles.tenantcontent` for a member-placed Tenant's pipeline read. It returns the
   bundle, four content keys (never `jenkins.yaml`), and `held`. `held` comes from
-  `TeamHeld` (`team_held.go`), which checks `status.cell.tenantWarnings` of every member
+  `TenantHeld` (`tenant_held.go`), which checks `status.cell.tenantWarnings` of every member
   cell in `v1alpha1.PlacementCells` order through `v1alpha1.CellHoldsTenant`.
 - **`applyRuntimeUpdateSite` is the only writer of `jenkins.updateCenter`**
   (`updatesite.go`). It runs in `resolveBundleForController` after `ResolveVars`
@@ -675,7 +675,7 @@ sections describe.
 - **`status.cell.tenants` has exactly one writer: `PatchControllerCellStatus`**
   (`clientset_client.go`). It sends a narrow merge patch carrying only
   `status.cell.tenants`, never the whole `status.cell` object, and only the
-  placement pass (`TeamReconciler`, via `cells.Place`) calls it. The blind
+  placement pass (`TenantReconciler`, via `cells.Place`) calls it. The blind
   end-of-reconcile `PatchControllerStatus` patch above deliberately omits
   `tenants` from its own `cell` sub-map — it carries only `warm`,
   `appliedTenants`, `drainingTenants`, `evacuate`, `unreadySince`, `rolledAt`, and
@@ -873,10 +873,10 @@ sections describe.
     `name@version` (`ucclosurecomplete.go`). A lock-sourced member never counts
     as unknown.
     A lock pin that `ucmeta.IsLatest` matches sets no floor and names no version.
-  - `GroupReconciler`, `UserReconciler`, `TeamReconciler` (`group_controller.go`,
-    `user_controller.go`, `team_controller.go`) — Group/User/Team CRDs; Team also
-    provisions/owns a namespace. A `Team` with `spec.pipelines` set is a
-    pipelines tenant: `TeamReconciler` calls `cells.Place` (below) once per
+  - `GroupReconciler`, `UserReconciler`, `TenantReconciler` (`group_controller.go`,
+    `user_controller.go`, `tenant_controller.go`) — Group/User/Tenant CRDs; Tenant also
+    provisions/owns a namespace. A `Tenant` with `spec.pipelines` set is a
+    pipelines tenant: `TenantReconciler` calls `cells.Place` (below) once per
     tick to bind, move, or tear the tenant down from a shared cell.
   - `BroodOperationReconciler` / `BroodScheduleReconciler`
     (`broodoperation_controller.go`, `broodschedule_controller.go`) — fleet-wide
@@ -884,15 +884,15 @@ sections describe.
     scheduled brood operations.
 - **`cells/` package + the cell reconcilers** — a cell is a `Controller` with
   `spec.cell.enabled`: a disposable Jenkins JVM holding no durable state,
-  hosting several `Team`s as top-level folders (design D4/D6). Two
+  hosting several `Tenant`s as top-level folders (design D4/D6). Two
   reconcilers drive it:
-  - `TeamReconciler` (`team_controller.go`) is the placement reconciler. For
-    every pipelines `Team` it calls `cells.Place` (`cells/placement.go`) —
+  - `TenantReconciler` (`tenant_controller.go`) is the placement reconciler. For
+    every pipelines `Tenant` it calls `cells.Place` (`cells/placement.go`) —
     pure decision logic, no Kubernetes write of its own: it reads a
     caller-gathered `[]CellCandidate` snapshot, a caller-gathered
     `[]CellPoolSummary` (`Inputs.Pools`, listed once per tick beside the cell
-    list), and the `Team`'s own status,
-    and returns an `Outcome` plus a mutated `TeamStatus` for the caller to
+    list), and the `Tenant`'s own status,
+    and returns an `Outcome` plus a mutated `TenantStatus` for the caller to
     apply. A tenant's **resolved pool** is `spec.pipelines.cellPool` when set,
     else the pool named by `spec.pipelines.profile`; gate 4 refuses a named
     pool that is absent or serves another profile with `CellPoolNotFound`,
@@ -904,11 +904,11 @@ sections describe.
     describing slot 0. A slot whose holder is gone takes the newest-applied
     standby, and the announce carries the whole list before the status
     write. The reasons `SlotPending`, `StandbyPending`, and
-    `MembersApplied` report the member set. `TeamReconciler` then applies the
+    `MembersApplied` report the member set. `TenantReconciler` then applies the
     `Outcome` in a fixed order: **the claim first** (`cells.WriteCellClaim` on
     the selected cell, and a failed claim ends the tick with no fence
-    written), then `Team.status.placement.cluster` (and the rest of
-    `TeamStatus`), then `PatchControllerCellStatus` (above) on the
+    written), then `Tenant.status.placement.cluster` (and the rest of
+    `TenantStatus`), then `PatchControllerCellStatus` (above) on the
     bound/vacated cells, then `cells.ReleaseCellClaim` **only for a tenant
     patch that succeeded**. `Place` also names the claim on the `moveNone`
     path while the bound cell's tenant list does not carry the tenant, so a
@@ -921,10 +921,10 @@ sections describe.
     **The placement pass never creates a cell** — only the pool reconciler
     does. A voluntary move completes only once
     `Controller.status.cell.appliedTenants` no longer holds the tenant; the
-    `Team` finalizer holds through teardown until the schedule purge
+    `Tenant` finalizer holds through teardown until the schedule purge
     succeeds or `maxPurgeAttempts` (10) is spent (a teardown purge sets
-    `PurgeRequest.TeamDeleted` from the `Team`'s `DeletionTimestamp`, and
-    the recorder then retires the `Team`'s uid; a dropped `spec.pipelines`
+    `PurgeRequest.TenantDeleted` from the `Tenant`'s `DeletionTimestamp`, and
+    the recorder then retires the `Tenant`'s uid; a dropped `spec.pipelines`
     leaves it false), then a bounded
     `teardownBoundedWait` (10 minutes) release, in both cases raising a
     warning event before releasing — warnings order by tenant then reason.
@@ -933,7 +933,7 @@ sections describe.
     `Reconcile` finalizer hold, because the finishing tick clears
     `status.pipelines`, the only copy of the agent namespace once
     `spec.pipelines` is gone.
-  - **Tenant agent pod reaper** (`team_agent_pods.go`). The operator deletes
+  - **Tenant agent pod reaper** (`tenant_agent_pods.go`). The operator deletes
     a tenant agent pod that no live JVM refreshes. A Running pod can hold a
     node that a resume adopts late, so every age that can delete one
     outlives `TenantAgentAdoptBound` (`cell_jcasc.go`:
@@ -952,7 +952,7 @@ sections describe.
     `ReleaseInstanceAgentPods` deletes the idle pods of a confirmed gone instance.
     The garbage collection and the operator's long age then cover only busy pods.
     `orphanTenantAgentPods` is pure: a candidate runs as
-    `varroa-agent-<team>`, carries the `kubernetes.jenkins.io/controller`
+    `varroa-agent-<tenant>`, carries the `kubernetes.jenkins.io/controller`
     label, and carries a `kubernetes.jenkins.io/last-refresh` annotation that
     parses as epoch milliseconds. It goes when older than
     `agentPodReapAfter` (by pod phase; `Unknown` counts as Running) or at
@@ -966,7 +966,7 @@ sections describe.
     resume can adopt), a pod with a last refresh after `refreshedBefore`, a pod
     refreshed within `tenantAgentPendingReapAfter`, and a pod that is missing the
     annotation or the label. Each delete carries the listed UID. `syncPipelinesChildren` runs the steady-state pass,
-    rate-limited by `reapTenantAgentPodsDue` to one list per Team per
+    rate-limited by `reapTenantAgentPodsDue` to one list per Tenant per
     `tenantAgentReapInterval` (1 minute), and never fails the tick on it.
     `Reconcile` runs the teardown pass before `cells.Place`, on the same
     tick as, and before, the tenant ServiceAccount delete, and feeds the
@@ -979,7 +979,7 @@ sections describe.
     every managed namespace.
   - `cells.WarmPoolReconciler` (`cells/warmpool.go`) is a plain
     `Reconcile(ctx) error` ticker reconciler (not controller-runtime,
-    interval 60s in `cmd/operator/main.go`), not a per-`Team` reconciler. It
+    interval 60s in `cmd/operator/main.go`), not a per-`Tenant` reconciler. It
     sizes every `CellPool` from **that pool's own spec**, never from the chart
     values: `WarmPoolConfig` now only seeds a pool the operator creates, and
     `Enabled` gates auto-creation alone — a hand-applied `CellPool` is
@@ -1168,7 +1168,7 @@ sections describe.
     (`acceptFirstConnectionStrategy`) under the composed `jenkins.yaml` as
     the merge base, so a strategy in the cell bundle wins. And
     `tenantCloudFor`, which builds a tenant's cloud from the operator's
-    constant `<team>-default` pod template followed by the lifted templates
+    constant `<tenant>-default` pod template followed by the lifted templates
     it receives, and sets `GarbageCollectionTimeout` to
     `tenantAgentGCTimeoutSeconds`; no other cloud sets it), `cell_pod_templates.go` (`liftTenantPodTemplates` reads
     every kubernetes cloud's `templates` list of a tenant's `jenkins.yaml` in
@@ -1226,10 +1226,10 @@ sections describe.
     tenant keeps its lifted templates, and a read fault for it logs and
     lifts nothing instead of failing the cell. A non-draining
     tenant's own materialized `PipelineTemplatesYAML`, when non-blank, becomes
-    one `bundle.CellTemplateFragment{Folder: team.Name, ...}` entry, returned
+    one `bundle.CellTemplateFragment{Folder: tenant.Name, ...}` entry, returned
     on `assembleCellState.TemplateFragments` for the caller to merge via
-    `bundle.InjectPipelineTemplates`), `cell_team_access.go` (`listPlacedTeams`
-    reads each `Team` named in `cr.Status.Cell.Tenants`, skipping and
+    `bundle.InjectPipelineTemplates`), `cell_tenant_access.go` (`listPlacedTenants`
+    reads each `Tenant` named in `cr.Status.Cell.Tenants`, skipping and
     logging one that is gone rather than failing the tick), and
     `cell_tenant_credentials.go` (`projectTenantCredentials` projects a
     tenant's `varroa.dev/tenant-credential=true` Secrets at `GLOBAL` scope.
@@ -1269,10 +1269,10 @@ sections describe.
     restart. `MaxTenantsPerCell` and `UnreadyGracePeriod` stay live as the
     fallback for a cell with no effective owner.
 - **Tenant-sync announcement** (`cell_instance.go`, `single_tenant_announce.go`,
-  `team_sync.go`, `internal/controller/cells/sync.go`) — the placement-fencing
+  `tenant_sync.go`, `internal/controller/cells/sync.go`) — the placement-fencing
   capability's write side: it keeps `varroa.tenant_placements` current for
   every controller, cell or not. The completion webhook rides the announce:
-  `resolveTeamWebhook` (`team_controller.go`) reads the Secret that
+  `resolveTenantWebhook` (`tenant_controller.go`) reads the Secret that
   `notifications.webhook.secretRef` names, in `spec.pipelines.agentNamespace`,
   and sets the `Notifications` condition. `SyncPolicy.Webhook` travels in
   the request's `notification_webhook` field and never in the policy JSON. `updateCellInstance` writes
@@ -1298,7 +1298,7 @@ sections describe.
   member list (`internal/recordstore`, `deriveDeadInstances`), which covers
   a second roll during a recorder outage and a cell deleted while the cache
   is empty. A cell that **left** the candidate set is read
-  by `TeamReconciler.departedMemberPods`, which applies the same pod rule to
+  by `TenantReconciler.departedMemberPods`, which applies the same pod rule to
   every member cell the tenant still names and hands the answers to
   `Inputs.DepartedPods` — the placement pass performs no Kubernetes read of
   its own. `performMove`'s deleted-cell branch and `memberDeadInstances`
@@ -1310,7 +1310,7 @@ sections describe.
   recorder's unconfirmed entries back** (`AnnounceResult.Unconfirmed`,
   kept in `SyncCache.Unconfirmed`; the stored `dead_instances` row is the
   durable list, and an empty cache announces at once to fill it again).
-  On every tick `TeamReconciler.confirmDepartedInstances` lists the
+  On every tick `TenantReconciler.confirmDepartedInstances` lists the
   pods of each such namespace (`ResourceClient.ListPodPhases`, no label
   selector, so a pod with no label never reads as absent) and confirms an
   instance when no pod carries its UID, or that pod is `Failed` or
@@ -1327,17 +1327,17 @@ sections describe.
   `announceSingleTenantPlacement` sends a generation-zero `tenant.sync`
   "announce" request for it on every tick — the fence needs a row for every
   claim, with no exemption. A cell's own tenant announcements instead ride
-  `cells.Announcer` through `TeamReconciler`'s placement pass
+  `cells.Announcer` through `TenantReconciler`'s placement pass
   (`cells.Place`, `cells/placement.go`). The recorder refuses a stale
   announce with `AnnounceResult.Stale` true, `OK` false, and no error. The
   placement pass treats the refusal as a failed announce, and
-  `TeamReconciler.loggedAnnounce` and `announceSingleTenantPlacement` log
+  `TenantReconciler.loggedAnnounce` and `announceSingleTenantPlacement` log
   it. `NewNATSSyncAnnouncer` and
-  `NewNATSSyncRecordsRequester` (`team_sync.go`) wire that seam and the
+  `NewNATSSyncRecordsRequester` (`tenant_sync.go`) wire that seam and the
   rehydration `records` request over `bus.TenantSyncSubject`, encoding
-  `cells.SyncPolicy` (`cells/sync.go`, `Team.spec.pipelines`'s seven
+  `cells.SyncPolicy` (`cells/sync.go`, `Tenant.spec.pipelines`'s seven
   ledger/rehydration settings) the same way `api/v1alpha1`'s `Effective*`
-  accessors compute it, plus `Team.spec.pipelines.exports` (the tenant's
+  accessors compute it, plus `Tenant.spec.pipelines.exports` (the tenant's
   outward pipelines grants) carried verbatim. `SyncPolicy` holds a slice
   field, so a caller compares two values with `SyncPolicy.Equal`, never
   `==`. An exports-only edit reaches the recorder on the next tick through
@@ -1347,16 +1347,16 @@ sections describe.
   `metadata.uid`** as `Incarnation` (`AnnounceRequest`, `PurgeRequest`,
   `announceSingleTenantPlacement`). The recorder stores it on the
   placement row and refuses a teardown purge that names another
-  incarnation, so a `Team` created again under one name keeps the row its
+  incarnation, so a `Tenant` created again under one name keeps the row its
   own first announcement wrote.
 - **Cell rehydration send and apply** (`cell_rehydration.go`,
   `cell_rehydration_adapt.go`, `cell_rehydration_applied.go`,
   `cell_rehydration_entry.go`, `cell_rehydration_fetch.go`,
   `internal/controller/cells/rehydration_pass.go`) — the operational half of
   `rehydrate/` below. `attachCellRehydration` runs once per cell reconcile
-  tick: for each placed `Team` it checks `rehydrationApplied` against the
+  tick: for each placed `Tenant` it checks `rehydrationApplied` against the
   tenant's current placement generation and cell instance, gives up past
-  `Team.spec.pipelines.rehydrateDeadline` (`rehydrationExpired`,
+  `Tenant.spec.pipelines.rehydrateDeadline` (`rehydrationExpired`,
   `deadlineEntry`), else fetches the tenant's build records over the
   `records` tenant-sync request (`fetchTenantJobRecords`, enumerate then page
   at 32 job paths) and builds one `rehydrate.JobSeed` per job. Each member
@@ -1426,17 +1426,17 @@ sections describe.
   `maxUnseededBytesPerCell` (256 KiB; each path counts its length plus 3 bytes),
   dropping the largest list first (ties by tenant name) until the total fits.
   `rehydrationApplied` also requires an empty `Unseeded`, so a lost in-flight
-  record sends the next block on the next tick. The Team reconciler's `PendingJobs`
+  record sends the next block on the next tick. The Tenant reconciler's `PendingJobs`
   input is `cellRehydrationEntryPending`, which returns `seedAnswerOf(...).pending`.
-  `cells.RehydrationPass`, called from `TeamReconciler.Reconcile` inside the
-  same status patch, derives `Team.status.rehydration` and the `Rehydrated`
+  `cells.RehydrationPass`, called from `TenantReconciler.Reconcile` inside the
+  same status patch, derives `Tenant.status.rehydration` and the `Rehydrated`
   condition from the tenant's own entry on the bound cell by comparing
   generation and cell instance — it never computes a deadline of its own,
   since `attachCellRehydration` already wrote the give-up as the entry's own
   `Error`. **The announcement reads the seed from the cell, never from the
   `Rehydrated` condition.** `cells.currentRehydrationState` calls the same
   `Inputs.MemberSeed` seam the member entries use (`memberSeedReader`,
-  `team_controller.go`), because `RehydrationPass` writes that condition
+  `tenant_controller.go`), because `RehydrationPass` writes that condition
   **after** `cells.Place` runs in the same tick. A read of the condition
   reports the tick before, so the tenant would be announced as unseeded on
   the tick its seed applies and the fence would hold every build of that
@@ -1449,12 +1449,12 @@ sections describe.
 - `webhook_replay.go` — drains a NATS queue of webhook deliveries received while a
   controller was hibernated, replaying them once the mite reconnects. It routes two
   envelope shapes on one filter, chosen from the envelope's own fields, never the
-  subject: the controller shape (unchanged) and the tenant shape (`Team` set,
+  subject: the controller shape (unchanged) and the tenant shape (`Tenant` set,
   `Namespace`/`Controller` both empty), whose target it re-resolves from
-  `Team.status.placement` at delivery time — a move between ingest and delivery lands
+  `Tenant.status.placement` at delivery time — a move between ingest and delivery lands
   on the new cell. A tenant delivery naks on an empty placement, a moving tenant
   (`Placed=False`/`TenantMoving`), or an absent/not-`Connected` target `Controller`;
-  it terms only when the `Team` itself is gone.
+  it terms only when the `Tenant` itself is gone.
 - `sharding/` (`ring.go`, `shardset.go`, `manager.go`) — consistent-hash shard ownership so multiple
   operator replicas split the `Controller` watch set; `SetShardOwnership`/
   `ownsController`/`EnqueueShards` on `*Reconciler` consume it. Only the owning
@@ -1542,7 +1542,7 @@ sections describe.
 - `rehydrate/` — build-record rehydration rendering (design D1/D1a/D2/D4). Pure
   functions, no Kubernetes or NATS I/O: `RenderBuildXML`/`RenderChangelog` render
   one run's `build.xml`/`changelog0.xml`; `BuildJobSeed` selects one job's records
-  (`Team.spec.pipelines.rehydrateBuilds` newest, plus the newest successful run,
+  (`Tenant.spec.pipelines.rehydrateBuilds` newest, plus the newest successful run,
   always); `SelectWithinBudget` truncates a tenant's seeds to the 256 KiB
   `mitev1.RehydrationBundle` cap; `BuildBundle` gzips, hashes, and mints the
   bundle's UUIDv7 id. Its `Record`/`Change` input type mirrors
@@ -1561,10 +1561,10 @@ sections describe.
   empty on the last page. A single row over the budget fails the list with
   `listRowTooLargeError`.
 
-- **`forgeops/`** — answers the operator forge verbs `check` and `read` (`operator.<cluster>.forge.<verb>`). `chooseCredential` reads the Team's agent-namespace tenant-credential Secrets and keeps the ones whose `varroa.dev/allowed-hosts` lists the repository host, sorted by id. `pickWriter` (`check`) uses the first credential whose `Repository` reports push; a credential that reads but cannot push is skipped. `candidates(…, needPush=true)` (`pullrequest`, commit status) lists the pushing credentials in id order. A forge 403 moves to the next candidate. A `RateLimitError` on a write stops the fallback and answers `forge_unreachable` with the reset time. `pullrequest` deletes the branch before it moves on, and it stops when the delete fails. `pickReader` (`read`) uses the first credential that reads the repository. Every probe, `pickCredential` and `candidates` alike, uses `probeResult`. A probe error other than an auth refusal, a 403, or a 404 skips its credential. A rate limit is such an error. When no credential serves the verb, the reply names the first such error, ahead of a scope refusal. Replies name only the credential id and HTTP status, never a body or a token. `ShardKey(team)` is `team/<name>`, the ring key of every forge verb. `EndPendingStatus` (`commitstatus.go`) serves the recorder's `end_commit_status` action, not a forge verb: it sets each `pending` status whose `target_url` names the job path and build number to `error`. A context with an end state, or another build number, is never written.
-- **`forgeops/issue.go`** — answers `operator.<cluster>.forge.issue`. The accepted, enabled `TeamAgent` of the Team must name the Team and enable issue output. Its labels must sit inside `outputs.issues.labels`. A label the forge does not carry answers `invalid_request` and names the label. `issue` builds its candidates with `candidates(…, needPush=false)`: every credential that reads the repository, pushing credentials first, then read-only ones. The operator tries each candidate in turn. A forge 403 on the write moves to the next candidate. A `RateLimitError` on the write stops the fallback and answers `forge_unreachable` with the reset time. Any other error stops the attempt. `forge_write_denied` answers only when every candidate answers 403, and it names each credential tried.
-- **`teamagents/`** — the leader-elected `teamagent` ticker (flag `--team-agents`, core install only). It applies one `VarroaRoleBinding` per accepted `TeamAgent`, labelled `varroa.dev/team-agent`, with the `developer` role scoped to the Team. It deletes each labelled binding that no accepted object needs.
-- **Activity producers** — `cell.signature_refused` (`cell_script_approval_status.go`, one event per new tenant refusal) and `tenant.placement_moved` (`team_controller.go`, a move between two cells only). Each event builder is a pure function (`refusalEvents`, `placementMovedEvent`), so a test checks the rule without a publisher.
+- **`forgeops/`** — answers the operator forge verbs `check` and `read` (`operator.<cluster>.forge.<verb>`). `chooseCredential` reads the Tenant's agent-namespace tenant-credential Secrets and keeps the ones whose `varroa.dev/allowed-hosts` lists the repository host, sorted by id. `pickWriter` (`check`) uses the first credential whose `Repository` reports push; a credential that reads but cannot push is skipped. `candidates(…, needPush=true)` (`pullrequest`, commit status) lists the pushing credentials in id order. A forge 403 moves to the next candidate. A `RateLimitError` on a write stops the fallback and answers `forge_unreachable` with the reset time. `pullrequest` deletes the branch before it moves on, and it stops when the delete fails. `pickReader` (`read`) uses the first credential that reads the repository. Every probe, `pickCredential` and `candidates` alike, uses `probeResult`. A probe error other than an auth refusal, a 403, or a 404 skips its credential. A rate limit is such an error. When no credential serves the verb, the reply names the first such error, ahead of a scope refusal. Replies name only the credential id and HTTP status, never a body or a token. `ShardKey(tenant)` is `tenant/<name>`, the ring key of every forge verb. `EndPendingStatus` (`commitstatus.go`) serves the recorder's `end_commit_status` action, not a forge verb: it sets each `pending` status whose `target_url` names the job path and build number to `error`. A context with an end state, or another build number, is never written.
+- **`forgeops/issue.go`** — answers `operator.<cluster>.forge.issue`. The accepted, enabled `TenantAgent` of the Tenant must name the Tenant and enable issue output. Its labels must sit inside `outputs.issues.labels`. A label the forge does not carry answers `invalid_request` and names the label. `issue` builds its candidates with `candidates(…, needPush=false)`: every credential that reads the repository, pushing credentials first, then read-only ones. The operator tries each candidate in turn. A forge 403 on the write moves to the next candidate. A `RateLimitError` on the write stops the fallback and answers `forge_unreachable` with the reset time. Any other error stops the attempt. `forge_write_denied` answers only when every candidate answers 403, and it names each credential tried.
+- **`tenantagents/`** — the leader-elected `tenantagent` ticker (flag `--tenant-agents`, core install only). It applies one `VarroaRoleBinding` per accepted `TenantAgent`, labelled `varroa.dev/tenant-agent`, with the `developer` role scoped to the Tenant. It deletes each labelled binding that no accepted object needs.
+- **Activity producers** — `cell.signature_refused` (`cell_script_approval_status.go`, one event per new tenant refusal) and `tenant.placement_moved` (`tenant_controller.go`, a move between two cells only). Each event builder is a pure function (`refusalEvents`, `placementMovedEvent`), so a test checks the rule without a publisher.
 
 ## Work Guidance
 

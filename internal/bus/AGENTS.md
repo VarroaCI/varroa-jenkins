@@ -41,7 +41,7 @@ control plane's async transport — no other package talks to NATS directly.
   / `activity.<cluster>._global` (`ActivitySubject`/`ActivityGlobalSubject`,
   wildcard `ActivityWildcard = "activity.>"`), `events.brood.>`
   (`WebhookSubject`/`WebhookWildcard`, hibernation webhook replay;
-  `WebhookTenantSubject` is `webhook.<cluster>.tenant.<team>`, a pipelines
+  `WebhookTenantSubject` is `webhook.<cluster>.tenant.<tenant>`, a pipelines
   tenant's own webhook door — already captured by the same `webhook.>`
   stream and `webhook.<cluster>.>` consumer filter, no new stream or
   consumer needed),
@@ -72,7 +72,7 @@ control plane's async transport — no other package talks to NATS directly.
   (core NATS request-reply, BFF to recorder, queue group `recorder`:
   force-release one releasing fleet lock; the BFF publishes it and the
   recorder answers on `_INBOX_bff.>`, both gated on `recordStore.enabled`).
-- **Webhook enqueue** (`varroa.recordstore.webhook.enqueue`, queue `recorder`): the Team agent message request. The recorder is the only responder.
+- **Webhook enqueue** (`varroa.recordstore.webhook.enqueue`, queue `recorder`): the Tenant agent message request. The recorder is the only responder.
 - **Run note post** (`varroa.recordstore.notes.post`, core NATS request-reply,
   BFF to recorder, queue group `recorder`): write one run or job note. The
   body names the run or the job, so the subject carries no cluster token.
@@ -251,9 +251,9 @@ control plane's async transport — no other package talks to NATS directly.
   `charts/varroa/templates/nats-auth-config.yaml` when adding a new stream,
   subject prefix, or KV bucket — connections are denied by default.
 
-- **Forge subjects** — `operator.<cluster>.forge.{check,read,pullrequest}` (`OperatorForgeSubject`). A later change adds `issue`. Every operator replica subscribes with no queue group. Only the Team's shard owner replies. Request and reply types live in `internal/forge/forgeapi`.
+- **Forge subjects** — `operator.<cluster>.forge.{check,read,pullrequest}` (`OperatorForgeSubject`). A later change adds `issue`. Every operator replica subscribes with no queue group. Only the Tenant's shard owner replies. Request and reply types live in `internal/forge/forgeapi`.
 
-- Team agent subjects (add-team-agents). The `agentrunner` user publishes `agentsessions.>`, `operator.*.forge.read`, `operator.*.forge.issue`, and `varroa.recordstore.notes.post`. It subscribes `varroa.assistant.control` and `_INBOX_agentrunner.>`. It reads the durable `agent-triggers` consumer on `varroa_activity` and holds no stream write. The BFF publishes `varroa.recordstore.webhook.enqueue`; the recorder subscribes to it. The recorder publishes `activity.>`, the audit producers' subject, on every install with `recordStore` enabled. The gateway holds no `operator.*.forge.issue` grant (`TestACL_GatewayCannotPublishForgeIssue`).
+- Tenant agent subjects (add-tenant-agents). The `agentrunner` user publishes `agentsessions.>`, `operator.*.forge.read`, `operator.*.forge.issue`, and `varroa.recordstore.notes.post`. It subscribes `varroa.assistant.control` and `_INBOX_agentrunner.>`. It reads the durable `agent-triggers` consumer on `varroa_activity` and holds no stream write. The BFF publishes `varroa.recordstore.webhook.enqueue`; the recorder subscribes to it. The recorder publishes `activity.>`, the audit producers' subject, on every install with `recordStore` enabled. The gateway holds no `operator.*.forge.issue` grant (`TestACL_GatewayCannotPublishForgeIssue`).
 
 ## Work Guidance
 

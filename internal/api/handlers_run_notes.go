@@ -31,7 +31,7 @@ type runNoteJSON struct {
 	ID          string    `json:"id"`
 	RunID       *string   `json:"runId"`
 	Cluster     string    `json:"cluster"`
-	Team        string    `json:"team"`
+	Tenant      string    `json:"tenant"`
 	JobPath     string    `json:"jobPath"`
 	Principal   string    `json:"principal"`
 	SessionID   *string   `json:"sessionId"`
@@ -43,7 +43,7 @@ type runNoteJSON struct {
 // toRunNoteJSON converts a record-store note into the API shape.
 func toRunNoteJSON(n recordstore.RunNote) runNoteJSON {
 	out := runNoteJSON{
-		ID: n.ID.String(), Cluster: n.Cluster, Team: n.Team, JobPath: n.JobPath,
+		ID: n.ID.String(), Cluster: n.Cluster, Tenant: n.Tenant, JobPath: n.JobPath,
 		Principal: n.Principal, Body: n.Body, CreatedAt: n.CreatedAt, BuildNumber: n.BuildNumber,
 	}
 	if n.RunID != nil {
@@ -147,7 +147,7 @@ func runNoteListJSON(notes []recordstore.RunNote) map[string]any {
 	return map[string]any{"items": items}
 }
 
-// handleListJobNotes serves GET /pipelines/{team}/jobs/{job}/notes. The
+// handleListJobNotes serves GET /pipelines/{tenant}/jobs/{job}/notes. The
 // caller must read the job, and the list holds the newest ten notes.
 func (s *Server) handleListJobNotes(w http.ResponseWriter, r *http.Request) {
 	if s.deps.RecordStore == nil {
@@ -157,7 +157,7 @@ func (s *Server) handleListJobNotes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	claims := auth.ClaimsFromContext(ctx)
 	jobPath := r.PathValue("job")
-	refs, serr := s.resolveTeamTenants(ctx, claims, r.PathValue("team"))
+	refs, serr := s.resolveTenantTenants(ctx, claims, r.PathValue("tenant"))
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return

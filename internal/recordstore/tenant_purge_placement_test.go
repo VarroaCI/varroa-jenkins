@@ -7,7 +7,7 @@ import (
 
 // TestTeardownPurgeResetsThePlacementGeneration asserts a whole-tenant
 // purge, which only a teardown sends, resets the tenant's stored
-// placement generation. A Team created again under the same name starts
+// placement generation. A Tenant created again under the same name starts
 // at generation 1, and the announce never lowers a stored generation, so
 // without the reset every claim of the new tenant answers NOT_READY.
 func TestTeardownPurgeResetsThePlacementGeneration(t *testing.T) {
@@ -134,7 +134,7 @@ func TestTeardownPurgeKeepsANewerPlacementGeneration(t *testing.T) {
 
 // TestTenantPurgeIgnoresANewerIncarnation asserts a late teardown purge
 // leaves the placement row of a tenant created again under the same name
-// alone. The purge can arrive after the Team finalizer clears, and the
+// alone. The purge can arrive after the Tenant finalizer clears, and the
 // new tenant announces inside that window, so the row already belongs to
 // the new incarnation.
 func TestTenantPurgeIgnoresANewerIncarnation(t *testing.T) {

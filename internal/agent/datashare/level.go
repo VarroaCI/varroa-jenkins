@@ -54,13 +54,13 @@ func Ceiling(trust agent.ProviderTrust, external agent.DataSharing) agent.DataSh
 	return external
 }
 
-// TenantLevel returns the level that a tenant grants. An empty team, or a
+// TenantLevel returns the level that a tenant grants. An empty tenant, or a
 // tenant with no entry, grants logs. An invalid entry grants none.
-func TenantLevel(levels map[string]agent.DataSharing, team string) agent.DataSharing {
-	if team == "" {
+func TenantLevel(levels map[string]agent.DataSharing, tenant string) agent.DataSharing {
+	if tenant == "" {
 		return agent.DataLogs
 	}
-	level, ok := levels[team]
+	level, ok := levels[tenant]
 	if !ok {
 		return agent.DataLogs
 	}
@@ -73,7 +73,7 @@ func TenantLevel(levels map[string]agent.DataSharing, team string) agent.DataSha
 // Inputs are the values that decide a session's level.
 type Inputs struct {
 	User            agent.DataSharing
-	Team            string
+	Tenant          string
 	TenantLevels    map[string]agent.DataSharing
 	Trust           agent.ProviderTrust
 	ExternalCeiling agent.DataSharing
@@ -85,7 +85,7 @@ func Effective(in Inputs) agent.DataSharing {
 	if user == "" {
 		user = agent.DataLogs
 	}
-	return Min(user, TenantLevel(in.TenantLevels, in.Team), Ceiling(in.Trust, in.ExternalCeiling))
+	return Min(user, TenantLevel(in.TenantLevels, in.Tenant), Ceiling(in.Trust, in.ExternalCeiling))
 }
 
 // Visible returns the tools that the model may see at the level. Every

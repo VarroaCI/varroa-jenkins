@@ -240,7 +240,7 @@ describe("ManagedJenkins", () => {
       expect(screen.queryByText(/Cannot embed/)).not.toBeInTheDocument();
     });
 
-    it("links to /pipelines/<name> when the DTO resolves a team", () => {
+    it("links to /pipelines/<name> when the DTO resolves a tenant", () => {
       mockUseController.mockReturnValue({
         data: { name: "my-ctrl", namespace: "my-ns", phase: "Running", endpoint: "", miteConnected: true, headless: true },
         isLoading: false,
@@ -252,7 +252,7 @@ describe("ManagedJenkins", () => {
       expect(link).toHaveAttribute("href", "/pipelines/my-ctrl");
     });
 
-    it("links to the pipelines index when the DTO resolves no team", () => {
+    it("links to the pipelines index when the DTO resolves no tenant", () => {
       mockUseController.mockReturnValue({
         data: { name: "", namespace: "my-ns", phase: "Running", endpoint: "", miteConnected: true, headless: true },
         isLoading: false,

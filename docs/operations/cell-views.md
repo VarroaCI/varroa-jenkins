@@ -38,7 +38,7 @@ The panel renders the cell usage read: the tenant cap, the free slots, the queue
 
 ### Permissions
 
-The panel lists one block for each tenant, with the subjects, the pipelines verbs, and the job globs of each grant, plus the tenant's generated Jenkins item role and its folder pattern. The panel also lists the generated member roles of each tenant, with the folder pattern, the subjects, and the permissions of each role. It edits no binding, and a link opens the Access page. A tenant that no binding and no Team membership reaches says so.
+The panel lists one block for each tenant, with the subjects, the pipelines verbs, and the job globs of each grant, plus the tenant's generated Jenkins item role and its folder pattern. The panel also lists the generated member roles of each tenant, with the folder pattern, the subjects, and the permissions of each role. It edits no binding, and a link opens the Access page. A tenant that no binding and no Tenant membership reaches says so.
 
 ### Script approvals
 
@@ -117,7 +117,7 @@ One code for the three `404` conditions confirms no cell's existence.
 
 The read touches no record store, so it answers no `503`. It returns at most 50 grants for each tenant, narrowing grants first, and flags a cut list as `truncated`.
 
-A cell on a member cluster answers from that member's operator. The member operator reads its own Team and binding state, the state the member cell renders. Core tenant-scoped bindings appear there as `federatedBinding` rows. Each row names its JenkinsRoleBinding copy in `binding`, its source VarroaRole in `roleRef`, and its core VarroaRoleBindings in `federatedFrom`. A core cluster-wide binding with pipelines write appears through its all-tenants copy, as described in `cells.md`.
+A cell on a member cluster answers from that member's operator. The member operator reads its own Tenant and binding state, the state the member cell renders. Core tenant-scoped bindings appear there as `federatedBinding` rows. Each row names its JenkinsRoleBinding copy in `binding`, its source VarroaRole in `roleRef`, and its core VarroaRoleBindings in `federatedFrom`. A core cluster-wide binding with pipelines write appears through its all-tenants copy, as described in `cells.md`.
 
 Each tenant also carries `memberRoles`, the generated Jenkins member roles. This list is never capped. Its `User` subjects include the principal of each person that the `User` objects name. On a member cluster, the list shows the member roles that the member operator renders.
 

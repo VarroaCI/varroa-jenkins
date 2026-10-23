@@ -53,7 +53,7 @@ func TestLintMarker_ZeroExitOnCleanMarker(t *testing.T) {
 	})
 	defer srv.Close()
 
-	code := run([]string{"lint", "marker", "--team", "payments", "--marker", markerPath})
+	code := run([]string{"lint", "marker", "--tenant", "payments", "--marker", markerPath})
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
@@ -78,7 +78,7 @@ func TestLintMarker_NonZeroExitOnFindings(t *testing.T) {
 	})
 	defer srv.Close()
 
-	code := run([]string{"lint", "marker", "--team", "payments", "--marker", markerPath})
+	code := run([]string{"lint", "marker", "--tenant", "payments", "--marker", markerPath})
 	if code == 0 {
 		t.Fatal("expected non-zero exit for a finding")
 	}
@@ -91,13 +91,13 @@ func TestLintMarker_MissingFileIsError(t *testing.T) {
 	testSetup(t)
 	missingPath := filepath.Join(t.TempDir(), "does-not-exist.yaml")
 
-	code := run([]string{"lint", "marker", "--team", "payments", "--marker", missingPath})
+	code := run([]string{"lint", "marker", "--tenant", "payments", "--marker", missingPath})
 	if code == 0 {
 		t.Fatal("expected non-zero exit for a missing marker file")
 	}
 }
 
-// TestLintMarker_NoBundleReportsOneFinding asserts varroa-cli's "A team
+// TestLintMarker_NoBundleReportsOneFinding asserts varroa-cli's "A tenant
 // with no bundle produces a finding" scenario: the BFF's one finding
 // reaches the command as a non-zero exit, the same as any other finding.
 func TestLintMarker_NoBundleReportsOneFinding(t *testing.T) {
@@ -108,26 +108,26 @@ func TestLintMarker_NoBundleReportsOneFinding(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"findings": []map[string]string{
-				{"severity": "error", "message": `team "payments" delivers no pipeline template`},
+				{"severity": "error", "message": `tenant "payments" delivers no pipeline template`},
 			},
 		})
 	})
 	defer srv.Close()
 
-	code := run([]string{"lint", "marker", "--team", "payments", "--marker", markerPath})
+	code := run([]string{"lint", "marker", "--tenant", "payments", "--marker", markerPath})
 	if code == 0 {
-		t.Fatal("expected non-zero exit when the team delivers no pipeline template")
+		t.Fatal("expected non-zero exit when the tenant delivers no pipeline template")
 	}
 }
 
-// TestLintMarker_RequiresTeamFlag asserts --team is required.
-func TestLintMarker_RequiresTeamFlag(t *testing.T) {
+// TestLintMarker_RequiresTenantFlag asserts --tenant is required.
+func TestLintMarker_RequiresTenantFlag(t *testing.T) {
 	testSetup(t)
 	markerPath := writeTestMarker(t)
 
 	code := run([]string{"lint", "marker", "--marker", markerPath})
 	if code == 0 {
-		t.Fatal("expected non-zero exit with no --team")
+		t.Fatal("expected non-zero exit with no --tenant")
 	}
 }
 
@@ -158,7 +158,7 @@ func TestLintMarker_DefaultsMarkerPath(t *testing.T) {
 	})
 	defer srv.Close()
 
-	code := run([]string{"lint", "marker", "--team", "payments"})
+	code := run([]string{"lint", "marker", "--tenant", "payments"})
 	if code != 0 {
 		t.Fatalf("expected exit 0 reading the default marker path, got %d", code)
 	}

@@ -38,9 +38,9 @@ items:
           script: "pipeline {}"
 `
 
-// teamItemsYAML declares jobs relative to a tenant bundle root. The
-// manifest is re-rooted under the Team folder before the listing reads it.
-const teamItemsYAML = `
+// tenantItemsYAML declares jobs relative to a tenant bundle root. The
+// manifest is re-rooted under the Tenant folder before the listing reads it.
+const tenantItemsYAML = `
 items:
   - kind: folder
     name: release
@@ -112,9 +112,9 @@ func newMultibranchControllerFixture() *fakeResourceClient {
 	return client
 }
 
-// newPlacedTeamFixture seeds the placed Team "payments" on the cell
+// newPlacedTenantFixture seeds the placed Tenant "payments" on the cell
 // "cell-1", with a tenant bundle declaring release/eu and build/nightly.
-func newPlacedTeamFixture(t *testing.T) *fakeResourceClient {
+func newPlacedTenantFixture(t *testing.T) *fakeResourceClient {
 	t.Helper()
 	client := newFakeResourceClient()
 	client.controllers = map[string]*v1alpha1.Controller{
@@ -127,23 +127,23 @@ func newPlacedTeamFixture(t *testing.T) *fakeResourceClient {
 		},
 	}
 	client.configMaps = map[string]map[string]string{
-		"payments-content": {"items.yaml": teamItemsYAML},
+		"payments-content": {"items.yaml": tenantItemsYAML},
 	}
-	obj := placedTeamObject("payments", "core", "test-ns", "cell-1")
+	obj := placedTenantObject("payments", "core", "test-ns", "cell-1")
 	if err := unstructured.SetNestedMap(obj.Object, map[string]any{
 		"name":      "payments-bundle",
 		"namespace": "test-ns",
 	}, "spec", "pipelines", "composedBundleRef"); err != nil {
 		t.Fatalf("set composedBundleRef: %v", err)
 	}
-	seedTeam(t, client.crdStore, obj)
+	seedTenant(t, client.crdStore, obj)
 	return client
 }
 
-// listPipelinesFor issues GET /pipelines/{team} and decodes the envelope.
-func listPipelinesFor(t *testing.T, srv *Server, team string) pipelineListResponse {
+// listPipelinesFor issues GET /pipelines/{tenant} and decodes the envelope.
+func listPipelinesFor(t *testing.T, srv *Server, tenant string) pipelineListResponse {
 	t.Helper()
-	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/"+team, map[string]string{"team": team})
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/"+tenant, map[string]string{"tenant": tenant})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -220,7 +220,7 @@ func TestHandleListPipelines_RecordRowDoesNotClearDeclaredKind(t *testing.T) {
 
 // TestHandleListPipelines_MultibranchDeclarationWinsOverPipeline asserts
 // the scenario "A multibranch declaration wins over a pipeline
-// declaration". Two controller tenants of one team declare shared/api with
+// declaration". Two controller tenants of one tenant declare shared/api with
 // different kinds. The fan-out order is the map order of the fake
 // controller set, so the request runs many times and the result must not
 // change.
@@ -250,7 +250,7 @@ func TestHandleListPipelines_MultibranchDeclarationWinsOverPipeline(t *testing.T
 		"content-pipe":  {"items.yaml": sharedPathItemsYAML("pipeline")},
 		"content-multi": {"items.yaml": sharedPathItemsYAML("multibranch")},
 	}
-	seedTeam(t, client.crdStore, unplacedTeamObject("payments", "ns-a", "ns-b"))
+	seedTenant(t, client.crdStore, unplacedTenantObject("payments", "ns-a", "ns-b"))
 
 	authz := namespaceAuthorizer("ns-a", "ns-b")
 	srv := pipelinesTestServer(client, authz, newFakeRecordReader(), nil)
@@ -265,10 +265,10 @@ func TestHandleListPipelines_MultibranchDeclarationWinsOverPipeline(t *testing.T
 
 // --- Task 2.3: the tenant folder ---
 
-// TestHandleListPipelines_PlacedTeamReportsItsFolder asserts the scenario
-// "A placed team reports its folder".
-func TestHandleListPipelines_PlacedTeamReportsItsFolder(t *testing.T) {
-	client := newPlacedTeamFixture(t)
+// TestHandleListPipelines_PlacedTenantReportsItsFolder asserts the scenario
+// "A placed tenant reports its folder".
+func TestHandleListPipelines_PlacedTenantReportsItsFolder(t *testing.T) {
+	client := newPlacedTenantFixture(t)
 	authz := resolverAuthorizer("payments")
 	srv := pipelinesTestServer(client, authz, newFakeRecordReader(), nil)
 
@@ -286,7 +286,7 @@ func TestHandleListPipelines_ControllerTenantReportsEmptyFolder(t *testing.T) {
 	authz := pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a")
 	srv := pipelinesTestServer(client, authz, newFakeRecordReader(), nil)
 
-	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"team": "ctrl-a"})
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"tenant": "ctrl-a"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -321,7 +321,7 @@ func TestTenantGrants_NilAuthorizerDenies(t *testing.T) {
 
 // --- Task 4.3: the glob filter on the listing ---
 
-// narrowedPaymentsAuthorizer grants pipelines read on the placed Team
+// narrowedPaymentsAuthorizer grants pipelines read on the placed Tenant
 // tenant "payments", narrowed to the job globs named.
 func narrowedPaymentsAuthorizer(globs ...string) *Authorizer {
 	role := &v1alpha1.VarroaRole{
@@ -348,7 +348,7 @@ func narrowedPaymentsAuthorizer(globs ...string) *Authorizer {
 // name must be absent from the whole response body, not merely from the
 // decoded item list.
 func TestHandleListPipelines_NarrowedCallerReadsOnlyItsOwnJobs(t *testing.T) {
-	client := newPlacedTeamFixture(t)
+	client := newPlacedTenantFixture(t)
 	authz := narrowedPaymentsAuthorizer("release/*")
 	reader := newFakeRecordReader()
 	reader.jobSummaries["core/payments"] = []recordstore.JobSummary{
@@ -357,7 +357,7 @@ func TestHandleListPipelines_NarrowedCallerReadsOnlyItsOwnJobs(t *testing.T) {
 	}
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
-	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/payments", map[string]string{"team": "payments"})
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/payments", map[string]string{"tenant": "payments"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -373,7 +373,7 @@ func TestHandleListPipelines_NarrowedCallerReadsOnlyItsOwnJobs(t *testing.T) {
 // TestHandleListPipelines_RunningNowObeysTheSameGlobs asserts the scenario
 // "The running-now list obeys the same globs".
 func TestHandleListPipelines_RunningNowObeysTheSameGlobs(t *testing.T) {
-	client := newPlacedTeamFixture(t)
+	client := newPlacedTenantFixture(t)
 	authz := narrowedPaymentsAuthorizer("release/*")
 	reader := newFakeRecordReader()
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -387,7 +387,7 @@ func TestHandleListPipelines_RunningNowObeysTheSameGlobs(t *testing.T) {
 	})
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
-	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/payments", map[string]string{"team": "payments"})
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/payments", map[string]string{"tenant": "payments"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -408,7 +408,7 @@ func TestHandleListPipelines_RunningNowObeysTheSameGlobs(t *testing.T) {
 // "A filtered strip does not change the truncated flag". truncated reports
 // the page the record store answered, not the filter.
 func TestHandleListPipelines_FilteredStripKeepsTruncated(t *testing.T) {
-	client := newPlacedTeamFixture(t)
+	client := newPlacedTenantFixture(t)
 	authz := narrowedPaymentsAuthorizer("release/*")
 	reader := newFakeRecordReader()
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -434,11 +434,11 @@ func TestHandleListPipelines_FilteredStripKeepsTruncated(t *testing.T) {
 	}
 }
 
-// TestHandleListPipelines_NarrowedCallerStillReadsTheTeamPage asserts the
-// scenario "A narrowed caller still reads the team page": the empty job
+// TestHandleListPipelines_NarrowedCallerStillReadsTheTenantPage asserts the
+// scenario "A narrowed caller still reads the tenant page": the empty job
 // path admits the tenant, so the page answers 200.
-func TestHandleListPipelines_NarrowedCallerStillReadsTheTeamPage(t *testing.T) {
-	client := newPlacedTeamFixture(t)
+func TestHandleListPipelines_NarrowedCallerStillReadsTheTenantPage(t *testing.T) {
+	client := newPlacedTenantFixture(t)
 	authz := narrowedPaymentsAuthorizer("release/*")
 	reader := newFakeRecordReader()
 	reader.jobSummaries["core/payments"] = []recordstore.JobSummary{
@@ -446,17 +446,17 @@ func TestHandleListPipelines_NarrowedCallerStillReadsTheTeamPage(t *testing.T) {
 	}
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
-	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/payments", map[string]string{"team": "payments"})
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/payments", map[string]string{"tenant": "payments"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
 	}
 }
 
 // TestHandleListPipelines_HeldTenantListsNoDeclaredJobs asserts a placed
-// Team whose items the cell holds shows no declared job, while its run
+// Tenant whose items the cell holds shows no declared job, while its run
 // history still lists.
 func TestHandleListPipelines_HeldTenantListsNoDeclaredJobs(t *testing.T) {
-	client := newPlacedTeamFixture(t)
+	client := newPlacedTenantFixture(t)
 	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantUnknownKeyItems}
 	reader := newFakeRecordReader()
 	reader.jobSummaries["core/payments"] = []recordstore.JobSummary{

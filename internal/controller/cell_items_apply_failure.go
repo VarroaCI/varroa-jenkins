@@ -32,7 +32,7 @@ func itemsApplyFailureWarnings(cell *v1alpha1.CellStatus, d *mitev1.DesiredState
 	for _, tenant := range tenants {
 		out = append(out, v1alpha1.TenantWarning{
 			Tenant:  tenant,
-			Reason:  v1alpha1.TeamReasonItemsApplyFailed,
+			Reason:  v1alpha1.TenantReasonItemsApplyFailed,
 			Message: truncate(strings.Join(errorsByTenant[tenant], "; "), 1024),
 		})
 	}
@@ -62,10 +62,10 @@ func itemsApplyFailedAfter(existing []v1alpha1.TenantWarning, cell *v1alpha1.Cel
 		return existing
 	}
 	if d.ItemsSuccess {
-		return replaceTenantWarnings(existing, v1alpha1.TeamReasonItemsApplyFailed, nil)
+		return replaceTenantWarnings(existing, v1alpha1.TenantReasonItemsApplyFailed, nil)
 	}
 	if len(d.ItemFailures) == 0 {
 		return existing
 	}
-	return replaceTenantWarnings(existing, v1alpha1.TeamReasonItemsApplyFailed, itemsApplyFailureWarnings(cell, d))
+	return replaceTenantWarnings(existing, v1alpha1.TenantReasonItemsApplyFailed, itemsApplyFailureWarnings(cell, d))
 }

@@ -30,7 +30,7 @@ DO $$ BEGIN
     GRANT INSERT ON varroa.log_chunks TO varroa_client;
     GRANT INSERT, UPDATE ON varroa.agent_sessions, varroa.agent_session_events,
       varroa.agent_approvals, varroa.agent_settings TO varroa_client;
-    GRANT INSERT, UPDATE ON varroa.team_agent_spend TO varroa_client;
+    GRANT INSERT, UPDATE ON varroa.tenant_agent_spend TO varroa_client;
     ALTER DEFAULT PRIVILEGES IN SCHEMA varroa GRANT SELECT ON TABLES TO varroa_client;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'varroa_gateway') THEN

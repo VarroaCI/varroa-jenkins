@@ -14,7 +14,7 @@ import (
 // D12:
 //
 //	java -jar agent.jar -url https://<door host>/runners/<token>/ \
-//	  -name <team>-<runner> -secret <token> -webSocket -workDir <remoteFS>
+//	  -name <tenant>-<runner> -secret <token> -webSocket -workDir <remoteFS>
 // ---------------------------------------------------------------------------
 
 func TestInboundInstruction_GoldenString(t *testing.T) {
@@ -89,7 +89,7 @@ func TestRunnerRegister_InboundPrint(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"name": "win-1",
 				"spec": map[string]any{
-					"team": "payments", "launcher": "inbound", "remoteFS": "/var/j",
+					"tenant": "payments", "launcher": "inbound", "remoteFS": "/var/j",
 				},
 				"status": map[string]any{
 					"nodeName":  "payments-win-1",
@@ -140,7 +140,7 @@ func TestRunnerRegister_SSHPrint(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"name": "unix-1",
 				"spec": map[string]any{
-					"team": "payments", "launcher": "ssh", "remoteFS": "/home/jenkins",
+					"tenant": "payments", "launcher": "ssh", "remoteFS": "/home/jenkins",
 					"host": "10.0.0.5", "port": 22, "credentialRef": "unix-1-ssh-key",
 				},
 				"status": map[string]any{
@@ -201,7 +201,7 @@ func TestRunnerRegister_Timeout(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"name": "win-1",
 				"spec": map[string]any{
-					"team": "payments", "launcher": "inbound", "remoteFS": "/var/j",
+					"tenant": "payments", "launcher": "inbound", "remoteFS": "/var/j",
 				},
 				"status": map[string]any{
 					"connected": false,

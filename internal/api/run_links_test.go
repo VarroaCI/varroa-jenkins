@@ -225,7 +225,7 @@ func TestHandleGetPipelineJob_DependencyLastRunRedacted(t *testing.T) {
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
 	}
-	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
 
 	authz := resolverAuthorizer("payments")
 	reader := newFakeRecordReader()
@@ -238,7 +238,7 @@ func TestHandleGetPipelineJob_DependencyLastRunRedacted(t *testing.T) {
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Frelease",
-		map[string]string{"team": "payments", "job": "payments/release"})
+		map[string]string{"tenant": "payments", "job": "payments/release"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}

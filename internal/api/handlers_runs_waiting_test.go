@@ -58,7 +58,7 @@ func TestGetPipelineJob_ListsWaiting(t *testing.T) {
 	srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a"), reader, nil)
 
 	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/ctrl-a/jobs/"+url.PathEscape("acme/app-a"),
-		map[string]string{"team": "ctrl-a", "job": "acme/app-a"})
+		map[string]string{"tenant": "ctrl-a", "job": "acme/app-a"})
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}

@@ -18,8 +18,8 @@ func TestPlace_FirstPlacement_AnnouncesBeforePlacementWrite(t *testing.T) {
 	var calls int
 	in := testInputs()
 	in.Cells = []CellCandidate{readyCell("cell-a")}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
 	// Place mutates status only after a successful announce, so the
 	// announce closure observing status.Placement == nil proves the call
@@ -32,7 +32,7 @@ func TestPlace_FirstPlacement_AnnouncesBeforePlacementWrite(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if calls != 1 {
@@ -54,7 +54,7 @@ func TestPlace_InvoluntaryMove_AnnouncesBeforePlacementWrite(t *testing.T) {
 	evacuating.Evacuate = true
 	fresh := readyCell("cell-b")
 	in.Cells = []CellCandidate{evacuating, fresh}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(1)
 
 	in.Announce = func(_ context.Context, req AnnounceRequest) (AnnounceResult, error) {
@@ -67,7 +67,7 @@ func TestPlace_InvoluntaryMove_AnnouncesBeforePlacementWrite(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if calls != 1 {
@@ -88,10 +88,10 @@ func TestPlace_Move_FailedAnnouncementStopsTheMove(t *testing.T) {
 	in := testInputs()
 	in.Announce = failingAnnounce()
 	in.Cells = []CellCandidate{readyCell("cell-a")}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Placement != nil {
@@ -110,11 +110,11 @@ func TestPlace_VoluntaryMove_AnnouncesAfterDrain(t *testing.T) {
 	mismatched.ResolvedProfile = "other-profile"
 	other := readyCell("cell-b")
 	in.Cells = []CellCandidate{mismatched, other}
-	team := testTeam()
+	tenant := testTenant()
 	status := placedStatus(1)
-	status.Conditions = []v1alpha1.TeamCondition{{
-		Type: v1alpha1.TeamConditionPlaced, Status: metav1.ConditionFalse,
-		Reason: v1alpha1.TeamReasonTenantMoving, Message: tenantMovingMessage,
+	status.Conditions = []v1alpha1.TenantCondition{{
+		Type: v1alpha1.TenantConditionPlaced, Status: metav1.ConditionFalse,
+		Reason: v1alpha1.TenantReasonTenantMoving, Message: tenantMovingMessage,
 	}}
 
 	var calls int
@@ -132,7 +132,7 @@ func TestPlace_VoluntaryMove_AnnouncesAfterDrain(t *testing.T) {
 	// Tick: the drain has already completed (mismatched.AppliedTenants
 	// does not name the tenant, and there is no pending deletion), so this
 	// call performs the move.
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if calls != 1 {
@@ -153,8 +153,8 @@ func TestPlace_Announce_CarriesDefaultsAndPresence(t *testing.T) {
 	cell.MiteConnected = true
 	cell.MiteLastSeen = &t1
 	in.Cells = []CellCandidate{cell}
-	team := testTeam() // spec.pipelines sets none of the seven settings.
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant() // spec.pipelines sets none of the seven settings.
+	status := &v1alpha1.TenantStatus{}
 
 	var got AnnounceRequest
 	var calls int
@@ -164,13 +164,13 @@ func TestPlace_Announce_CarriesDefaultsAndPresence(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if calls != 1 {
 		t.Fatalf("expected exactly one announce call, got %d", calls)
 	}
-	wantPolicy := SyncPolicyFromPipelines(team.Spec.Pipelines)
+	wantPolicy := SyncPolicyFromPipelines(tenant.Spec.Pipelines)
 	if !got.Policy.Equal(wantPolicy) {
 		t.Errorf("Policy = %+v, want every default: %+v", got.Policy, wantPolicy)
 	}
@@ -201,10 +201,10 @@ func TestPlace_Announce_RolledPodAddsDeadInstance(t *testing.T) {
 	cellTick1.MiteConnected = true
 	cellTick1.MiteLastSeen = &t1
 	in.Cells = []CellCandidate{cellTick1}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
 
-	out1, err := Place(context.Background(), in, team, status)
+	out1, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("tick 1: Place returned error: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestPlace_Announce_RolledPodAddsDeadInstance(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("tick 2: Place returned error: %v", err)
 	}
 	if calls != 1 {
@@ -251,9 +251,9 @@ func TestPlace_Reannounce_PodRoll(t *testing.T) {
 	cellTick1 := readyCell("cell-a")
 	cellTick1.Instance = "uid-1"
 	in.Cells = []CellCandidate{cellTick1}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
-	out1, err := Place(context.Background(), in, team, status)
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
+	out1, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestPlace_Reannounce_PodRoll(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
 	if calls != 1 {
@@ -291,14 +291,14 @@ func TestPlace_Reannounce_PolicyEdit(t *testing.T) {
 	cell := readyCell("cell-a")
 	cell.Instance = "uid-1"
 	in.Cells = []CellCandidate{cell}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
-	out1, err := Place(context.Background(), in, team, status)
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
+	out1, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
 
-	team.Spec.Pipelines.Concurrency = "cancelInProgress"
+	tenant.Spec.Pipelines.Concurrency = "cancelInProgress"
 	in.LastSync = out1.SyncCacheUpdate
 	in.Now = fixedClock(fixedNow.Add(time.Minute))
 
@@ -310,7 +310,7 @@ func TestPlace_Reannounce_PolicyEdit(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
 	if calls != 1 {
@@ -334,15 +334,15 @@ func TestPlace_Reannounce_ExportsEdit(t *testing.T) {
 	cell := readyCell("cell-a")
 	cell.Instance = "uid-1"
 	in.Cells = []CellCandidate{cell}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
-	out1, err := Place(context.Background(), in, team, status)
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
+	out1, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
 	generationBefore := status.Placement.Generation
 
-	team.Spec.Pipelines.Exports = []v1alpha1.TeamExport{
+	tenant.Spec.Pipelines.Exports = []v1alpha1.TenantExport{
 		{Job: "release/*", Callers: []string{"payments", "search"}},
 	}
 	in.LastSync = out1.SyncCacheUpdate
@@ -356,7 +356,7 @@ func TestPlace_Reannounce_ExportsEdit(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
 	if calls != 1 {
@@ -383,16 +383,16 @@ func TestMaybeReannounceOnAgentNamespaceChange(t *testing.T) {
 	cell := readyCell("cell-a")
 	cell.Instance = "uid-1"
 	in.Cells = []CellCandidate{cell}
-	team := testTeam()
-	team.Spec.Namespaces = append(team.Spec.Namespaces, "payments-agents")
-	status := &v1alpha1.TeamStatus{}
+	tenant := testTenant()
+	tenant.Spec.Namespaces = append(tenant.Spec.Namespaces, "payments-agents")
+	status := &v1alpha1.TenantStatus{}
 
 	var first AnnounceRequest
 	in.Announce = func(_ context.Context, req AnnounceRequest) (AnnounceResult, error) {
 		first = req
 		return AnnounceResult{OK: true}, nil
 	}
-	out1, err := Place(context.Background(), in, team, status)
+	out1, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestMaybeReannounceOnAgentNamespaceChange(t *testing.T) {
 	}
 	generationBefore := status.Placement.Generation
 
-	team.Spec.Pipelines.AgentNamespace = "payments-agents"
+	tenant.Spec.Pipelines.AgentNamespace = "payments-agents"
 	in.LastSync = out1.SyncCacheUpdate
 	in.Now = fixedClock(fixedNow.Add(time.Minute))
 
@@ -415,7 +415,7 @@ func TestMaybeReannounceOnAgentNamespaceChange(t *testing.T) {
 		got = req
 		return AnnounceResult{OK: true}, nil
 	}
-	out2, err := Place(context.Background(), in, team, status)
+	out2, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
@@ -433,7 +433,7 @@ func TestMaybeReannounceOnAgentNamespaceChange(t *testing.T) {
 	}
 }
 
-// TestSyncPolicyFromPipelines_NilSpec_NoExports covers task 7.3: a Team
+// TestSyncPolicyFromPipelines_NilSpec_NoExports covers task 7.3: a Tenant
 // with no spec.pipelines contributes no export policy.
 func TestSyncPolicyFromPipelines_NilSpec_NoExports(t *testing.T) {
 	policy := SyncPolicyFromPipelines(nil)
@@ -447,9 +447,9 @@ func TestPlace_Reannounce_UnchangedSendsNothingInWindow(t *testing.T) {
 	cell := readyCell("cell-a")
 	cell.Instance = "uid-1"
 	in.Cells = []CellCandidate{cell}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
-	out1, err := Place(context.Background(), in, team, status)
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
+	out1, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
@@ -466,7 +466,7 @@ func TestPlace_Reannounce_UnchangedSendsNothingInWindow(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
 	if calls != 0 {
@@ -479,9 +479,9 @@ func TestPlace_Reannounce_TenMinuteResync(t *testing.T) {
 	cell := readyCell("cell-a")
 	cell.Instance = "uid-1"
 	in.Cells = []CellCandidate{cell}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
-	out1, err := Place(context.Background(), in, team, status)
+	tenant := testTenant()
+	status := &v1alpha1.TenantStatus{}
+	out1, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestPlace_Reannounce_TenMinuteResync(t *testing.T) {
 		return AnnounceResult{OK: true}, nil
 	}
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
 	if calls != 1 {
@@ -504,10 +504,10 @@ func TestPlace_Reannounce_TenMinuteResync(t *testing.T) {
 }
 
 func TestSyncPolicyFromPipelinesCarriesRetention(t *testing.T) {
-	spec := &v1alpha1.TeamPipelinesSpec{
-		Retention: &v1alpha1.TeamPipelinesRetention{
+	spec := &v1alpha1.TenantPipelinesSpec{
+		Retention: &v1alpha1.TenantPipelinesRetention{
 			Runs: "30d",
-			Jobs: []v1alpha1.TeamJobRetention{{Job: "pr-*", Runs: "7d"}},
+			Jobs: []v1alpha1.TenantJobRetention{{Job: "pr-*", Runs: "7d"}},
 		},
 	}
 	got := SyncPolicyFromPipelines(spec)
@@ -517,11 +517,11 @@ func TestSyncPolicyFromPipelinesCarriesRetention(t *testing.T) {
 }
 
 func TestSyncPolicyEqualDetectsRetentionChange(t *testing.T) {
-	base := SyncPolicyFromPipelines(&v1alpha1.TeamPipelinesSpec{
-		Retention: &v1alpha1.TeamPipelinesRetention{Runs: "30d"},
+	base := SyncPolicyFromPipelines(&v1alpha1.TenantPipelinesSpec{
+		Retention: &v1alpha1.TenantPipelinesRetention{Runs: "30d"},
 	})
-	changed := SyncPolicyFromPipelines(&v1alpha1.TeamPipelinesSpec{
-		Retention: &v1alpha1.TeamPipelinesRetention{Runs: "14d"},
+	changed := SyncPolicyFromPipelines(&v1alpha1.TenantPipelinesSpec{
+		Retention: &v1alpha1.TenantPipelinesRetention{Runs: "14d"},
 	})
 	if base.Equal(changed) {
 		t.Fatalf("Equal = true for policies whose retention differs")

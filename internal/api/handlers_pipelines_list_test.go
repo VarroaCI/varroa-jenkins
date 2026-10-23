@@ -48,27 +48,27 @@ func globalPipelinesAuthorizer() *Authorizer {
 	return NewAuthorizer(testResolver(roles, bindings), false)
 }
 
-// pipelinesTeam builds a local Team. A non-empty cell places it.
-func pipelinesTeam(name string, pipelines bool, cluster, cellNamespace, cell string) *v1alpha1.Team {
-	team := &v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: name}}
+// pipelinesTenant builds a local Tenant. A non-empty cell places it.
+func pipelinesTenant(name string, pipelines bool, cluster, cellNamespace, cell string) *v1alpha1.Tenant {
+	tenant := &v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	if pipelines {
-		team.Spec.Pipelines = &v1alpha1.TeamPipelinesSpec{}
+		tenant.Spec.Pipelines = &v1alpha1.TenantPipelinesSpec{}
 	}
 	if cell != "" {
-		team.Status.Placement = &v1alpha1.TeamPlacementStatus{
+		tenant.Status.Placement = &v1alpha1.TenantPlacementStatus{
 			Cluster: cluster, Cell: cell, CellNamespace: cellNamespace, Generation: 1,
 		}
 	}
-	return team
+	return tenant
 }
 
-// getPipelineTeams serves GET /pipelines against a server with the given
-// local Teams and record store, and decodes the body.
-func getPipelineTeams(t *testing.T, authorizer *Authorizer, reader recordstore.Reader, teams ...*v1alpha1.Team) pipelineTeamListJSON {
+// getPipelineTenants serves GET /pipelines against a server with the given
+// local Tenants and record store, and decodes the body.
+func getPipelineTenants(t *testing.T, authorizer *Authorizer, reader recordstore.Reader, tenants ...*v1alpha1.Tenant) pipelineTenantListJSON {
 	t.Helper()
 	store := crdstore.NewFake()
-	for _, team := range teams {
-		crdstore.MustSeed(store, team)
+	for _, tenant := range tenants {
+		crdstore.MustSeed(store, tenant)
 	}
 	client := newFakeResourceClient()
 	srv := NewServer(&Dependencies{
@@ -82,18 +82,18 @@ func getPipelineTeams(t *testing.T, authorizer *Authorizer, reader recordstore.R
 	req := httptest.NewRequest(http.MethodGet, "/pipelines", nil)
 	req = req.WithContext(contextWithClaims(req.Context(), resolverClaims))
 	rec := httptest.NewRecorder()
-	srv.handleListPipelineTeams(rec, req)
+	srv.handleListPipelineTenants(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
 	}
-	var body pipelineTeamListJSON
+	var body pipelineTenantListJSON
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
 	return body
 }
 
-func assertPipelineTeams(t *testing.T, got []pipelineTeamJSON, want ...pipelineTeamJSON) {
+func assertPipelineTenants(t *testing.T, got []pipelineTenantJSON, want ...pipelineTenantJSON) {
 	t.Helper()
 	if len(got) != len(want) {
 		t.Fatalf("items = %+v, want %+v", got, want)
@@ -105,137 +105,137 @@ func assertPipelineTeams(t *testing.T, got []pipelineTeamJSON, want ...pipelineT
 	}
 }
 
-func TestListPipelineTeams_LocalPipelinesTeamOnly(t *testing.T) {
-	body := getPipelineTeams(t, resolverAuthorizer("pay", "idle", "plain"), &fakeAllPlacementReader{},
-		pipelinesTeam("pay", true, "core", "cells", "cell-a"),
-		pipelinesTeam("idle", true, "", "", ""),
-		pipelinesTeam("plain", false, "", "", ""),
+func TestListPipelineTenants_LocalPipelinesTenantOnly(t *testing.T) {
+	body := getPipelineTenants(t, resolverAuthorizer("pay", "idle", "plain"), &fakeAllPlacementReader{},
+		pipelinesTenant("pay", true, "core", "cells", "cell-a"),
+		pipelinesTenant("idle", true, "", "", ""),
+		pipelinesTenant("plain", false, "", "", ""),
 	)
 	if !body.RecordStore {
 		t.Error("recordStore = false, want true")
 	}
-	assertPipelineTeams(t, body.Items,
-		pipelineTeamJSON{Name: "idle", Cluster: "core"},
-		pipelineTeamJSON{Name: "pay", Cluster: "core", Cell: "cell-a", CellNamespace: "cells", Placed: true},
+	assertPipelineTenants(t, body.Items,
+		pipelineTenantJSON{Name: "idle", Cluster: "core"},
+		pipelineTenantJSON{Name: "pay", Cluster: "core", Cell: "cell-a", CellNamespace: "cells", Placed: true},
 	)
 }
 
-func TestListPipelineTeams_MemberRowOnly(t *testing.T) {
+func TestListPipelineTenants_MemberRowOnly(t *testing.T) {
 	reader := &fakeAllPlacementReader{rows: []recordstore.TenantPlacement{
 		{Cluster: "member-c", Tenant: "member-a", Namespace: "cells", Cell: "cell-m", Generation: 3},
 	}}
-	body := getPipelineTeams(t, resolverAuthorizer("member-a"), reader)
-	assertPipelineTeams(t, body.Items,
-		pipelineTeamJSON{Name: "member-a", Cluster: "member-c", Cell: "cell-m", CellNamespace: "cells", Placed: true},
+	body := getPipelineTenants(t, resolverAuthorizer("member-a"), reader)
+	assertPipelineTenants(t, body.Items,
+		pipelineTenantJSON{Name: "member-a", Cluster: "member-c", Cell: "cell-m", CellNamespace: "cells", Placed: true},
 	)
 }
 
-func TestListPipelineTeams_LocalAndMemberRows(t *testing.T) {
+func TestListPipelineTenants_LocalAndMemberRows(t *testing.T) {
 	reader := &fakeAllPlacementReader{rows: []recordstore.TenantPlacement{
 		{Cluster: "member-c", Tenant: "member-a", Namespace: "cells", Cell: "cell-m", Generation: 1},
-		// The local Team of the same name hides this row.
+		// The local Tenant of the same name hides this row.
 		{Cluster: "member-c", Tenant: "pay", Namespace: "cells", Cell: "cell-x", Generation: 1},
 	}}
-	body := getPipelineTeams(t, resolverAuthorizer("pay", "member-a"), reader,
-		pipelinesTeam("pay", true, "core", "cells", "cell-a"))
-	assertPipelineTeams(t, body.Items,
-		pipelineTeamJSON{Name: "member-a", Cluster: "member-c", Cell: "cell-m", CellNamespace: "cells", Placed: true},
-		pipelineTeamJSON{Name: "pay", Cluster: "core", Cell: "cell-a", CellNamespace: "cells", Placed: true},
+	body := getPipelineTenants(t, resolverAuthorizer("pay", "member-a"), reader,
+		pipelinesTenant("pay", true, "core", "cells", "cell-a"))
+	assertPipelineTenants(t, body.Items,
+		pipelineTenantJSON{Name: "member-a", Cluster: "member-c", Cell: "cell-m", CellNamespace: "cells", Placed: true},
+		pipelineTenantJSON{Name: "pay", Cluster: "core", Cell: "cell-a", CellNamespace: "cells", Placed: true},
 	)
 }
 
-func TestListPipelineTeams_DropsARowTheCallerMayNotRead(t *testing.T) {
+func TestListPipelineTenants_DropsARowTheCallerMayNotRead(t *testing.T) {
 	reader := &fakeAllPlacementReader{rows: []recordstore.TenantPlacement{
 		{Cluster: "member-c", Tenant: "member-a", Namespace: "cells", Cell: "cell-m", Generation: 1},
 		{Cluster: "member-c", Tenant: "secret", Namespace: "cells", Cell: "cell-m", Generation: 1},
 	}}
-	body := getPipelineTeams(t, resolverAuthorizer("member-a"), reader,
-		pipelinesTeam("hidden", true, "core", "cells", "cell-a"))
-	assertPipelineTeams(t, body.Items,
-		pipelineTeamJSON{Name: "member-a", Cluster: "member-c", Cell: "cell-m", CellNamespace: "cells", Placed: true},
+	body := getPipelineTenants(t, resolverAuthorizer("member-a"), reader,
+		pipelinesTenant("hidden", true, "core", "cells", "cell-a"))
+	assertPipelineTenants(t, body.Items,
+		pipelineTenantJSON{Name: "member-a", Cluster: "member-c", Cell: "cell-m", CellNamespace: "cells", Placed: true},
 	)
 }
 
-func TestListPipelineTeams_NoReadableRowAnswersAnEmptyList(t *testing.T) {
-	body := getPipelineTeams(t, resolverAuthorizer(), &fakeAllPlacementReader{},
-		pipelinesTeam("pay", true, "core", "cells", "cell-a"))
+func TestListPipelineTenants_NoReadableRowAnswersAnEmptyList(t *testing.T) {
+	body := getPipelineTenants(t, resolverAuthorizer(), &fakeAllPlacementReader{},
+		pipelinesTenant("pay", true, "core", "cells", "cell-a"))
 	if body.Items == nil || len(body.Items) != 0 {
 		t.Errorf("items = %+v, want an empty list", body.Items)
 	}
 }
 
-func TestListPipelineTeams_RecordStoreOffAnswersLocalRows(t *testing.T) {
-	team := pipelinesTeam("pay", true, "core", "cells", "cell-a")
-	want := pipelineTeamJSON{Name: "pay", Cluster: "core", Cell: "cell-a", CellNamespace: "cells", Placed: true}
+func TestListPipelineTenants_RecordStoreOffAnswersLocalRows(t *testing.T) {
+	tenant := pipelinesTenant("pay", true, "core", "cells", "cell-a")
+	want := pipelineTenantJSON{Name: "pay", Cluster: "core", Cell: "cell-a", CellNamespace: "cells", Placed: true}
 
-	off := getPipelineTeams(t, resolverAuthorizer("pay"), nil, team)
+	off := getPipelineTenants(t, resolverAuthorizer("pay"), nil, tenant)
 	if off.RecordStore {
 		t.Error("recordStore = true with no record store, want false")
 	}
-	assertPipelineTeams(t, off.Items, want)
+	assertPipelineTenants(t, off.Items, want)
 
-	old := getPipelineTeams(t, resolverAuthorizer("pay"), &fakeAllPlacementReader{err: recordstore.ErrSchemaTooOld}, team)
+	old := getPipelineTenants(t, resolverAuthorizer("pay"), &fakeAllPlacementReader{err: recordstore.ErrSchemaTooOld}, tenant)
 	if old.RecordStore {
 		t.Error("recordStore = true with a schema too old, want false")
 	}
-	assertPipelineTeams(t, old.Items, want)
+	assertPipelineTenants(t, old.Items, want)
 }
 
-func TestListPipelineTeams_SkipsLocalEmptyAndTornDownRows(t *testing.T) {
+func TestListPipelineTenants_SkipsLocalEmptyAndTornDownRows(t *testing.T) {
 	reader := &fakeAllPlacementReader{rows: []recordstore.TenantPlacement{
 		{Cluster: "core", Tenant: "local-row", Namespace: "cells", Cell: "cell-c", Generation: 1},
 		{Cluster: "member-c", Tenant: "no-cell", Namespace: "cells", Cell: "", Generation: 1},
 		{Cluster: "member-c", Tenant: "torn-down", Namespace: "cells", Cell: "cell-m", Generation: 0},
 		{Cluster: "member-c", Tenant: "ns/ctrl", Namespace: "cells", Cell: "cell-m", Generation: 1},
 	}}
-	body := getPipelineTeams(t, globalPipelinesAuthorizer(), reader)
+	body := getPipelineTenants(t, globalPipelinesAuthorizer(), reader)
 	if len(body.Items) != 0 {
 		t.Errorf("items = %+v, want none", body.Items)
 	}
 }
 
-func TestListPipelineTeams_GlobalViewerSeesEveryRow(t *testing.T) {
+func TestListPipelineTenants_GlobalViewerSeesEveryRow(t *testing.T) {
 	reader := &fakeAllPlacementReader{rows: []recordstore.TenantPlacement{
 		{Cluster: "member-c", Tenant: "member-a", Namespace: "cells", Cell: "cell-m", Generation: 1},
 	}}
-	body := getPipelineTeams(t, globalPipelinesAuthorizer(), reader,
-		pipelinesTeam("north", true, "core", "cells", "cell-a"),
-		pipelinesTeam("south", true, "", "", ""),
+	body := getPipelineTenants(t, globalPipelinesAuthorizer(), reader,
+		pipelinesTenant("north", true, "core", "cells", "cell-a"),
+		pipelinesTenant("south", true, "", "", ""),
 	)
-	assertPipelineTeams(t, body.Items,
-		pipelineTeamJSON{Name: "member-a", Cluster: "member-c", Cell: "cell-m", CellNamespace: "cells", Placed: true},
-		pipelineTeamJSON{Name: "north", Cluster: "core", Cell: "cell-a", CellNamespace: "cells", Placed: true},
-		pipelineTeamJSON{Name: "south", Cluster: "core"},
+	assertPipelineTenants(t, body.Items,
+		pipelineTenantJSON{Name: "member-a", Cluster: "member-c", Cell: "cell-m", CellNamespace: "cells", Placed: true},
+		pipelineTenantJSON{Name: "north", Cluster: "core", Cell: "cell-a", CellNamespace: "cells", Placed: true},
+		pipelineTenantJSON{Name: "south", Cluster: "core"},
 	)
 }
 
-func TestListPipelineTeams_OneNameOnTwoClustersAnswersTwoRows(t *testing.T) {
+func TestListPipelineTenants_OneNameOnTwoClustersAnswersTwoRows(t *testing.T) {
 	reader := &fakeAllPlacementReader{rows: []recordstore.TenantPlacement{
 		{Cluster: "member-a", Tenant: "shop", Namespace: "cells", Cell: "cell-a", Generation: 1},
 		{Cluster: "member-b", Tenant: "shop", Namespace: "cells", Cell: "cell-b", Generation: 2},
 	}}
-	body := getPipelineTeams(t, resolverAuthorizer("shop"), reader)
-	assertPipelineTeams(t, body.Items,
-		pipelineTeamJSON{Name: "shop", Cluster: "member-a", Cell: "cell-a", CellNamespace: "cells", Placed: true},
-		pipelineTeamJSON{Name: "shop", Cluster: "member-b", Cell: "cell-b", CellNamespace: "cells", Placed: true},
+	body := getPipelineTenants(t, resolverAuthorizer("shop"), reader)
+	assertPipelineTenants(t, body.Items,
+		pipelineTenantJSON{Name: "shop", Cluster: "member-a", Cell: "cell-a", CellNamespace: "cells", Placed: true},
+		pipelineTenantJSON{Name: "shop", Cluster: "member-b", Cell: "cell-b", CellNamespace: "cells", Placed: true},
 	)
 }
 
-// nsTeam builds a local Team without spec.pipelines, naming namespaces.
-func nsTeam(name string, namespaces ...string) *v1alpha1.Team {
-	return &v1alpha1.Team{
+// nsTenant builds a local Tenant without spec.pipelines, naming namespaces.
+func nsTenant(name string, namespaces ...string) *v1alpha1.Tenant {
+	return &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       v1alpha1.TeamSpec{Namespaces: namespaces},
+		Spec:       v1alpha1.TenantSpec{Namespaces: namespaces},
 	}
 }
 
-// getPipelineTeamsWithControllers serves GET /pipelines with the given
-// Controllers in the brood, next to the local Teams.
-func getPipelineTeamsWithControllers(t *testing.T, authorizer *Authorizer, controllers []*v1alpha1.Controller, teams ...*v1alpha1.Team) pipelineTeamListJSON {
+// getPipelineTenantsWithControllers serves GET /pipelines with the given
+// Controllers in the brood, next to the local Tenants.
+func getPipelineTenantsWithControllers(t *testing.T, authorizer *Authorizer, controllers []*v1alpha1.Controller, tenants ...*v1alpha1.Tenant) pipelineTenantListJSON {
 	t.Helper()
 	store := crdstore.NewFake()
-	for _, team := range teams {
-		crdstore.MustSeed(store, team)
+	for _, tenant := range tenants {
+		crdstore.MustSeed(store, tenant)
 	}
 	client := newFakeResourceClient()
 	client.controllers = make(map[string]*v1alpha1.Controller, len(controllers))
@@ -252,11 +252,11 @@ func getPipelineTeamsWithControllers(t *testing.T, authorizer *Authorizer, contr
 	req := httptest.NewRequest(http.MethodGet, "/pipelines", nil)
 	req = req.WithContext(contextWithClaims(req.Context(), resolverClaims))
 	rec := httptest.NewRecorder()
-	srv.handleListPipelineTeams(rec, req)
+	srv.handleListPipelineTenants(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
 	}
-	var body pipelineTeamListJSON
+	var body pipelineTenantListJSON
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
@@ -267,34 +267,34 @@ func controllerIn(name, namespace string) *v1alpha1.Controller {
 	return &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}}
 }
 
-func TestListPipelineTeams_TeamWithControllersInItsNamespacesIsListed(t *testing.T) {
-	body := getPipelineTeamsWithControllers(t, globalPipelinesAuthorizer(),
+func TestListPipelineTenants_TenantWithControllersInItsNamespacesIsListed(t *testing.T) {
+	body := getPipelineTenantsWithControllers(t, globalPipelinesAuthorizer(),
 		[]*v1alpha1.Controller{controllerIn("svc-a", "team-pay")},
-		nsTeam("payments", "team-pay"))
-	assertPipelineTeams(t, body.Items,
-		pipelineTeamJSON{Name: "payments", Cluster: "core", Placed: false})
+		nsTenant("payments", "team-pay"))
+	assertPipelineTenants(t, body.Items,
+		pipelineTenantJSON{Name: "payments", Cluster: "core", Placed: false})
 }
 
-func TestListPipelineTeams_TeamWithNoControllersIsNotListed(t *testing.T) {
-	body := getPipelineTeamsWithControllers(t, globalPipelinesAuthorizer(),
+func TestListPipelineTenants_TenantWithNoControllersIsNotListed(t *testing.T) {
+	body := getPipelineTenantsWithControllers(t, globalPipelinesAuthorizer(),
 		[]*v1alpha1.Controller{controllerIn("svc-a", "other")},
-		nsTeam("mt-tenant", "mt-tenant-ns"))
-	assertPipelineTeams(t, body.Items)
+		nsTenant("mt-tenant", "mt-tenant-ns"))
+	assertPipelineTenants(t, body.Items)
 }
 
-func TestListPipelineTeams_TeamWithUnreadableControllersIsNotListed(t *testing.T) {
-	body := getPipelineTeamsWithControllers(t, namespaceAuthorizer("other"),
+func TestListPipelineTenants_TenantWithUnreadableControllersIsNotListed(t *testing.T) {
+	body := getPipelineTenantsWithControllers(t, namespaceAuthorizer("other"),
 		[]*v1alpha1.Controller{controllerIn("svc-a", "team-pay")},
-		nsTeam("payments", "team-pay"))
-	assertPipelineTeams(t, body.Items)
+		nsTenant("payments", "team-pay"))
+	assertPipelineTenants(t, body.Items)
 }
 
-func TestListPipelineTeams_TeamPastTheTenantCeilingIsNotListed(t *testing.T) {
+func TestListPipelineTenants_TenantPastTheTenantCeilingIsNotListed(t *testing.T) {
 	var controllers []*v1alpha1.Controller
-	for i := 0; i <= maxTeamTenants; i++ {
-		controllers = append(controllers, controllerIn(fmt.Sprintf("svc-%02d", i), "team-big"))
+	for i := 0; i <= maxTenantTenants; i++ {
+		controllers = append(controllers, controllerIn(fmt.Sprintf("svc-%02d", i), "tenant-big"))
 	}
-	body := getPipelineTeamsWithControllers(t, globalPipelinesAuthorizer(), controllers,
-		nsTeam("big", "team-big"))
-	assertPipelineTeams(t, body.Items)
+	body := getPipelineTenantsWithControllers(t, globalPipelinesAuthorizer(), controllers,
+		nsTenant("big", "tenant-big"))
+	assertPipelineTenants(t, body.Items)
 }

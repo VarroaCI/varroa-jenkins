@@ -252,7 +252,7 @@ func TestRunFanout_NotificationForUnmatchedKeyKeepsRunning(t *testing.T) {
 	ch := rf.Subscribe(keys, nil)
 	defer rf.Unsubscribe(keys, ch)
 
-	rf.deliverPayload(runNotifyJSON("run", "core", "team-z", "team-z/app"))
+	rf.deliverPayload(runNotifyJSON("run", "core", "tenant-z", "tenant-z/app"))
 	rf.deliverPayload(runNotifyJSON("run", "core", "team-a", "team-a/app"))
 
 	rec := waitRecord(t, ch)

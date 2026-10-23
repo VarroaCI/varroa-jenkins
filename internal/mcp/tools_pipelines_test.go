@@ -111,7 +111,7 @@ func (f *fakePipelineReader) GetIntentByKey(_ context.Context, key string) (reco
 }
 
 // --- fakePipelineTenantResolver: a fixed-answer api.TenantResolver.
-// Every team resolves to refs, unconditionally — the pipeline tool
+// Every tenant resolves to refs, unconditionally — the pipeline tool
 // tests exercise Authorizer's own tenant/job decision, not
 // TenantResolver's candidate search. ---
 
@@ -223,11 +223,11 @@ func TestListRunsClampsLimitAt200(t *testing.T) {
 	deps := &api.Dependencies{
 		Authorizer:     pipelinesTestAuthorizer("read"),
 		RecordStore:    reader,
-		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", Team: "team-a", Folder: "team-a"}}},
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", TenantName: "team-a", Folder: "team-a"}}},
 	}
 
 	tr := callPipelineTool(t, deps, "list_runs", map[string]interface{}{
-		"team": "team-a", "job": "team-a/build", "limit": float64(1000),
+		"tenant": "team-a", "job": "team-a/build", "limit": float64(1000),
 	})
 	if tr.IsError {
 		t.Fatalf("list_runs returned error: %v", tr.Content)
@@ -255,12 +255,12 @@ func TestRunPipelineReturnsRunIDAndIntentKey(t *testing.T) {
 	deps := &api.Dependencies{
 		Authorizer:     pipelinesTestAuthorizer("write"),
 		RecordStore:    reader,
-		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", Team: "team-a", Folder: "team-a"}}},
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", TenantName: "team-a", Folder: "team-a"}}},
 		MiteRegistry:   sent,
 	}
 
 	tr := callPipelineTool(t, deps, "run_pipeline", map[string]interface{}{
-		"team": "team-a", "job": "team-a/build",
+		"tenant": "team-a", "job": "team-a/build",
 	})
 	if tr.IsError {
 		t.Fatalf("run_pipeline returned error: %v", tr.Content)
@@ -300,12 +300,12 @@ func TestRunPipelineAcceptsTheShortFormJobPath(t *testing.T) {
 	deps := &api.Dependencies{
 		Authorizer:     pipelinesTestAuthorizer("write"),
 		RecordStore:    reader,
-		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", Team: "team-a", Folder: "team-a"}}},
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", TenantName: "team-a", Folder: "team-a"}}},
 		MiteRegistry:   sent,
 	}
 
 	tr := callPipelineTool(t, deps, "run_pipeline", map[string]interface{}{
-		"team": "team-a", "job": "build",
+		"tenant": "team-a", "job": "build",
 	})
 	if tr.IsError {
 		t.Fatalf("run_pipeline returned error: %v", tr.Content)
@@ -325,12 +325,12 @@ func TestRunPipelineDeniesReadOnlyCaller(t *testing.T) {
 	deps := &api.Dependencies{
 		Authorizer:     pipelinesTestAuthorizer("read"),
 		RecordStore:    newFakePipelineReader(),
-		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", Team: "team-a", Folder: "team-a"}}},
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", TenantName: "team-a", Folder: "team-a"}}},
 		MiteRegistry:   sent,
 	}
 
 	tr := callPipelineTool(t, deps, "run_pipeline", map[string]interface{}{
-		"team": "team-a", "job": "team-a/build",
+		"tenant": "team-a", "job": "team-a/build",
 	})
 	if !tr.IsError {
 		t.Fatal("expected run_pipeline to deny a read-only caller")
@@ -601,19 +601,19 @@ func TestGetRunLogStartsNoTail(t *testing.T) {
 	}
 }
 
-// --- list_fleet_locks reads the same team lock list GET
-// /pipelines/{team}/locks serves. ---
+// --- list_fleet_locks reads the same tenant lock list GET
+// /pipelines/{tenant}/locks serves. ---
 
 // ListFleetLocks answers the seeded rows for one tenant.
 func (f *fakePipelineReader) ListFleetLocks(_ context.Context, _, tenant string) ([]recordstore.FleetLock, error) {
 	return f.locksByTenant[tenant], nil
 }
 
-// TestListFleetLocksAnswersTheTeamRows proves the tool answers the
-// team's lock rows, in the holder-then-waiters order the record store
+// TestListFleetLocksAnswersTheTenantRows proves the tool answers the
+// tenant's lock rows, in the holder-then-waiters order the record store
 // answers with, each row carrying the run link the caller's own read
 // grant allows.
-func TestListFleetLocksAnswersTheTeamRows(t *testing.T) {
+func TestListFleetLocksAnswersTheTenantRows(t *testing.T) {
 	reader := newFakePipelineReader()
 	reader.locksByTenant["team-a"] = []recordstore.FleetLock{
 		{Name: "team-a/deploy", RunID: "run-a", Tenant: "team-a", JobPath: "team-a/build", State: "held"},
@@ -622,10 +622,10 @@ func TestListFleetLocksAnswersTheTeamRows(t *testing.T) {
 	deps := &api.Dependencies{
 		Authorizer:     pipelinesTestAuthorizer("read"),
 		RecordStore:    reader,
-		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", Team: "team-a", Folder: "team-a"}}},
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", TenantName: "team-a", Folder: "team-a"}}},
 	}
 
-	tr := callPipelineTool(t, deps, "list_fleet_locks", map[string]interface{}{"team": "team-a"})
+	tr := callPipelineTool(t, deps, "list_fleet_locks", map[string]interface{}{"tenant": "team-a"})
 	if tr.IsError {
 		t.Fatalf("list_fleet_locks returned error: %v", tr.Content)
 	}
@@ -658,7 +658,7 @@ func TestListFleetLocksAnswersTheTeamRows(t *testing.T) {
 		if item.Name != "team-a/deploy" || item.Tenant != "team-a" || item.JobPath != "team-a/build" {
 			t.Errorf("row = %+v, want the seeded lock's own identity", item)
 		}
-		// The link is the run's own page, /pipelines/{team}/{jobPath}/{runId},
+		// The link is the run's own page, /pipelines/{tenant}/{jobPath}/{runId},
 		// with the job path's own slash escaped, as a run search result carries it.
 		if want := "/pipelines/team-a/team-a%2Fbuild/" + item.RunID; item.RunLink != want {
 			t.Errorf("row %s runLink = %q, want %s", item.RunID, item.RunLink, want)
@@ -666,9 +666,9 @@ func TestListFleetLocksAnswersTheTeamRows(t *testing.T) {
 	}
 }
 
-// TestListFleetLocksDeniesAnUnreadableTeam proves the tool denies a
-// caller whose own grant reads no tenant of the team.
-func TestListFleetLocksDeniesAnUnreadableTeam(t *testing.T) {
+// TestListFleetLocksDeniesAnUnreadableTenant proves the tool denies a
+// caller whose own grant reads no tenant of the tenant.
+func TestListFleetLocksDeniesAnUnreadableTenant(t *testing.T) {
 	reader := newFakePipelineReader()
 	reader.locksByTenant["team-b"] = []recordstore.FleetLock{
 		{Name: "team-b/deploy", RunID: "run-b", Tenant: "team-b", JobPath: "team-b/build", State: "held"},
@@ -676,15 +676,15 @@ func TestListFleetLocksDeniesAnUnreadableTeam(t *testing.T) {
 	deps := &api.Dependencies{
 		Authorizer:     pipelinesTestAuthorizer("read"),
 		RecordStore:    reader,
-		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-b", Team: "team-b", Folder: "team-b"}}},
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-b", TenantName: "team-b", Folder: "team-b"}}},
 	}
 
-	tr := callPipelineTool(t, deps, "list_fleet_locks", map[string]interface{}{"team": "team-b"})
+	tr := callPipelineTool(t, deps, "list_fleet_locks", map[string]interface{}{"tenant": "team-b"})
 	if !tr.IsError {
-		t.Fatal("expected list_fleet_locks to deny a caller with no read grant on the team")
+		t.Fatal("expected list_fleet_locks to deny a caller with no read grant on the tenant")
 	}
-	if got := toolText(tr); got != "team not found" {
-		t.Errorf("error text = %q, want %q", got, "team not found")
+	if got := toolText(tr); got != "tenant not found" {
+		t.Errorf("error text = %q, want %q", got, "tenant not found")
 	}
 }
 
@@ -733,7 +733,7 @@ func TestGetRunParityWithHTTPRunDetail(t *testing.T) {
 		Authorizer:     pipelinesTestAuthorizer("read"),
 		RecordStore:    reader,
 		BlobStore:      store,
-		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", Team: "team-a", Folder: "team-a"}}},
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", TenantName: "team-a", Folder: "team-a"}}},
 	}
 
 	// The HTTP surface: the router wires GET /runs/{run} to the same read.

@@ -17,7 +17,7 @@ Send `tools/list` to the target controller:
 
 ```json
 {
-  "namespace": "teams-platform",
+  "namespace": "tenants-platform",
   "name": "demo",
   "method": "tools/list"
 }
@@ -29,7 +29,7 @@ Place the controller tool name and its arguments inside JSON-RPC `params`:
 
 ```json
 {
-  "namespace": "teams-platform",
+  "namespace": "tenants-platform",
   "name": "demo",
   "method": "tools/call",
   "params": {

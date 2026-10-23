@@ -39,7 +39,7 @@ export function canCellsRow(perms: Permissions | undefined): boolean {
 }
 
 /**
- * Whether the user can see the Team agents row. The agent sessions read is
+ * Whether the user can see the Tenant agents row. The agent sessions read is
  * cluster-wide, so a namespace-scoped grant admits nothing.
  */
 export function canAgentsRow(perms: Permissions | undefined): boolean {

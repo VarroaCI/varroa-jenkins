@@ -166,7 +166,7 @@ describe("BroodSchedules", () => {
 
     await waitFor(() => expect(mockCreate).toHaveBeenCalled());
     // A single cluster + single namespace selection must produce an explicit
-    // namespace with bare names (team-mode) and a clusters list — not the bare,
+    // namespace with bare names (tenant-mode) and a clusters list — not the bare,
     // unqualified names the old comma-field sent, which the BFF rejected with a
     // 400 in operator-namespace mode.
     const req = mockCreate.mock.calls[0][0];

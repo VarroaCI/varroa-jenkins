@@ -5,7 +5,7 @@ discovers the heads and lists them on the job page.
 
 ## Read the inventory
 
-1. Open the team in the dashboard. Click the name of a multibranch job.
+1. Open the tenant in the dashboard. Click the name of a multibranch job.
 2. The page shows two cards: **Branches** and **Pull requests**.
 3. Each row names a head. Click the name to open the head's job page.
 4. The **Latest run** column shows the result of the newest build of the head. Click the
@@ -39,7 +39,7 @@ write the job.
 - A scan that does not complete shows its state and reason:
   - `failed`: Jenkins did not finish the index.
   - `timeout`: the scan ran for more than 30 minutes.
-  - `refused`: the cell did not run the scan. You need write access to the team's pipelines on the job.
+  - `refused`: the cell did not run the scan. You need write access to the tenant's pipelines on the job.
 - For 15 minutes after a scan starts, the cell exports the list at its shortest interval.
   The result then reaches the list within about one minute.
 
@@ -52,9 +52,9 @@ own page, which lists its branches and pull requests.
 
 ## Read the inventory from the command line or an agent
 
-The MCP tool `list_job_branches` returns the same lists as the page. It takes the `team`
-and `job` arguments. The HTTP route is `GET /api/v1/pipelines/{team}/jobs/{job}/branches`.
-The scan route is `POST /api/v1/pipelines/{team}/jobs/{job}/scan`.
+The MCP tool `list_job_branches` returns the same lists as the page. It takes the `tenant`
+and `job` arguments. The HTTP route is `GET /api/v1/pipelines/{tenant}/jobs/{job}/branches`.
+The scan route is `POST /api/v1/pipelines/{tenant}/jobs/{job}/scan`.
 
 A head you may not read does not appear in the response.
 

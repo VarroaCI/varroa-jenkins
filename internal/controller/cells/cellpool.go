@@ -52,7 +52,7 @@ func SummarizeCellPool(pool *v1alpha1.CellPool) CellPoolSummary {
 
 // ResolvedPoolName answers the pool a tenant uses: spec.pipelines.cellPool
 // when set, otherwise the pool whose name equals spec.pipelines.profile.
-func ResolvedPoolName(p *v1alpha1.TeamPipelinesSpec) string {
+func ResolvedPoolName(p *v1alpha1.TenantPipelinesSpec) string {
 	if p == nil {
 		return ""
 	}

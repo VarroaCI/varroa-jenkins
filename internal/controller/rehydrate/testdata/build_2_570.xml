@@ -30,7 +30,7 @@
       <scm class="org.jenkinsci.plugins.varroamiteauth.rehydrate.VarroaRehydratedSCM" plugin="varroa-mite-auth"></scm>
       <node></node>
       <workspace></workspace>
-      <changelogFile>/var/jenkins_home/jobs/team/jobs/api/builds/12/changelog0.xml</changelogFile>
+      <changelogFile>/var/jenkins_home/jobs/tenant/jobs/api/builds/12/changelog0.xml</changelogFile>
     </org.jenkinsci.plugins.workflow.job.WorkflowRun_-SCMCheckout>
   </checkouts>
   <completed>true</completed>

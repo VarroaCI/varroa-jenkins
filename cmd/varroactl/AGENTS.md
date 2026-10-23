@@ -30,7 +30,7 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
 - **Command tree (root.go)** — two registration seams so noun files don't
   touch shared root/verb-parent files:
   - `registerNoun(nounRegistrar)` — attaches a noun (e.g. `controllers`,
-    `groups`, `teams`, `catalog`) onto the shared verb parents
+    `groups`, `tenants`, `catalog`) onto the shared verb parents
     (`get`/`describe`/`create`/`delete`/`edit`/`patch`) built by
     `newRootCmd()`.
   - `registerRootCommand(rootRegistrar)` — adds a top-level, non-CRUD command
@@ -56,14 +56,14 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
     `crdnoun.go` is unchanged.
   - One file per noun, each paired with a `_test.go`: `controllers.go` (+
     `controllers_actions.go`, `controllers_edit.go`), `groups.go`,
-    `teams.go`, `catalog.go`, `composedbundles.go`, `rbac.go`, `apikeys.go`,
+    `tenants.go`, `catalog.go`, `composedbundles.go`, `rbac.go`, `apikeys.go`,
     `clusters.go`, `broodop.go`, `broodschedule.go`, `provisioning.go`,
     `users.go`, `runners.go`, `crdnoun.go`/`editcrd.go`/`describe.go` (shared
     verb machinery).
   - **`runners.go`** — the `runners` CRD noun (alias `rnr` only; the varroa-cli
     delta forbids the alias `runner`, since `runner_register.go` reserves that
     word for the top-level ergonomic group). Cluster-scoped with no cluster
-    segment (`/api/v1/runners`, like Teams). All five generated-client
+    segment (`/api/v1/runners`, like Tenants). All five generated-client
     callbacks convert between the generated client's flat `{name, spec,
     status}` DTO and the `{metadata: {name}, spec, status}` document shape
     the shared machinery (`Columns`, `printDescribe`, `editLoop`) expects.
@@ -88,7 +88,7 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
     and `delete` reuse `runners.go`'s own verb closures directly, so they
     delegate to the identical generated-client calls as `get runners` and
     `delete runners`.
-- **`teams.go`** — a generic `map[string]any` JSON pass-through: get,
+- **`tenants.go`** — a generic `map[string]any` JSON pass-through: get,
   describe, create, delete, and edit all treat `pipelines` (including its
   `exports` list) as one opaque nested object, so a new field under
   `spec.pipelines` needs no per-field mapping here to flow through every
@@ -134,10 +134,10 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
 - **Streaming/watch** — `watch.go` (`varroactl controller watch`, polling
   render loop) and `streamcmds.go` (SSE-backed live commands) both build on
   `pkg/client/stream`.
-- **Pipelines (`pipelines.go`)** — `run <team>/<job>` triggers a build (`--param
+- **Pipelines (`pipelines.go`)** — `run <tenant>/<job>` triggers a build (`--param
   key=value`, repeatable; `--follow`/`-f` waits for the run to appear, then
   streams its log until it ends and exits non-zero on a non-success result).
-  `builds <team>/<job>` lists runs (`-o {table,wide,json,yaml,name}`, table
+  `builds <tenant>/<job>` lists runs (`-o {table,wide,json,yaml,name}`, table
   columns `BUILD RESULT BRANCH DURATION AGE`). `logs` gains a run form
   instead of a second command: a UUIDv7 argument names a run and everything
   else names a controller, one-shot by default, `-f`/`--follow` streams
@@ -148,18 +148,18 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
   watermark. `run`/`builds` register as new top-level
   commands (`registerRootCommand`); the run form extends the existing
   `logs` command in place via `findCommand(root, "logs")`.
-- **`lint marker` (`lint.go`)** — `varroactl lint marker --team <team>
+- **`lint marker` (`lint.go`)** — `varroactl lint marker --tenant <tenant>
   [--marker .varroa/pipeline.yaml]` posts the marker file to `POST
-  /pipelines/{team}/markers/validate` directly (that path has no generated
+  /pipelines/{tenant}/markers/validate` directly (that path has no generated
   `pkg/client` method yet, so this file builds the request itself, the way
   `activity.go` does for a path the generated client does not cover). Exits
   zero on an empty findings list, non-zero otherwise, printing each finding's
   severity/path/message. Contacts no cell and reads no record-store data.
-- **`locks list` (`locks.go`)** — `varroactl locks list [--team TEAM]`
+- **`locks list` (`locks.go`)** — `varroactl locks list [--tenant TENANT]`
   reads every fleet lock through the generated client's
   `ListAllFleetLocksWithResponse` (`GET /locks`, cluster-wide
-  `fleetlocks:read`), or one team's locks through
-  `ListTeamFleetLocksWithResponse` (`GET /pipelines/{team}/locks`). Columns:
+  `fleetlocks:read`), or one tenant's locks through
+  `ListTenantFleetLocksWithResponse` (`GET /pipelines/{tenant}/locks`). Columns:
   `NAME STATE RUN TENANT CLUSTER JOB AGE`; `wide` adds `SINCE` and `LINK`.
   AGE counts from `waitingSince` on a waiting row and from `acquiredAt`
   otherwise. `-o name` prints the lock name of each row, so a name repeats

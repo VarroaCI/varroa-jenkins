@@ -191,12 +191,12 @@ Set global.domain in values.yaml to see external URLs.
 {{- end }}
 
 ================================================================================
-  Teams
+  Tenants
 ================================================================================
-  Creating a Team CRD replaces the three hand-authored objects (Group,
+  Creating a Tenant CRD replaces the three hand-authored objects (Group,
   VarroaRoleBinding, and namespace mux) with a single cluster-scoped resource.
-  The operator composes: (1) a local Group named team-<T> with managed-by and
-  team-name labels; (2) a VarroaRoleBinding named team-<T> scoped to the team's
+  The operator composes: (1) a local Group named tenant-<T> with managed-by and
+  tenant-name labels; (2) a VarroaRoleBinding named tenant-<T> scoped to the tenant's
   namespaces; (3) an optional namespace provisioner.
 
   provisionNamespaces opt-in creates and labels namespaces via the tenancy

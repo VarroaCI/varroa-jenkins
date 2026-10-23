@@ -21,12 +21,12 @@ rules:
     resources: ["varroarolebindings/status", "varroaroles/status"]
     verbs: ["get", "patch", "update"]
   - apiGroups: ["varroa.dev"]
-    resources: ["teams", "teams/status"]
+    resources: ["tenants", "tenants/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 {{- if .Values.agentRunner.enabled }}
-  # The Team agent endpoints read TeamAgent objects for the tenant pages.
+  # The Tenant agent endpoints read TenantAgent objects for the tenant pages.
   - apiGroups: ["varroa.dev"]
-    resources: ["teamagents"]
+    resources: ["tenantagents"]
     verbs: ["get", "list", "watch"]
 {{- end }}
   # BFF serves the runner CRUD surface and keeps the door's token index from a

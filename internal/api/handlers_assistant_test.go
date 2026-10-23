@@ -91,7 +91,7 @@ func newAssistantFixture(t *testing.T, turns ...[]provider.Delta) *assistantFixt
 			Models: []string{"m1"}, Trust: agent.TrustInternal, Default: true,
 		}},
 		ExternalDataSharing: agent.DataLogs,
-		Budgets:             provider.Budgets{Session: 100000, UserDay: 1000000, TeamDay: 1000000, Steps: 32},
+		Budgets:             provider.Budgets{Session: 100000, UserDay: 1000000, TenantDay: 1000000, Steps: 32},
 		ApprovalExpiryText:  "1h",
 		ApprovalExpiry:      time.Hour,
 	}

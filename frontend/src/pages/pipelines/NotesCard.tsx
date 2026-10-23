@@ -23,17 +23,17 @@ export const NOTE_LIMIT = 16384;
 
 export type NotesCardProps =
   | { mode: "run"; runId: string; canWrite: boolean; hasDigest: boolean }
-  | { mode: "job"; team: string; job: string };
+  | { mode: "job"; tenant: string; job: string };
 
 export function NotesCard(props: NotesCardProps) {
   if (props.mode === "run") return <RunNotes {...props} />;
-  return <JobNotes team={props.team} job={props.job} />;
+  return <JobNotes tenant={props.tenant} job={props.job} />;
 }
 
-function JobNotes({ team, job }: { team: string; job: string }) {
+function JobNotes({ tenant, job }: { tenant: string; job: string }) {
   const notes = useQuery({
-    queryKey: ["job-notes", team, job],
-    queryFn: () => listJobNotes(team, job),
+    queryKey: ["job-notes", tenant, job],
+    queryFn: () => listJobNotes(tenant, job),
     retry: false,
   });
   const items: RunNote[] = notes.data?.items ?? [];
@@ -44,7 +44,7 @@ function JobNotes({ team, job }: { team: string; job: string }) {
         <article key={n.id} id={`note-${n.id}`} tabIndex={-1} className={styles.note}>
           <div className={styles.meta}>
             {n.runId ? (
-              <Link to={`/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}/${n.runId}`}>
+              <Link to={`/pipelines/${encodeURIComponent(tenant)}/${encodeURIComponent(job)}/${n.runId}`}>
                 Build #{n.buildNumber ?? "?"}
               </Link>
             ) : (

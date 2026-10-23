@@ -167,7 +167,7 @@ LoginResponse:
       description: Token lifetime in seconds.
   additionalProperties: false
 
-# --- 3.2 user / group / team / identity schemas ---
+# --- 3.2 user / group / tenant / identity schemas ---
 
 UserListEntry:
   type: object
@@ -265,14 +265,14 @@ CreateGroupRequest:
         type: string
   additionalProperties: false
 
-TeamRequest:
+TenantRequest:
   type: object
-  description: Request body for creating or updating a team.
+  description: Request body for creating or updating a tenant.
   required: [name, namespaces]
   properties:
     name:
       type: string
-      description: Team name (ignored in body for updates).
+      description: Tenant name (ignored in body for updates).
     displayName:
       type: string
     members:
@@ -289,7 +289,7 @@ TeamRequest:
       type: array
       items:
         type: string
-      description: Target namespaces for this team.
+      description: Target namespaces for this tenant.
     roleRef:
       type: string
       description: Name of a VarroaRole to bind. Must not be "admin".
@@ -297,13 +297,13 @@ TeamRequest:
       type: boolean
       description: Whether to auto-provision namespaces.
     pipelines:
-      $ref: '#/TeamPipelines'
+      $ref: '#/TenantPipelines'
   additionalProperties: false
 
-TeamPipelines:
+TenantPipelines:
   type: object
   description: >-
-    A Team's pipelines tenancy declaration (spec.pipelines). A Team that
+    A Tenant's pipelines tenancy declaration (spec.pipelines). A Tenant that
     sets this becomes a pipelines tenant: one top-level folder on exactly
     one cell.
   required: [profile, agentNamespace]
@@ -326,12 +326,12 @@ TeamPipelines:
       minLength: 1
       description: >-
         Kubernetes namespace this tenant's agents run in. Must be one of
-        the team's own namespaces. Required when pipelines is set.
+        the tenant's own namespaces. Required when pipelines is set.
     composedBundleRef:
       $ref: '#/ComposedBundleRef'
       description: >-
         The ComposedBundle this tenant's items come from. Both name and
-        namespace are set: a Team is cluster-scoped and has no namespace
+        namespace are set: a Tenant is cluster-scoped and has no namespace
         to default to.
     rehydrateBuilds:
       type: integer
@@ -398,36 +398,36 @@ TeamPipelines:
     exports:
       type: array
       items:
-        $ref: '#/TeamExport'
+        $ref: '#/TenantExport'
       description: >-
         Grants of this tenant's jobs and locks to other tenants. An absent
         list exports nothing.
     notifications:
-      $ref: '#/TeamNotifications'
+      $ref: '#/TenantNotifications'
     retention:
-      $ref: '#/TeamPipelinesRetention'
+      $ref: '#/TenantPipelinesRetention'
     concurrencyLimits:
       type: array
       maxItems: 32
       items:
-        $ref: '#/TeamConcurrencyLimit'
+        $ref: '#/TenantConcurrencyLimit'
       description: >-
         Named caps on how many builds of a set of this tenant's jobs run at
         one time. A build over a limit waits in the queue. A tenant pipelines
         admin may write this field.
   additionalProperties: false
 
-TeamNotifications:
+TenantNotifications:
   type: object
   description: >-
     Outward notifications of a pipelines tenant. The record store posts
     the completion webhook for each run.
   properties:
     webhook:
-      $ref: '#/TeamWebhook'
+      $ref: '#/TenantWebhook'
   additionalProperties: false
 
-TeamWebhook:
+TenantWebhook:
   type: object
   description: >-
     A completion webhook. The record store posts a signed JSON payload to
@@ -442,10 +442,10 @@ TeamWebhook:
         Receiver endpoint. Starts with https:// or http://. Use https://
         for a receiver outside the cluster.
     secretRef:
-      $ref: '#/TeamWebhookSecret'
+      $ref: '#/TenantWebhookSecret'
   additionalProperties: false
 
-TeamWebhookSecret:
+TenantWebhookSecret:
   type: object
   description: >-
     The Secret and data key that hold the HMAC signing key. The key
@@ -461,7 +461,7 @@ TeamWebhookSecret:
       description: Data key that holds the signing key. Default hmac-key.
   additionalProperties: false
 
-TeamPipelinesRetention:
+TenantPipelinesRetention:
   type: object
   description: >-
     Record-store windows for this tenant's runs. A job rule replaces the
@@ -478,13 +478,13 @@ TeamPipelinesRetention:
       type: array
       maxItems: 64
       items:
-        $ref: '#/TeamJobRetention'
+        $ref: '#/TenantJobRetention'
       description: >-
         Per-job windows. The first rule whose job glob matches sets the
         window of that job.
   additionalProperties: false
 
-TeamJobRetention:
+TenantJobRetention:
   type: object
   description: A run window for the jobs that match a folder-relative glob.
   required: [job, runs]
@@ -501,7 +501,7 @@ TeamJobRetention:
       description: The job window, in whole days, such as 7d.
   additionalProperties: false
 
-TeamConcurrencyLimit:
+TenantConcurrencyLimit:
   type: object
   description: A cap on the builds of a named set of jobs that run at once.
   required: [name, jobs, max]
@@ -529,7 +529,7 @@ TeamConcurrencyLimit:
       description: Number of builds the set runs at one time.
   additionalProperties: false
 
-TeamExport:
+TenantExport:
   type: object
   description: >-
     One grant a pipelines tenant makes to other tenants: a job pattern or
@@ -554,14 +554,14 @@ TeamExport:
       items:
         type: string
       minItems: 1
-      description: Team names allowed to use this export.
+      description: Tenant names allowed to use this export.
   additionalProperties: false
 
-TeamRehydration:
+TenantRehydration:
   type: object
   description: >-
     A pipelines tenant's build-record rehydration state
-    (status.rehydration). Response-only: TeamReconciler is its only
+    (status.rehydration). Response-only: TenantReconciler is its only
     writer.
   properties:
     generation:
@@ -601,7 +601,7 @@ TeamRehydration:
       description: When the operator last sent a rehydration bundle for this tenant.
   additionalProperties: false
 
-TeamPlacement:
+TenantPlacement:
   type: object
   description: >-
     The cell a pipelines tenant is bound to (status.placement).
@@ -623,13 +623,13 @@ TeamPlacement:
     members:
       type: array
       items:
-        $ref: '#/TeamMember'
+        $ref: '#/TenantMember'
       description: >-
         Every member of this tenant. The scalar fields above keep
         describing slot 0.
   additionalProperties: false
 
-TeamMember:
+TenantMember:
   type: object
   description: >-
     One member of a pipelines tenant (status.placement.members).
@@ -656,9 +656,9 @@ TeamMember:
       description: True when the member's cell reports this tenant applied.
   additionalProperties: false
 
-TeamEntry:
+TenantEntry:
   type: object
-  description: Full team object returned from get/list operations.
+  description: Full tenant object returned from get/list operations.
   required: [name, namespaces]
   properties:
     name:
@@ -682,7 +682,7 @@ TeamEntry:
     provisionNamespaces:
       type: boolean
     pipelines:
-      $ref: '#/TeamPipelines'
+      $ref: '#/TenantPipelines'
     observedGeneration:
       type: integer
       format: int64
@@ -695,15 +695,15 @@ TeamEntry:
     namespaceStates:
       type: array
       items:
-        $ref: '#/TeamNamespaceState'
+        $ref: '#/TenantNamespaceState'
     conditions:
       type: array
       items:
-        $ref: '#/TeamCondition'
+        $ref: '#/TenantCondition'
     placement:
-      $ref: '#/TeamPlacement'
+      $ref: '#/TenantPlacement'
     rehydration:
-      $ref: '#/TeamRehydration'
+      $ref: '#/TenantRehydration'
   additionalProperties: false
 
 SubjectRef:
@@ -720,9 +720,9 @@ SubjectRef:
       description: OIDC claim value (group name or user subject).
   additionalProperties: false
 
-TeamNamespaceState:
+TenantNamespaceState:
   type: object
-  description: State of a single namespace for a Team.
+  description: State of a single namespace for a Tenant.
   required: [name, state]
   properties:
     name:
@@ -731,9 +731,9 @@ TeamNamespaceState:
       type: string
   additionalProperties: false
 
-TeamCondition:
+TenantCondition:
   type: object
-  description: Status condition for a Team.
+  description: Status condition for a Tenant.
   required: [type, status]
   properties:
     type:
@@ -752,13 +752,13 @@ TeamCondition:
 RunnerSpec:
   type: object
   description: >-
-    A Runner's mutable configuration (spec.*). team and launcher are
+    A Runner's mutable configuration (spec.*). tenant and launcher are
     immutable after creation.
-  required: [team, launcher, remoteFS]
+  required: [tenant, launcher, remoteFS]
   properties:
-    team:
+    tenant:
       type: string
-      description: The pipelines Team that owns this runner. Immutable.
+      description: The pipelines Tenant that owns this runner. Immutable.
     launcher:
       type: string
       enum: [ssh, inbound]
@@ -769,7 +769,7 @@ RunnerSpec:
         type: string
       description: >-
         Unprefixed label suffixes; the operator prefixes each one with
-        <team>-.
+        <tenant>-.
     remoteFS:
       type: string
       description: The agent work directory on the node.
@@ -785,7 +785,7 @@ RunnerSpec:
     credentialRef:
       type: string
       description: >-
-        Name of a Secret in the Team's agent namespace holding the SSH
+        Name of a Secret in the Tenant's agent namespace holding the SSH
         credential. Required for launcher ssh; forbidden for inbound.
     javaPath:
       type: string
@@ -820,7 +820,7 @@ RunnerStatus:
   properties:
     nodeName:
       type: string
-      description: The rendered Jenkins node name, <team>-<runner name>.
+      description: The rendered Jenkins node name, <tenant>-<runner name>.
     cell:
       type: string
       description: The Controller that hosts this runner's node.
@@ -868,7 +868,7 @@ RunnerCreateRequest:
       type: string
       description: >-
         metadata.name. Not generated: the operator names the machine, and
-        the rendered node is <team>-<name>.
+        the rendered node is <tenant>-<name>.
     spec:
       $ref: '#/RunnerSpec'
   additionalProperties: false
@@ -2146,7 +2146,7 @@ TenantScope:
     name:
       type: string
       maxLength: 253
-      description: A tenant is a Team name.
+      description: A tenant is a Tenant name.
     jobs:
       type: array
       maxItems: 64
@@ -2915,7 +2915,7 @@ ActivityEvent:
       type: string
     source:
       type: string
-      enum: [mite, operator, user, api, jenkins, mcp, assistant, team_agent]
+      enum: [mite, operator, user, api, jenkins, mcp, assistant, tenant_agent]
     severity:
       type: string
       enum: [info, warning, error]
@@ -4506,7 +4506,7 @@ ChangeRequest:
 JobBranchList:
   type: object
   description: >
-    GET /pipelines/{team}/jobs/{job}/branches. The inventory is up to
+    GET /pipelines/{tenant}/jobs/{job}/branches. The inventory is up to
     ten minutes stale. A hibernated cell keeps its last export.
   required: [jobPath, truncated, branches, changeRequests, tags, repositories]
   properties:
@@ -4574,7 +4574,7 @@ JobBranchHead:
 
 ScanMultibranchRequest:
   type: object
-  description: POST /pipelines/{team}/jobs/{job}/scan. Every field is optional.
+  description: POST /pipelines/{tenant}/jobs/{job}/scan. Every field is optional.
   properties:
     cluster:
       type: string
@@ -4689,7 +4689,7 @@ RunSummary:
 RunningRun:
   type: object
   description: >
-    One unfinished run for the team home's Running now card. currentStage
+    One unfinished run for the tenant home's Running now card. currentStage
     names the top-level stage in progress. It is absent when no top-level
     stage is in progress: before the first stage, between two stages, and
     for a queued run.
@@ -4778,7 +4778,7 @@ PipelineSummary:
 
 PipelineRetention:
   type: object
-  description: The record-store windows that apply to one pipelines team.
+  description: The record-store windows that apply to one pipelines tenant.
   required: [storeDays, effectiveDays, jobs]
   properties:
     storeDays:
@@ -4799,7 +4799,7 @@ PipelineRetention:
 
 PipelineJobRetention:
   type: object
-  description: One per-job window rule of a pipelines team.
+  description: One per-job window rule of a pipelines tenant.
   required: [job, days, effectiveDays]
   properties:
     job:
@@ -4816,7 +4816,7 @@ PipelineJobRetention:
 PipelineListResponse:
   type: object
   description: >
-    GET /pipelines/{team}: the job list, unioned with the catalog's
+    GET /pipelines/{tenant}: the job list, unioned with the catalog's
     declared jobs, plus the running-now strip.
   required: [items, runningNow, truncated, tenantFolder, retention]
   properties:
@@ -4834,7 +4834,7 @@ PipelineListResponse:
       type: string
       description: >
         The Jenkins folder that prefixes every job path in the response.
-        It is the Team name for a placed pipelines tenant. It is the empty
+        It is the Tenant name for a placed pipelines tenant. It is the empty
         string for a controller tenant. The field is always present.
     truncated:
       type: boolean
@@ -5021,7 +5021,7 @@ PipelineParameter:
 
 PipelineJobDetail:
   type: object
-  description: GET /pipelines/{team}/jobs/{job}.
+  description: GET /pipelines/{tenant}/jobs/{job}.
   required: [jobPath, kind, pending, health, last30Days, tenantFolder, tenant, dependencies]
   properties:
     jobPath:
@@ -5054,7 +5054,7 @@ PipelineJobDetail:
       type: string
       description: >
         The tenant noun the server authorizes against, from
-        TenantRef.Tenant: a Team name for a Team tenant, or
+        TenantRef.Tenant: a Tenant name for a Tenant tenant, or
         "<namespace>/<controller>" for a synthetic tenant.
     lastBuild:
       $ref: '#/RunSummary'
@@ -5150,7 +5150,7 @@ PipelineDependencyEdge:
 
 PipelineLast30Days:
   type: object
-  description: The job's "Last 30 days" card, GET /pipelines/{team}/jobs/{job}.
+  description: The job's "Last 30 days" card, GET /pipelines/{tenant}/jobs/{job}.
   required: [builds]
   properties:
     builds:
@@ -5192,7 +5192,7 @@ PipelineSlowestStage:
 
 RunListResponse:
   type: object
-  description: GET /pipelines/{team}/jobs/{job}/runs, cross-tenant cursor-merged.
+  description: GET /pipelines/{tenant}/jobs/{job}/runs, cross-tenant cursor-merged.
   required: [items]
   properties:
     items:
@@ -5241,7 +5241,7 @@ FleetLock:
       type: string
       description: >
         The run's own page path,
-        /pipelines/{team}/{jobPath}/{runId}, the same link a run search
+        /pipelines/{tenant}/{jobPath}/{runId}, the same link a run search
         result carries. Absent, not null, when the caller's own grant
         cannot read the row's own run.
     waitingSince:
@@ -5257,7 +5257,7 @@ FleetLock:
         releasing row.
   additionalProperties: false
 
-PipelineTeam:
+PipelineTenant:
   type: object
   description: >
     One row of GET /pipelines. cell and cellNamespace are set only on a
@@ -5266,12 +5266,12 @@ PipelineTeam:
   properties:
     name:
       type: string
-      description: The Team name, which is also its tenant name.
+      description: The Tenant name, which is also its tenant name.
     cluster:
       type: string
       description: >
-        The cluster that holds the tenant's cell. An unplaced local Team
-        names the local cluster. A local Team whose namespaces hold a
+        The cluster that holds the tenant's cell. An unplaced local Tenant
+        names the local cluster. A local Tenant whose namespaces hold a
         controller, and which has no spec.pipelines, also names the local
         cluster.
     cell:
@@ -5283,11 +5283,11 @@ PipelineTeam:
     placed:
       type: boolean
       description: >
-        True when a cell holds the tenant. A controller-namespace Team
+        True when a cell holds the tenant. A controller-namespace Tenant
         answers false.
   additionalProperties: false
 
-PipelineTeamList:
+PipelineTenantList:
   type: object
   description: >
     GET /pipelines. The rows are in (name, cluster) order.
@@ -5296,18 +5296,18 @@ PipelineTeamList:
     items:
       type: array
       items:
-        $ref: '#/PipelineTeam'
+        $ref: '#/PipelineTenant'
     recordStore:
       type: boolean
       description: >
         False when the record store is off or its schema is too old. The
-        list then carries no Team that another cluster holds.
+        list then carries no Tenant that another cluster holds.
   additionalProperties: false
 
 FleetLockListResponse:
   type: object
   description: >
-    GET /pipelines/{team}/locks and GET /locks. Both routes answer the
+    GET /pipelines/{tenant}/locks and GET /locks. Both routes answer the
     rows in lock name order. In one name, the holder comes first, and
     the waiters follow in the order they began to wait.
   required: [items]
@@ -5395,7 +5395,7 @@ FleetLockHolderCell:
 CreateRunRequest:
   type: object
   description: >
-    POST /pipelines/{team}/jobs/{job}/runs. clientToken, a UUIDv7, makes
+    POST /pipelines/{tenant}/jobs/{job}/runs. clientToken, a UUIDv7, makes
     the request idempotent: the BFF uses it as the run identifier. A
     request with no clientToken is not idempotent.
   properties:
@@ -5444,7 +5444,7 @@ CancelRunResponse:
 
 PipelineMarkerValidateRequest:
   type: object
-  description: POST /pipelines/{team}/markers/validate.
+  description: POST /pipelines/{tenant}/markers/validate.
   required: [marker]
   properties:
     marker:
@@ -5469,7 +5469,7 @@ PipelineMarkerFinding:
 PipelineMarkerValidateResponse:
   type: object
   description: >
-    findings is empty when the marker resolved against the team's
+    findings is empty when the marker resolved against the tenant's
     delivered set and its values validated; templateName and
     templateVersion are then present.
   required: [findings]
@@ -5590,7 +5590,7 @@ RunDetail:
       type: string
       description: >
         The tenant noun the server authorizes against: the run row's
-        stored tenant column. A Team name for a Team tenant, or
+        stored tenant column. A Tenant name for a Tenant tenant, or
         "<namespace>/<controller>" for a synthetic tenant.
     buildNumber:
       type: integer
@@ -6087,7 +6087,7 @@ RunTestCase:
         The opaque case key the server makes from the class name and the
         test name. Do not parse it. Percent-encode the whole key as one
         path segment before you use it as {case} on
-        GET /pipelines/{team}/jobs/{job}/tests/{case}.
+        GET /pipelines/{tenant}/jobs/{job}/tests/{case}.
   additionalProperties: false
 
 RunTestReport:
@@ -6273,14 +6273,14 @@ TestCaseOutcome:
     runLink:
       type: string
       description: >
-        The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the
+        The run's own page path, /pipelines/{tenant}/{jobPath}/{runId}, the
         same link a fleet lock row carries.
   additionalProperties: false
 
 TestCaseHistoryResponse:
   type: object
   description: >
-    GET /pipelines/{team}/jobs/{job}/tests/{case}. items holds the case's
+    GET /pipelines/{tenant}/jobs/{job}/tests/{case}. items holds the case's
     recent outcomes, newest first, within the record store retention
     window. The response holds no rate, no trend, and no flake score.
   required: [items]
@@ -6360,7 +6360,7 @@ JenkinsLink:
   properties:
     link:
       type: string
-      description: A dashboard path, such as /pipelines/team/job/runId.
+      description: A dashboard path, such as /pipelines/tenant/job/runId.
   additionalProperties: false
 
 CellPoolSpec:
@@ -6782,13 +6782,13 @@ CellGrant:
   properties:
     source:
       type: string
-      enum: [teamMembership, tenantScopedBinding, federatedBinding, clusterWideBinding]
+      enum: [tenantMembership, tenantScopedBinding, federatedBinding, clusterWideBinding]
     binding:
       type: string
       description: >-
         The VarroaRoleBinding name. For the federatedBinding source it names the
         JenkinsRoleBinding copy on this cell's cluster. Absent for the
-        teamMembership source.
+        tenantMembership source.
     roleRef:
       type: string
       description: >-
@@ -7010,7 +7010,7 @@ CellUsage:
       description: maxTenants minus the placed tenant count, never below zero.
   additionalProperties: false
 
-TeamCell:
+TenantCell:
   type: object
   description: >-
     The tenant's own view of the cell that hosts it. For the state
@@ -7024,7 +7024,7 @@ TeamCell:
       enum: [placed, moving, rehydrating, unplaced, notCellHosted]
     reason:
       type: string
-      description: The Team's Placed condition reason, verbatim.
+      description: The Tenant's Placed condition reason, verbatim.
     cell:
       type: string
     namespace:
@@ -7069,20 +7069,20 @@ TeamCell:
     members:
       type: array
       items:
-        $ref: '#/TeamCellMember'
+        $ref: '#/TenantCellMember'
       description: >-
         One entry for each member of the tenant, ordered by role: active
         members by ascending slot first, then standbys by cell name. It is
         absent for unplaced and notCellHosted. Every other field of this
         body describes the tenant's slot 0.
     warning:
-      $ref: '#/TeamCellWarning'
+      $ref: '#/TenantCellWarning'
   additionalProperties: false
 
-TeamCellWarning:
+TenantCellWarning:
   type: object
   description: >-
-    The Team's TenantWarnings condition, verbatim, while its status is
+    The Tenant's TenantWarnings condition, verbatim, while its status is
     True. It is absent otherwise.
   required: [reason, message]
   properties:
@@ -7097,7 +7097,7 @@ TeamCellWarning:
       description: The warning message, which names the fault.
   additionalProperties: false
 
-TeamCellMember:
+TenantCellMember:
   type: object
   description: >-
     One member of the tenant, with that member's own four load counts. The
@@ -7140,7 +7140,7 @@ AssistantError:
       type: string
     code:
       type: string
-      enum: [assistant_disabled, assistant_key_unavailable, assistant_off, assistant_busy, prompt_not_startable, kill_switch, approval_expired, team_agent_session]
+      enum: [assistant_disabled, assistant_key_unavailable, assistant_off, assistant_busy, prompt_not_startable, kill_switch, approval_expired, tenant_agent_session]
   additionalProperties: false
 
 ProposePipelineRequest:
@@ -7190,7 +7190,7 @@ AssistantSessionContext:
   description: The client context of a session. Each key names one object the session is about.
   properties:
     route: {type: string}
-    team: {type: string}
+    tenant: {type: string}
     job: {type: string}
     run: {type: string}
     controller: {type: string}
@@ -7214,9 +7214,9 @@ AssistantSession:
   required: [id, kind, principal, cluster, state, context, keySource, dataSharing, promptTokens, completionTokens, steps, startedAt]
   properties:
     id: {type: string}
-    kind: {type: string, enum: [assistant, team_agent]}
+    kind: {type: string, enum: [assistant, tenant_agent]}
     principal: {type: string}
-    team: {type: string}
+    tenant: {type: string}
     cluster: {type: string}
     trigger: {type: string}
     context: {type: object, additionalProperties: true}
@@ -7330,7 +7330,7 @@ AssistantLimits:
       properties:
         session: {type: integer, format: int64}
         userDay: {type: integer, format: int64}
-        teamDay: {type: integer, format: int64}
+        tenantDay: {type: integer, format: int64}
         steps: {type: integer}
     externalDataSharing: {type: string}
     approvalExpiry: {type: string}
@@ -7436,12 +7436,12 @@ MyAssistantKeyRequest:
 RunNote:
   type: object
   description: A note on one build, or on one job. A session note carries the session id.
-  required: [id, runId, cluster, team, jobPath, principal, sessionId, body, createdAt]
+  required: [id, runId, cluster, tenant, jobPath, principal, sessionId, body, createdAt]
   properties:
     id: {type: string, format: uuid}
     runId: {type: string, format: uuid, nullable: true}
     cluster: {type: string}
-    team: {type: string}
+    tenant: {type: string}
     jobPath: {type: string}
     principal: {type: string}
     sessionId: {type: string, format: uuid, nullable: true}
@@ -7483,12 +7483,12 @@ RunNoteError:
       enum: [note_too_long, note_session_invalid]
   additionalProperties: false
 
-TeamAgentSpec:
+TenantAgentSpec:
   type: object
-  description: The desired state of one TeamAgent. The acceptance rule picks the one object of a Team that runs.
-  required: [teamRef]
+  description: The desired state of one TenantAgent. The acceptance rule picks the one object of a Tenant that runs.
+  required: [tenantRef]
   properties:
-    teamRef:
+    tenantRef:
       type: object
       required: [name]
       properties:
@@ -7538,7 +7538,7 @@ TeamAgentSpec:
       type: string
       enum: [none, metadata, logs]
 
-TeamAgentCondition:
+TenantAgentCondition:
   type: object
   required: [type, status, reason, lastTransitionTime]
   properties:
@@ -7549,23 +7549,23 @@ TeamAgentCondition:
     lastTransitionTime: {type: string, format: date-time}
     observedGeneration: {type: integer, format: int64}
 
-TeamAgent:
+TenantAgent:
   type: object
-  required: [namespace, name, team, cluster, spec, status, accepted, pendingApprovals, spendToday, dayLimit]
+  required: [namespace, name, tenant, cluster, spec, status, accepted, pendingApprovals, spendToday, dayLimit]
   properties:
     namespace: {type: string}
     name: {type: string}
-    team: {type: string}
+    tenant: {type: string}
     cluster: {type: string}
     spec:
-      $ref: '#/TeamAgentSpec'
+      $ref: '#/TenantAgentSpec'
     status:
       type: object
       properties:
         conditions:
           type: array
           items:
-            $ref: '#/TeamAgentCondition'
+            $ref: '#/TenantAgentCondition'
         instructionsSHA: {type: string}
         lastSession:
           type: object
@@ -7581,9 +7581,9 @@ TeamAgent:
     spendToday: {type: integer, format: int64}
     dayLimit: {type: integer, format: int64}
 
-TeamAgentSession:
+TenantAgentSession:
   type: object
-  description: One Team agent session. It carries the AssistantSession fields and its pending approvals.
+  description: One Tenant agent session. It carries the AssistantSession fields and its pending approvals.
   allOf:
     - $ref: '#/AssistantSession'
     - type: object
@@ -7594,17 +7594,17 @@ TeamAgentSession:
           items:
             $ref: '#/AssistantApproval'
 
-TeamAgentSessionList:
+TenantAgentSessionList:
   type: object
   required: [items, nextCursor]
   properties:
     items:
       type: array
       items:
-        $ref: '#/TeamAgentSession'
+        $ref: '#/TenantAgentSession'
     nextCursor: {type: string}
 
-TeamAgentCapability:
+TenantAgentCapability:
   type: object
   required: [name, description, kind]
   properties:
@@ -7614,60 +7614,60 @@ TeamAgentCapability:
       type: string
       description: The tool class read or write, or the output kind note, issue, or webhook on an output tool.
 
-TeamAgentCapabilities:
+TenantAgentCapabilities:
   type: object
   required: [reads, writesByApproval, unattended, never]
   properties:
     reads:
       type: array
-      items: {$ref: '#/TeamAgentCapability'}
+      items: {$ref: '#/TenantAgentCapability'}
     writesByApproval:
       type: array
-      items: {$ref: '#/TeamAgentCapability'}
+      items: {$ref: '#/TenantAgentCapability'}
     unattended:
       type: array
-      items: {$ref: '#/TeamAgentCapability'}
+      items: {$ref: '#/TenantAgentCapability'}
     never:
       type: array
-      items: {$ref: '#/TeamAgentCapability'}
+      items: {$ref: '#/TenantAgentCapability'}
 
-TeamAgentRunRequest:
+TenantAgentRunRequest:
   type: object
   properties:
-    job: {type: string, description: A job path under the Team. Empty names the whole Team.}
+    job: {type: string, description: A job path under the Tenant. Empty names the whole Tenant.}
     run: {type: string, description: A run id to note in the request.}
 
-TeamAgentError:
+TenantAgentError:
   type: object
   required: [error, code]
-  description: A Team agent refusal. The code names the cause, and error gives the text.
+  description: A Tenant agent refusal. The code names the cause, and error gives the text.
   properties:
     error: {type: string}
     code:
       type: string
-      enum: [team_agent_session, not_accepted, disabled, manual_not_enabled, nothing_to_grant]
+      enum: [tenant_agent_session, not_accepted, disabled, manual_not_enabled, nothing_to_grant]
   additionalProperties: false
 
-TeamAgentPaused:
+TenantAgentPaused:
   type: object
   required: [reason, message]
   properties:
     reason: {type: string}
     message: {type: string}
 
-TeamAgentItem:
+TenantAgentItem:
   type: object
-  required: [namespace, name, team, cluster, enabled, sessionsToday, spendToday, failedToday, conditions, unattendedRequested, unattendedGranted]
+  required: [namespace, name, tenant, cluster, enabled, sessionsToday, spendToday, failedToday, conditions, unattendedRequested, unattendedGranted]
   properties:
     namespace: {type: string}
     name: {type: string}
-    team: {type: string}
+    tenant: {type: string}
     cluster: {type: string}
     enabled: {type: boolean}
     paused:
       nullable: true
       allOf:
-        - $ref: '#/TeamAgentPaused'
+        - $ref: '#/TenantAgentPaused'
     sessionsToday: {type: integer}
     spendToday: {type: integer, format: int64}
     failedToday: {type: integer}
@@ -7675,7 +7675,7 @@ TeamAgentItem:
       type: array
       description: The conditions whose status is not True.
       items:
-        $ref: '#/TeamAgentCondition'
+        $ref: '#/TenantAgentCondition'
     unattendedRequested:
       type: array
       items: {type: string}
@@ -7683,23 +7683,23 @@ TeamAgentItem:
       type: array
       items: {type: string}
 
-TeamAgentItemList:
+TenantAgentItemList:
   type: object
   required: [items]
   properties:
     items:
       type: array
       items:
-        $ref: '#/TeamAgentItem'
+        $ref: '#/TenantAgentItem'
 
-TeamAgentUnattendedRequest:
+TenantAgentUnattendedRequest:
   type: object
   required: [enabled]
   properties:
     enabled: {type: boolean}
   additionalProperties: false
 
-TeamAgentUnattendedResult:
+TenantAgentUnattendedResult:
   type: object
   required: [namespace, name, enabled, unattendedGranted]
   properties:

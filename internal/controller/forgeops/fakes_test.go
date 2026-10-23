@@ -202,7 +202,7 @@ func (f *fakeClient) SetCommitStatus(_ context.Context, _ forge.Repo, sha string
 	return nil
 }
 
-// fixture wires an Ops over a Team and a fake forge. clients maps a token
+// fixture wires an Ops over a Tenant and a fake forge. clients maps a token
 // value to the client that the token builds.
 type fixture struct {
 	ops     *Ops
@@ -215,20 +215,20 @@ type fixture struct {
 	logBuf  *strings.Builder
 }
 
-func newFixture(t *testing.T, teamAgentNS string) *fixture {
+func newFixture(t *testing.T, tenantAgentNS string) *fixture {
 	t.Helper()
 	store := crdstore.NewFake()
-	team := &v1alpha1.Team{
+	tenant := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec: v1alpha1.TeamSpec{
+		Spec: v1alpha1.TenantSpec{
 			Namespaces: []string{"default"},
-			Pipelines:  &v1alpha1.TeamPipelinesSpec{AgentNamespace: teamAgentNS},
+			Pipelines:  &v1alpha1.TenantPipelinesSpec{AgentNamespace: tenantAgentNS},
 		},
 	}
-	if teamAgentNS == "" {
-		team.Spec.Pipelines = nil
+	if tenantAgentNS == "" {
+		tenant.Spec.Pipelines = nil
 	}
-	crdstore.MustSeed(store, team)
+	crdstore.MustSeed(store, tenant)
 	fx := &fixture{
 		store:   store,
 		secrets: &fakeSecrets{},
@@ -267,7 +267,7 @@ const testSHA = "0123456789abcdef0123456789abcdef01234567"
 // prReq returns a valid pull-request request for the tests.
 func prReq() forgeapi.PullRequestRequest {
 	return forgeapi.PullRequestRequest{
-		Team:          "payments",
+		Tenant:        "payments",
 		Repo:          testRepoURL,
 		Branch:        forgeapi.ProposalBranch,
 		Title:         "Add a Jenkinsfile proposed by Varroa",
@@ -279,9 +279,9 @@ func prReq() forgeapi.PullRequestRequest {
 
 // checkReq and readReq build the requests of the tests.
 func checkReq() forgeapi.CheckRequest {
-	return forgeapi.CheckRequest{Team: "payments", Repo: testRepoURL}
+	return forgeapi.CheckRequest{Tenant: "payments", Repo: testRepoURL}
 }
 
 func readReq(path string) forgeapi.ReadRequest {
-	return forgeapi.ReadRequest{Team: "payments", Repo: testRepoURL, Path: path}
+	return forgeapi.ReadRequest{Tenant: "payments", Repo: testRepoURL, Path: path}
 }

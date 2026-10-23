@@ -18,10 +18,10 @@ const (
 	defaultCronCatchUp  = "one"
 )
 
-// defaultCronGrace is Team.spec.pipelines.cronGrace's default.
+// defaultCronGrace is Tenant.spec.pipelines.cronGrace's default.
 const defaultCronGrace = 5 * time.Minute
 
-// cronCatchUpNone is the only Team.spec.pipelines.cronCatchUp value
+// cronCatchUpNone is the only Tenant.spec.pipelines.cronCatchUp value
 // besides defaultCronCatchUp ("one").
 const cronCatchUpNone = "none"
 
@@ -41,7 +41,7 @@ func defaultTenantSchedulePolicy() tenantSchedulePolicy {
 
 // schedulePolicyWire is the subset of tenant_placements.policy the
 // backstop round reads. cronBackstop is a plain bool, not a pointer:
-// the operator's announce already resolved Team.spec.pipelines'
+// the operator's announce already resolved Tenant.spec.pipelines'
 // tri-state CronBackstop to a concrete value before it wrote the wire
 // policy, so every stored row's own key is always present.
 type schedulePolicyWire struct {

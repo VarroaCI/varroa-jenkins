@@ -51,7 +51,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/controller/forgeops"
 	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
 	"github.com/varroaci/varroa-jenkins/internal/controller/sharding"
-	"github.com/varroaci/varroa-jenkins/internal/controller/teamagents"
+	"github.com/varroaci/varroa-jenkins/internal/controller/tenantagents"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/forge"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
@@ -84,7 +84,7 @@ func main() {
 	oidcUserClaim := flag.String("oidc-user-claim", envDefault("VARROA_OIDC_USER_CLAIM", "preferred_username,sub"), "comma-separated JWT claims for kind:User bindings")
 	oidcGroupClaim := flag.String("oidc-group-claim", envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"), "comma-separated JWT claims for kind:Group bindings inside Jenkins")
 	defaultRead := flag.Bool("default-read", false, "Allow any authenticated user to read controllers without explicit binding")
-	teamAgents := flag.Bool("team-agents", envBool("VARROA_TEAM_AGENTS", false), "Reconcile Team agent role bindings (core install only)")
+	tenantAgents := flag.Bool("tenant-agents", envBool("VARROA_TENANT_AGENTS", false), "Reconcile Tenant agent role bindings (core install only)")
 	logLevel := flag.String("log-level", "info", "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", "text", "Log format: text, json")
 	maxConcurrent := flag.Int("max-concurrent-reconciles", envInt("VARROA_MAX_CONCURRENT_RECONCILES", 8), "Max concurrent Controller reconciles")
@@ -353,8 +353,8 @@ func main() {
 	// operator-embedded content (replaces the Helm-chart-templated versions).
 	versionProfileSeedReconciler := controller.NewVersionProfileSeedReconciler(clientsetClient, clientsetClient, operatorNamespace, logger)
 
-	// Create Team reconciler for composing Teams into Group + VarroaRoleBinding.
-	teamReconciler := controller.NewTeamReconciler(clientsetClient, clientsetClient, operatorNamespace, logger)
+	// Create Tenant reconciler for composing Tenants into Group + VarroaRoleBinding.
+	tenantReconciler := controller.NewTenantReconciler(clientsetClient, clientsetClient, operatorNamespace, logger)
 
 	// --- RBAC informers ---
 	dynamicClient := clientsetClient.DynamicClient()
@@ -441,16 +441,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	// A change of a cell's per-tenant seed answer wakes the Team ticker on
+	// A change of a cell's per-tenant seed answer wakes the Tenant ticker on
 	// every replica. Only the leader runs that ticker, and it reads the same
 	// answers from its own informer cache.
-	teamWakeCh := make(chan struct{}, 1)
+	tenantWakeCh := make(chan struct{}, 1)
 	if _, err := controllerInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			o, _ := oldObj.(*v1alpha1.Controller)
 			n, _ := newObj.(*v1alpha1.Controller)
 			if o != nil && n != nil && controller.CellSeedStateChanged(o, n) {
-				notifyWake(teamWakeCh)
+				notifyWake(tenantWakeCh)
 			}
 		},
 	}); err != nil {
@@ -542,35 +542,35 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Team informer: the Jenkins member role of each tenant reads the
-	// Team-membership path, so the operator needs the same Team cache the
+	// Tenant informer: the Jenkins member role of each tenant reads the
+	// Tenant-membership path, so the operator needs the same Tenant cache the
 	// BFF builds.
-	teamGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "teams"}
-	teamInformer := cache.NewSharedIndexInformer(
+	tenantGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "tenants"}
+	tenantInformer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return dynamicClient.Resource(teamGVR).List(context.TODO(), options)
+				return dynamicClient.Resource(tenantGVR).List(context.TODO(), options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return dynamicClient.Resource(teamGVR).Watch(context.TODO(), options)
+				return dynamicClient.Resource(tenantGVR).Watch(context.TODO(), options)
 			},
 		},
 		&unstructured.Unstructured{},
 		0,
 		cache.Indexers{},
 	)
-	if err := teamInformer.SetTransform(func(obj interface{}) (interface{}, error) {
+	if err := tenantInformer.SetTransform(func(obj interface{}) (interface{}, error) {
 		u, ok := obj.(*unstructured.Unstructured)
 		if !ok {
 			return obj, nil
 		}
-		team := &v1alpha1.Team{}
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, team); err != nil {
+		tenant := &v1alpha1.Tenant{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, tenant); err != nil {
 			return nil, err
 		}
-		return team, nil
+		return tenant, nil
 	}); err != nil {
-		logger.Error("failed to set transform on team informer", "error", err)
+		logger.Error("failed to set transform on tenant informer", "error", err)
 		os.Exit(1)
 	}
 
@@ -606,7 +606,7 @@ func main() {
 	}
 
 	userClaims := auth.ParseClaimNames(*oidcUserClaim)
-	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, teamInformer,
+	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, tenantInformer,
 		*defaultRead, userClaims)
 	rbacResolver.SetUserDirectory(userInformer.GetIndexer(), operatorNamespace)
 	rbacGen := rbac.NewGenerator(rbacResolver)
@@ -635,7 +635,7 @@ func main() {
 	reconciler.SetVarroaEndpoint(gatewayEndpoint)
 	reconciler.SetOperatorNamespace(operatorNamespace)
 	// claimGate, blobstoreURL, and artifactSecretBase feed the reconciler,
-	// the team reconciler's pipelines gates, and the warm-pool reconciler's
+	// the tenant reconciler's pipelines gates, and the warm-pool reconciler's
 	// fill gate, so they are read once here (design D4).
 	claimGate := envDefault("VARROA_CLAIM_GATE", "0")
 	blobstoreURL := os.Getenv("VARROA_BLOBSTORE_URL")
@@ -663,26 +663,26 @@ func main() {
 	managedNamespaces := os.Getenv("MANAGED_NAMESPACES")
 	set := tenancy.NewManagedSet(managedNamespaces, operatorNamespace)
 	reconciler.SetTenancy(tenancy.NewClassifier(clientsetClient, set))
-	teamReconciler.SetManagedSet(set)
+	tenantReconciler.SetManagedSet(set)
 	reconciler.SetVarroaRedirectURL(*oidcRedirectURL)
 	cellsConfig := controller.ParseCellsConfigFromEnv(logger)
 	reconciler.SetCellsConfig(cellsConfig)
 	reconciler.Logger = logger
 
-	// --- Pipelines placement pass wiring (design D4): the Team reconciler
+	// --- Pipelines placement pass wiring (design D4): the Tenant reconciler
 	// needs its own cluster identity, gate values, and cells tunables before
-	// it can place a tenant. A Team with no spec.pipelines never reads any
+	// it can place a tenant. A Tenant with no spec.pipelines never reads any
 	// of these.
-	teamReconciler.SetClusterIdentity(cluster)
-	teamReconciler.SetPipelinesGates(claimGate, blobstoreURL)
-	teamReconciler.SetCellsConfig(cellsConfig)
-	teamReconciler.SetPurgeRequester(controller.NewNATSPurgeRequester(busConn))
-	teamReconciler.SetSyncAnnouncer(controller.NewNATSSyncAnnouncer(busConn))
+	tenantReconciler.SetClusterIdentity(cluster)
+	tenantReconciler.SetPipelinesGates(claimGate, blobstoreURL)
+	tenantReconciler.SetCellsConfig(cellsConfig)
+	tenantReconciler.SetPurgeRequester(controller.NewNATSPurgeRequester(busConn))
+	tenantReconciler.SetSyncAnnouncer(controller.NewNATSSyncAnnouncer(busConn))
 
 	// --- Activity publisher (mode-agnostic, publishes to activity.* subjects) ---
 	actPub := activity.NewPublisher(cluster, busConn)
 	reconciler.SetActivityPublisher(actPub)
-	teamReconciler.SetActivityPublisher(actPub)
+	tenantReconciler.SetActivityPublisher(actPub)
 
 	// jenkinsUpstream is the Jenkins upstream host. "" turns off every read from
 	// it: the upgrade tracker, candidate metadata, and the Jenkins JVM flags.
@@ -899,27 +899,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Forge check, read, issue, and pullrequest run on every replica; only the Team's shard owner replies.
-	enterTeam := func(ctx context.Context, key string) (context.Context, func(), bool) {
+	// Forge check, read, issue, and pullrequest run on every replica; only the Tenant's shard owner replies.
+	enterTenant := func(ctx context.Context, key string) (context.Context, func(), bool) {
 		return shardSet.Enter(ctx, ring.ShardFor(key))
 	}
 	forgePullRequestLocks := keylock.New()
 	for _, r := range []*forgeRunner{
 		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbCheck, limit: forgeConcurrency, logger: logger,
 			handle: func(ctx context.Context, d []byte) []byte {
-				return handleForgeCheck(ctx, logger, forgeAnswerer, enterTeam, d)
+				return handleForgeCheck(ctx, logger, forgeAnswerer, enterTenant, d)
 			}},
 		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbRead, limit: forgeConcurrency, logger: logger,
 			handle: func(ctx context.Context, d []byte) []byte {
-				return handleForgeRead(ctx, logger, forgeAnswerer, enterTeam, d)
+				return handleForgeRead(ctx, logger, forgeAnswerer, enterTenant, d)
 			}},
 		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbIssue, limit: forgeConcurrency, logger: logger,
 			handle: func(ctx context.Context, d []byte) []byte {
-				return handleForgeIssue(ctx, logger, forgeAnswerer, enterTeam, operatorNamespace, d)
+				return handleForgeIssue(ctx, logger, forgeAnswerer, enterTenant, operatorNamespace, d)
 			}},
 		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbPullRequest, limit: forgeConcurrency, logger: logger,
 			handle: func(ctx context.Context, d []byte) []byte {
-				return handleForgePullRequest(ctx, logger, forgeAnswerer, enterTeam, forgePullRequestLocks, d)
+				return handleForgePullRequest(ctx, logger, forgeAnswerer, enterTenant, forgePullRequestLocks, d)
 			}},
 	} {
 		if err := mgr.Add(r); err != nil {
@@ -988,7 +988,7 @@ func main() {
 	go jenkinsRoleInformer.Run(ctx.Done())
 	go jenkinsRoleBindingInformer.Run(ctx.Done())
 	go controllerInformer.Run(ctx.Done())
-	go teamInformer.Run(ctx.Done())
+	go tenantInformer.Run(ctx.Done())
 	go userInformer.Run(ctx.Done())
 	// The cell-pool informer runs on every replica. The channel it feeds is
 	// in-process, so a non-leader replica's informer wakes nothing.
@@ -999,7 +999,7 @@ func main() {
 		jenkinsRoleBindingInformer.HasSynced,
 		roleBindingInformer.HasSynced,
 		controllerInformer.HasSynced,
-		teamInformer.HasSynced,
+		tenantInformer.HasSynced,
 		userInformer.HasSynced,
 	) {
 		logger.Error("failed to sync RBAC informer caches")
@@ -1132,22 +1132,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 3. Team reconciler (30s, immediate). The brood subscriber and the
+	// 3. Tenant reconciler (30s, immediate). The brood subscriber and the
 	// Controller informer handler above wake it, so a confirmed cell loss
 	// and a new seed answer take effect without waiting for the interval.
 	// The channel holds one token and the send never blocks, so no
 	// publisher can stall on it.
 	if err := mgr.Add(&tickerRunnable{
-		name:      "team",
+		name:      "tenant",
 		interval:  30 * time.Second,
 		immediate: true,
 		tick: func(ctx context.Context) {
-			reconcileAllTeams(ctx, clientsetClient, teamReconciler, logger)
+			reconcileAllTenants(ctx, clientsetClient, tenantReconciler, logger)
 		},
-		wake:   (<-chan struct{})(teamWakeCh),
+		wake:   (<-chan struct{})(tenantWakeCh),
 		logger: logger,
 	}); err != nil {
-		logger.Error("failed to add team runnable", "error", err)
+		logger.Error("failed to add tenant runnable", "error", err)
 		os.Exit(1)
 	}
 
@@ -1155,7 +1155,7 @@ func main() {
 	// about 40 seconds, which is faster than any reconcile interval. The
 	// event only removes latency and decides nothing: the Controller
 	// reconcile it enqueues performs the pod read that proves the loss.
-	broodSub, err := startBroodWatch(busConn, cluster, reconciler, teamWakeCh, logger)
+	broodSub, err := startBroodWatch(busConn, cluster, reconciler, tenantWakeCh, logger)
 	if err != nil {
 		logger.Error("failed to subscribe to the brood subject", "error", err)
 		os.Exit(1)
@@ -1231,27 +1231,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 3d. Team agent bindings (30s, immediate, leader-elected). The bindings
-	// grant each accepted TeamAgent its developer role on its Team. The
-	// ticker runs only on a core install, behind --team-agents.
-	if *teamAgents {
-		teamAgentReconciler := &teamagents.Reconciler{
+	// 3d. Tenant agent bindings (30s, immediate, leader-elected). The bindings
+	// grant each accepted TenantAgent its developer role on its Tenant. The
+	// ticker runs only on a core install, behind --tenant-agents.
+	if *tenantAgents {
+		tenantAgentReconciler := &tenantagents.Reconciler{
 			Backend:          clientsetClient,
 			ReleaseNamespace: operatorNamespace,
 			Logger:           logger,
 		}
 		if err := mgr.Add(&tickerRunnable{
-			name:      "teamagent",
+			name:      "tenantagent",
 			interval:  30 * time.Second,
 			immediate: true,
 			tick: func(ctx context.Context) {
-				if err := teamAgentReconciler.Tick(ctx); err != nil {
-					logger.Warn("team agent binding reconcile failed", "error", err)
+				if err := tenantAgentReconciler.Tick(ctx); err != nil {
+					logger.Warn("tenant agent binding reconcile failed", "error", err)
 				}
 			},
 			logger: logger,
 		}); err != nil {
-			logger.Error("failed to add teamagent runnable", "error", err)
+			logger.Error("failed to add tenantagent runnable", "error", err)
 			os.Exit(1)
 		}
 	}
@@ -1766,18 +1766,18 @@ func reconcileAllProfileCandidates(ctx context.Context, store crdstore.Backend, 
 	backoff.prune(present)
 }
 
-// reconcileAllTeams lists all Team CRDs and reconciles each one via the
-// team reconciler.
-func reconcileAllTeams(ctx context.Context, store crdstore.Backend, rec *controller.TeamReconciler, logger *slog.Logger) {
-	teams, err := crdstore.List[v1alpha1.Team](ctx, store, "", "")
+// reconcileAllTenants lists all Tenant CRDs and reconciles each one via the
+// tenant reconciler.
+func reconcileAllTenants(ctx context.Context, store crdstore.Backend, rec *controller.TenantReconciler, logger *slog.Logger) {
+	tenants, err := crdstore.List[v1alpha1.Tenant](ctx, store, "", "")
 	if err != nil {
-		logger.Warn("failed to list Teams", "error", err)
+		logger.Warn("failed to list Tenants", "error", err)
 		return
 	}
-	for _, t := range teams {
+	for _, t := range tenants {
 		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: t.Name}}
 		if _, err := rec.Reconcile(ctx, req); err != nil {
-			logger.Warn("failed to reconcile Team", "team", t.Name, "error", err)
+			logger.Warn("failed to reconcile Tenant", "tenant", t.Name, "error", err)
 		}
 	}
 }
@@ -1998,7 +1998,7 @@ func (r *operatorCommandRunner) commandResponders(ctx context.Context) []command
 		{"bundles.preview", bus.OperatorBundlesSubject(r.cluster, "preview"), r.configCrud.HandleBundlesPreview, composeConcurrency},
 		{"bundles.pause", bus.OperatorBundlesSubject(r.cluster, "pause"), r.configCrud.HandleBundlesPause, serialResponder},
 		{"bundles.resume", bus.OperatorBundlesSubject(r.cluster, "resume"), r.configCrud.HandleBundlesPause, serialResponder},
-		{"bundles.teamcontent", bus.OperatorBundlesSubject(r.cluster, "teamcontent"), r.configCrud.HandleBundlesTeamContent, serialResponder},
+		{"bundles.tenantcontent", bus.OperatorBundlesSubject(r.cluster, "tenantcontent"), r.configCrud.HandleBundlesTenantContent, serialResponder},
 		{"catalog.itemlist", bus.OperatorCatalogSubject(r.cluster, "itemlist"), r.configCrud.HandleItemsList, serialResponder},
 		{"catalog.itemget", bus.OperatorCatalogSubject(r.cluster, "itemget"), r.configCrud.HandleItemsGet, serialResponder},
 		{"catalog.sourcelist", bus.OperatorCatalogSubject(r.cluster, "sourcelist"), r.configCrud.HandleSourcesList, serialResponder},

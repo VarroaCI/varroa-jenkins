@@ -5,7 +5,7 @@ Use a namespaced `BroodSchedule` to create recurring [brood operations](brood-op
 ```bash
 varroactl broodschedule create daily-reconcile \
   --cron '0 6 * * *' --verb reconcile --names controller-a,controller-b \
-  --namespace team-a
+  --namespace tenant-a
 ```
 
 Use `--selector` for a changing target set. The supported verbs are `restart`, `reprovision`, `reconcile`, `stop`, and `start`. Use `varroactl broodschedule create --help` for target, retention, and deadline options.
@@ -33,4 +33,4 @@ varroactl broodschedule delete <namespace>/<name>
 
 `varroactl broodschedule get` lists the schedules of every cluster. It prints a warning on stderr for each cluster whose list did not arrive.
 
-Team-namespace schedules can target only their namespace and one cluster. Put cross-namespace or multi-cluster schedules in the operator namespace. If no run appears, inspect `status.reason`; `TenancyViolation` means the target is outside that scope. A trigger that cannot start usually lacks an image pull Secret in its namespace.
+Tenant-namespace schedules can target only their namespace and one cluster. Put cross-namespace or multi-cluster schedules in the operator namespace. If no run appears, inspect `status.reason`; `TenancyViolation` means the target is outside that scope. A trigger that cannot start usually lacks an image pull Secret in its namespace.

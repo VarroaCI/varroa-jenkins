@@ -173,7 +173,7 @@ func TestGetJobSummaryUnknownJobHasNoRecentResults(t *testing.T) {
 	}
 }
 
-// TestListJobSummariesAddsQueueWaitMedians asserts the team home table's
+// TestListJobSummariesAddsQueueWaitMedians asserts the tenant home table's
 // queue wait comes from the runs inside the window: the median of a
 // job's waits, no value for a job that never started a build, and no
 // contribution from a run created before the window.

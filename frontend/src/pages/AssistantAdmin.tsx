@@ -184,7 +184,7 @@ export function AssistantAdmin() {
         <Card title="Limits">
           <p>Session budget {s.limits.budgets.session} tokens.</p>
           <p>User day budget {s.limits.budgets.userDay} tokens.</p>
-          <p>Team day budget {s.limits.budgets.teamDay} tokens.</p>
+          <p>Tenant day budget {s.limits.budgets.tenantDay} tokens.</p>
           <p>Steps per session {s.limits.budgets.steps}.</p>
           <p>External data sharing {s.limits.externalDataSharing}.</p>
           <p>Approval expiry {s.limits.approvalExpiry}.</p>

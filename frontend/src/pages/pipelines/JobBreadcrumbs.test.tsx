@@ -3,10 +3,10 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import JobBreadcrumbs from "./JobBreadcrumbs";
 
-function renderTrail(team: string, tenantFolder: string, jobPath: string) {
+function renderTrail(tenant: string, tenantFolder: string, jobPath: string) {
   return render(
     <MemoryRouter>
-      <JobBreadcrumbs team={team} tenantFolder={tenantFolder} jobPath={jobPath} />
+      <JobBreadcrumbs tenant={tenant} tenantFolder={tenantFolder} jobPath={jobPath} />
     </MemoryRouter>,
   );
 }
@@ -23,7 +23,7 @@ describe("JobBreadcrumbs", () => {
     expect(crumbTexts()).toEqual(["payments", "release", "eu", "deploy"]);
   });
 
-  it("links a folder crumb to the team home with that folder and every ancestor unfolded", () => {
+  it("links a folder crumb to the tenant home with that folder and every ancestor unfolded", () => {
     renderTrail("payments", "payments", "payments/release/eu/deploy");
     const link = screen.getByRole("link", { name: "eu" });
     const href = link.getAttribute("href") ?? "";
@@ -52,7 +52,7 @@ describe("JobBreadcrumbs", () => {
   it("links the job crumb to the job page and marks the current label when a current label is set", () => {
     render(
       <MemoryRouter>
-        <JobBreadcrumbs team="payments" tenantFolder="payments" jobPath="payments/release/eu/deploy" current="#42" />
+        <JobBreadcrumbs tenant="payments" tenantFolder="payments" jobPath="payments/release/eu/deploy" current="#42" />
       </MemoryRouter>,
     );
     expect(crumbTexts()).toEqual(["payments", "release", "eu", "deploy", "#42"]);

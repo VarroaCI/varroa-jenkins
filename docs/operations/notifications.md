@@ -10,11 +10,11 @@ the signing key.
 
 ## Declare the webhook
 
-Set `spec.pipelines.notifications.webhook` on the Team:
+Set `spec.pipelines.notifications.webhook` on the Tenant:
 
 ```yaml
 apiVersion: varroa.dev/v1alpha1
-kind: Team
+kind: Tenant
 metadata:
   name: payments
 spec:
@@ -44,7 +44,7 @@ kubectl -n payments create secret generic payments-webhook \
   --from-literal=hmac-key="$(openssl rand -hex 32)"
 ```
 
-The Team status reports the webhook in its `Notifications` condition:
+The Tenant status reports the webhook in its `Notifications` condition:
 
 - `True` with reason `WebhookReady` means the operator read the key.
 - `False` with reason `WebhookSecretMissing` means the Secret or the key
@@ -176,10 +176,10 @@ The record store refuses to send to any address that is not global unicast.
 Loopback, link-local, group, and unspecified addresses are not global unicast. A receiver must use an address that the record
 store can reach.
 
-A delivery records the Team incarnation that owned the run when the cell
-claimed it. When you delete a Team and create a new one with the same name,
-the record store drops any pending delivery of the old Team. The new Team's
-receiver gets no deliveries for the old Team's runs.
+A delivery records the Tenant incarnation that owned the run when the cell
+claimed it. When you delete a Tenant and create a new one with the same name,
+the record store drops any pending delivery of the old Tenant. The new Tenant's
+receiver gets no deliveries for the old Tenant's runs.
 
 Finished delivery rows stay for seven days, then the maintenance round
 deletes them.
@@ -284,7 +284,7 @@ Use the `mail` step in a pipeline to send through the pool login:
 ```groovy
 post {
   failure {
-    mail to: 'team@example.com', subject: "${env.JOB_NAME} failed",
+    mail to: 'tenant@example.com', subject: "${env.JOB_NAME} failed",
          body: "See ${env.BUILD_URL}"
   }
 }

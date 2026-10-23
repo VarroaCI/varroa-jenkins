@@ -6,8 +6,8 @@ import "fmt"
 type TenantKind int
 
 const (
-	// TenantTeam names a Team placed on a cell.
-	TenantTeam TenantKind = iota
+	// TenantTenant names a Tenant placed on a cell.
+	TenantTenant TenantKind = iota
 	// TenantController names one controller as "<namespace>/<name>".
 	TenantController
 )
@@ -15,15 +15,15 @@ const (
 // ParsedTenant is the classification of a tenant value. It carries no cluster identity.
 type ParsedTenant struct {
 	Kind       TenantKind
-	Team       string // set when Kind is TenantTeam
+	Tenant     string // set when Kind is TenantTenant
 	Namespace  string // set when Kind is TenantController
 	Controller string // set when Kind is TenantController
-	Folder     string // the Jenkins folder prefix: Team for TenantTeam, "" for TenantController
+	Folder     string // the Jenkins folder prefix: Tenant for TenantTenant, "" for TenantController
 }
 
 // ParseTenant classifies a stored or resolved tenant value. It performs no lookup.
 //
-// A value with no "/" is a TenantTeam. A value with exactly one "/", and a
+// A value with no "/" is a TenantTenant. A value with exactly one "/", and a
 // non-empty part on each side, is a TenantController. Every other value,
 // including the empty string, returns an error.
 func ParseTenant(tenant string) (ParsedTenant, error) {
@@ -41,8 +41,8 @@ func ParseTenant(tenant string) (ParsedTenant, error) {
 
 	if idx == -1 {
 		return ParsedTenant{
-			Kind:   TenantTeam,
-			Team:   tenant,
+			Kind:   TenantTenant,
+			Tenant: tenant,
 			Folder: tenant,
 		}, nil
 	}

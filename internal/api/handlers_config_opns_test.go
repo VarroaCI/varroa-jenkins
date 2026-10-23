@@ -214,7 +214,7 @@ func TestDispatchCatalogItems_UnknownMemberNoExemption(t *testing.T) {
 }
 
 // configOpnsSearchConfigBrood answers one catalog item per namespace listed
-// for each cluster. Every item name contains "team".
+// for each cluster. Every item name contains "tenant".
 type configOpnsSearchConfigBrood struct {
 	ConfigBrood
 	namespaces map[string][]string
@@ -223,7 +223,7 @@ type configOpnsSearchConfigBrood struct {
 func (c *configOpnsSearchConfigBrood) ListCatalogItems(_ context.Context, cluster, _ string, _ CatalogItemFilter) ([]json.RawMessage, error) {
 	var out []json.RawMessage
 	for _, ns := range c.namespaces[cluster] {
-		raw, err := json.Marshal(bus.CatalogItemSummary{Name: "team-" + ns, Namespace: ns, Type: "pipeline"})
+		raw, err := json.Marshal(bus.CatalogItemSummary{Name: "tenant-" + ns, Namespace: ns, Type: "pipeline"})
 		if err != nil {
 			return nil, err
 		}
@@ -244,7 +244,7 @@ func TestSearch_CatalogItems_PerClusterOperatorNamespace(t *testing.T) {
 		ConfigBrood:       config,
 		OperatorNamespace: "varroa-system",
 	})
-	resp, err := srv.Search(context.Background(), scopedDevClaims, "team", "")
+	resp, err := srv.Search(context.Background(), scopedDevClaims, "tenant", "")
 	if err != nil {
 		t.Fatalf("Search error = %v", err)
 	}

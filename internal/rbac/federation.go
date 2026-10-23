@@ -56,7 +56,7 @@ const LabelFederatedTenantMember = "varroa.dev/federated-tenant-member"
 const AnnotationFederatedTenant = "varroa.dev/federated-tenant"
 
 // FederatedAllTenants is the tenant annotation value of a copy that reaches
-// every tenant on a cell. It cannot be a Team name.
+// every tenant on a cell. It cannot be a Tenant name.
 const FederatedAllTenants = "*"
 
 // AnnotationFederatedTenantJobs holds the job globs of a tenant-member copy as
@@ -103,7 +103,7 @@ func DesiredFederatedCRs(
 
 	for _, vrb := range varroaRoleBindings {
 		// A binding with no subjects grants nothing, and the JenkinsRoleBinding
-		// CRD requires a subjects list. A Team with no members is a normal
+		// CRD requires a subjects list. A Tenant with no members is a normal
 		// state, so the skip comes before every check that warns. The skip
 		// also comes before the role is recorded: a role that only empty
 		// bindings reference is not federated.
@@ -129,19 +129,19 @@ func DesiredFederatedCRs(
 				continue
 			}
 			var names []string
-			grants := tenantJobsByTeam(vrb.Spec.Scope.Tenants)
-			for _, team := range sortedKeys(grants) {
-				grant := grants[team]
+			grants := tenantJobsByTenant(vrb.Spec.Scope.Tenants)
+			for _, tenant := range sortedKeys(grants) {
+				grant := grants[tenant]
 				if !grant.whole && len(grant.jobs) == 0 {
 					continue
 				}
-				childName := fedTenantBindingName(vr, vrb, team, grant.jobs, grant.whole)
+				childName := fedTenantBindingName(vr, vrb, tenant, grant.jobs, grant.whole)
 				names = append(names, childName)
 				if bindingByName[childName] {
 					continue
 				}
 				bindingByName[childName] = true
-				annotations := map[string]string{AnnotationFederatedTenant: team}
+				annotations := map[string]string{AnnotationFederatedTenant: tenant}
 				if !grant.whole {
 					raw, _ := json.Marshal(grant.jobs)
 					annotations[AnnotationFederatedTenantJobs] = string(raw)
@@ -157,7 +157,7 @@ func DesiredFederatedCRs(
 						Annotations: annotations,
 					},
 					Spec: v1alpha1.JenkinsRoleBindingSpec{
-						RoleRef:  TenantMemberRoleName(team),
+						RoleRef:  TenantMemberRoleName(tenant),
 						Subjects: copySubjects(expand(vrb.Spec.Subjects)),
 					},
 				})
@@ -356,10 +356,10 @@ type tenantGrant struct {
 	whole bool
 }
 
-// tenantJobsByTeam merges the scope entries of one binding by tenant name.
+// tenantJobsByTenant merges the scope entries of one binding by tenant name.
 // An entry without jobs covers the whole folder. Otherwise the jobs of the
 // entries are sorted and deduplicated.
-func tenantJobsByTeam(tenants []v1alpha1.TenantScope) map[string]tenantGrant {
+func tenantJobsByTenant(tenants []v1alpha1.TenantScope) map[string]tenantGrant {
 	out := map[string]tenantGrant{}
 	for _, t := range tenants {
 		g := out[t.Name]
@@ -369,10 +369,10 @@ func tenantJobsByTeam(tenants []v1alpha1.TenantScope) map[string]tenantGrant {
 		g.jobs = append(g.jobs, t.Jobs...)
 		out[t.Name] = g
 	}
-	for team, g := range out {
+	for tenant, g := range out {
 		slices.Sort(g.jobs)
 		g.jobs = slices.Compact(g.jobs)
-		out[team] = g
+		out[tenant] = g
 	}
 	return out
 }
@@ -390,14 +390,14 @@ func sortedKeys[V any](m map[string]V) []string {
 // fedTenantBindingName names the tenant-member copy of one source binding.
 // The name hashes the role, the tenant, the job globs, and the source subjects.
 // A change to any of them gives the copy a new name.
-func fedTenantBindingName(vr *v1alpha1.VarroaRole, vrb *v1alpha1.VarroaRoleBinding, team string, jobs []string, whole bool) string {
+func fedTenantBindingName(vr *v1alpha1.VarroaRole, vrb *v1alpha1.VarroaRoleBinding, tenant string, jobs []string, whole bool) string {
 	payload := struct {
 		Role     string                `json:"role"`
-		Team     string                `json:"team"`
+		Tenant   string                `json:"tenant"`
 		Jobs     []string              `json:"jobs"`
 		Whole    bool                  `json:"whole"`
 		Subjects []v1alpha1.SubjectRef `json:"subjects"`
-	}{Role: vr.Name, Team: team, Jobs: jobs, Whole: whole, Subjects: sortedSubjects(vrb.Spec.Subjects)}
+	}{Role: vr.Name, Tenant: tenant, Jobs: jobs, Whole: whole, Subjects: sortedSubjects(vrb.Spec.Subjects)}
 	b, _ := json.Marshal(payload)
 	sum := sha256.Sum256(b)
 	return "varroa-fed-tenant-" + hex.EncodeToString(sum[:])[:12]

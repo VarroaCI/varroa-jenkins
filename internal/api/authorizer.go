@@ -374,15 +374,15 @@ func (a *Authorizer) CanUseAssistant(claims *auth.Claims) bool {
 }
 
 // CanGrantUnattended reports whether the caller may enable unattended writes
-// on a Team agent. The decision reads the cluster-wide grant only.
+// on a Tenant agent. The decision reads the cluster-wide grant only.
 func (a *Authorizer) CanGrantUnattended(claims *auth.Claims) bool {
 	if claims == nil {
 		return false
 	}
-	return hasVerb(a.globalEffective(claims), "teamagents", "unattended")
+	return hasVerb(a.globalEffective(claims), "tenantagents", "unattended")
 }
 
-// CanReadAgentSessions reports whether the caller may read every Team agent
+// CanReadAgentSessions reports whether the caller may read every Tenant agent
 // session. The decision reads the cluster-wide grant only.
 func (a *Authorizer) CanReadAgentSessions(claims *auth.Claims) bool {
 	if claims == nil {

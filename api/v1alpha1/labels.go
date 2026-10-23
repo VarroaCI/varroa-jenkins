@@ -57,6 +57,6 @@ const (
 	// Set to "true" to bypass; persists until removed by the operator.
 	AnnotationRolloutOverride = "varroa.dev/rollout-override"
 
-	// LabelTeamName marks a resource as belonging to a specific Team.
-	LabelTeamName = "varroa.dev/team-name"
+	// LabelTenantName marks a resource as belonging to a specific Tenant.
+	LabelTenantName = "varroa.dev/tenant-name"
 )

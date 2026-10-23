@@ -21,7 +21,7 @@ const MaxTenantGrants = 50
 // first. A federated copy narrows or reaches one tenant, so it ranks with
 // the tenant-scoped sources and before the cluster-wide binding.
 const (
-	GrantSourceTeamMembership      = "teamMembership"
+	GrantSourceTenantMembership    = "tenantMembership"
 	GrantSourceTenantScopedBinding = "tenantScopedBinding"
 	GrantSourceClusterWideBinding  = "clusterWideBinding"
 	GrantSourceFederatedBinding    = "federatedBinding"
@@ -29,7 +29,7 @@ const (
 
 // sourceRank orders the four grant sources.
 var sourceRank = map[string]int{
-	GrantSourceTeamMembership:      0,
+	GrantSourceTenantMembership:    0,
 	GrantSourceTenantScopedBinding: 1,
 	GrantSourceFederatedBinding:    2,
 	GrantSourceClusterWideBinding:  3,
@@ -55,50 +55,50 @@ type TenantGrantSource struct {
 // TenantItemRoleName returns the generated Jenkins item role name of a
 // tenant. The name comes from the tenant name alone, so a caller resolves
 // it without reading a JenkinsRole object.
-func TenantItemRoleName(team string) string {
-	return "varroa:tenant:" + team
+func TenantItemRoleName(tenant string) string {
+	return "varroa:tenant:" + tenant
 }
 
 // TenantItemRolePattern returns the folder pattern of the generated Jenkins
 // item role of a tenant.
-func TenantItemRolePattern(team string) string {
-	return "^" + regexp.QuoteMeta(team) + "($|/.*)$"
+func TenantItemRolePattern(tenant string) string {
+	return "^" + regexp.QuoteMeta(tenant) + "($|/.*)$"
 }
 
 // TenantMemberRoleName returns the generated Jenkins item role name that
 // grants a tenant's write holders the build and replay permissions on the
 // tenant folder subtree. A narrowed grant appends its binding name.
 //
-// No name this package generates may equal TenantItemRoleName of a team:
+// No name this package generates may equal TenantItemRoleName of a tenant:
 // the plugin's VarroaTenantResolver looks that exact name up, and a
-// collision would hand a member role to the service identity. Team names
+// collision would hand a member role to the service identity. Tenant names
 // hold no ":", so the "tenant-member:" prefix cannot collide.
-func TenantMemberRoleName(team string) string {
-	return "varroa:tenant-member:" + team
+func TenantMemberRoleName(tenant string) string {
+	return "varroa:tenant-member:" + tenant
 }
 
 // TenantMemberRolePattern returns the folder pattern of the member role of
-// a team that a cluster-wide or Team-membership write grant produces. It
+// a tenant that a cluster-wide or Tenant-membership write grant produces. It
 // covers the tenant folder itself and every job under it.
-func TenantMemberRolePattern(team string) string {
-	return TenantItemRolePattern(team)
+func TenantMemberRolePattern(tenant string) string {
+	return TenantItemRolePattern(tenant)
 }
 
 // TenantMemberNarrowedRoleName returns the member role name of one
 // tenant-scoped binding that narrows the grant to job globs.
-func TenantMemberNarrowedRoleName(team, binding string) string {
-	return "varroa:tenant-member:" + team + ":" + binding
+func TenantMemberNarrowedRoleName(tenant, binding string) string {
+	return "varroa:tenant-member:" + tenant + ":" + binding
 }
 
 // TenantMemberNarrowedPattern returns the folder pattern of a narrowed
 // member role. Each job glob is folder-relative, so the pattern joins the
-// team name and the glob body.
-func TenantMemberNarrowedPattern(team string, jobs []string) string {
+// tenant name and the glob body.
+func TenantMemberNarrowedPattern(tenant string, jobs []string) string {
 	bodies := make([]string, 0, len(jobs))
 	for _, g := range jobs {
 		bodies = append(bodies, jobglob.RegexpBody(g))
 	}
-	return "^" + regexp.QuoteMeta(team) + "/(?:" + strings.Join(bodies, "|") + ")$"
+	return "^" + regexp.QuoteMeta(tenant) + "/(?:" + strings.Join(bodies, "|") + ")$"
 }
 
 // tenantMemberPermissions lists the Jenkins permissions of a member role.
@@ -125,15 +125,15 @@ type TenantMemberRole struct {
 // TenantMemberRoles returns the generated member roles of one pipelines
 // tenant, the same roles JenkinsRoleAssignments emits for it. The operator
 // and the cell grants read both call it, so they cannot disagree. It returns
-// nil for a nil Resolver or a tenant that is not a pipelines Team.
+// nil for a nil Resolver or a tenant that is not a pipelines Tenant.
 func (r *Resolver) TenantMemberRoles(tenant ParsedTenant) []TenantMemberRole {
-	if r == nil || tenant.Kind != TenantTeam || tenant.Team == "" {
+	if r == nil || tenant.Kind != TenantTenant || tenant.Tenant == "" {
 		return nil
 	}
-	return r.tenantMemberRoles(tenant.Team, r.userPrincipalAliases())
+	return r.tenantMemberRoles(tenant.Tenant, r.userPrincipalAliases())
 }
 
-// tenantMemberRoles builds the member roles of one team. The subtree role
+// tenantMemberRoles builds the member roles of one tenant. The subtree role
 // comes first, then one narrowed role per binding in first-seen order.
 //
 // The member role grants the person checks. The acting-user routes (scan,
@@ -144,11 +144,11 @@ func (r *Resolver) TenantMemberRoles(tenant ParsedTenant) []TenantMemberRole {
 // narrow the same tenant in several entries. Each entry names the same role,
 // so the job globs of one binding merge into one pattern. A separate role per
 // entry would collide by name, and Jenkins keeps one of them.
-func (r *Resolver) tenantMemberRoles(team string, aliases map[string][]string) []TenantMemberRole {
+func (r *Resolver) tenantMemberRoles(tenant string, aliases map[string][]string) []TenantMemberRole {
 	var subtree *TenantMemberRole
 	narrowed := map[string]*tenantMemberNarrowing{}
 	var narrowedOrder []string
-	grants := r.allTenantGrantSources(ParsedTenant{Kind: TenantTeam, Team: team, Folder: team})
+	grants := r.allTenantGrantSources(ParsedTenant{Kind: TenantTenant, Tenant: tenant, Folder: tenant})
 	for _, src := range grants {
 		if !slices.Contains(src.Verbs, "write") {
 			continue
@@ -157,8 +157,8 @@ func (r *Resolver) tenantMemberRoles(team string, aliases map[string][]string) [
 		if src.Jobs == nil {
 			if subtree == nil {
 				subtree = &TenantMemberRole{
-					Name:        TenantMemberRoleName(team),
-					Pattern:     TenantMemberRolePattern(team),
+					Name:        TenantMemberRoleName(tenant),
+					Pattern:     TenantMemberRolePattern(tenant),
 					Permissions: slices.Clone(tenantMemberPermissions),
 				}
 			}
@@ -189,8 +189,8 @@ func (r *Resolver) tenantMemberRoles(team string, aliases map[string][]string) [
 	for _, binding := range narrowedOrder {
 		n := narrowed[binding]
 		out = append(out, TenantMemberRole{
-			Name:        TenantMemberNarrowedRoleName(team, binding),
-			Pattern:     TenantMemberNarrowedPattern(team, n.jobs),
+			Name:        TenantMemberNarrowedRoleName(tenant, binding),
+			Pattern:     TenantMemberNarrowedPattern(tenant, n.jobs),
 			Binding:     binding,
 			Permissions: slices.Clone(tenantMemberPermissions),
 			Subjects:    mergeMemberSubjects(nil, n.subjects),
@@ -227,7 +227,7 @@ type tenantMemberNarrowing struct {
 
 // TenantGrantSources lists every grant that reaches one pipelines tenant.
 // It is the reverse of EffectiveTenantCapabilities: it walks the same four
-// paths (Team membership, tenant-scoped and cluster-wide bindings, and the
+// paths (Tenant membership, tenant-scoped and cluster-wide bindings, and the
 // federated tenant-member copies) with the subject filter removed, so it
 // takes no claims.
 //
@@ -260,16 +260,16 @@ func (r *Resolver) TenantGrantSourcesTruncated(tenant ParsedTenant) ([]TenantGra
 // TenantGrantSources reports. Callers that generate Jenkins grants use it,
 // because a cut list would silently drop a subject from a Jenkins role.
 func (r *Resolver) allTenantGrantSources(tenant ParsedTenant) []TenantGrantSource {
-	if r == nil || tenant.Kind != TenantTeam || tenant.Team == "" {
+	if r == nil || tenant.Kind != TenantTenant || tenant.Tenant == "" {
 		return nil
 	}
 
 	var out []TenantGrantSource
-	if g, ok := r.teamMembershipGrantSource(tenant.Team); ok {
+	if g, ok := r.tenantMembershipGrantSource(tenant.Tenant); ok {
 		out = append(out, g)
 	}
-	out = append(out, r.bindingGrantSources(tenant.Team)...)
-	out = append(out, r.federatedTenantMemberSources(tenant.Team)...)
+	out = append(out, r.bindingGrantSources(tenant.Tenant)...)
+	out = append(out, r.federatedTenantMemberSources(tenant.Tenant)...)
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if sourceRank[out[i].Source] != sourceRank[out[j].Source] {
@@ -292,7 +292,7 @@ func VarroaRolePipelinesVerbs(vr *v1alpha1.VarroaRole) []string {
 // the tenant or the all-tenants value. Each copy is a grant with pipelines
 // write. A copy with an unreadable job list is skipped, so the grant fails
 // closed.
-func (r *Resolver) federatedTenantMemberSources(team string) []TenantGrantSource {
+func (r *Resolver) federatedTenantMemberSources(tenant string) []TenantGrantSource {
 	if r == nil || r.jenkinsRoleBindingIndex == nil {
 		return nil
 	}
@@ -302,11 +302,11 @@ func (r *Resolver) federatedTenantMemberSources(team string) []TenantGrantSource
 		if !ok || b.Labels[LabelFederatedTenantMember] != "true" || b.Labels[LabelFederatedFrom] == "" {
 			continue
 		}
-		tenant := b.Annotations[AnnotationFederatedTenant]
-		if (tenant != team && tenant != FederatedAllTenants) || len(b.Spec.Subjects) == 0 {
+		annotated := b.Annotations[AnnotationFederatedTenant]
+		if (annotated != tenant && annotated != FederatedAllTenants) || len(b.Spec.Subjects) == 0 {
 			continue
 		}
-		if _, narrowed := b.Annotations[AnnotationFederatedTenantJobs]; narrowed && tenant == FederatedAllTenants {
+		if _, narrowed := b.Annotations[AnnotationFederatedTenantJobs]; narrowed && annotated == FederatedAllTenants {
 			// A cluster-wide grant never narrows. A copy that carries a job list is malformed and fails closed.
 			continue
 		}
@@ -339,24 +339,24 @@ func federatedFromNames(raw string) []string {
 	return strings.Split(raw, ",")
 }
 
-// teamMembershipGrantSource resolves the Team-membership path. It applies
+// tenantMembershipGrantSource resolves the Tenant-membership path. It applies
 // the rules of the forward walk: the managed Group counts only when
-// status.groupRef names it and TeamRBACReady is true, an "admin" roleRef
+// status.groupRef names it and TenantRBACReady is true, an "admin" roleRef
 // yields no grant, and an empty roleRef means "developer".
-func (r *Resolver) teamMembershipGrantSource(teamName string) (TenantGrantSource, bool) {
-	if r.teamLister == nil {
+func (r *Resolver) tenantMembershipGrantSource(tenantName string) (TenantGrantSource, bool) {
+	if r.tenantLister == nil {
 		return TenantGrantSource{}, false
 	}
-	obj, err := r.teamLister.Get(teamName)
+	obj, err := r.tenantLister.Get(tenantName)
 	if err != nil {
 		return TenantGrantSource{}, false
 	}
-	team, ok := obj.(*v1alpha1.Team)
+	tenant, ok := obj.(*v1alpha1.Tenant)
 	if !ok {
 		return TenantGrantSource{}, false
 	}
 
-	role := team.Spec.RoleRef
+	role := tenant.Spec.RoleRef
 	if role == "" {
 		role = "developer"
 	}
@@ -368,29 +368,29 @@ func (r *Resolver) teamMembershipGrantSource(teamName string) (TenantGrantSource
 		return TenantGrantSource{}, false
 	}
 
-	subjects := teamEffectiveSubjects(team)
+	subjects := tenantEffectiveSubjects(tenant)
 	if len(subjects) == 0 {
 		return TenantGrantSource{}, false
 	}
 	return TenantGrantSource{
-		Source:   GrantSourceTeamMembership,
+		Source:   GrantSourceTenantMembership,
 		RoleRef:  role,
 		Subjects: subjects,
 		Verbs:    grantedPipelinesVerbs(caps),
 	}, true
 }
 
-// teamEffectiveSubjects returns the Team's effective subject set: the
-// managed Group, when status.groupRef names it and TeamRBACReady is true,
+// tenantEffectiveSubjects returns the Tenant's effective subject set: the
+// managed Group, when status.groupRef names it and TenantRBACReady is true,
 // plus every spec.subjects entry. spec.members is never a subject: those
 // usernames belong to the managed Group.
-func teamEffectiveSubjects(team *v1alpha1.Team) []v1alpha1.SubjectRef {
+func tenantEffectiveSubjects(tenant *v1alpha1.Tenant) []v1alpha1.SubjectRef {
 	var out []v1alpha1.SubjectRef
-	wantGroupRef := "team-" + team.Name
-	if team.Status.GroupRef == wantGroupRef && teamRBACReady(team) {
+	wantGroupRef := "tenant-" + tenant.Name
+	if tenant.Status.GroupRef == wantGroupRef && tenantRBACReady(tenant) {
 		out = append(out, v1alpha1.SubjectRef{Kind: "Group", Name: wantGroupRef})
 	}
-	out = append(out, team.Spec.Subjects...)
+	out = append(out, tenant.Spec.Subjects...)
 	return out
 }
 
@@ -398,7 +398,7 @@ func teamEffectiveSubjects(team *v1alpha1.Team) []v1alpha1.SubjectRef {
 // paths over every stored VarroaRoleBinding. It keeps one entry for each
 // matching scope.tenants entry, so two bindings that narrow differently
 // stay separate.
-func (r *Resolver) bindingGrantSources(team string) []TenantGrantSource {
+func (r *Resolver) bindingGrantSources(tenant string) []TenantGrantSource {
 	if r.roleBindingIndex == nil {
 		return nil
 	}
@@ -424,7 +424,7 @@ func (r *Resolver) bindingGrantSources(team string) []TenantGrantSource {
 			continue
 		}
 		for _, t := range sc.Tenants {
-			if t.Name != team {
+			if t.Name != tenant {
 				continue
 			}
 			out = append(out, TenantGrantSource{

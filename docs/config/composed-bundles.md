@@ -10,7 +10,7 @@ apiVersion: varroa.dev/v1alpha1
 kind: ComposedBundle
 metadata:
   name: platform-baseline
-  namespace: teams-platform
+  namespace: tenants-platform
 spec:
   inputs:
     - itemRef:
@@ -19,7 +19,7 @@ spec:
           organization: example
     - gitSource:
         repoURL: https://github.com/example/casc-bundles.git
-        path: bundles/team-platform
+        path: bundles/tenant-platform
         revision: main
     - ociSource:
         ref: ghcr.io/varroaci/casc-bundles:v1
@@ -101,7 +101,7 @@ A `warnings` entry also names each top-level item manifest key other than `items
 Pause dependent controller rollout during review:
 
 ```bash
-kubectl annotate composedbundle platform-baseline -n teams-platform \
+kubectl annotate composedbundle platform-baseline -n tenants-platform \
   varroa.dev/rollout-paused=true
 ```
 

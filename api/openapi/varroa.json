@@ -126,19 +126,19 @@
           "type": "string"
         }
       },
-      "components_parameters_team": {
-        "description": "Team or controller name that addresses one pipelines tenant.\n",
+      "components_parameters_tenant": {
+        "description": "Tenant or controller name that addresses one pipelines tenant.\n",
         "in": "path",
-        "name": "team",
+        "name": "tenant",
         "required": true,
         "schema": {
           "type": "string"
         }
       },
-      "components_parameters_teamQuery": {
-        "description": "Team name filter for the runner list.",
+      "components_parameters_tenantQuery": {
+        "description": "Tenant name filter for the runner list.",
         "in": "query",
-        "name": "team",
+        "name": "tenant",
         "schema": {
           "type": "string"
         }
@@ -391,7 +391,7 @@
               "jenkins",
               "mcp",
               "assistant",
-              "team_agent"
+              "tenant_agent"
             ],
             "type": "string"
           },
@@ -660,7 +660,7 @@
               "prompt_not_startable",
               "kill_switch",
               "approval_expired",
-              "team_agent_session"
+              "tenant_agent_session"
             ],
             "type": "string"
           },
@@ -688,7 +688,7 @@
               "steps": {
                 "type": "integer"
               },
-              "teamDay": {
+              "tenantDay": {
                 "format": "int64",
                 "type": "integer"
               },
@@ -822,7 +822,7 @@
           "kind": {
             "enum": [
               "assistant",
-              "team_agent"
+              "tenant_agent"
             ],
             "type": "string"
           },
@@ -868,7 +868,7 @@
           "steps": {
             "type": "integer"
           },
-          "team": {
+          "tenant": {
             "type": "string"
           },
           "trigger": {
@@ -910,7 +910,7 @@
           "run": {
             "type": "string"
           },
-          "team": {
+          "tenant": {
             "type": "string"
           }
         },
@@ -2629,7 +2629,7 @@
       },
       "CreateRunRequest": {
         "additionalProperties": false,
-        "description": "POST /pipelines/{team}/jobs/{job}/runs. clientToken, a UUIDv7, makes the request idempotent: the BFF uses it as the run identifier. A request with no clientToken is not idempotent.\n",
+        "description": "POST /pipelines/{tenant}/jobs/{job}/runs. clientToken, a UUIDv7, makes the request idempotent: the BFF uses it as the run identifier. A request with no clientToken is not idempotent.\n",
         "properties": {
           "clientToken": {
             "format": "uuid",
@@ -3346,7 +3346,7 @@
       },
       "PipelineJobDetail": {
         "additionalProperties": false,
-        "description": "GET /pipelines/{team}/jobs/{job}.",
+        "description": "GET /pipelines/{tenant}/jobs/{job}.",
         "properties": {
           "definition": {
             "$ref": "#/components/schemas/components_schemas_PipelineDefinition"
@@ -3415,7 +3415,7 @@
             "description": "Absent for a job with no catalog template (a Jenkinsfile job)."
           },
           "tenant": {
-            "description": "The tenant noun the server authorizes against, from TenantRef.Tenant: a Team name for a Team tenant, or \"\u003cnamespace\u003e/\u003ccontroller\u003e\" for a synthetic tenant.\n",
+            "description": "The tenant noun the server authorizes against, from TenantRef.Tenant: a Tenant name for a Tenant tenant, or \"\u003cnamespace\u003e/\u003ccontroller\u003e\" for a synthetic tenant.\n",
             "type": "string"
           },
           "tenantFolder": {
@@ -3448,7 +3448,7 @@
       },
       "PipelineListResponse": {
         "additionalProperties": false,
-        "description": "GET /pipelines/{team}: the job list, unioned with the catalog's declared jobs, plus the running-now strip.\n",
+        "description": "GET /pipelines/{tenant}: the job list, unioned with the catalog's declared jobs, plus the running-now strip.\n",
         "properties": {
           "items": {
             "items": {
@@ -3466,7 +3466,7 @@
             "type": "array"
           },
           "tenantFolder": {
-            "description": "The Jenkins folder that prefixes every job path in the response. It is the Team name for a placed pipelines tenant. It is the empty string for a controller tenant. The field is always present.\n",
+            "description": "The Jenkins folder that prefixes every job path in the response. It is the Tenant name for a placed pipelines tenant. It is the empty string for a controller tenant. The field is always present.\n",
             "type": "string"
           },
           "truncated": {
@@ -4455,7 +4455,7 @@
             "type": "string"
           },
           "tenant": {
-            "description": "The tenant noun the server authorizes against: the run row's stored tenant column. A Team name for a Team tenant, or \"\u003cnamespace\u003e/\u003ccontroller\u003e\" for a synthetic tenant.\n",
+            "description": "The tenant noun the server authorizes against: the run row's stored tenant column. A Tenant name for a Tenant tenant, or \"\u003cnamespace\u003e/\u003ccontroller\u003e\" for a synthetic tenant.\n",
             "type": "string"
           },
           "tenantFolder": {
@@ -4620,7 +4620,7 @@
       },
       "RunListResponse": {
         "additionalProperties": false,
-        "description": "GET /pipelines/{team}/jobs/{job}/runs, cross-tenant cursor-merged.",
+        "description": "GET /pipelines/{tenant}/jobs/{job}/runs, cross-tenant cursor-merged.",
         "properties": {
           "items": {
             "items": {
@@ -4677,7 +4677,7 @@
             "nullable": true,
             "type": "string"
           },
-          "team": {
+          "tenant": {
             "type": "string"
           }
         },
@@ -4685,7 +4685,7 @@
           "id",
           "runId",
           "cluster",
-          "team",
+          "tenant",
           "jobPath",
           "principal",
           "sessionId",
@@ -4912,7 +4912,7 @@
         "description": "One stored test case of a run. The record store holds only failed and skipped cases, at most 500 for each run.\n",
         "properties": {
           "caseKey": {
-            "description": "The opaque case key the server makes from the class name and the test name. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on GET /pipelines/{team}/jobs/{job}/tests/{case}.\n",
+            "description": "The opaque case key the server makes from the class name and the test name. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on GET /pipelines/{tenant}/jobs/{job}/tests/{case}.\n",
             "type": "string"
           },
           "className": {
@@ -5058,7 +5058,7 @@
       },
       "RunningRun": {
         "additionalProperties": false,
-        "description": "One unfinished run for the team home's Running now card. currentStage names the top-level stage in progress. It is absent when no top-level stage is in progress: before the first stage, between two stages, and for a queued run.\n",
+        "description": "One unfinished run for the tenant home's Running now card. currentStage names the top-level stage in progress. It is absent when no top-level stage is in progress: before the first stage, between two stages, and for a queued run.\n",
         "properties": {
           "branch": {
             "type": "string"
@@ -5282,9 +5282,9 @@
         ],
         "type": "object"
       },
-      "TeamCondition": {
+      "TenantCondition": {
         "additionalProperties": false,
-        "description": "Status condition for a Team.",
+        "description": "Status condition for a Tenant.",
         "properties": {
           "lastTransitionTime": {
             "description": "ISO 8601 last transition time.",
@@ -5309,9 +5309,9 @@
         ],
         "type": "object"
       },
-      "TeamEntry": {
+      "TenantEntry": {
         "additionalProperties": false,
-        "description": "Full team object returned from get/list operations.",
+        "description": "Full tenant object returned from get/list operations.",
         "properties": {
           "bindingRef": {
             "description": "Reference to the managed VarroaRoleBinding.",
@@ -5319,7 +5319,7 @@
           },
           "conditions": {
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamCondition"
+              "$ref": "#/components/schemas/components_schemas_TenantCondition"
             },
             "type": "array"
           },
@@ -5341,7 +5341,7 @@
           },
           "namespaceStates": {
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamNamespaceState"
+              "$ref": "#/components/schemas/components_schemas_TenantNamespaceState"
             },
             "type": "array"
           },
@@ -5356,16 +5356,16 @@
             "type": "integer"
           },
           "pipelines": {
-            "$ref": "#/components/schemas/components_schemas_TeamPipelines"
+            "$ref": "#/components/schemas/components_schemas_TenantPipelines"
           },
           "placement": {
-            "$ref": "#/components/schemas/components_schemas_TeamPlacement"
+            "$ref": "#/components/schemas/components_schemas_TenantPlacement"
           },
           "provisionNamespaces": {
             "type": "boolean"
           },
           "rehydration": {
-            "$ref": "#/components/schemas/components_schemas_TeamRehydration"
+            "$ref": "#/components/schemas/components_schemas_TenantRehydration"
           },
           "roleRef": {
             "type": "string"
@@ -5383,9 +5383,9 @@
         ],
         "type": "object"
       },
-      "TeamNamespaceState": {
+      "TenantNamespaceState": {
         "additionalProperties": false,
-        "description": "State of a single namespace for a Team.",
+        "description": "State of a single namespace for a Tenant.",
         "properties": {
           "name": {
             "type": "string"
@@ -5400,9 +5400,9 @@
         ],
         "type": "object"
       },
-      "TeamRequest": {
+      "TenantRequest": {
         "additionalProperties": false,
-        "description": "Request body for creating or updating a team.",
+        "description": "Request body for creating or updating a tenant.",
         "properties": {
           "displayName": {
             "type": "string"
@@ -5415,18 +5415,18 @@
             "type": "array"
           },
           "name": {
-            "description": "Team name (ignored in body for updates).",
+            "description": "Tenant name (ignored in body for updates).",
             "type": "string"
           },
           "namespaces": {
-            "description": "Target namespaces for this team.",
+            "description": "Target namespaces for this tenant.",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "pipelines": {
-            "$ref": "#/components/schemas/components_schemas_TeamPipelines"
+            "$ref": "#/components/schemas/components_schemas_TenantPipelines"
           },
           "provisionNamespaces": {
             "description": "Whether to auto-provision namespaces.",
@@ -5452,7 +5452,7 @@
       },
       "TestCaseHistoryResponse": {
         "additionalProperties": false,
-        "description": "GET /pipelines/{team}/jobs/{job}/tests/{case}. items holds the case's recent outcomes, newest first, within the record store retention window. The response holds no rate, no trend, and no flake score.\n",
+        "description": "GET /pipelines/{tenant}/jobs/{job}/tests/{case}. items holds the case's recent outcomes, newest first, within the record store retention window. The response holds no rate, no trend, and no flake score.\n",
         "properties": {
           "items": {
             "items": {
@@ -5496,7 +5496,7 @@
             "type": "string"
           },
           "runLink": {
-            "description": "The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the same link a fleet lock row carries.\n",
+            "description": "The run's own page path, /pipelines/{tenant}/{jobPath}/{runId}, the same link a fleet lock row carries.\n",
             "type": "string"
           },
           "status": {
@@ -5960,7 +5960,7 @@
               "jenkins",
               "mcp",
               "assistant",
-              "team_agent"
+              "tenant_agent"
             ],
             "type": "string"
           },
@@ -6229,7 +6229,7 @@
               "prompt_not_startable",
               "kill_switch",
               "approval_expired",
-              "team_agent_session"
+              "tenant_agent_session"
             ],
             "type": "string"
           },
@@ -6257,7 +6257,7 @@
               "steps": {
                 "type": "integer"
               },
-              "teamDay": {
+              "tenantDay": {
                 "format": "int64",
                 "type": "integer"
               },
@@ -6391,7 +6391,7 @@
           "kind": {
             "enum": [
               "assistant",
-              "team_agent"
+              "tenant_agent"
             ],
             "type": "string"
           },
@@ -6437,7 +6437,7 @@
           "steps": {
             "type": "integer"
           },
-          "team": {
+          "tenant": {
             "type": "string"
           },
           "trigger": {
@@ -6479,7 +6479,7 @@
           "run": {
             "type": "string"
           },
-          "team": {
+          "tenant": {
             "type": "string"
           }
         },
@@ -7982,7 +7982,7 @@
         "description": "One grant that reaches a tenant. The jobs field is absent when the grant narrows nothing. An absent jobs and an empty jobs mean different things, so the field is never an empty array.",
         "properties": {
           "binding": {
-            "description": "The VarroaRoleBinding name. For the federatedBinding source it names the JenkinsRoleBinding copy on this cell's cluster. Absent for the teamMembership source.",
+            "description": "The VarroaRoleBinding name. For the federatedBinding source it names the JenkinsRoleBinding copy on this cell's cluster. Absent for the tenantMembership source.",
             "type": "string"
           },
           "federatedFrom": {
@@ -8006,7 +8006,7 @@
           },
           "source": {
             "enum": [
-              "teamMembership",
+              "tenantMembership",
               "tenantScopedBinding",
               "federatedBinding",
               "clusterWideBinding"
@@ -10142,7 +10142,7 @@
       },
       "components_schemas_CreateRunRequest": {
         "additionalProperties": false,
-        "description": "POST /pipelines/{team}/jobs/{job}/runs. clientToken, a UUIDv7, makes the request idempotent: the BFF uses it as the run identifier. A request with no clientToken is not idempotent.\n",
+        "description": "POST /pipelines/{tenant}/jobs/{job}/runs. clientToken, a UUIDv7, makes the request idempotent: the BFF uses it as the run identifier. A request with no clientToken is not idempotent.\n",
         "properties": {
           "clientToken": {
             "format": "uuid",
@@ -10299,7 +10299,7 @@
             "type": "string"
           },
           "runLink": {
-            "description": "The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the same link a run search result carries. Absent, not null, when the caller's own grant cannot read the row's own run.\n",
+            "description": "The run's own page path, /pipelines/{tenant}/{jobPath}/{runId}, the same link a run search result carries. Absent, not null, when the caller's own grant cannot read the row's own run.\n",
             "type": "string"
           },
           "state": {
@@ -10353,7 +10353,7 @@
       },
       "components_schemas_FleetLockListResponse": {
         "additionalProperties": false,
-        "description": "GET /pipelines/{team}/locks and GET /locks. Both routes answer the rows in lock name order. In one name, the holder comes first, and the waiters follow in the order they began to wait.\n",
+        "description": "GET /pipelines/{tenant}/locks and GET /locks. Both routes answer the rows in lock name order. In one name, the holder comes first, and the waiters follow in the order they began to wait.\n",
         "properties": {
           "items": {
             "items": {
@@ -10925,7 +10925,7 @@
         "description": "The Varroa page that a Jenkins item path resolves to.",
         "properties": {
           "link": {
-            "description": "A dashboard path, such as /pipelines/team/job/runId.",
+            "description": "A dashboard path, such as /pipelines/tenant/job/runId.",
             "type": "string"
           }
         },
@@ -11121,7 +11121,7 @@
       },
       "components_schemas_JobBranchList": {
         "additionalProperties": false,
-        "description": "GET /pipelines/{team}/jobs/{job}/branches. The inventory is up to ten minutes stale. A hibernated cell keeps its last export.\n",
+        "description": "GET /pipelines/{tenant}/jobs/{job}/branches. The inventory is up to ten minutes stale. A hibernated cell keeps its last export.\n",
         "properties": {
           "branches": {
             "items": {
@@ -11938,7 +11938,7 @@
       },
       "components_schemas_PipelineJobDetail": {
         "additionalProperties": false,
-        "description": "GET /pipelines/{team}/jobs/{job}.",
+        "description": "GET /pipelines/{tenant}/jobs/{job}.",
         "properties": {
           "definition": {
             "$ref": "#/components/schemas/components_schemas_PipelineDefinition"
@@ -12007,7 +12007,7 @@
             "description": "Absent for a job with no catalog template (a Jenkinsfile job)."
           },
           "tenant": {
-            "description": "The tenant noun the server authorizes against, from TenantRef.Tenant: a Team name for a Team tenant, or \"\u003cnamespace\u003e/\u003ccontroller\u003e\" for a synthetic tenant.\n",
+            "description": "The tenant noun the server authorizes against, from TenantRef.Tenant: a Tenant name for a Tenant tenant, or \"\u003cnamespace\u003e/\u003ccontroller\u003e\" for a synthetic tenant.\n",
             "type": "string"
           },
           "tenantFolder": {
@@ -12040,7 +12040,7 @@
       },
       "components_schemas_PipelineJobRetention": {
         "additionalProperties": false,
-        "description": "One per-job window rule of a pipelines team.",
+        "description": "One per-job window rule of a pipelines tenant.",
         "properties": {
           "days": {
             "description": "The window the rule names, in days, before the store cap.",
@@ -12064,7 +12064,7 @@
       },
       "components_schemas_PipelineLast30Days": {
         "additionalProperties": false,
-        "description": "The job's \"Last 30 days\" card, GET /pipelines/{team}/jobs/{job}.",
+        "description": "The job's \"Last 30 days\" card, GET /pipelines/{tenant}/jobs/{job}.",
         "properties": {
           "builds": {
             "description": "Every run created in the window, whatever its status.",
@@ -12105,7 +12105,7 @@
       },
       "components_schemas_PipelineListResponse": {
         "additionalProperties": false,
-        "description": "GET /pipelines/{team}: the job list, unioned with the catalog's declared jobs, plus the running-now strip.\n",
+        "description": "GET /pipelines/{tenant}: the job list, unioned with the catalog's declared jobs, plus the running-now strip.\n",
         "properties": {
           "items": {
             "items": {
@@ -12123,7 +12123,7 @@
             "type": "array"
           },
           "tenantFolder": {
-            "description": "The Jenkins folder that prefixes every job path in the response. It is the Team name for a placed pipelines tenant. It is the empty string for a controller tenant. The field is always present.\n",
+            "description": "The Jenkins folder that prefixes every job path in the response. It is the Tenant name for a placed pipelines tenant. It is the empty string for a controller tenant. The field is always present.\n",
             "type": "string"
           },
           "truncated": {
@@ -12165,7 +12165,7 @@
       },
       "components_schemas_PipelineMarkerValidateRequest": {
         "additionalProperties": false,
-        "description": "POST /pipelines/{team}/markers/validate.",
+        "description": "POST /pipelines/{tenant}/markers/validate.",
         "properties": {
           "marker": {
             "description": "The marker file's raw text, at most 64 KiB.",
@@ -12179,7 +12179,7 @@
       },
       "components_schemas_PipelineMarkerValidateResponse": {
         "additionalProperties": false,
-        "description": "findings is empty when the marker resolved against the team's delivered set and its values validated; templateName and templateVersion are then present.\n",
+        "description": "findings is empty when the marker resolved against the tenant's delivered set and its values validated; templateName and templateVersion are then present.\n",
         "properties": {
           "findings": {
             "items": {
@@ -12243,7 +12243,7 @@
       },
       "components_schemas_PipelineRetention": {
         "additionalProperties": false,
-        "description": "The record-store windows that apply to one pipelines team.",
+        "description": "The record-store windows that apply to one pipelines tenant.",
         "properties": {
           "effectiveDays": {
             "description": "The window a job without a matching rule gets, in days.",
@@ -12347,59 +12347,6 @@
         ],
         "type": "object"
       },
-      "components_schemas_PipelineTeam": {
-        "additionalProperties": false,
-        "description": "One row of GET /pipelines. cell and cellNamespace are set only on a placed row.\n",
-        "properties": {
-          "cell": {
-            "description": "The slot-0 cell Controller that holds the tenant.",
-            "type": "string"
-          },
-          "cellNamespace": {
-            "description": "The namespace of that cell Controller.",
-            "type": "string"
-          },
-          "cluster": {
-            "description": "The cluster that holds the tenant's cell. An unplaced local Team names the local cluster. A local Team whose namespaces hold a controller, and which has no spec.pipelines, also names the local cluster.\n",
-            "type": "string"
-          },
-          "name": {
-            "description": "The Team name, which is also its tenant name.",
-            "type": "string"
-          },
-          "placed": {
-            "description": "True when a cell holds the tenant. A controller-namespace Team answers false.\n",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "name",
-          "cluster",
-          "placed"
-        ],
-        "type": "object"
-      },
-      "components_schemas_PipelineTeamList": {
-        "additionalProperties": false,
-        "description": "GET /pipelines. The rows are in (name, cluster) order.\n",
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/components_schemas_PipelineTeam"
-            },
-            "type": "array"
-          },
-          "recordStore": {
-            "description": "False when the record store is off or its schema is too old. The list then carries no Team that another cluster holds.\n",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "items",
-          "recordStore"
-        ],
-        "type": "object"
-      },
       "components_schemas_PipelineTemplateInfo": {
         "additionalProperties": false,
         "description": "The resolved catalog template for a job, read from the record store (marker-defined) or the items engine and catalog (items-declared). Absent from PipelineJobDetail for a job with no catalog template.\nFor source \"marker\": name, version, and asOfBuild are absent before the job's first run — markerPath and source are always present. markerRevision is the trusted revision the cell read the marker from, not the branch tip. For source \"items\": only name, version, and source are set.\n",
@@ -12453,6 +12400,59 @@
         "required": [
           "name",
           "version"
+        ],
+        "type": "object"
+      },
+      "components_schemas_PipelineTenant": {
+        "additionalProperties": false,
+        "description": "One row of GET /pipelines. cell and cellNamespace are set only on a placed row.\n",
+        "properties": {
+          "cell": {
+            "description": "The slot-0 cell Controller that holds the tenant.",
+            "type": "string"
+          },
+          "cellNamespace": {
+            "description": "The namespace of that cell Controller.",
+            "type": "string"
+          },
+          "cluster": {
+            "description": "The cluster that holds the tenant's cell. An unplaced local Tenant names the local cluster. A local Tenant whose namespaces hold a controller, and which has no spec.pipelines, also names the local cluster.\n",
+            "type": "string"
+          },
+          "name": {
+            "description": "The Tenant name, which is also its tenant name.",
+            "type": "string"
+          },
+          "placed": {
+            "description": "True when a cell holds the tenant. A controller-namespace Tenant answers false.\n",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "cluster",
+          "placed"
+        ],
+        "type": "object"
+      },
+      "components_schemas_PipelineTenantList": {
+        "additionalProperties": false,
+        "description": "GET /pipelines. The rows are in (name, cluster) order.\n",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_PipelineTenant"
+            },
+            "type": "array"
+          },
+          "recordStore": {
+            "description": "False when the record store is off or its schema is too old. The list then carries no Tenant that another cluster holds.\n",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "recordStore"
         ],
         "type": "object"
       },
@@ -13767,7 +13767,7 @@
             "type": "string"
           },
           "tenant": {
-            "description": "The tenant noun the server authorizes against: the run row's stored tenant column. A Team name for a Team tenant, or \"\u003cnamespace\u003e/\u003ccontroller\u003e\" for a synthetic tenant.\n",
+            "description": "The tenant noun the server authorizes against: the run row's stored tenant column. A Tenant name for a Tenant tenant, or \"\u003cnamespace\u003e/\u003ccontroller\u003e\" for a synthetic tenant.\n",
             "type": "string"
           },
           "tenantFolder": {
@@ -13989,7 +13989,7 @@
       },
       "components_schemas_RunListResponse": {
         "additionalProperties": false,
-        "description": "GET /pipelines/{team}/jobs/{job}/runs, cross-tenant cursor-merged.",
+        "description": "GET /pipelines/{tenant}/jobs/{job}/runs, cross-tenant cursor-merged.",
         "properties": {
           "items": {
             "items": {
@@ -14046,7 +14046,7 @@
             "nullable": true,
             "type": "string"
           },
-          "team": {
+          "tenant": {
             "type": "string"
           }
         },
@@ -14054,7 +14054,7 @@
           "id",
           "runId",
           "cluster",
-          "team",
+          "tenant",
           "jobPath",
           "principal",
           "sessionId",
@@ -14306,7 +14306,7 @@
         "description": "One stored test case of a run. The record store holds only failed and skipped cases, at most 500 for each run.\n",
         "properties": {
           "caseKey": {
-            "description": "The opaque case key the server makes from the class name and the test name. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on GET /pipelines/{team}/jobs/{job}/tests/{case}.\n",
+            "description": "The opaque case key the server makes from the class name and the test name. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on GET /pipelines/{tenant}/jobs/{job}/tests/{case}.\n",
             "type": "string"
           },
           "className": {
@@ -14565,7 +14565,7 @@
         "description": "Request body for POST /runners.",
         "properties": {
           "name": {
-            "description": "metadata.name. Not generated: the operator names the machine, and the rendered node is \u003cteam\u003e-\u003cname\u003e.",
+            "description": "metadata.name. Not generated: the operator names the machine, and the rendered node is \u003ctenant\u003e-\u003cname\u003e.",
             "type": "string"
           },
           "spec": {
@@ -14601,10 +14601,10 @@
       },
       "components_schemas_RunnerSpec": {
         "additionalProperties": false,
-        "description": "A Runner's mutable configuration (spec.*). team and launcher are immutable after creation.",
+        "description": "A Runner's mutable configuration (spec.*). tenant and launcher are immutable after creation.",
         "properties": {
           "credentialRef": {
-            "description": "Name of a Secret in the Team's agent namespace holding the SSH credential. Required for launcher ssh; forbidden for inbound.",
+            "description": "Name of a Secret in the Tenant's agent namespace holding the SSH credential. Required for launcher ssh; forbidden for inbound.",
             "type": "string"
           },
           "host": {
@@ -14616,7 +14616,7 @@
             "type": "string"
           },
           "labels": {
-            "description": "Unprefixed label suffixes; the operator prefixes each one with \u003cteam\u003e-.",
+            "description": "Unprefixed label suffixes; the operator prefixes each one with \u003ctenant\u003e-.",
             "items": {
               "type": "string"
             },
@@ -14642,13 +14642,13 @@
             "description": "The agent work directory on the node.",
             "type": "string"
           },
-          "team": {
-            "description": "The pipelines Team that owns this runner. Immutable.",
+          "tenant": {
+            "description": "The pipelines Tenant that owns this runner. Immutable.",
             "type": "string"
           }
         },
         "required": [
-          "team",
+          "tenant",
           "launcher",
           "remoteFS"
         ],
@@ -14680,7 +14680,7 @@
             "type": "string"
           },
           "nodeName": {
-            "description": "The rendered Jenkins node name, \u003cteam\u003e-\u003crunner name\u003e.",
+            "description": "The rendered Jenkins node name, \u003ctenant\u003e-\u003crunner name\u003e.",
             "type": "string"
           },
           "observedGeneration": {
@@ -14699,7 +14699,7 @@
       },
       "components_schemas_RunningRun": {
         "additionalProperties": false,
-        "description": "One unfinished run for the team home's Running now card. currentStage names the top-level stage in progress. It is absent when no top-level stage is in progress: before the first stage, between two stages, and for a queued run.\n",
+        "description": "One unfinished run for the tenant home's Running now card. currentStage names the top-level stage in progress. It is absent when no top-level stage is in progress: before the first stage, between two stages, and for a queued run.\n",
         "properties": {
           "branch": {
             "type": "string"
@@ -14753,7 +14753,7 @@
       },
       "components_schemas_ScanMultibranchRequest": {
         "additionalProperties": false,
-        "description": "POST /pipelines/{team}/jobs/{job}/scan. Every field is optional.",
+        "description": "POST /pipelines/{tenant}/jobs/{job}/scan. Every field is optional.",
         "properties": {
           "cluster": {
             "description": "Breaks a tie when the job path lies in more than one surviving tenant.\n",
@@ -14969,7 +14969,32 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamAgent": {
+      "components_schemas_TemplateCatalogCondition": {
+        "description": "Status condition for catalog/composedbundle resources.",
+        "properties": {
+          "lastTransitionTime": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "status"
+        ],
+        "type": "object"
+      },
+      "components_schemas_TenantAgent": {
         "properties": {
           "accepted": {
             "type": "boolean"
@@ -14991,7 +15016,7 @@
             "type": "integer"
           },
           "spec": {
-            "$ref": "#/components/schemas/components_schemas_TeamAgentSpec"
+            "$ref": "#/components/schemas/components_schemas_TenantAgentSpec"
           },
           "spendToday": {
             "format": "int64",
@@ -15001,7 +15026,7 @@
             "properties": {
               "conditions": {
                 "items": {
-                  "$ref": "#/components/schemas/components_schemas_TeamAgentCondition"
+                  "$ref": "#/components/schemas/components_schemas_TenantAgentCondition"
                 },
                 "type": "array"
               },
@@ -15037,14 +15062,14 @@
             },
             "type": "object"
           },
-          "team": {
+          "tenant": {
             "type": "string"
           }
         },
         "required": [
           "namespace",
           "name",
-          "team",
+          "tenant",
           "cluster",
           "spec",
           "status",
@@ -15055,29 +15080,29 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamAgentCapabilities": {
+      "components_schemas_TenantAgentCapabilities": {
         "properties": {
           "never": {
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamAgentCapability"
+              "$ref": "#/components/schemas/components_schemas_TenantAgentCapability"
             },
             "type": "array"
           },
           "reads": {
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamAgentCapability"
+              "$ref": "#/components/schemas/components_schemas_TenantAgentCapability"
             },
             "type": "array"
           },
           "unattended": {
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamAgentCapability"
+              "$ref": "#/components/schemas/components_schemas_TenantAgentCapability"
             },
             "type": "array"
           },
           "writesByApproval": {
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamAgentCapability"
+              "$ref": "#/components/schemas/components_schemas_TenantAgentCapability"
             },
             "type": "array"
           }
@@ -15090,7 +15115,7 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamAgentCapability": {
+      "components_schemas_TenantAgentCapability": {
         "properties": {
           "description": {
             "type": "string"
@@ -15110,7 +15135,7 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamAgentCondition": {
+      "components_schemas_TenantAgentCondition": {
         "properties": {
           "lastTransitionTime": {
             "format": "date-time",
@@ -15146,13 +15171,13 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamAgentError": {
+      "components_schemas_TenantAgentError": {
         "additionalProperties": false,
-        "description": "A Team agent refusal. The code names the cause, and error gives the text.",
+        "description": "A Tenant agent refusal. The code names the cause, and error gives the text.",
         "properties": {
           "code": {
             "enum": [
-              "team_agent_session",
+              "tenant_agent_session",
               "not_accepted",
               "disabled",
               "manual_not_enabled",
@@ -15170,7 +15195,7 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamAgentItem": {
+      "components_schemas_TenantAgentItem": {
         "properties": {
           "cluster": {
             "type": "string"
@@ -15178,7 +15203,7 @@
           "conditions": {
             "description": "The conditions whose status is not True.",
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamAgentCondition"
+              "$ref": "#/components/schemas/components_schemas_TenantAgentCondition"
             },
             "type": "array"
           },
@@ -15197,7 +15222,7 @@
           "paused": {
             "allOf": [
               {
-                "$ref": "#/components/schemas/components_schemas_TeamAgentPaused"
+                "$ref": "#/components/schemas/components_schemas_TenantAgentPaused"
               }
             ],
             "nullable": true
@@ -15209,7 +15234,7 @@
             "format": "int64",
             "type": "integer"
           },
-          "team": {
+          "tenant": {
             "type": "string"
           },
           "unattendedGranted": {
@@ -15228,7 +15253,7 @@
         "required": [
           "namespace",
           "name",
-          "team",
+          "tenant",
           "cluster",
           "enabled",
           "sessionsToday",
@@ -15240,11 +15265,11 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamAgentItemList": {
+      "components_schemas_TenantAgentItemList": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamAgentItem"
+              "$ref": "#/components/schemas/components_schemas_TenantAgentItem"
             },
             "type": "array"
           }
@@ -15254,7 +15279,7 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamAgentPaused": {
+      "components_schemas_TenantAgentPaused": {
         "properties": {
           "message": {
             "type": "string"
@@ -15269,10 +15294,10 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamAgentRunRequest": {
+      "components_schemas_TenantAgentRunRequest": {
         "properties": {
           "job": {
-            "description": "A job path under the Team. Empty names the whole Team.",
+            "description": "A job path under the Tenant. Empty names the whole Tenant.",
             "type": "string"
           },
           "run": {
@@ -15282,7 +15307,7 @@
         },
         "type": "object"
       },
-      "components_schemas_TeamAgentSession": {
+      "components_schemas_TenantAgentSession": {
         "allOf": [
           {
             "$ref": "#/components/schemas/components_schemas_AssistantSession"
@@ -15302,14 +15327,14 @@
             "type": "object"
           }
         ],
-        "description": "One Team agent session. It carries the AssistantSession fields and its pending approvals.",
+        "description": "One Tenant agent session. It carries the AssistantSession fields and its pending approvals.",
         "type": "object"
       },
-      "components_schemas_TeamAgentSessionList": {
+      "components_schemas_TenantAgentSessionList": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamAgentSession"
+              "$ref": "#/components/schemas/components_schemas_TenantAgentSession"
             },
             "type": "array"
           },
@@ -15323,8 +15348,8 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamAgentSpec": {
-        "description": "The desired state of one TeamAgent. The acceptance rule picks the one object of a Team that runs.",
+      "components_schemas_TenantAgentSpec": {
+        "description": "The desired state of one TenantAgent. The acceptance rule picks the one object of a Tenant that runs.",
         "properties": {
           "budgets": {
             "properties": {
@@ -15402,7 +15427,7 @@
           "provider": {
             "type": "string"
           },
-          "teamRef": {
+          "tenantRef": {
             "properties": {
               "name": {
                 "type": "string"
@@ -15449,11 +15474,11 @@
           }
         },
         "required": [
-          "teamRef"
+          "tenantRef"
         ],
         "type": "object"
       },
-      "components_schemas_TeamAgentUnattendedRequest": {
+      "components_schemas_TenantAgentUnattendedRequest": {
         "additionalProperties": false,
         "properties": {
           "enabled": {
@@ -15465,7 +15490,7 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamAgentUnattendedResult": {
+      "components_schemas_TenantAgentUnattendedResult": {
         "properties": {
           "enabled": {
             "type": "boolean"
@@ -15491,7 +15516,32 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamCell": {
+      "components_schemas_TenantCapabilities": {
+        "additionalProperties": false,
+        "description": "One grant the caller holds on one pipelines tenant. A tenant name may appear in more than one entry, because the caller can hold two grants on it with different job globs; they are never merged.",
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/components_schemas_APICapabilitySet"
+          },
+          "jobs": {
+            "description": "Folder-relative job globs the grant covers. Always an array, never null; an empty array means every job.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tenant": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant",
+          "jobs",
+          "capabilities"
+        ],
+        "type": "object"
+      },
+      "components_schemas_TenantCell": {
         "additionalProperties": false,
         "description": "The tenant's own view of the cell that hosts it. For the state notCellHosted only state is present. For the state unplaced every field other than state, reason, and warning is absent. The body carries no other tenant's name, job path, run, or count.",
         "properties": {
@@ -15526,7 +15576,7 @@
           "members": {
             "description": "One entry for each member of the tenant, ordered by role: active members by ascending slot first, then standbys by cell name. It is absent for unplaced and notCellHosted. Every other field of this body describes the tenant's slot 0.",
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamCellMember"
+              "$ref": "#/components/schemas/components_schemas_TenantCellMember"
             },
             "type": "array"
           },
@@ -15546,7 +15596,7 @@
             "type": "integer"
           },
           "reason": {
-            "description": "The Team's Placed condition reason, verbatim.",
+            "description": "The Tenant's Placed condition reason, verbatim.",
             "type": "string"
           },
           "runningNow": {
@@ -15568,7 +15618,7 @@
             "type": "string"
           },
           "warning": {
-            "$ref": "#/components/schemas/components_schemas_TeamCellWarning"
+            "$ref": "#/components/schemas/components_schemas_TenantCellWarning"
           }
         },
         "required": [
@@ -15577,7 +15627,7 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamCellMember": {
+      "components_schemas_TenantCellMember": {
         "additionalProperties": false,
         "description": "One member of the tenant, with that member's own four load counts. The counts apply the same grant narrowing the top-level counts apply. No entry names another tenant.",
         "properties": {
@@ -15623,9 +15673,9 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamCellWarning": {
+      "components_schemas_TenantCellWarning": {
         "additionalProperties": false,
-        "description": "The Team's TenantWarnings condition, verbatim, while its status is True. It is absent otherwise.",
+        "description": "The Tenant's TenantWarnings condition, verbatim, while its status is True. It is absent otherwise.",
         "properties": {
           "message": {
             "description": "The warning message, which names the fault.",
@@ -15642,7 +15692,7 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamConcurrencyLimit": {
+      "components_schemas_TenantConcurrencyLimit": {
         "additionalProperties": false,
         "description": "A cap on the builds of a named set of jobs that run at once.",
         "properties": {
@@ -15679,9 +15729,9 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamCondition": {
+      "components_schemas_TenantCondition": {
         "additionalProperties": false,
-        "description": "Status condition for a Team.",
+        "description": "Status condition for a Tenant.",
         "properties": {
           "lastTransitionTime": {
             "description": "ISO 8601 last transition time.",
@@ -15706,9 +15756,9 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamEntry": {
+      "components_schemas_TenantEntry": {
         "additionalProperties": false,
-        "description": "Full team object returned from get/list operations.",
+        "description": "Full tenant object returned from get/list operations.",
         "properties": {
           "bindingRef": {
             "description": "Reference to the managed VarroaRoleBinding.",
@@ -15716,7 +15766,7 @@
           },
           "conditions": {
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamCondition"
+              "$ref": "#/components/schemas/components_schemas_TenantCondition"
             },
             "type": "array"
           },
@@ -15738,7 +15788,7 @@
           },
           "namespaceStates": {
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamNamespaceState"
+              "$ref": "#/components/schemas/components_schemas_TenantNamespaceState"
             },
             "type": "array"
           },
@@ -15753,16 +15803,16 @@
             "type": "integer"
           },
           "pipelines": {
-            "$ref": "#/components/schemas/components_schemas_TeamPipelines"
+            "$ref": "#/components/schemas/components_schemas_TenantPipelines"
           },
           "placement": {
-            "$ref": "#/components/schemas/components_schemas_TeamPlacement"
+            "$ref": "#/components/schemas/components_schemas_TenantPlacement"
           },
           "provisionNamespaces": {
             "type": "boolean"
           },
           "rehydration": {
-            "$ref": "#/components/schemas/components_schemas_TeamRehydration"
+            "$ref": "#/components/schemas/components_schemas_TenantRehydration"
           },
           "roleRef": {
             "type": "string"
@@ -15780,12 +15830,12 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamExport": {
+      "components_schemas_TenantExport": {
         "additionalProperties": false,
         "description": "One grant a pipelines tenant makes to other tenants: a job pattern or a list of lock patterns, plus the callers allowed to use it. Exactly one of job or locks is set.",
         "properties": {
           "callers": {
-            "description": "Team names allowed to use this export.",
+            "description": "Tenant names allowed to use this export.",
             "items": {
               "type": "string"
             },
@@ -15809,7 +15859,7 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamJobRetention": {
+      "components_schemas_TenantJobRetention": {
         "additionalProperties": false,
         "description": "A run window for the jobs that match a folder-relative glob.",
         "properties": {
@@ -15832,7 +15882,7 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamMember": {
+      "components_schemas_TenantMember": {
         "additionalProperties": false,
         "description": "One member of a pipelines tenant (status.placement.members). Response-only: the placement pass is its only writer.",
         "properties": {
@@ -15864,9 +15914,9 @@
         },
         "type": "object"
       },
-      "components_schemas_TeamNamespaceState": {
+      "components_schemas_TenantNamespaceState": {
         "additionalProperties": false,
-        "description": "State of a single namespace for a Team.",
+        "description": "State of a single namespace for a Tenant.",
         "properties": {
           "name": {
             "type": "string"
@@ -15881,22 +15931,22 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamNotifications": {
+      "components_schemas_TenantNotifications": {
         "additionalProperties": false,
         "description": "Outward notifications of a pipelines tenant. The record store posts the completion webhook for each run.",
         "properties": {
           "webhook": {
-            "$ref": "#/components/schemas/components_schemas_TeamWebhook"
+            "$ref": "#/components/schemas/components_schemas_TenantWebhook"
           }
         },
         "type": "object"
       },
-      "components_schemas_TeamPipelines": {
+      "components_schemas_TenantPipelines": {
         "additionalProperties": false,
-        "description": "A Team's pipelines tenancy declaration (spec.pipelines). A Team that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.",
+        "description": "A Tenant's pipelines tenancy declaration (spec.pipelines). A Tenant that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.",
         "properties": {
           "agentNamespace": {
-            "description": "Kubernetes namespace this tenant's agents run in. Must be one of the team's own namespaces. Required when pipelines is set.",
+            "description": "Kubernetes namespace this tenant's agents run in. Must be one of the tenant's own namespaces. Required when pipelines is set.",
             "minLength": 1,
             "type": "string"
           },
@@ -15918,7 +15968,7 @@
           "concurrencyLimits": {
             "description": "Named caps on how many builds of a set of this tenant's jobs run at one time. A build over a limit waits in the queue. A tenant pipelines admin may write this field.",
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamConcurrencyLimit"
+              "$ref": "#/components/schemas/components_schemas_TenantConcurrencyLimit"
             },
             "maxItems": 32,
             "type": "array"
@@ -15942,7 +15992,7 @@
           "exports": {
             "description": "Grants of this tenant's jobs and locks to other tenants. An absent list exports nothing.",
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamExport"
+              "$ref": "#/components/schemas/components_schemas_TenantExport"
             },
             "type": "array"
           },
@@ -15962,7 +16012,7 @@
             "type": "integer"
           },
           "notifications": {
-            "$ref": "#/components/schemas/components_schemas_TeamNotifications"
+            "$ref": "#/components/schemas/components_schemas_TenantNotifications"
           },
           "profile": {
             "description": "JenkinsVersionProfile the placement pass resolves a cell against. Required when pipelines is set.",
@@ -15981,7 +16031,7 @@
             "type": "string"
           },
           "retention": {
-            "$ref": "#/components/schemas/components_schemas_TeamPipelinesRetention"
+            "$ref": "#/components/schemas/components_schemas_TenantPipelinesRetention"
           },
           "standby": {
             "description": "The number of warm members this tenant keeps. A standby holds the folder and no slot. It takes a slot whose holder dies. Default 0.",
@@ -15997,14 +16047,14 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamPipelinesRetention": {
+      "components_schemas_TenantPipelinesRetention": {
         "additionalProperties": false,
         "description": "Record-store windows for this tenant's runs. A job rule replaces the tenant window for the jobs it matches. The store-wide window caps both. Only an operator may set it.",
         "properties": {
           "jobs": {
             "description": "Per-job windows. The first rule whose job glob matches sets the window of that job.",
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamJobRetention"
+              "$ref": "#/components/schemas/components_schemas_TenantJobRetention"
             },
             "maxItems": 64,
             "type": "array"
@@ -16017,7 +16067,7 @@
         },
         "type": "object"
       },
-      "components_schemas_TeamPlacement": {
+      "components_schemas_TenantPlacement": {
         "additionalProperties": false,
         "description": "The cell a pipelines tenant is bound to (status.placement). Response-only: the placement pass is its only writer.",
         "properties": {
@@ -16041,16 +16091,16 @@
           "members": {
             "description": "Every member of this tenant. The scalar fields above keep describing slot 0.",
             "items": {
-              "$ref": "#/components/schemas/components_schemas_TeamMember"
+              "$ref": "#/components/schemas/components_schemas_TenantMember"
             },
             "type": "array"
           }
         },
         "type": "object"
       },
-      "components_schemas_TeamRehydration": {
+      "components_schemas_TenantRehydration": {
         "additionalProperties": false,
-        "description": "A pipelines tenant's build-record rehydration state (status.rehydration). Response-only: TeamReconciler is its only writer.",
+        "description": "A pipelines tenant's build-record rehydration state (status.rehydration). Response-only: TenantReconciler is its only writer.",
         "properties": {
           "attempts": {
             "description": "Rehydration retries since the last applied bundle.",
@@ -16095,9 +16145,9 @@
         },
         "type": "object"
       },
-      "components_schemas_TeamRequest": {
+      "components_schemas_TenantRequest": {
         "additionalProperties": false,
-        "description": "Request body for creating or updating a team.",
+        "description": "Request body for creating or updating a tenant.",
         "properties": {
           "displayName": {
             "type": "string"
@@ -16110,18 +16160,18 @@
             "type": "array"
           },
           "name": {
-            "description": "Team name (ignored in body for updates).",
+            "description": "Tenant name (ignored in body for updates).",
             "type": "string"
           },
           "namespaces": {
-            "description": "Target namespaces for this team.",
+            "description": "Target namespaces for this tenant.",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "pipelines": {
-            "$ref": "#/components/schemas/components_schemas_TeamPipelines"
+            "$ref": "#/components/schemas/components_schemas_TenantPipelines"
           },
           "provisionNamespaces": {
             "description": "Whether to auto-provision namespaces.",
@@ -16145,12 +16195,36 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamWebhook": {
+      "components_schemas_TenantScope": {
+        "additionalProperties": false,
+        "description": "One pipelines tenant name and the folder-relative job globs a binding covers. An absent jobs list covers every job.",
+        "properties": {
+          "jobs": {
+            "description": "Jobs are folder-relative globs. An absent jobs list covers every job.",
+            "items": {
+              "maxLength": 512,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "name": {
+            "description": "A tenant is a Tenant name.",
+            "maxLength": 253,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "components_schemas_TenantWebhook": {
         "additionalProperties": false,
         "description": "A completion webhook. The record store posts a signed JSON payload to url for each run this tenant completes. The signing key lives in the Secret that secretRef names, in the tenant's agent namespace.",
         "properties": {
           "secretRef": {
-            "$ref": "#/components/schemas/components_schemas_TeamWebhookSecret"
+            "$ref": "#/components/schemas/components_schemas_TenantWebhookSecret"
           },
           "url": {
             "description": "Receiver endpoint. Starts with https:// or http://. Use https:// for a receiver outside the cluster.",
@@ -16164,7 +16238,7 @@
         ],
         "type": "object"
       },
-      "components_schemas_TeamWebhookSecret": {
+      "components_schemas_TenantWebhookSecret": {
         "additionalProperties": false,
         "description": "The Secret and data key that hold the HMAC signing key. The key defaults to hmac-key.",
         "properties": {
@@ -16183,83 +16257,9 @@
         ],
         "type": "object"
       },
-      "components_schemas_TemplateCatalogCondition": {
-        "description": "Status condition for catalog/composedbundle resources.",
-        "properties": {
-          "lastTransitionTime": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "status"
-        ],
-        "type": "object"
-      },
-      "components_schemas_TenantCapabilities": {
-        "additionalProperties": false,
-        "description": "One grant the caller holds on one pipelines tenant. A tenant name may appear in more than one entry, because the caller can hold two grants on it with different job globs; they are never merged.",
-        "properties": {
-          "capabilities": {
-            "$ref": "#/components/schemas/components_schemas_APICapabilitySet"
-          },
-          "jobs": {
-            "description": "Folder-relative job globs the grant covers. Always an array, never null; an empty array means every job.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "tenant": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "tenant",
-          "jobs",
-          "capabilities"
-        ],
-        "type": "object"
-      },
-      "components_schemas_TenantScope": {
-        "additionalProperties": false,
-        "description": "One pipelines tenant name and the folder-relative job globs a binding covers. An absent jobs list covers every job.",
-        "properties": {
-          "jobs": {
-            "description": "Jobs are folder-relative globs. An absent jobs list covers every job.",
-            "items": {
-              "maxLength": 512,
-              "type": "string"
-            },
-            "maxItems": 64,
-            "type": "array"
-          },
-          "name": {
-            "description": "A tenant is a Team name.",
-            "maxLength": 253,
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "type": "object"
-      },
       "components_schemas_TestCaseHistoryResponse": {
         "additionalProperties": false,
-        "description": "GET /pipelines/{team}/jobs/{job}/tests/{case}. items holds the case's recent outcomes, newest first, within the record store retention window. The response holds no rate, no trend, and no flake score.\n",
+        "description": "GET /pipelines/{tenant}/jobs/{job}/tests/{case}. items holds the case's recent outcomes, newest first, within the record store retention window. The response holds no rate, no trend, and no flake score.\n",
         "properties": {
           "items": {
             "items": {
@@ -16303,7 +16303,7 @@
             "type": "string"
           },
           "runLink": {
-            "description": "The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the same link a fleet lock row carries.\n",
+            "description": "The run's own page path, /pipelines/{tenant}/{jobPath}/{runId}, the same link a fleet lock row carries.\n",
             "type": "string"
           },
           "status": {
@@ -17198,7 +17198,7 @@
                 "jenkins",
                 "mcp",
                 "assistant",
-                "team_agent"
+                "tenant_agent"
               ],
               "type": "string"
             }
@@ -17406,11 +17406,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/components_schemas_TeamAgentItemList"
+                  "$ref": "#/components/schemas/components_schemas_TenantAgentItemList"
                 }
               }
             },
-            "description": "Every TeamAgent."
+            "description": "Every TenantAgent."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
@@ -17419,15 +17419,15 @@
             "$ref": "#/components/responses/components_responses_Forbidden"
           }
         },
-        "summary": "Lists every TeamAgent with its state, spend, and unattended grant.",
+        "summary": "Lists every TenantAgent with its state, spend, and unattended grant.",
         "tags": [
-          "TeamAgents"
+          "TenantAgents"
         ]
       }
     },
     "/api/v1/agents/{namespace}/{name}/unattended": {
       "put": {
-        "description": "A true grant copies the object's current unattendedWrites, pinned to its UID. A later spec edit does not extend the grant. It needs teamagents:unattended.\n",
+        "description": "A true grant copies the object's current unattendedWrites, pinned to its UID. A later spec edit does not extend the grant. It needs tenantagents:unattended.\n",
         "operationId": "putAgentUnattended",
         "parameters": [
           {
@@ -17451,7 +17451,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/components_schemas_TeamAgentUnattendedRequest"
+                "$ref": "#/components/schemas/components_schemas_TenantAgentUnattendedRequest"
               }
             }
           },
@@ -17462,7 +17462,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/components_schemas_TeamAgentUnattendedResult"
+                  "$ref": "#/components/schemas/components_schemas_TenantAgentUnattendedResult"
                 }
               }
             },
@@ -17484,7 +17484,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/components_schemas_TeamAgentError"
+                  "$ref": "#/components/schemas/components_schemas_TenantAgentError"
                 }
               }
             },
@@ -17494,9 +17494,9 @@
             "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
-        "summary": "Grants or revokes the unattended writes of one TeamAgent.",
+        "summary": "Grants or revokes the unattended writes of one TenantAgent.",
         "tags": [
-          "TeamAgents"
+          "TenantAgents"
         ]
       }
     },
@@ -17796,7 +17796,7 @@
           },
           {
             "in": "query",
-            "name": "team",
+            "name": "tenant",
             "schema": {
               "type": "string"
             }
@@ -18047,7 +18047,7 @@
     },
     "/api/v1/assistant/sessions/{id}/events": {
       "get": {
-        "description": "Sends every event after the cursor, then each new event. Each frame carries its sequence number as its id. The stream closes after a done event. The stream reads the ticket of the session scope, because a browser EventSource cannot set headers. A caller who is neither the session owner nor, for a Team agent session, a tenant reader, receives each tool_result frame with an empty content and withheld set to true. The frame keeps call_id and name.\n",
+        "description": "Sends every event after the cursor, then each new event. Each frame carries its sequence number as its id. The stream closes after a done event. The stream reads the ticket of the session scope, because a browser EventSource cannot set headers. A caller who is neither the session owner nor, for a Tenant agent session, a tenant reader, receives each tool_result frame with an empty content and withheld set to true. The frame keeps call_id and name.\n",
         "operationId": "streamAssistantEvents",
         "parameters": [
           {
@@ -19263,7 +19263,7 @@
     },
     "/api/v1/cells/{namespace}/{name}/grants": {
       "get": {
-        "description": "Applies two gates. It applies the controller read check on the cell, exactly as the usage reads do. It then applies rolebindings:read on the caller's cluster-wide capability partition. It answers 404 for an unknown controller, a controller that is not a cell, and a caller the controller read check refuses. It answers 403 when the controller check passes and the caller holds no rolebindings:read. A member cell's grants and member roles come from that member's operator, which holds the Team and binding state the member renders. The read touches no record store, so it answers no 503. It answers 502 when the member cluster does not answer.\n",
+        "description": "Applies two gates. It applies the controller read check on the cell, exactly as the usage reads do. It then applies rolebindings:read on the caller's cluster-wide capability partition. It answers 404 for an unknown controller, a controller that is not a cell, and a caller the controller read check refuses. It answers 403 when the controller check passes and the caller holds no rolebindings:read. A member cell's grants and member roles come from that member's operator, which holds the Tenant and binding state the member renders. The read touches no record store, so it answers no 503. It answers 502 when the member cluster does not answer.\n",
         "operationId": "getCellGrants",
         "parameters": [
           {
@@ -21015,7 +21015,7 @@
     },
     "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/jenkins-link": {
       "get": {
-        "description": "The dashboard door route redirects through this endpoint. The path names\na Jenkins item, such as job/team/job/app/12/display/redirect. The answer\nis the build page for that build, or the job page when the path names no\nbuild number. The caller needs read access to the matched run.\n",
+        "description": "The dashboard door route redirects through this endpoint. The path names\na Jenkins item, such as job/tenant/job/app/12/display/redirect. The answer\nis the build page for that build, or the job page when the path names no\nbuild number. The caller needs read access to the matched run.\n",
         "operationId": "getControllerJenkinsLink",
         "parameters": [
           {
@@ -23687,18 +23687,18 @@
     },
     "/api/v1/pipelines": {
       "get": {
-        "description": "Answers each local Team that carries spec.pipelines, and each live record-store placement row of another cluster. A row of the local cluster, a row with no cell, and a row at placement generation 0 are not listed. A name that a local Team holds lists only the local Team. One name placed on two other clusters lists one row for each cluster. It also answers each local Team without spec.pipelines whose spec.namespaces hold a controller the caller may read. The route has no gate of its own: the tenant read check drops each row the caller may not read, so a caller who can read no row gets an empty list. When the record store is off or its schema is too old, the list carries the local Teams alone and recordStore is false.\n",
-        "operationId": "listPipelineTeams",
+        "description": "Answers each local Tenant that carries spec.pipelines, and each live record-store placement row of another cluster. A row of the local cluster, a row with no cell, and a row at placement generation 0 are not listed. A name that a local Tenant holds lists only the local Tenant. One name placed on two other clusters lists one row for each cluster. It also answers each local Tenant without spec.pipelines whose spec.namespaces hold a controller the caller may read. The route has no gate of its own: the tenant read check drops each row the caller may not read, so a caller who can read no row gets an empty list. When the record store is off or its schema is too old, the list carries the local Tenants alone and recordStore is false.\n",
+        "operationId": "listPipelineTenants",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/components_schemas_PipelineTeamList"
+                  "$ref": "#/components/schemas/components_schemas_PipelineTenantList"
                 }
               }
             },
-            "description": "The pipelines Teams the caller may read."
+            "description": "The pipelines Tenants the caller may read."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
@@ -23707,19 +23707,19 @@
             "$ref": "#/components/responses/components_responses_Internal"
           }
         },
-        "summary": "Lists the pipelines Teams the caller may read.",
+        "summary": "Lists the pipelines Tenants the caller may read.",
         "tags": [
           "Pipelines"
         ]
       }
     },
-    "/api/v1/pipelines/{team}": {
+    "/api/v1/pipelines/{tenant}": {
       "get": {
-        "description": "Resolves {team} onto one or more record-store tenants, unions each tenant's job summaries with the catalog's declared jobs, and reads each tenant's unfinished runs for the Running now strip.\n",
+        "description": "Resolves {tenant} onto one or more record-store tenants, unions each tenant's job summaries with the catalog's declared jobs, and reads each tenant's unfinished runs for the Running now strip.\n",
         "operationId": "listPipelines",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           }
         ],
         "responses": {
@@ -23731,7 +23731,7 @@
                 }
               }
             },
-            "description": "The team's pipelines and running-now strip."
+            "description": "The tenant's pipelines and running-now strip."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
@@ -23747,7 +23747,7 @@
                 }
               }
             },
-            "description": "The team name is ambiguous across clusters."
+            "description": "The tenant name is ambiguous across clusters."
           },
           "422": {
             "content": {
@@ -23757,25 +23757,25 @@
                 }
               }
             },
-            "description": "The team resolves to more tenants than the fan-out ceiling."
+            "description": "The tenant resolves to more tenants than the fan-out ceiling."
           },
           "503": {
             "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
-        "summary": "Lists a team's pipelines and its unfinished runs.",
+        "summary": "Lists a tenant's pipelines and its unfinished runs.",
         "tags": [
           "Pipelines"
         ]
       }
     },
-    "/api/v1/pipelines/{team}/agent": {
+    "/api/v1/pipelines/{tenant}/agent": {
       "get": {
-        "description": "Answers the TeamAgent object that the acceptance rule selects for the Team, its status, the pending approval count of its sessions, and the spend of the current UTC day against the day limit. Answers 404 when the Team has no accepted TeamAgent or the caller may not read the Team.\n",
-        "operationId": "getTeamAgent",
+        "description": "Answers the TenantAgent object that the acceptance rule selects for the Tenant, its status, the pending approval count of its sessions, and the spend of the current UTC day against the day limit. Answers 404 when the Tenant has no accepted TenantAgent or the caller may not read the Tenant.\n",
+        "operationId": "getTenantAgent",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           }
         ],
         "responses": {
@@ -23783,11 +23783,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/components_schemas_TeamAgent"
+                  "$ref": "#/components/schemas/components_schemas_TenantAgent"
                 }
               }
             },
-            "description": "The accepted Team agent."
+            "description": "The accepted Tenant agent."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
@@ -23796,19 +23796,19 @@
             "$ref": "#/components/responses/components_responses_NotFound"
           }
         },
-        "summary": "Returns the accepted Team agent of a pipelines tenant.",
+        "summary": "Returns the accepted Tenant agent of a pipelines tenant.",
         "tags": [
-          "TeamAgents"
+          "TenantAgents"
         ]
       }
     },
-    "/api/v1/pipelines/{team}/agent/capabilities": {
+    "/api/v1/pipelines/{tenant}/agent/capabilities": {
       "get": {
         "description": "The groups are reads, writesByApproval, unattended, and never. The lists hold only the tools the object's data level and grant make visible. Hidden tools are absent.\n",
-        "operationId": "getTeamAgentCapabilities",
+        "operationId": "getTenantAgentCapabilities",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           }
         ],
         "responses": {
@@ -23816,7 +23816,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/components_schemas_TeamAgentCapabilities"
+                  "$ref": "#/components/schemas/components_schemas_TenantAgentCapabilities"
                 }
               }
             },
@@ -23839,26 +23839,26 @@
             "description": "The assistant is off."
           }
         },
-        "summary": "Lists what the Team agent may do, in four groups.",
+        "summary": "Lists what the Tenant agent may do, in four groups.",
         "tags": [
-          "TeamAgents"
+          "TenantAgents"
         ]
       }
     },
-    "/api/v1/pipelines/{team}/agent/run": {
+    "/api/v1/pipelines/{tenant}/agent/run": {
       "post": {
-        "description": "Publishes a teamagent.run_requested activity for the placement cluster of the Team. The run starts later, on the runner. A kill switch or a spent day budget still answers 202, and the session ends skipped.\n",
-        "operationId": "runTeamAgent",
+        "description": "Publishes a tenantagent.run_requested activity for the placement cluster of the Tenant. The run starts later, on the runner. A kill switch or a spent day budget still answers 202, and the session ends skipped.\n",
+        "operationId": "runTenantAgent",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/components_schemas_TeamAgentRunRequest"
+                "$ref": "#/components/schemas/components_schemas_TenantAgentRunRequest"
               }
             }
           }
@@ -23901,29 +23901,29 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/components_schemas_TeamAgentError"
+                  "$ref": "#/components/schemas/components_schemas_TenantAgentError"
                 }
               }
             },
-            "description": "The Team agent cannot run now."
+            "description": "The Tenant agent cannot run now."
           },
           "503": {
             "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
-        "summary": "Requests a manual Team agent run.",
+        "summary": "Requests a manual Tenant agent run.",
         "tags": [
-          "TeamAgents"
+          "TenantAgents"
         ]
       }
     },
-    "/api/v1/pipelines/{team}/agent/sessions": {
+    "/api/v1/pipelines/{tenant}/agent/sessions": {
       "get": {
-        "description": "Pages the sessions of kind team_agent for the Team. Each item carries its pending approvals. The Approvals tab reads state waiting_approval.\n",
-        "operationId": "listTeamAgentSessions",
+        "description": "Pages the sessions of kind tenant_agent for the Tenant. Each item carries its pending approvals. The Approvals tab reads state waiting_approval.\n",
+        "operationId": "listTenantAgentSessions",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           },
           {
             "in": "query",
@@ -23963,11 +23963,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/components_schemas_TeamAgentSessionList"
+                  "$ref": "#/components/schemas/components_schemas_TenantAgentSessionList"
                 }
               }
             },
-            "description": "One page of Team agent sessions."
+            "description": "One page of Tenant agent sessions."
           },
           "400": {
             "$ref": "#/components/responses/components_responses_BadRequest"
@@ -23989,19 +23989,19 @@
             "description": "The assistant is off."
           }
         },
-        "summary": "Lists the Team agent sessions of a pipelines tenant, newest first.",
+        "summary": "Lists the Tenant agent sessions of a pipelines tenant, newest first.",
         "tags": [
-          "TeamAgents"
+          "TenantAgents"
         ]
       }
     },
-    "/api/v1/pipelines/{team}/cell": {
+    "/api/v1/pipelines/{tenant}/cell": {
       "get": {
-        "description": "Reads the Team object first, so a pipelines team that waits for its first cell answers 200 with the state unplaced. The body carries this tenant's own counts and a neighbour count. It carries no other tenant's name, job path, run, or count. canOpenCell is a hint that gates no field: a caller the controller read check refuses still receives the whole body.\n",
-        "operationId": "getTeamCell",
+        "description": "Reads the Tenant object first, so a pipelines tenant that waits for its first cell answers 200 with the state unplaced. The body carries this tenant's own counts and a neighbour count. It carries no other tenant's name, job path, run, or count. canOpenCell is a hint that gates no field: a caller the controller read check refuses still receives the whole body.\n",
+        "operationId": "getTenantCell",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           }
         ],
         "responses": {
@@ -24009,7 +24009,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/components_schemas_TeamCell"
+                  "$ref": "#/components/schemas/components_schemas_TenantCell"
                 }
               }
             },
@@ -24031,13 +24031,13 @@
         ]
       }
     },
-    "/api/v1/pipelines/{team}/jobs/{job}": {
+    "/api/v1/pipelines/{tenant}/jobs/{job}": {
       "get": {
         "description": "dependencies.upstream and dependencies.downstream carry the job's cross-tenant varroa-upstream trigger edges (design D13), each marked granted or not. The route authorizes with CanReadPipeline, never a controller-scoped check, because a cell hosts many tenants.\n",
         "operationId": "getPipelineJob",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           },
           {
             "$ref": "#/components/parameters/components_parameters_job"
@@ -24070,13 +24070,13 @@
         ]
       }
     },
-    "/api/v1/pipelines/{team}/jobs/{job}/branches": {
+    "/api/v1/pipelines/{tenant}/jobs/{job}/branches": {
       "get": {
         "description": "The inventory is exported by the cell that holds the job's home slot, so it can be up to ten minutes stale. A cell that is down or hibernated keeps its last export, and the response shows that last export. A job with no export yet answers an empty list with no observedAt. Each head is listed only when the caller may read its job path.\n",
         "operationId": "listJobBranches",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           },
           {
             "$ref": "#/components/parameters/components_parameters_job"
@@ -24109,13 +24109,13 @@
         ]
       }
     },
-    "/api/v1/pipelines/{team}/jobs/{job}/notes": {
+    "/api/v1/pipelines/{tenant}/jobs/{job}/notes": {
       "get": {
         "description": "Each run note carries the build number of its run when the record store still holds the run. A job note carries a null runId.\n",
         "operationId": "listJobNotes",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           },
           {
             "$ref": "#/components/parameters/components_parameters_job"
@@ -24148,12 +24148,12 @@
         ]
       }
     },
-    "/api/v1/pipelines/{team}/jobs/{job}/runs": {
+    "/api/v1/pipelines/{tenant}/jobs/{job}/runs": {
       "get": {
         "operationId": "listRuns",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           },
           {
             "$ref": "#/components/parameters/components_parameters_job"
@@ -24225,7 +24225,7 @@
             "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
-        "summary": "Lists a job's runs, filtered and paged across every tenant of the team.",
+        "summary": "Lists a job's runs, filtered and paged across every tenant of the tenant.",
         "tags": [
           "Pipelines"
         ]
@@ -24235,7 +24235,7 @@
         "operationId": "createRun",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           },
           {
             "$ref": "#/components/parameters/components_parameters_job"
@@ -24293,13 +24293,13 @@
         ]
       }
     },
-    "/api/v1/pipelines/{team}/jobs/{job}/scan": {
+    "/api/v1/pipelines/{tenant}/jobs/{job}/scan": {
       "post": {
         "description": "The job must be a multibranch job or an organization folder. The route answers 409 for any other job before it publishes the command. The command goes to the cell that holds the job's home slot. The route reports no outcome. The result arrives in lastScan of the branch inventory, within about one minute during the fifteen minutes after the request.\n",
         "operationId": "scanMultibranch",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           },
           {
             "$ref": "#/components/parameters/components_parameters_job"
@@ -24350,13 +24350,13 @@
         ]
       }
     },
-    "/api/v1/pipelines/{team}/jobs/{job}/tests/{case}": {
+    "/api/v1/pipelines/{tenant}/jobs/{job}/tests/{case}": {
       "get": {
-        "description": "Resolves {team} onto one or more record-store tenants and applies the tenant read check to each, with the decoded job path. Reads the case history of each admitted tenant, merges the rows newest first, and cuts the list to limit. The history is keyed by class name and test name, so two suites that report one class and one name merge. A job that holds no stored case answers an empty items list. The read answers the record store retention window.\n",
+        "description": "Resolves {tenant} onto one or more record-store tenants and applies the tenant read check to each, with the decoded job path. Reads the case history of each admitted tenant, merges the rows newest first, and cuts the list to limit. The history is keyed by class name and test name, so two suites that report one class and one name merge. A job that holds no stored case answers an empty items list. The read answers the record store retention window.\n",
         "operationId": "listJobTestCaseHistory",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           },
           {
             "$ref": "#/components/parameters/components_parameters_job"
@@ -24407,25 +24407,25 @@
                 }
               }
             },
-            "description": "The team resolves no tenant, or the caller may not read any of its tenants."
+            "description": "The tenant resolves no tenant, or the caller may not read any of its tenants."
           },
           "503": {
             "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
-        "summary": "Lists the recent outcomes of one test case of a job, across every tenant of the team.",
+        "summary": "Lists the recent outcomes of one test case of a job, across every tenant of the tenant.",
         "tags": [
           "Pipelines"
         ]
       }
     },
-    "/api/v1/pipelines/{team}/locks": {
+    "/api/v1/pipelines/{tenant}/locks": {
       "get": {
-        "description": "Resolves {team} onto one or more record-store tenants, applies the tenant read check to each, reads each tenant's locks, and merges the answers in lock name order, the holder before its waiters. Each row carries its own tenant and jobPath, whichever tenant it belongs to. A row carries runLink only when the caller's own grant can read that row's own run. A waiting row reports its own waitingSince. A held or a releasing row reports its own acquiredAt. It carries no queue position.\n",
-        "operationId": "listTeamFleetLocks",
+        "description": "Resolves {tenant} onto one or more record-store tenants, applies the tenant read check to each, reads each tenant's locks, and merges the answers in lock name order, the holder before its waiters. Each row carries its own tenant and jobPath, whichever tenant it belongs to. A row carries runLink only when the caller's own grant can read that row's own run. A waiting row reports its own waitingSince. A held or a releasing row reports its own acquiredAt. It carries no queue position.\n",
+        "operationId": "listTenantFleetLocks",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           }
         ],
         "responses": {
@@ -24437,7 +24437,7 @@
                 }
               }
             },
-            "description": "The team's fleet locks, the holder of each name before its waiters."
+            "description": "The tenant's fleet locks, the holder of each name before its waiters."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
@@ -24449,19 +24449,19 @@
             "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
-        "summary": "Lists the fleet locks a team's tenants own, hold, or wait on.",
+        "summary": "Lists the fleet locks a tenant's tenants own, hold, or wait on.",
         "tags": [
           "Pipelines"
         ]
       }
     },
-    "/api/v1/pipelines/{team}/markers/validate": {
+    "/api/v1/pipelines/{tenant}/markers/validate": {
       "post": {
-        "description": "Resolves {team} onto its delivered pipeline-template set (design pipeline-marker-file) and validates the posted marker text against it. Contacts no cell and no record store, so it works while a cell is down and while the record store is disabled.\n",
+        "description": "Resolves {tenant} onto its delivered pipeline-template set (design pipeline-marker-file) and validates the posted marker text against it. Contacts no cell and no record store, so it works while a cell is down and while the record store is disabled.\n",
         "operationId": "validatePipelineMarker",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           }
         ],
         "requestBody": {
@@ -24498,19 +24498,19 @@
             "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
-        "summary": "Lints a marker file against the team's delivered pipeline templates.",
+        "summary": "Lints a marker file against the tenant's delivered pipeline templates.",
         "tags": [
           "Pipelines"
         ]
       }
     },
-    "/api/v1/pipelines/{team}/propose": {
+    "/api/v1/pipelines/{tenant}/propose": {
       "post": {
-        "description": "Checks the repository, then starts an assistant session with the fixed prompt propose-pipeline. The session reads the repository and asks for one approval before it opens a pull request. The checks run in this order, and nothing is written before the last one. Each refusal answers its code and creates no session. 1. The assistant is on the server (503 assistant_disabled). 2. The caller holds assistant use (403). 3. The body is valid (400). 4. The user's assistant switch is on (409 assistant_off). 5. The Team is a pipelines tenant the caller reads (404), and the caller\n   holds the tenant write check (403).\n6. The repo is an https URL on port 443 (400 repo_url_invalid). 7. The data level of the tenant and provider shows read_repo_file\n   (409 data_sharing_too_low).\n8. The operator finds a credential that reaches the forge and a\n   Jenkinsfile and a proposal branch are absent (422, 409, 502, or 404\n   by the code of the forge reply, 504 operator_timeout when the\n   operator does not answer in time, or 503 operator_unavailable when\n   no operator receives the check).\n9. The assistant is not busy (429 assistant_busy). Codes from the forge check: no_matching_credential, forge_unsupported, forge_auth_failed, forge_write_denied (422); jenkinsfile_exists and proposal_branch_exists (409); not_found (404); forge_unreachable (502); operator_timeout (504); operator_unavailable (503).\n",
+        "description": "Checks the repository, then starts an assistant session with the fixed prompt propose-pipeline. The session reads the repository and asks for one approval before it opens a pull request. The checks run in this order, and nothing is written before the last one. Each refusal answers its code and creates no session. 1. The assistant is on the server (503 assistant_disabled). 2. The caller holds assistant use (403). 3. The body is valid (400). 4. The user's assistant switch is on (409 assistant_off). 5. The Tenant is a pipelines tenant the caller reads (404), and the caller\n   holds the tenant write check (403).\n6. The repo is an https URL on port 443 (400 repo_url_invalid). 7. The data level of the tenant and provider shows read_repo_file\n   (409 data_sharing_too_low).\n8. The operator finds a credential that reaches the forge and a\n   Jenkinsfile and a proposal branch are absent (422, 409, 502, or 404\n   by the code of the forge reply, 504 operator_timeout when the\n   operator does not answer in time, or 503 operator_unavailable when\n   no operator receives the check).\n9. The assistant is not busy (429 assistant_busy). Codes from the forge check: no_matching_credential, forge_unsupported, forge_auth_failed, forge_write_denied (422); jenkinsfile_exists and proposal_branch_exists (409); not_found (404); forge_unreachable (502); operator_timeout (504); operator_unavailable (503).\n",
         "operationId": "proposePipeline",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           }
         ],
         "requestBody": {
@@ -24620,13 +24620,13 @@
         ]
       }
     },
-    "/api/v1/pipelines/{team}/stream": {
+    "/api/v1/pipelines/{tenant}/stream": {
       "get": {
-        "description": "Streams one frame per live run notification, with the event name run, stage, lock, input, or wait and the notification body as data. The stream writes no initial frame and replays nothing, so a page refetches its own reads when the stream reports itself open. It uses `?ticket=` for browser EventSource auth, and the ticket carries the scope pipelines:{team}.\n",
-        "operationId": "streamTeamRuns",
+        "description": "Streams one frame per live run notification, with the event name run, stage, lock, input, or wait and the notification body as data. The stream writes no initial frame and replays nothing, so a page refetches its own reads when the stream reports itself open. It uses `?ticket=` for browser EventSource auth, and the ticket carries the scope pipelines:{tenant}.\n",
+        "operationId": "streamTenantRuns",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_team"
+            "$ref": "#/components/parameters/components_parameters_tenant"
           }
         ],
         "responses": {
@@ -24650,7 +24650,7 @@
             "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
-        "summary": "Streams live run notifications for one team via Server-Sent Events.",
+        "summary": "Streams live run notifications for one tenant via Server-Sent Events.",
         "tags": [
           "Pipelines"
         ],
@@ -25030,7 +25030,7 @@
         "operationId": "listRunners",
         "parameters": [
           {
-            "$ref": "#/components/parameters/components_parameters_teamQuery"
+            "$ref": "#/components/parameters/components_parameters_tenantQuery"
           }
         ],
         "responses": {
@@ -25110,7 +25110,7 @@
             "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
-        "summary": "Registers a runner for a pipelines tenant. Requires the runners:create verb and a write grant on spec.team; refuses a spec.team that names no Team with 400.",
+        "summary": "Registers a runner for a pipelines tenant. Requires the runners:create verb and a write grant on spec.tenant; refuses a spec.tenant that names no Tenant with 400.",
         "tags": [
           "runners"
         ]
@@ -25234,7 +25234,7 @@
             "$ref": "#/components/responses/components_responses_NotFound"
           }
         },
-        "summary": "Merge-patches a runner's spec. spec.team and spec.launcher are immutable; a patch that changes either is refused with 400.",
+        "summary": "Merge-patches a runner's spec. spec.tenant and spec.launcher are immutable; a patch that changes either is refused with 400.",
         "tags": [
           "runners"
         ]
@@ -26340,7 +26340,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "scope": {
-                    "description": "The one stream the ticket opens. One of brood, activity, controller:{cluster}/{ns}/{name}, broodop:{ns}/{name}, run:{run_id}, or pipelines:{team}. A ticket opens the stream whose path maps onto the same scope, and no other.\n",
+                    "description": "The one stream the ticket opens. One of brood, activity, controller:{cluster}/{ns}/{name}, broodop:{ns}/{name}, run:{run_id}, or pipelines:{tenant}. A ticket opens the stream whose path maps onto the same scope, and no other.\n",
                     "type": "string"
                   }
                 },
@@ -26377,9 +26377,9 @@
         ]
       }
     },
-    "/api/v1/teams": {
+    "/api/v1/tenants": {
       "get": {
-        "operationId": "listTeams",
+        "operationId": "listTenants",
         "responses": {
           "200": {
             "content": {
@@ -26389,7 +26389,7 @@
                   "properties": {
                     "items": {
                       "items": {
-                        "$ref": "#/components/schemas/components_schemas_TeamEntry"
+                        "$ref": "#/components/schemas/components_schemas_TenantEntry"
                       },
                       "type": "array"
                     }
@@ -26401,7 +26401,7 @@
                 }
               }
             },
-            "description": "Team list (N6 envelope)."
+            "description": "Tenant list (N6 envelope)."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
@@ -26410,18 +26410,18 @@
             "$ref": "#/components/responses/components_responses_Forbidden"
           }
         },
-        "summary": "Lists all teams (admin only).",
+        "summary": "Lists all tenants (admin only).",
         "tags": [
-          "teams"
+          "tenants"
         ]
       },
       "post": {
-        "operationId": "createTeam",
+        "operationId": "createTenant",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/components_schemas_TeamRequest"
+                "$ref": "#/components/schemas/components_schemas_TenantRequest"
               }
             }
           },
@@ -26445,7 +26445,7 @@
                 }
               }
             },
-            "description": "Team created."
+            "description": "Tenant created."
           },
           "400": {
             "$ref": "#/components/responses/components_responses_BadRequest"
@@ -26460,15 +26460,15 @@
             "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
-        "summary": "Creates a new team (admin).",
+        "summary": "Creates a new tenant (admin).",
         "tags": [
-          "teams"
+          "tenants"
         ]
       }
     },
-    "/api/v1/teams/{name}": {
+    "/api/v1/tenants/{name}": {
       "delete": {
-        "operationId": "deleteTeam",
+        "operationId": "deleteTenant",
         "parameters": [
           {
             "$ref": "#/components/parameters/components_parameters_name"
@@ -26476,7 +26476,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Team deleted."
+            "description": "Tenant deleted."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
@@ -26488,13 +26488,13 @@
             "$ref": "#/components/responses/components_responses_NotFound"
           }
         },
-        "summary": "Deletes a team (admin).",
+        "summary": "Deletes a tenant (admin).",
         "tags": [
-          "teams"
+          "tenants"
         ]
       },
       "get": {
-        "operationId": "getTeam",
+        "operationId": "getTenant",
         "parameters": [
           {
             "$ref": "#/components/parameters/components_parameters_name"
@@ -26505,11 +26505,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/components_schemas_TeamEntry"
+                  "$ref": "#/components/schemas/components_schemas_TenantEntry"
                 }
               }
             },
-            "description": "Team details."
+            "description": "Tenant details."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
@@ -26521,13 +26521,13 @@
             "$ref": "#/components/responses/components_responses_NotFound"
           }
         },
-        "summary": "Gets a team's details (admin).",
+        "summary": "Gets a tenant's details (admin).",
         "tags": [
-          "teams"
+          "tenants"
         ]
       },
       "put": {
-        "operationId": "updateTeam",
+        "operationId": "updateTenant",
         "parameters": [
           {
             "$ref": "#/components/parameters/components_parameters_name"
@@ -26537,7 +26537,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/components_schemas_TeamRequest"
+                "$ref": "#/components/schemas/components_schemas_TenantRequest"
               }
             }
           },
@@ -26561,7 +26561,7 @@
                 }
               }
             },
-            "description": "Team updated."
+            "description": "Tenant updated."
           },
           "400": {
             "$ref": "#/components/responses/components_responses_BadRequest"
@@ -26576,9 +26576,9 @@
             "$ref": "#/components/responses/components_responses_NotFound"
           }
         },
-        "summary": "Updates a team (admin).",
+        "summary": "Updates a tenant (admin).",
         "tags": [
-          "teams"
+          "tenants"
         ]
       }
     },
@@ -27341,16 +27341,16 @@
       "name": "groups"
     },
     {
-      "description": "Team management (admin).",
-      "name": "teams"
+      "description": "Tenant management (admin).",
+      "name": "tenants"
     },
     {
       "description": "External agent (runner) registration for a pipelines tenant.",
       "name": "runners"
     },
     {
-      "description": "The Team agent of a pipelines tenant, its sessions, capabilities, and unattended grants.",
-      "name": "TeamAgents"
+      "description": "The Tenant agent of a pipelines tenant, its sessions, capabilities, and unattended grants.",
+      "name": "TenantAgents"
     },
     {
       "description": "Identity settings and built-in roles (admin).",
@@ -27413,7 +27413,7 @@
       "name": "upgrade-tracking"
     },
     {
-      "description": "Team-scoped pipeline, run, log, and artifact surfaces.",
+      "description": "Tenant-scoped pipeline, run, log, and artifact surfaces.",
       "name": "Pipelines"
     },
     {

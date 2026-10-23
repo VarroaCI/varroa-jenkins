@@ -37,7 +37,7 @@
 {{- if not (has (toString .Values.assistant.externalDataSharing) (list "none" "metadata" "logs")) }}
 {{- fail "assistant.externalDataSharing must be none, metadata, or logs" }}
 {{- end }}
-{{- range $k := list "session" "userDay" "teamDay" "steps" }}
+{{- range $k := list "session" "userDay" "tenantDay" "steps" }}
 {{- $v := index $.Values.assistant.budgets $k | default 0 }}
 {{- if le (int64 $v) 0 }}
 {{- fail (printf "assistant.budgets.%s must be a positive whole number" $k) }}

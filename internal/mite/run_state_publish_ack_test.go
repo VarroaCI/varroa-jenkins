@@ -238,7 +238,7 @@ func TestOnRunStateChunk_UnresolvedTenantHealsInsideGrace(t *testing.T) {
 		t.Fatal("the first unresolved observation did not start the grace clock")
 	}
 
-	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{"team/pipeline": {tenant: "team"}}})
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{"team/pipeline": {tenant: "tenant"}}})
 	h.OnRunStateChunk("cell1", "ns1", chunk)
 	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusStored {
 		t.Fatalf("retry ack = %+v, want STORED", ack)
@@ -390,7 +390,7 @@ func TestOnRunStateChunk_TenantResolvedAfterReconnectClearsGrace(t *testing.T) {
 	h.OnRunStateChunk("cell1", "ns1", chunk)
 	h.dropCellStateEntries("ns1", "cell1")
 
-	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{"team/pipeline": {tenant: "team"}}})
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{"team/pipeline": {tenant: "tenant"}}})
 	h.OnRunStateChunk("cell1", "ns1", chunk)
 	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusStored {
 		t.Fatalf("ack after the tenant resolved = %+v, want STORED", ack)

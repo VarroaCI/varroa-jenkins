@@ -53,36 +53,36 @@ func TestParseRehydrationPath_AcceptedShapes(t *testing.T) {
 	}{
 		{
 			name:        "build.xml",
-			path:        "jobs/team/jobs/pipeline/builds/7/build.xml",
+			path:        "jobs/tenant/jobs/pipeline/builds/7/build.xml",
 			wantKind:    rehydrationPathBuildXML,
-			wantJobPath: "team/pipeline",
+			wantJobPath: "tenant/pipeline",
 			wantBuild:   7,
 		},
 		{
 			name:        "changelog0.xml",
-			path:        "jobs/team/jobs/pipeline/builds/7/changelog0.xml",
+			path:        "jobs/tenant/jobs/pipeline/builds/7/changelog0.xml",
 			wantKind:    rehydrationPathChangelog,
-			wantJobPath: "team/pipeline",
+			wantJobPath: "tenant/pipeline",
 			wantBuild:   7,
 		},
 		{
 			name:        "nextBuildNumber",
-			path:        "jobs/team/jobs/pipeline/nextBuildNumber",
+			path:        "jobs/tenant/jobs/pipeline/nextBuildNumber",
 			wantKind:    rehydrationPathNextBuildNumber,
-			wantJobPath: "team/pipeline",
+			wantJobPath: "tenant/pipeline",
 		},
 		{
 			name:        "program.dat",
-			path:        "jobs/team/jobs/pipeline/builds/7/program.dat",
+			path:        "jobs/tenant/jobs/pipeline/builds/7/program.dat",
 			wantKind:    rehydrationPathProgramDat,
-			wantJobPath: "team/pipeline",
+			wantJobPath: "tenant/pipeline",
 			wantBuild:   7,
 		},
 		{
 			name:        "workflow node xml",
-			path:        "jobs/team/jobs/pipeline/builds/7/workflow/3.xml",
+			path:        "jobs/tenant/jobs/pipeline/builds/7/workflow/3.xml",
 			wantKind:    rehydrationPathWorkflowNode,
-			wantJobPath: "team/pipeline",
+			wantJobPath: "tenant/pipeline",
 			wantBuild:   7,
 		},
 		{
@@ -124,10 +124,10 @@ func TestParseRehydrationPath_Rejections(t *testing.T) {
 		{"dotdot segment", "jobs/../nextBuildNumber"},
 		{"leading dot segment", "jobs/.hidden/nextBuildNumber"},
 		{"separator inside a segment", "jobs/foo\\bar/nextBuildNumber"},
-		{"unrecognized shape", "jobs/team/config.xml"},
-		{"leading zero build number", "jobs/team/builds/07/build.xml"},
-		{"non-numeric build number", "jobs/team/builds/x/build.xml"},
-		{"workflow node leading zero", "jobs/team/builds/7/workflow/01.xml"},
+		{"unrecognized shape", "jobs/tenant/config.xml"},
+		{"leading zero build number", "jobs/tenant/builds/07/build.xml"},
+		{"non-numeric build number", "jobs/tenant/builds/x/build.xml"},
+		{"workflow node leading zero", "jobs/tenant/builds/7/workflow/01.xml"},
 		{"node segment traverses", "nodes/../config.xml"},
 		{"node segment hidden", "nodes/.hidden/config.xml"},
 	}
@@ -149,11 +149,11 @@ func TestConfineRehydrationPath_RefusesEscape(t *testing.T) {
 
 func TestConfineRehydrationPath_AcceptsInsidePath(t *testing.T) {
 	home := t.TempDir()
-	got, err := confineRehydrationPath(home, "jobs/team/nextBuildNumber")
+	got, err := confineRehydrationPath(home, "jobs/tenant/nextBuildNumber")
 	if err != nil {
 		t.Fatalf("confineRehydrationPath: %v", err)
 	}
-	want := filepath.Join(home, "jobs", "team", "nextBuildNumber")
+	want := filepath.Join(home, "jobs", "tenant", "nextBuildNumber")
 	if got != want {
 		t.Errorf("confineRehydrationPath = %q, want %q", got, want)
 	}
@@ -170,7 +170,7 @@ func TestCheckRehydrationPath_RefusesSymlinkInParentChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := checkRehydrationPath(home, "jobs/team/nextBuildNumber")
+	_, _, err := checkRehydrationPath(home, "jobs/tenant/nextBuildNumber")
 	if err == nil {
 		t.Error("checkRehydrationPath: expected error for a symbolic link in the parent chain, got none")
 	}
@@ -187,7 +187,7 @@ func TestCheckRehydrationPath_TraversalPathFails(t *testing.T) {
 
 func TestAtomicWriteRehydrationFile_SetsFileMode(t *testing.T) {
 	home := t.TempDir()
-	target := filepath.Join(home, "jobs", "team", "nextBuildNumber")
+	target := filepath.Join(home, "jobs", "tenant", "nextBuildNumber")
 	if err := atomicWriteRehydrationFile(target, []byte("5\n")); err != nil {
 		t.Fatalf("atomicWriteRehydrationFile: %v", err)
 	}
@@ -245,7 +245,7 @@ func seedJob(t *testing.T, home string, jobDirParts ...string) string {
 
 func TestApplyRehydrationBundle_SkipsExistingBuildDirectory(t *testing.T) {
 	home := t.TempDir()
-	jobDir := seedJob(t, home, "jobs", "team")
+	jobDir := seedJob(t, home, "jobs", "tenant")
 	buildDir := filepath.Join(jobDir, "builds", "7")
 	if err := os.MkdirAll(buildDir, 0755); err != nil {
 		t.Fatal(err)
@@ -256,7 +256,7 @@ func TestApplyRehydrationBundle_SkipsExistingBuildDirectory(t *testing.T) {
 
 	bundle := &mitev1.RehydrationBundle{
 		Files: []*mitev1.RehydrationFile{
-			rehydrationFile(t, "jobs/team/builds/7/build.xml", []byte("<seeded/>")),
+			rehydrationFile(t, "jobs/tenant/builds/7/build.xml", []byte("<seeded/>")),
 		},
 	}
 	if _, err := applyRehydrationBundle(home, bundle); err != nil {
@@ -277,31 +277,31 @@ func TestApplyRehydrationBundle_DefersMissingJob(t *testing.T) {
 
 	bundle := &mitev1.RehydrationBundle{
 		Files: []*mitev1.RehydrationFile{
-			rehydrationFile(t, "jobs/team/jobs/branch-not-indexed-yet/builds/1/build.xml", []byte("<seeded/>")),
+			rehydrationFile(t, "jobs/tenant/jobs/branch-not-indexed-yet/builds/1/build.xml", []byte("<seeded/>")),
 		},
 	}
 	result, err := applyRehydrationBundle(home, bundle)
 	if err != nil {
 		t.Fatalf("applyRehydrationBundle: %v", err)
 	}
-	if len(result.deferredJobs) != 1 || result.deferredJobs[0] != "team/branch-not-indexed-yet" {
-		t.Errorf("deferredJobs = %v, want [team/branch-not-indexed-yet]", result.deferredJobs)
+	if len(result.deferredJobs) != 1 || result.deferredJobs[0] != "tenant/branch-not-indexed-yet" {
+		t.Errorf("deferredJobs = %v, want [tenant/branch-not-indexed-yet]", result.deferredJobs)
 	}
-	if _, err := os.Stat(filepath.Join(home, "jobs", "team", "jobs", "branch-not-indexed-yet", "builds", "1", "build.xml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, "jobs", "tenant", "jobs", "branch-not-indexed-yet", "builds", "1", "build.xml")); !os.IsNotExist(err) {
 		t.Errorf("expected no build.xml written for a deferred job, stat error = %v", err)
 	}
 }
 
 func TestApplyRehydrationBundle_NeverLowersNextBuildNumber(t *testing.T) {
 	home := t.TempDir()
-	jobDir := seedJob(t, home, "jobs", "team")
+	jobDir := seedJob(t, home, "jobs", "tenant")
 	if err := os.WriteFile(filepath.Join(jobDir, "nextBuildNumber"), []byte("40"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	bundle := &mitev1.RehydrationBundle{
 		Files: []*mitev1.RehydrationFile{
-			rehydrationFile(t, "jobs/team/nextBuildNumber", []byte("12")),
+			rehydrationFile(t, "jobs/tenant/nextBuildNumber", []byte("12")),
 		},
 	}
 	if _, err := applyRehydrationBundle(home, bundle); err != nil {
@@ -319,14 +319,14 @@ func TestApplyRehydrationBundle_NeverLowersNextBuildNumber(t *testing.T) {
 
 func TestApplyRehydrationBundle_RaisesNextBuildNumberWhenHigher(t *testing.T) {
 	home := t.TempDir()
-	jobDir := seedJob(t, home, "jobs", "team")
+	jobDir := seedJob(t, home, "jobs", "tenant")
 	if err := os.WriteFile(filepath.Join(jobDir, "nextBuildNumber"), []byte("5"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	bundle := &mitev1.RehydrationBundle{
 		Files: []*mitev1.RehydrationFile{
-			rehydrationFile(t, "jobs/team/nextBuildNumber", []byte("12")),
+			rehydrationFile(t, "jobs/tenant/nextBuildNumber", []byte("12")),
 		},
 	}
 	if _, err := applyRehydrationBundle(home, bundle); err != nil {
@@ -350,14 +350,14 @@ func TestApplyRehydrationBundle_RaisesNextBuildNumberWhenHigher(t *testing.T) {
 // an error for the broken build.xml.
 func TestApplyRehydrationBundle_WritesChangelogBeforeBuildXML(t *testing.T) {
 	home := t.TempDir()
-	jobDir := seedJob(t, home, "jobs", "team")
+	jobDir := seedJob(t, home, "jobs", "tenant")
 
 	brokenBuildXML := &mitev1.RehydrationFile{
-		Path:        "jobs/team/builds/3/build.xml",
+		Path:        "jobs/tenant/builds/3/build.xml",
 		GzipContent: []byte("not gzip data"),
 		RawSize:     9,
 	}
-	changelog := rehydrationFile(t, "jobs/team/builds/3/changelog0.xml", []byte("<varroa-changelog/>"))
+	changelog := rehydrationFile(t, "jobs/tenant/builds/3/changelog0.xml", []byte("<varroa-changelog/>"))
 
 	bundle := &mitev1.RehydrationBundle{
 		Files: []*mitev1.RehydrationFile{brokenBuildXML, changelog},
@@ -384,13 +384,13 @@ func TestApplyRehydrationBundle_WritesChangelogBeforeBuildXML(t *testing.T) {
 // proves the file was not touched.
 func TestApplyRehydrationBundle_SecondApplyIsFullyIdempotent(t *testing.T) {
 	home := t.TempDir()
-	jobDir := seedJob(t, home, "jobs", "team")
+	jobDir := seedJob(t, home, "jobs", "tenant")
 
 	bundle := &mitev1.RehydrationBundle{
 		Files: []*mitev1.RehydrationFile{
-			rehydrationFile(t, "jobs/team/builds/5/build.xml", []byte("<flow-build/>")),
-			rehydrationFile(t, "jobs/team/builds/5/changelog0.xml", []byte("<varroa-changelog/>")),
-			rehydrationFile(t, "jobs/team/nextBuildNumber", []byte("6")),
+			rehydrationFile(t, "jobs/tenant/builds/5/build.xml", []byte("<flow-build/>")),
+			rehydrationFile(t, "jobs/tenant/builds/5/changelog0.xml", []byte("<varroa-changelog/>")),
+			rehydrationFile(t, "jobs/tenant/nextBuildNumber", []byte("6")),
 		},
 	}
 
@@ -711,12 +711,12 @@ func TestApplyRehydrationBundle_RebasesChangelogFileOfBranchJob(t *testing.T) {
 
 func TestApplyRehydrationBundle_LogicalJobKeepsChangelogFile(t *testing.T) {
 	home := t.TempDir()
-	jobDir := seedJob(t, home, "jobs", "team", "jobs", "pipeline")
+	jobDir := seedJob(t, home, "jobs", "tenant", "jobs", "pipeline")
 	buildXML := "<build><checkouts><checkout><changelogFile>" +
-		home + "/jobs/team/jobs/pipeline/builds/3/changelog0.xml" +
+		home + "/jobs/tenant/jobs/pipeline/builds/3/changelog0.xml" +
 		"</changelogFile></checkout></checkouts></build>"
 	bundle := &mitev1.RehydrationBundle{Files: []*mitev1.RehydrationFile{
-		rehydrationFile(t, "jobs/team/jobs/pipeline/builds/3/build.xml", []byte(buildXML)),
+		rehydrationFile(t, "jobs/tenant/jobs/pipeline/builds/3/build.xml", []byte(buildXML)),
 	}}
 	if _, err := applyRehydrationBundle(home, bundle); err != nil {
 		t.Fatalf("applyRehydrationBundle: %v", err)
@@ -764,12 +764,12 @@ func resolveFileForTest(t *testing.T, home, relPath string) (string, error) {
 
 func TestResolveJobFilePath_PlainJobKeepsLogicalPath(t *testing.T) {
 	home := t.TempDir()
-	writeJobConfig(t, home, "team/app", folderConfig)
-	got, err := resolveFileForTest(t, home, "jobs/team/jobs/app/builds/7/build.xml")
+	writeJobConfig(t, home, "tenant/app", folderConfig)
+	got, err := resolveFileForTest(t, home, "jobs/tenant/jobs/app/builds/7/build.xml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(home, "jobs", "team", "jobs", "app", "builds", "7", "build.xml")
+	want := filepath.Join(home, "jobs", "tenant", "jobs", "app", "builds", "7", "build.xml")
 	if got != want {
 		t.Errorf("path = %s, want %s", got, want)
 	}

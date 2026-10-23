@@ -18,8 +18,8 @@ import Roles from "./pages/Roles";
 import RoleForm from "./pages/RoleForm";
 import RoleBindings from "./pages/RoleBindings";
 import RoleBindingForm from "./pages/RoleBindingForm";
-import Teams from "./pages/Teams";
-import TeamForm from "./pages/TeamForm";
+import Tenants from "./pages/Tenants";
+import TenantForm from "./pages/TenantForm";
 import JenkinsRoles from "./pages/JenkinsRoles";
 import JenkinsRoleBindings from "./pages/JenkinsRoleBindings";
 import JenkinsRoleForm from "./pages/JenkinsRoleForm";
@@ -42,10 +42,10 @@ import BroodScheduleDetail from "./pages/BroodScheduleDetail";
 import FleetPlugins from "./pages/FleetPlugins";
 import Cells from "./pages/Cells";
 import Agents from "./pages/Agents";
-import TeamAgentPage from "./pages/pipelines/TeamAgentPage";
+import TenantAgentPage from "./pages/pipelines/TenantAgentPage";
 import Locks from "./pages/Locks";
 import PipelinesIndex from "./pages/pipelines/PipelinesIndex";
-import TeamHome from "./pages/pipelines/TeamHome";
+import TenantHome from "./pages/pipelines/TenantHome";
 import PipelinePage from "./pages/pipelines/PipelinePage";
 import BuildPage from "./pages/pipelines/BuildPage";
 import TestCaseHistory from "./pages/pipelines/TestCaseHistory";
@@ -150,7 +150,7 @@ function AppRoutes() {
                     <Route path="access/builtin-roles" element={<PermissionRoute admin><BuiltinRolesPage /></PermissionRoute>} />
                     <Route path="access/roles" element={<PermissionRoute resource="roles" globalOnly><Roles /></PermissionRoute>} />
                     <Route path="access/role-bindings" element={<PermissionRoute resource="rolebindings" globalOnly><RoleBindings /></PermissionRoute>} />
-                    <Route path="access/teams" element={<PermissionRoute resource="roles" globalOnly><Teams /></PermissionRoute>} />
+                    <Route path="access/tenants" element={<PermissionRoute resource="roles" globalOnly><Tenants /></PermissionRoute>} />
                     <Route path="access/jenkins-roles" element={<PermissionRoute resource="jenkinsroles" globalOnly><JenkinsRoles /></PermissionRoute>} />
                     <Route path="access/jenkins-role-bindings" element={<PermissionRoute resource="jenkinsrolebindings" globalOnly><JenkinsRoleBindings /></PermissionRoute>} />
                     <Route path="administration/provisioning" element={<PermissionRoute resource="provisioningdefaults" verb="update" globalOnly><ProvisioningPage /></PermissionRoute>} />
@@ -165,8 +165,8 @@ function AppRoutes() {
                   <Route path="access/roles/:name/edit" element={<PermissionRoute resource="roles" verb="update" globalOnly><RoleForm /></PermissionRoute>} />
                   <Route path="access/role-bindings/create" element={<PermissionRoute resource="rolebindings" verb="create" globalOnly><RoleBindingForm /></PermissionRoute>} />
                   <Route path="access/role-bindings/:name/edit" element={<PermissionRoute resource="rolebindings" verb="update" globalOnly><RoleBindingForm /></PermissionRoute>} />
-                  <Route path="access/teams/create" element={<PermissionRoute resource="roles" verb="create" globalOnly><TeamForm /></PermissionRoute>} />
-                  <Route path="access/teams/:name/edit" element={<PermissionRoute resource="roles" verb="update" globalOnly><TeamForm /></PermissionRoute>} />
+                  <Route path="access/tenants/create" element={<PermissionRoute resource="roles" verb="create" globalOnly><TenantForm /></PermissionRoute>} />
+                  <Route path="access/tenants/:name/edit" element={<PermissionRoute resource="roles" verb="update" globalOnly><TenantForm /></PermissionRoute>} />
                   <Route path="access/jenkins-roles/create" element={<PermissionRoute resource="jenkinsroles" verb="create" globalOnly><JenkinsRoleForm /></PermissionRoute>} />
                   <Route path="access/jenkins-roles/:name/edit" element={<PermissionRoute resource="jenkinsroles" verb="update" globalOnly><JenkinsRoleForm /></PermissionRoute>} />
                   <Route path="access/jenkins-role-bindings/create" element={<PermissionRoute resource="jenkinsrolebindings" verb="create" globalOnly><JenkinsRoleBindingForm /></PermissionRoute>} />
@@ -193,8 +193,8 @@ function AppRoutes() {
                   <Route path="brood-schedules/:namespace/:name" element={<BroodScheduleDetail />} />
                   <Route path="plugins" element={<PermissionRoute resource="controllers" verb="read"><FleetPlugins /></PermissionRoute>} />
                   <Route path="pipelines" element={<PipelinesIndex />} />
-                  <Route path="pipelines/:team" element={<TeamHome />} />
-                  <Route path="pipelines/:team/agent" element={<TeamAgentPage />} />
+                  <Route path="pipelines/:tenant" element={<TenantHome />} />
+                  <Route path="pipelines/:tenant/agent" element={<TenantAgentPage />} />
                   <Route
                     path="agents"
                     element={
@@ -203,10 +203,10 @@ function AppRoutes() {
                       </PermissionRoute>
                     }
                   />
-                  <Route path="pipelines/:team/:job" element={<PipelinePage />} />
-                  <Route path="pipelines/:team/:job/:run" element={<BuildPageRoute />} />
+                  <Route path="pipelines/:tenant/:job" element={<PipelinePage />} />
+                  <Route path="pipelines/:tenant/:job/:run" element={<BuildPageRoute />} />
                   {/* The case route holds five segments and the run route four, so the two never match one URL. */}
-                  <Route path="pipelines/:team/:job/tests/:case" element={<TestCaseHistory />} />
+                  <Route path="pipelines/:tenant/:job/tests/:case" element={<TestCaseHistory />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>
               </Route>

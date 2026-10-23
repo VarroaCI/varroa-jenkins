@@ -6,7 +6,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/auth/userdirectory"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/accept"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/accept"
 )
 
 // userPrincipalAliases maps each configured user claim value to the Jenkins
@@ -33,7 +33,7 @@ func (r *Resolver) userPrincipalAliases() map[string][]string {
 			u.Spec.Email,
 			u.Annotations[v1alpha1.AnnotationOIDCSubject],
 		)
-		// The agent prefix belongs to Team agent principals only. A person
+		// The agent prefix belongs to Tenant agent principals only. A person
 		// never holds it, whatever the IdP sends.
 		if principal == "" || accept.IsPrincipal(principal) {
 			continue

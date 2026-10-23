@@ -28,8 +28,8 @@ func TestScopeMatches_TenantScopeDeniesEveryController(t *testing.T) {
 	cases := []struct {
 		namespace, controller string
 	}{
-		{"team-a", "ci"},
-		{"team-b", "other"},
+		{"tenant-a", "ci"},
+		{"tenant-b", "other"},
 		{"", ""},
 	}
 	for _, c := range cases {
@@ -72,7 +72,7 @@ func TestEffectiveAPICapabilities_TenantScopeGrantsNoControllerVerb(t *testing.T
 	r := testResolver(roles, bindings, nil, false)
 	claims := &auth.Claims{Groups: []string{"pay-eng"}}
 
-	caps := r.EffectiveAPICapabilities(claims, "team-pay", "ci")
+	caps := r.EffectiveAPICapabilities(claims, "tenant-pay", "ci")
 	if hasVerb(caps, "controllers", "read") {
 		t.Errorf("expected no controllers:read from a tenant-scoped binding, got %v", caps)
 	}
@@ -85,7 +85,7 @@ func TestControllerScopeMatches_TenantScopeContributesNoRoleAssignment(t *testin
 	scope := &v1alpha1.VarroaRoleBindingScope{
 		Tenants: []v1alpha1.TenantScope{{Name: "payments"}},
 	}
-	ctrl := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-pay"}}
+	ctrl := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "tenant-pay"}}
 
 	if controllerScopeMatches(scope, ctrl) {
 		t.Errorf("controllerScopeMatches must return false for a scope carrying tenants")
@@ -116,7 +116,7 @@ func TestJenkinsRoleAssignments_TenantScopeContributesNoAssignment(t *testing.T)
 		},
 	}
 	r := testResolverWithJenkins(nil, nil, jenkinsRoles, jenkinsRoleBindings, nil, false)
-	ctrl := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-pay"}}
+	ctrl := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "tenant-pay"}}
 
 	assignments, err := r.JenkinsRoleAssignments(ctrl)
 	if err != nil {

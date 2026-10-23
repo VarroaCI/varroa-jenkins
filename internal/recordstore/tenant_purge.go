@@ -45,19 +45,19 @@ type TenantPurgeRequest struct {
 	// same name, so the cell name alone names no one cell. A request
 	// that names a cell must name its namespace.
 	CellNamespace string `json:"cell_namespace,omitempty"`
-	// Incarnation is the identity of the Team this purge tears down: the
+	// Incarnation is the identity of the Tenant this purge tears down: the
 	// object's metadata.uid. A teardown purge that names another
 	// incarnation than the stored one leaves the placement row alone,
 	// because a newer tenant of the same name already owns it. An empty
 	// value means the caller names no incarnation, which keeps the reset.
 	Incarnation string `json:"incarnation,omitempty"`
-	// TeamDeleted reports that the Team object is under deletion, and not
-	// only without spec.pipelines. A teardown for a deleted Team retires
+	// TenantDeleted reports that the Tenant object is under deletion, and not
+	// only without spec.pipelines. A teardown for a deleted Tenant retires
 	// its incarnation, because a deleted object's uid never comes back. A
-	// Team that only drops spec.pipelines keeps its uid and can add the
+	// Tenant that only drops spec.pipelines keeps its uid and can add the
 	// field again, so its teardown retires nothing. A slot move never sets
 	// this field.
-	TeamDeleted bool `json:"team_deleted,omitempty"`
+	TenantDeleted bool `json:"tenant_deleted,omitempty"`
 }
 
 // TenantPurgeResponse is the reply body of a
@@ -105,11 +105,11 @@ func handleTenantPurge(logger *slog.Logger, pool *pgxpool.Pool, data []byte) []b
 		out, _ := json.Marshal(TenantPurgeResponse{Error: "tenant purge request needs the cell's namespace"})
 		return out
 	}
-	if req.Cell != "" && req.TeamDeleted {
+	if req.Cell != "" && req.TenantDeleted {
 		// A request that names a cell is a slot move, and the tenant lives
 		// on. A move that retires the incarnation would refuse the
 		// tenant's own next announcement.
-		out, _ := json.Marshal(TenantPurgeResponse{Error: "a slot move purge cannot report a deleted team"})
+		out, _ := json.Marshal(TenantPurgeResponse{Error: "a slot move purge cannot report a deleted tenant"})
 		return out
 	}
 
@@ -151,7 +151,7 @@ func purgeTenant(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, r
 // guards both.
 //
 // Teardown ends the tenant, but it leaves the tenant_placements row in
-// place. A Team created again under the same name starts at generation 1,
+// place. A Tenant created again under the same name starts at generation 1,
 // and the announce lowers a stored generation for one reason alone: an
 // announcement that names a new incarnation. The reset serves the row
 // whose incarnation is unknown, where that take-over cannot apply: it
@@ -164,7 +164,7 @@ func purgeTenant(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, r
 // own. Until it arrives, the generation orders refuse every claim.
 //
 // One teardown request can still be applied after the teardown completes.
-// Two teardown paths release the Team finalizer with no successful purge:
+// Two teardown paths release the Tenant finalizer with no successful purge:
 // an absent cell, and the tenth failed attempt. The purge rides core NATS
 // request-reply, which redelivers nothing, and both ends bound one call
 // at ten seconds, so that window is at most ten seconds wide. A tenant of
@@ -182,11 +182,11 @@ func purgeTenant(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, r
 // tenant with no row answers the purge too, because the schedule rows can
 // outlive the placement row.
 //
-// A purge for a deleted Team (TeamDeleted) also adds the incarnation to
+// A purge for a deleted Tenant (TenantDeleted) also adds the incarnation to
 // retired_incarnations, in the same transaction. A late announcement of
-// that Team is then stale, and it cannot write the old placement back
-// after the reset. A purge for a Team that only drops spec.pipelines
-// retires nothing: the Team keeps its uid, and it can add the field again
+// that Tenant is then stale, and it cannot write the old placement back
+// after the reset. A purge for a Tenant that only drops spec.pipelines
+// retires nothing: the Tenant keeps its uid, and it can add the field again
 // under that same uid. A retiring purge with no placement row writes no
 // row, so a deleted tenant never gets a row of its own.
 //
@@ -227,8 +227,8 @@ func purgeTornDownTenant(ctx context.Context, logger *slog.Logger, pool *pgxpool
 	if err := resetTenantPlacementGeneration(ctx, tx, req); err != nil {
 		return err
 	}
-	if exists && req.TeamDeleted {
-		if err := retireDeletedTeam(ctx, tx, req, stored.retired); err != nil {
+	if exists && req.TenantDeleted {
+		if err := retireDeletedTenant(ctx, tx, req, stored.retired); err != nil {
 			return err
 		}
 	}
@@ -242,9 +242,9 @@ type purgeIdentity struct {
 	retired     []string
 }
 
-// retireDeletedTeam adds the incarnation of a deleted Team to the row's
+// retireDeletedTenant adds the incarnation of a deleted Tenant to the row's
 // retired list. The list keeps the take-over's order and bound.
-func retireDeletedTeam(ctx context.Context, tx pgx.Tx, req TenantPurgeRequest, retired []string) error {
+func retireDeletedTenant(ctx context.Context, tx pgx.Tx, req TenantPurgeRequest, retired []string) error {
 	next := retireIncarnation(retired, req.Incarnation)
 	data, err := json.Marshal(nonNilStrings(next))
 	if err != nil {
@@ -255,7 +255,7 @@ func retireDeletedTeam(ctx context.Context, tx pgx.Tx, req TenantPurgeRequest, r
 		SET retired_incarnations = $3::jsonb
 		WHERE cluster = $1 AND tenant = $2
 	`, req.Cluster, req.Tenant, string(data)); err != nil {
-		return fmt.Errorf("retire the deleted team's incarnation: %w", err)
+		return fmt.Errorf("retire the deleted tenant's incarnation: %w", err)
 	}
 	return nil
 }

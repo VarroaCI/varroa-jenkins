@@ -25,7 +25,7 @@ describe("JobTree multibranch rows", () => {
         <table>
           <tbody>
             <JobTree
-              team="alpha"
+              tenant="alpha"
               folder="alpha"
               rows={[multibranchNode]}
               openPaths={new Set()}
@@ -62,7 +62,7 @@ describe("JobTree organization folder rows", () => {
         <table>
           <tbody>
             <JobTree
-              team="alpha"
+              tenant="alpha"
               folder="alpha"
               rows={[organizationNode]}
               openPaths={new Set()}
@@ -99,7 +99,7 @@ function renderRows(rows: JobTreeNode[]) {
     <MemoryRouter>
       <table>
         <tbody>
-          <JobTree team="alpha" folder="alpha" rows={rows} openPaths={new Set()} onToggle={() => {}} />
+          <JobTree tenant="alpha" folder="alpha" rows={rows} openPaths={new Set()} onToggle={() => {}} />
         </tbody>
       </table>
     </MemoryRouter>,

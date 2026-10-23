@@ -236,7 +236,7 @@ func TestFake_PatchObjectMetaBumpsOnlyOnChange(t *testing.T) {
 
 	// The first patch adds a label, which changes the object and moves the value.
 	if err := f.PatchObjectMeta(ctx, gvr, "ns", "alice", map[string]any{
-		"labels": map[string]any{"team": "blue"},
+		"labels": map[string]any{"tenant": "blue"},
 	}); err != nil {
 		t.Fatalf("first PatchObjectMeta: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestFake_PatchObjectMetaBumpsOnlyOnChange(t *testing.T) {
 		t.Fatalf("a changing patch left resourceVersion at %q", start.ResourceVersion)
 	}
 	if err := f.PatchObjectMeta(ctx, gvr, "ns", "alice", map[string]any{
-		"labels": map[string]any{"team": "blue"},
+		"labels": map[string]any{"tenant": "blue"},
 	}); err != nil {
 		t.Fatalf("second PatchObjectMeta: %v", err)
 	}
@@ -450,21 +450,21 @@ func TestFake_KindWithoutStatusSubresourceKeepsWholeObject(t *testing.T) {
 func TestFake_SeedObjectKeepsStatus(t *testing.T) {
 	ctx := context.Background()
 	f := NewFake()
-	team := &v1alpha1.Team{
+	tenant := &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Status: v1alpha1.TeamStatus{
-			Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-1"},
+		Status: v1alpha1.TenantStatus{
+			Placement: &v1alpha1.TenantPlacementStatus{Cell: "cell-1"},
 		},
 	}
-	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(team)
+	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tenant)
 	if err != nil {
 		t.Fatalf("to unstructured: %v", err)
 	}
-	if err := f.SeedObject(teamGVR, &unstructured.Unstructured{Object: u}); err != nil {
+	if err := f.SeedObject(tenantGVR, &unstructured.Unstructured{Object: u}); err != nil {
 		t.Fatalf("seed object: %v", err)
 	}
 
-	got, err := Get[v1alpha1.Team](ctx, f, "payments", "")
+	got, err := Get[v1alpha1.Tenant](ctx, f, "payments", "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -688,23 +688,23 @@ func mustGen(t *testing.T, f *Fake) int64 {
 
 // --- status merge patch clears --------------------------------------------
 
-func TestFakePatchObjectStatus_TeamOmittingPlacementClearsIt(t *testing.T) {
+func TestFakePatchObjectStatus_TenantOmittingPlacementClearsIt(t *testing.T) {
 	ctx := context.Background()
 	f := NewFake()
-	MustSeed(f, &v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
-	if err := PatchStatus[v1alpha1.Team](ctx, f, "payments", "", &v1alpha1.TeamStatus{
-		Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "varroa-system"},
+	MustSeed(f, &v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
+	if err := PatchStatus[v1alpha1.Tenant](ctx, f, "payments", "", &v1alpha1.TenantStatus{
+		Placement: &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "varroa-system"},
 	}); err != nil {
 		t.Fatalf("PatchStatus (set): %v", err)
 	}
 
 	// The second patch omits placement and sets another field.
-	if err := PatchStatus[v1alpha1.Team](ctx, f, "payments", "", &v1alpha1.TeamStatus{
+	if err := PatchStatus[v1alpha1.Tenant](ctx, f, "payments", "", &v1alpha1.TenantStatus{
 		ObservedGeneration: 3,
 	}); err != nil {
 		t.Fatalf("PatchStatus (omit placement): %v", err)
 	}
-	got, err := Get[v1alpha1.Team](ctx, f, "payments", "")
+	got, err := Get[v1alpha1.Tenant](ctx, f, "payments", "")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -716,14 +716,14 @@ func TestFakePatchObjectStatus_TeamOmittingPlacementClearsIt(t *testing.T) {
 	}
 
 	// The recorded patch keeps the typed value the caller sent.
-	gvr, err := GVRFor[v1alpha1.Team]()
+	gvr, err := GVRFor[v1alpha1.Tenant]()
 	if err != nil {
 		t.Fatalf("GVRFor: %v", err)
 	}
 	patches := f.StatusPatches(gvr)
-	last, ok := patches[len(patches)-1].Status.(*v1alpha1.TeamStatus)
+	last, ok := patches[len(patches)-1].Status.(*v1alpha1.TenantStatus)
 	if !ok {
-		t.Fatalf("recorded status = %T, want *TeamStatus", patches[len(patches)-1].Status)
+		t.Fatalf("recorded status = %T, want *TenantStatus", patches[len(patches)-1].Status)
 	}
 	if last.Placement != nil {
 		t.Errorf("recorded placement = %+v, want nil", last.Placement)

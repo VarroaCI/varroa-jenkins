@@ -86,7 +86,7 @@
       controller read check refuses. It answers 403 when the controller
       check passes and the caller holds no rolebindings:read. A member
       cell's grants and member roles come from that member's operator,
-      which holds the Team and binding state the member renders. The read
+      which holds the Tenant and binding state the member renders. The read
       touches no record store, so it answers no 503. It answers 502 when
       the member cluster does not answer.
     parameters:

@@ -6,7 +6,7 @@
   <properties>
     <org.csanchez.jenkins.plugins.kubernetes.KubernetesFolderProperty>
       <permittedClouds>
-        <string>team-a</string>
+        <string>tenant-a</string>
       </permittedClouds>
     </org.csanchez.jenkins.plugins.kubernetes.KubernetesFolderProperty>
   </properties>

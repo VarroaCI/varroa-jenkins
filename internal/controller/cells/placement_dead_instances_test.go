@@ -36,14 +36,14 @@ func countDead(dead []DeadInstance, instance string) int {
 // and the run stays RUNNING with no end.
 func TestReannounceWithNoCacheReportsTheCellPreviousInstance(t *testing.T) {
 	in := testInputs()
-	team := testTeam()
+	tenant := testTenant()
 	lastSeen := fixedNow.Add(-3 * time.Minute)
-	in.Cells = []CellCandidate{rolledCell("cell-a", "uid-old", &lastSeen, team.Name)}
+	in.Cells = []CellCandidate{rolledCell("cell-a", "uid-old", &lastSeen, tenant.Name)}
 	status := placedStatus(1)
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(seen) != 1 {
@@ -68,22 +68,22 @@ func TestReannounceWithNoCacheReportsTheCellPreviousInstance(t *testing.T) {
 // rule holds for every member cell, active or standby, not slot 0 alone.
 func TestReannounceWithNoCacheReportsEachMemberPreviousInstance(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 1)
+	tenant := slotTenant(2, 1)
 	in.Cells = []CellCandidate{
-		rolledCell("cell-0", "old-cell-0", nil, team.Name),
-		rolledCell("cell-1", "old-cell-1", nil, team.Name),
-		rolledCell("cell-2", "old-cell-2", nil, team.Name),
+		rolledCell("cell-0", "old-cell-0", nil, tenant.Name),
+		rolledCell("cell-1", "old-cell-1", nil, tenant.Name),
+		rolledCell("cell-2", "old-cell-2", nil, tenant.Name),
 	}
-	status := placedWithMembers([]v1alpha1.TeamMemberStatus{
-		memberStatus("cell-0", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-1", v1alpha1.TeamMemberRoleActive, intPtr(1)),
-		memberStatus("cell-2", v1alpha1.TeamMemberRoleStandby, nil),
+	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
+		memberStatus("cell-0", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-1", v1alpha1.TenantMemberRoleActive, intPtr(1)),
+		memberStatus("cell-2", v1alpha1.TenantMemberRoleStandby, nil),
 	})
 	status.Placement.Cell = "cell-0"
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(seen) != 1 {
@@ -104,17 +104,17 @@ func TestReannounceWithNoCacheReportsEachMemberPreviousInstance(t *testing.T) {
 // the cache delta and the cell record both name appears once.
 func TestWarmCacheAndPreviousInstanceReportOneEntry(t *testing.T) {
 	in := testInputs()
-	team := testTeam()
-	in.Cells = []CellCandidate{rolledCell("cell-a", "uid-old", nil, team.Name)}
+	tenant := testTenant()
+	in.Cells = []CellCandidate{rolledCell("cell-a", "uid-old", nil, tenant.Name)}
 	status := placedStatus(1)
 	in.LastSync = &SyncCache{
 		Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1, CellInstance: "uid-old",
-		Policy: SyncPolicyFromPipelines(team.Spec.Pipelines), At: fixedNow.Add(-time.Minute),
+		Policy: SyncPolicyFromPipelines(tenant.Spec.Pipelines), At: fixedNow.Add(-time.Minute),
 	}
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(seen) != 1 {
@@ -139,13 +139,13 @@ func TestPreviousInstanceIsNotReportedWhenNoPodWasReplaced(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			in := testInputs()
-			team := testTeam()
-			in.Cells = []CellCandidate{rolledCell("cell-a", tc.previous, nil, team.Name)}
+			tenant := testTenant()
+			in.Cells = []CellCandidate{rolledCell("cell-a", tc.previous, nil, tenant.Name)}
 			status := placedStatus(1)
 			var seen []AnnounceRequest
 			in.Announce = recordingAnnounce(true, &seen)
 
-			if _, err := Place(context.Background(), in, team, status); err != nil {
+			if _, err := Place(context.Background(), in, tenant, status); err != nil {
 				t.Fatalf("Place: %v", err)
 			}
 			if len(seen) != 1 {
@@ -163,13 +163,13 @@ func TestPreviousInstanceIsNotReportedWhenNoPodWasReplaced(t *testing.T) {
 // read as older than any window.
 func TestPreviousInstanceWithNoLastSeenUsesTheTickClock(t *testing.T) {
 	in := testInputs()
-	team := testTeam()
-	in.Cells = []CellCandidate{rolledCell("cell-a", "uid-old", nil, team.Name)}
+	tenant := testTenant()
+	in.Cells = []CellCandidate{rolledCell("cell-a", "uid-old", nil, tenant.Name)}
 	status := placedStatus(1)
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	entry := deadFor(seen[0].DeadInstances, "uid-old")
@@ -185,15 +185,15 @@ func TestPreviousInstanceWithNoLastSeenUsesTheTickClock(t *testing.T) {
 // that leaves a live cell still reports the pod that cell replaced.
 func TestMoveWithNoCacheReportsTheOldCellPreviousInstance(t *testing.T) {
 	in := testInputs()
-	team := testTeam()
-	evacuating := rolledCell("cell-a", "old-a", nil, team.Name)
+	tenant := testTenant()
+	evacuating := rolledCell("cell-a", "old-a", nil, tenant.Name)
 	evacuating.Evacuate = true
 	in.Cells = []CellCandidate{evacuating, readyCell("cell-b")}
 	status := placedStatus(1)
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(seen) != 1 {
@@ -221,30 +221,30 @@ func TestMoveWithNoCacheReportsTheOldCellPreviousInstance(t *testing.T) {
 // re-fires.
 func TestPreviousInstanceConfirmsAnUnconfirmedCacheEntry(t *testing.T) {
 	in := testInputs()
-	team := slotTeam(2, 0)
+	tenant := slotTenant(2, 0)
 	recordedSeen := fixedNow.Add(-10 * time.Second)
-	evacuating := rolledCell("cell-b", "old-b", &recordedSeen, team.Name)
+	evacuating := rolledCell("cell-b", "old-b", &recordedSeen, tenant.Name)
 	evacuating.Evacuate = true
-	in.Cells = []CellCandidate{appliedCell("cell-a", team.Name), evacuating, readyCell("cell-c")}
+	in.Cells = []CellCandidate{appliedCell("cell-a", tenant.Name), evacuating, readyCell("cell-c")}
 	status := placedStatus(3)
-	status.Placement.Members = []v1alpha1.TeamMemberStatus{
-		memberStatus("cell-a", v1alpha1.TeamMemberRoleActive, intPtr(0)),
-		memberStatus("cell-b", v1alpha1.TeamMemberRoleActive, intPtr(1)),
+	status.Placement.Members = []v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	}
 	in.LastSync = &SyncCache{
 		Cell: "cell-a", CellNamespace: "cells-ns", Generation: 3, CellInstance: "uid-cell-a",
-		Policy: SyncPolicyFromPipelines(team.Spec.Pipelines), At: fixedNow.Add(-time.Minute),
+		Policy: SyncPolicyFromPipelines(tenant.Spec.Pipelines), At: fixedNow.Add(-time.Minute),
 		Members: []AnnounceMember{
-			{Cell: "cell-a", Namespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive,
+			{Cell: "cell-a", Namespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive,
 				Slot: intPtr(0), Instance: "uid-cell-a"},
-			{Cell: "cell-b", Namespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive,
+			{Cell: "cell-b", Namespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive,
 				Slot: intPtr(1), Instance: "old-b"},
 		},
 	}
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(seen) != 1 {
@@ -266,20 +266,20 @@ func TestPreviousInstanceConfirmsAnUnconfirmedCacheEntry(t *testing.T) {
 // heartbeat never moves the cache entry's LastSeenAt back.
 func TestPreviousInstanceKeepsANewerCacheLastSeen(t *testing.T) {
 	in := testInputs()
-	team := testTeam()
+	tenant := testTenant()
 	recordedSeen := fixedNow.Add(-10 * time.Minute)
-	in.Cells = []CellCandidate{rolledCell("cell-a", "uid-old", &recordedSeen, team.Name)}
+	in.Cells = []CellCandidate{rolledCell("cell-a", "uid-old", &recordedSeen, tenant.Name)}
 	status := placedStatus(1)
 	cacheSeen := fixedNow.Add(-30 * time.Second)
 	in.LastSync = &SyncCache{
 		Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1, CellInstance: "uid-old",
-		Policy: SyncPolicyFromPipelines(team.Spec.Pipelines), At: fixedNow.Add(-time.Minute),
+		Policy: SyncPolicyFromPipelines(tenant.Spec.Pipelines), At: fixedNow.Add(-time.Minute),
 		CellLastSeenAt: &cacheSeen,
 	}
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	entry := deadFor(seen[0].DeadInstances, "uid-old")
@@ -292,13 +292,13 @@ func TestPreviousInstanceKeepsANewerCacheLastSeen(t *testing.T) {
 // a warm cache with nothing due sends no announcement.
 func TestPreviousInstanceAddsNoAnnounce(t *testing.T) {
 	in := testInputs()
-	team := testTeam()
-	in.Cells = []CellCandidate{rolledCell("cell-a", "uid-old", nil, team.Name)}
+	tenant := testTenant()
+	in.Cells = []CellCandidate{rolledCell("cell-a", "uid-old", nil, tenant.Name)}
 	status := placedStatus(1)
 	var seen []AnnounceRequest
 	in.Announce = recordingAnnounce(true, &seen)
 
-	out, err := Place(context.Background(), in, team, status)
+	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestPreviousInstanceAddsNoAnnounce(t *testing.T) {
 
 	in.LastSync = out.SyncCacheUpdate
 	seen = nil
-	if _, err := Place(context.Background(), in, team, status); err != nil {
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
 		t.Fatalf("Place: %v", err)
 	}
 	if len(seen) != 0 {

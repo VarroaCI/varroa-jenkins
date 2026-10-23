@@ -28,20 +28,20 @@ func TestCreateUnderLock_OneWinsPerKey(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, ok, err := p.CreateUnderLock(ctx, "teamagent:ns/alpha:run.failed:job-a",
+			_, _, ok, err := p.CreateUnderLock(ctx, "tenantagent:ns/alpha:run.failed:job-a",
 				func(ctx context.Context, tx pgx.Tx) (agent.Session, []agent.EventInput, bool, error) {
 					// The check reads the table inside the lock. A second call
 					// sees the row the first call wrote.
 					var n int
-					if err := tx.QueryRow(ctx, `SELECT count(*) FROM varroa.agent_sessions WHERE team = 'alpha'`).Scan(&n); err != nil {
+					if err := tx.QueryRow(ctx, `SELECT count(*) FROM varroa.agent_sessions WHERE tenant = 'alpha'`).Scan(&n); err != nil {
 						return agent.Session{}, nil, false, err
 					}
 					if n > 0 {
 						return agent.Session{}, nil, false, nil
 					}
 					s := newSession(agent.StateRunning, testOwner)
-					s.Team = "alpha"
-					s.Kind = agent.KindTeamAgent
+					s.Tenant = "alpha"
+					s.Kind = agent.KindTenantAgent
 					return s, []agent.EventInput{userEvent("go")}, true, nil
 				})
 			if err != nil {

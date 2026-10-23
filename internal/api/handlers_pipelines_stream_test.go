@@ -156,7 +156,7 @@ func (r *sseRecorder) expectNoFrame(t *testing.T, want string) {
 	}
 }
 
-// refusingTenantResolver mirrors the answer Resolve gives a team whose
+// refusingTenantResolver mirrors the answer Resolve gives a tenant whose
 // candidate tenants the read check all refuses.
 type refusingTenantResolver struct{}
 
@@ -190,7 +190,7 @@ func pipelineGlobAuthorizer(jobs []string) *Authorizer {
 	return NewAuthorizer(testResolver([]*v1alpha1.VarroaRole{role}, []*v1alpha1.VarroaRoleBinding{binding}), false)
 }
 
-// streamTestServer wires a server for the team run stream over stubFanout.
+// streamTestServer wires a server for the tenant run stream over stubFanout.
 func streamTestServer(resolver TenantResolver, authorizer *Authorizer, stubFanout sse.RunEventSource) *Server {
 	return NewServer(&Dependencies{
 		RecordStore:    newFakeRecordReader(),
@@ -201,19 +201,19 @@ func streamTestServer(resolver TenantResolver, authorizer *Authorizer, stubFanou
 	})
 }
 
-// startTeamRunStream runs the handler on its own goroutine and answers the
+// startTenantRunStream runs the handler on its own goroutine and answers the
 // recorder and a stop function that ends the stream.
-func startTeamRunStream(t *testing.T, srv *Server, team string) (*sseRecorder, func()) {
+func startTenantRunStream(t *testing.T, srv *Server, tenant string) (*sseRecorder, func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(authContext(testClaims()))
-	req := httptest.NewRequest(http.MethodGet, "/pipelines/"+team+"/stream", nil).WithContext(ctx)
-	req.SetPathValue("team", team)
+	req := httptest.NewRequest(http.MethodGet, "/pipelines/"+tenant+"/stream", nil).WithContext(ctx)
+	req.SetPathValue("tenant", tenant)
 
 	rec := newSSERecorder()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		srv.handleTeamRunStream(rec, req)
+		srv.handleTenantRunStream(rec, req)
 	}()
 	stop := func() {
 		cancel()
@@ -226,8 +226,8 @@ func startTeamRunStream(t *testing.T, srv *Server, team string) (*sseRecorder, f
 	return rec, stop
 }
 
-// teamStreamRefs answers two placed tenants in one cluster.
-func teamStreamRefs() []TenantRef {
+// tenantStreamRefs answers two placed tenants in one cluster.
+func tenantStreamRefs() []TenantRef {
 	return []TenantRef{
 		{Cluster: "core", Tenant: "team-a", Folder: "team-a"},
 		{Cluster: "core", Tenant: "team-b", Folder: "team-b"},
@@ -245,18 +245,18 @@ func notification(kind, tenant, jobPath string) recordstore.RunNotification {
 // The stream handler
 // --------------------------------------------------------------------------
 
-// TestHandleTeamRunStream_ServesItsOwnTeamTenantsOnly proves the handler
+// TestHandleTenantRunStream_ServesItsOwnTenantTenantsOnly proves the handler
 // subscribes one key per resolved tenant, and that a notification for a
-// tenant outside the team reaches no caller.
-func TestHandleTeamRunStream_ServesItsOwnTeamTenantsOnly(t *testing.T) {
+// tenant outside the tenant reaches no caller.
+func TestHandleTenantRunStream_ServesItsOwnTenantTenantsOnly(t *testing.T) {
 	stub := &runFanoutStub{}
 	srv := streamTestServer(
-		fixedTenantResolver{refs: teamStreamRefs()},
+		fixedTenantResolver{refs: tenantStreamRefs()},
 		pipelineGrantAuthorizer([]string{"read"}, "team-a", "team-b"),
 		stub,
 	)
 
-	rec, stop := startTeamRunStream(t, srv, "payments")
+	rec, stop := startTenantRunStream(t, srv, "payments")
 	defer stop()
 	stub.waitForSubscription(t)
 
@@ -282,9 +282,9 @@ func TestHandleTeamRunStream_ServesItsOwnTeamTenantsOnly(t *testing.T) {
 	rec.waitForFrame(t, `"tenant":"team-a"`)
 }
 
-// TestHandleTeamRunStream_JobGlobsRefuseAJob proves a grant narrowed by job
+// TestHandleTenantRunStream_JobGlobsRefuseAJob proves a grant narrowed by job
 // globs admits only the jobs the globs cover.
-func TestHandleTeamRunStream_JobGlobsRefuseAJob(t *testing.T) {
+func TestHandleTenantRunStream_JobGlobsRefuseAJob(t *testing.T) {
 	stub := &runFanoutStub{}
 	srv := streamTestServer(
 		fixedTenantResolver{refs: []TenantRef{{Cluster: "core", Tenant: "team-a", Folder: "team-a"}}},
@@ -292,7 +292,7 @@ func TestHandleTeamRunStream_JobGlobsRefuseAJob(t *testing.T) {
 		stub,
 	)
 
-	rec, stop := startTeamRunStream(t, srv, "team-a")
+	rec, stop := startTenantRunStream(t, srv, "team-a")
 	defer stop()
 	stub.waitForSubscription(t)
 
@@ -307,18 +307,18 @@ func TestHandleTeamRunStream_JobGlobsRefuseAJob(t *testing.T) {
 	rec.waitForFrame(t, `"job_path":"team-a/release/app"`)
 }
 
-// TestHandleTeamRunStream_EmptyJobPathIsDropped proves the filter drops a
+// TestHandleTenantRunStream_EmptyJobPathIsDropped proves the filter drops a
 // notification whose job path is empty, for a caller who holds a full read
 // grant and for a caller narrowed by job globs. The narrowed caller still
 // opens the stream, and still receives the jobs its globs cover.
-func TestHandleTeamRunStream_EmptyJobPathIsDropped(t *testing.T) {
+func TestHandleTenantRunStream_EmptyJobPathIsDropped(t *testing.T) {
 	refs := []TenantRef{{Cluster: "core", Tenant: "team-a", Folder: "team-a"}}
 
 	t.Run("a full read grant drops the empty job path", func(t *testing.T) {
 		stub := &runFanoutStub{}
 		srv := streamTestServer(fixedTenantResolver{refs: refs}, pipelineGrantAuthorizer([]string{"read"}, "team-a"), stub)
 
-		rec, stop := startTeamRunStream(t, srv, "team-a")
+		rec, stop := startTenantRunStream(t, srv, "team-a")
 		defer stop()
 		stub.waitForSubscription(t)
 
@@ -338,7 +338,7 @@ func TestHandleTeamRunStream_EmptyJobPathIsDropped(t *testing.T) {
 		stub := &runFanoutStub{}
 		srv := streamTestServer(fixedTenantResolver{refs: refs}, pipelineGlobAuthorizer([]string{"release/*"}), stub)
 
-		rec, stop := startTeamRunStream(t, srv, "team-a")
+		rec, stop := startTenantRunStream(t, srv, "team-a")
 		defer stop()
 		stub.waitForSubscription(t)
 
@@ -357,12 +357,12 @@ func TestHandleTeamRunStream_EmptyJobPathIsDropped(t *testing.T) {
 	})
 }
 
-// TestHandleTeamRunStream_ForwardsALockNotification proves a lock
+// TestHandleTenantRunStream_ForwardsALockNotification proves a lock
 // notification meets the same tenant set and job-grant filter a run
 // notification meets: one whose job path the caller reads is forwarded
 // with its own fields unchanged, and one whose job path is empty is
 // dropped.
-func TestHandleTeamRunStream_ForwardsALockNotification(t *testing.T) {
+func TestHandleTenantRunStream_ForwardsALockNotification(t *testing.T) {
 	stub := &runFanoutStub{}
 	srv := streamTestServer(
 		fixedTenantResolver{refs: []TenantRef{{Cluster: "core", Tenant: "team-a", Folder: "team-a"}}},
@@ -370,7 +370,7 @@ func TestHandleTeamRunStream_ForwardsALockNotification(t *testing.T) {
 		stub,
 	)
 
-	rec, stop := startTeamRunStream(t, srv, "team-a")
+	rec, stop := startTenantRunStream(t, srv, "team-a")
 	defer stop()
 	stub.waitForSubscription(t)
 
@@ -390,23 +390,23 @@ func TestHandleTeamRunStream_ForwardsALockNotification(t *testing.T) {
 	rec.waitForFrame(t, `"state":"released"`)
 }
 
-// TestHandleTeamRunStream_ReconnectReceivesNoEarlierEvent proves the stream
+// TestHandleTenantRunStream_ReconnectReceivesNoEarlierEvent proves the stream
 // replays nothing: a second connection sees only what arrives after it.
-func TestHandleTeamRunStream_ReconnectReceivesNoEarlierEvent(t *testing.T) {
+func TestHandleTenantRunStream_ReconnectReceivesNoEarlierEvent(t *testing.T) {
 	stub := &runFanoutStub{}
 	srv := streamTestServer(
-		fixedTenantResolver{refs: teamStreamRefs()},
+		fixedTenantResolver{refs: tenantStreamRefs()},
 		pipelineGrantAuthorizer([]string{"read"}, "team-a", "team-b"),
 		stub,
 	)
 
-	first, stopFirst := startTeamRunStream(t, srv, "payments")
+	first, stopFirst := startTenantRunStream(t, srv, "payments")
 	stub.waitForSubscription(t)
 	stub.deliver(notification("run", "team-a", "team-a/app"))
 	first.waitForFrame(t, `"run_id":"run-1"`)
 	stopFirst()
 
-	second, stopSecond := startTeamRunStream(t, srv, "payments")
+	second, stopSecond := startTenantRunStream(t, srv, "payments")
 	defer stopSecond()
 	deadline := time.Now().Add(2 * time.Second)
 	for stub.subscriptions() < 2 && time.Now().Before(deadline) {
@@ -420,17 +420,17 @@ func TestHandleTeamRunStream_ReconnectReceivesNoEarlierEvent(t *testing.T) {
 	second.waitForFrame(t, "event: stage")
 }
 
-// TestHandleTeamRunStream_UnavailableWithoutDependencies proves the handler
+// TestHandleTenantRunStream_UnavailableWithoutDependencies proves the handler
 // answers 503 when the record store or the run fan-out is absent.
-func TestHandleTeamRunStream_UnavailableWithoutDependencies(t *testing.T) {
+func TestHandleTenantRunStream_UnavailableWithoutDependencies(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/pipelines/team-a/stream", nil).
 		WithContext(authContext(testClaims()))
-	req.SetPathValue("team", "team-a")
+	req.SetPathValue("tenant", "team-a")
 
 	t.Run("no record store", func(t *testing.T) {
 		srv := NewServer(&Dependencies{RunFanout: &runFanoutStub{}, Logger: slog.Default()})
 		rec := httptest.NewRecorder()
-		srv.handleTeamRunStream(rec, req)
+		srv.handleTenantRunStream(rec, req)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Errorf("status = %d, want 503", rec.Code)
 		}
@@ -439,16 +439,16 @@ func TestHandleTeamRunStream_UnavailableWithoutDependencies(t *testing.T) {
 	t.Run("no run fan-out", func(t *testing.T) {
 		srv := NewServer(&Dependencies{RecordStore: newFakeRecordReader(), Logger: slog.Default()})
 		rec := httptest.NewRecorder()
-		srv.handleTeamRunStream(rec, req)
+		srv.handleTenantRunStream(rec, req)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Errorf("status = %d, want 503", rec.Code)
 		}
 	})
 }
 
-// TestHandleTeamRunStream_RefusedTeamAnswers404 proves the handler writes the
-// resolution error unchanged, so a team the caller may not read answers 404.
-func TestHandleTeamRunStream_RefusedTeamAnswers404(t *testing.T) {
+// TestHandleTenantRunStream_RefusedTenantAnswers404 proves the handler writes the
+// resolution error unchanged, so a tenant the caller may not read answers 404.
+func TestHandleTenantRunStream_RefusedTenantAnswers404(t *testing.T) {
 	srv := NewServer(&Dependencies{
 		RecordStore:    newFakeRecordReader(),
 		TenantResolver: refusingTenantResolver{},
@@ -459,27 +459,27 @@ func TestHandleTeamRunStream_RefusedTeamAnswers404(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/pipelines/team-a/stream", nil).
 		WithContext(authContext(testClaims()))
-	req.SetPathValue("team", "team-a")
+	req.SetPathValue("tenant", "team-a")
 	rec := httptest.NewRecorder()
-	srv.handleTeamRunStream(rec, req)
+	srv.handleTenantRunStream(rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, body = %s, want 404", rec.Code, rec.Body.String())
 	}
 }
 
-// TestHandleTeamRunStream_FrameCarriesTheNotification proves one record
+// TestHandleTenantRunStream_FrameCarriesTheNotification proves one record
 // yields one frame, with the notification's own kind as the event name and
 // the notification body as data.
-func TestHandleTeamRunStream_FrameCarriesTheNotification(t *testing.T) {
+func TestHandleTenantRunStream_FrameCarriesTheNotification(t *testing.T) {
 	stub := &runFanoutStub{}
 	srv := streamTestServer(
-		fixedTenantResolver{refs: teamStreamRefs()},
+		fixedTenantResolver{refs: tenantStreamRefs()},
 		pipelineGrantAuthorizer([]string{"read"}, "team-a"),
 		stub,
 	)
 
-	rec, stop := startTeamRunStream(t, srv, "payments")
+	rec, stop := startTenantRunStream(t, srv, "payments")
 	defer stop()
 	stub.waitForSubscription(t)
 

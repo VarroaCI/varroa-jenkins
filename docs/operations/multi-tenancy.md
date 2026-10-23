@@ -1,21 +1,21 @@
 # Multi-Tenancy
 
-Use a Kubernetes namespace for each team or workload boundary. A cluster-scoped `Team` grants Varroa access to its namespaces and can create those namespaces.
+Use a Kubernetes namespace for each tenant or workload boundary. A cluster-scoped `Tenant` grants Varroa access to its namespaces and can create those namespaces.
 
-## Onboard a team
+## Onboard a tenant
 
 ```yaml
 apiVersion: varroa.dev/v1alpha1
-kind: Team
+kind: Tenant
 metadata:
   name: payments
 spec:
   displayName: Payments
   subjects:
     - kind: Group
-      name: payments-team
+      name: payments-tenant
   namespaces:
-    - team-payments
+    - tenant-payments
   roleRef: developer
   provisionNamespaces: true
 ```
@@ -23,40 +23,40 @@ spec:
 Apply the resource, then inspect its status:
 
 ```bash
-kubectl apply -f team.yaml
-kubectl get team payments -o yaml
+kubectl apply -f tenant.yaml
+kubectl get tenant payments -o yaml
 ```
 
 `namespaces` must not be empty. `roleRef` defaults to `developer`. `members` names local users; `subjects` names identities from the configured provider.
 
 ## Control namespace access
 
-Only configured deployable namespaces accept controller creation. Configure them through the installation values or a `Team`; then use [Varroa RBAC](../security/varroa-rbac.md) to grant API access and [Jenkins RBAC](../security/jenkins-rbac.md) to grant Jenkins permissions.
+Only configured deployable namespaces accept controller creation. Configure them through the installation values or a `Tenant`; then use [Varroa RBAC](../security/varroa-rbac.md) to grant API access and [Jenkins RBAC](../security/jenkins-rbac.md) to grant Jenkins permissions.
 
-Teams own their namespace membership and bindings. Do not manually edit generated access objects. If a user gets `403`, verify their identity, Team membership, namespace scope, and role binding. If creation is rejected, verify that the namespace is deployable.
+Tenants own their namespace membership and bindings. Do not manually edit generated access objects. If a user gets `403`, verify their identity, Tenant membership, namespace scope, and role binding. If creation is rejected, verify that the namespace is deployable.
 
 ## Onboard a pipelines tenant
 
-A `Team` can also become a pipelines tenant: it shares a cell controller with other teams instead
+A `Tenant` can also become a pipelines tenant: it shares a cell controller with other tenants instead
 of running its own controller.
 
 ```yaml
 apiVersion: varroa.dev/v1alpha1
-kind: Team
+kind: Tenant
 metadata:
   name: payments
 spec:
-  namespaces: ["team-payments"]
+  namespaces: ["tenant-payments"]
   pipelines:
     profile: jenkins-lts
-    agentNamespace: team-payments
+    agentNamespace: tenant-payments
     composedBundleRef:
       name: payments-pipelines
-      namespace: team-payments
+      namespace: tenant-payments
 ```
 
 `pipelines.agentNamespace` must be one of `spec.namespaces`. A `pipelines` block requires `profile` and `agentNamespace`. The API refuses a block without either field with `400`, and the error names the field. A placement reconciler binds the
-`Team` to a cell that matches `pipelines.profile`, and the `Team`'s `Placed` condition reports
+`Tenant` to a cell that matches `pipelines.profile`, and the `Tenant`'s `Placed` condition reports
 the result. See [Cells and pipelines tenants](cells.md) for the cell prerequisites, what a tenant
 gets, and how to troubleshoot a placement or a cell that will not accept it.
 
@@ -83,7 +83,7 @@ A tenant can also keep its runs for a shorter time than the store. The section b
 ## Tenant and job retention windows
 
 A pipelines tenant can keep its runs for less time than the store-wide `runs` window. An operator
-sets the window on the `Team`:
+sets the window on the `Tenant`:
 
 ```yaml
 spec:
@@ -114,7 +114,7 @@ retention round deletes at most 1000 runs for each job and 10000 runs in total. 
 drains over several rounds. The build-number watermark and the claim ledger stay, so no build
 number is reused.
 
-The team home page shows the effective window for the team and for each job rule. Only an
+The tenant home page shows the effective window for the tenant and for each job rule. Only an
 operator can change `retention`. A pipelines administrator of the tenant cannot.
 
 On a cell, `buildDiscarder` on a job does not change the record store. Use `retention` instead.
@@ -174,13 +174,13 @@ tenant does not own.
 ## Export a job or a lock to another tenant
 
 A pipelines tenant grants another tenant access to one of its jobs or its fleet locks on its own
-`Team`, under `spec.pipelines.exports`:
+`Tenant`, under `spec.pipelines.exports`:
 
 ```yaml
 spec:
   pipelines:
     profile: jenkins-lts
-    agentNamespace: team-platform
+    agentNamespace: tenant-platform
     exports:
       - job: "release/*"
         callers: ["payments", "search"]
@@ -188,7 +188,7 @@ spec:
         callers: ["payments"]
 ```
 
-Each entry sets exactly one of `job` or `locks`, plus `callers`, the list of Team names allowed
+Each entry sets exactly one of `job` or `locks`, plus `callers`, the list of Tenant names allowed
 to use it. An edit to `exports` takes one reconcile tick to reach the record store that enforces
 the grant. See [Cross-tenant pipelines](../config/cross-tenant-pipelines.md) for the caller-side
 `varroa` steps and the fleet lock.

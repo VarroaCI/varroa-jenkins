@@ -26,9 +26,9 @@ type stampOps struct {
 	calls *atomic.Int32
 	// block holds PullRequest and Issue until it is closed, when it is not nil.
 	block chan struct{}
-	// blockTeam limits block to the pull requests of one Team. An empty
-	// blockTeam holds every pull request.
-	blockTeam string
+	// blockTenant limits block to the pull requests of one Tenant. An empty
+	// blockTenant holds every pull request.
+	blockTenant string
 }
 
 func (s stampOps) Check(ctx context.Context, _ forgeapi.CheckRequest) forgeapi.CheckReply {
@@ -66,7 +66,7 @@ func (s stampOps) PullRequest(ctx context.Context, req forgeapi.PullRequestReque
 	if s.calls != nil {
 		s.calls.Add(1)
 	}
-	if s.block != nil && (s.blockTeam == "" || req.Team == s.blockTeam) {
+	if s.block != nil && (s.blockTenant == "" || req.Tenant == s.blockTenant) {
 		select {
 		case <-s.block:
 		case <-ctx.Done():
@@ -85,17 +85,17 @@ func prBody(t *testing.T) []byte {
 	return prBodyDeadline(t, time.Now().Add(forgeapi.PullRequestTimeout))
 }
 
-// prBodyDeadline returns a pull-request request for the payments Team that
+// prBodyDeadline returns a pull-request request for the payments Tenant that
 // carries the deadline d.
 func prBodyDeadline(t *testing.T, d time.Time) []byte {
 	t.Helper()
-	return prBodyTeam(t, "payments", d)
+	return prBodyTenant(t, "payments", d)
 }
 
-// prBodyTeam returns a pull-request request for team that carries the deadline d.
-func prBodyTeam(t *testing.T, team string, d time.Time) []byte {
+// prBodyTenant returns a pull-request request for tenant that carries the deadline d.
+func prBodyTenant(t *testing.T, tenant string, d time.Time) []byte {
 	t.Helper()
-	b, err := json.Marshal(forgeapi.PullRequestRequest{Team: team, Repo: "https://git.example.org/a/b", Branch: "varroa/propose-pipeline", Title: "t", Body: "b", CommitMessage: "c", Files: []forgeapi.File{{Path: "Jenkinsfile", Content: "x"}}, Deadline: d})
+	b, err := json.Marshal(forgeapi.PullRequestRequest{Tenant: tenant, Repo: "https://git.example.org/a/b", Branch: "varroa/propose-pipeline", Title: "t", Body: "b", CommitMessage: "c", Files: []forgeapi.File{{Path: "Jenkinsfile", Content: "x"}}, Deadline: d})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func prBodyTeam(t *testing.T, team string, d time.Time) []byte {
 }
 
 // TestHandleForgePullRequest_NonOwnerSendsNoReply checks that only the shard
-// owner of the Team opens the pull request and answers.
+// owner of the Tenant opens the pull request and answers.
 func TestHandleForgePullRequest_NonOwnerSendsNoReply(t *testing.T) {
 	ring := sharding.NewRing(8)
 	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{id: "x"}, ownerEnter(map[int]bool{}, ring), keylock.New(), prBody(t))
@@ -192,7 +192,7 @@ func issueBody(t *testing.T) []byte {
 // issueBodyDeadline returns an issue request that carries the deadline d.
 func issueBodyDeadline(t *testing.T, d time.Time) []byte {
 	t.Helper()
-	b, err := json.Marshal(forgeapi.IssueRequest{Team: "payments", Title: "t", Body: "b", Deadline: d})
+	b, err := json.Marshal(forgeapi.IssueRequest{Tenant: "payments", Title: "t", Body: "b", Deadline: d})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func issueBodyDeadline(t *testing.T, d time.Time) []byte {
 }
 
 // TestHandleForgeIssue_NotShardOwnerSendsNoReply checks that only the shard
-// owner of the Team opens the issue and answers.
+// owner of the Tenant opens the issue and answers.
 func TestHandleForgeIssue_NotShardOwnerSendsNoReply(t *testing.T) {
 	ring := sharding.NewRing(8)
 	got := handleForgeIssue(context.Background(), slog.Default(), stampOps{id: "x"}, ownerEnter(map[int]bool{}, ring), "varroa-system", issueBody(t))
@@ -221,7 +221,7 @@ func ownerEnter(held map[int]bool, ring *sharding.Ring) shardEnterer {
 
 func checkBody(t *testing.T) []byte {
 	t.Helper()
-	b, err := json.Marshal(forgeapi.CheckRequest{Team: "payments", Repo: "https://git.example.org/team/app"})
+	b, err := json.Marshal(forgeapi.CheckRequest{Tenant: "payments", Repo: "https://git.example.org/team/app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func checkBody(t *testing.T) []byte {
 
 func readBody(t *testing.T) []byte {
 	t.Helper()
-	b, err := json.Marshal(forgeapi.ReadRequest{Team: "payments", Repo: "https://git.example.org/team/app", Path: "README.md"})
+	b, err := json.Marshal(forgeapi.ReadRequest{Tenant: "payments", Repo: "https://git.example.org/team/app", Path: "README.md"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,10 +417,10 @@ func TestForgeRunners_OnlyOwnerReplies(t *testing.T) {
 	}
 }
 
-// TestForgeRunners_SecondPullRequestForTeamIsBusy checks that a second pull
-// request for a Team that runs answers pull_request_busy without a forge call,
+// TestForgeRunners_SecondPullRequestForTenantIsBusy checks that a second pull
+// request for a Tenant that runs answers pull_request_busy without a forge call,
 // and that the first request still completes.
-func TestForgeRunners_SecondPullRequestForTeamIsBusy(t *testing.T) {
+func TestForgeRunners_SecondPullRequestForTenantIsBusy(t *testing.T) {
 	s := startLedgerActionNATS(t)
 	url := s.ClientURL()
 	ring := sharding.NewRing(8)
@@ -437,7 +437,7 @@ func TestForgeRunners_SecondPullRequestForTeamIsBusy(t *testing.T) {
 	t.Cleanup(client.Close)
 	subject := bus.OperatorForgeSubject("core", forgeapi.VerbPullRequest)
 
-	// The first request holds the Team lock until the test closes block.
+	// The first request holds the Tenant lock until the test closes block.
 	inboxA := client.NewRespInbox()
 	subA, err := client.SubscribeSync(inboxA)
 	if err != nil {
@@ -493,10 +493,10 @@ func TestForgeRunners_SecondPullRequestForTeamIsBusy(t *testing.T) {
 	}
 }
 
-// TestForgeRunners_BusyTeamDoesNotStarveAnotherTeam checks that repeated pull
-// requests for a busy Team do not hold the bus slots, so a pull request for
-// another Team still runs.
-func TestForgeRunners_BusyTeamDoesNotStarveAnotherTeam(t *testing.T) {
+// TestForgeRunners_BusyTenantDoesNotStarveAnotherTenant checks that repeated pull
+// requests for a busy Tenant do not hold the bus slots, so a pull request for
+// another Tenant still runs.
+func TestForgeRunners_BusyTenantDoesNotStarveAnotherTenant(t *testing.T) {
 	s := startLedgerActionNATS(t)
 	url := s.ClientURL()
 	ring := sharding.NewRing(8)
@@ -507,7 +507,7 @@ func TestForgeRunners_BusyTeamDoesNotStarveAnotherTeam(t *testing.T) {
 	var calls atomic.Int32
 	block := make(chan struct{})
 	startForgeReplica(t, url, "A", forgeapi.VerbPullRequest, ring, held,
-		stampOps{id: "A", calls: &calls, block: block, blockTeam: "payments"})
+		stampOps{id: "A", calls: &calls, block: block, blockTenant: "payments"})
 
 	client, err := nats.Connect(url)
 	if err != nil {
@@ -521,7 +521,7 @@ func TestForgeRunners_BusyTeamDoesNotStarveAnotherTeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bodyA := prBodyTeam(t, "payments", time.Now().Add(forgeapi.PullRequestTimeout))
+	bodyA := prBodyTenant(t, "payments", time.Now().Add(forgeapi.PullRequestTimeout))
 	for i := 0; i < 50 && calls.Load() == 0; i++ {
 		if err := client.PublishRequest(subject, inboxA, bodyA); err != nil {
 			t.Fatal(err)
@@ -540,7 +540,7 @@ func TestForgeRunners_BusyTeamDoesNotStarveAnotherTeam(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := client.PublishRequest(subject, inbox, prBodyTeam(t, "payments", time.Now().Add(forgeapi.PullRequestTimeout))); err != nil {
+		if err := client.PublishRequest(subject, inbox, prBodyTenant(t, "payments", time.Now().Add(forgeapi.PullRequestTimeout))); err != nil {
 			t.Fatal(err)
 		}
 		msg, err := nextQueuedReply(sub, 3*time.Second)
@@ -561,12 +561,12 @@ func TestForgeRunners_BusyTeamDoesNotStarveAnotherTeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.PublishRequest(subject, inboxB, prBodyTeam(t, "billing", time.Now().Add(forgeapi.PullRequestTimeout))); err != nil {
+	if err := client.PublishRequest(subject, inboxB, prBodyTenant(t, "billing", time.Now().Add(forgeapi.PullRequestTimeout))); err != nil {
 		t.Fatal(err)
 	}
 	msgB, err := nextQueuedReply(subB, 3*time.Second)
 	if err != nil {
-		t.Fatalf("the billing request waited behind the busy payments Team: %v", err)
+		t.Fatalf("the billing request waited behind the busy payments Tenant: %v", err)
 	}
 	var repB forgeapi.PullRequestReply
 	if err := json.Unmarshal(msgB.Data, &repB); err != nil {
@@ -803,10 +803,10 @@ func stampOf(t *testing.T, verb string, data []byte) string {
 	return rep.Revision
 }
 
-// TestForgeRunners_OtherTeamPullRequestRunsBesideASlowOne checks that a slow
-// pull request for one Team does not hold back a pull request for another Team
+// TestForgeRunners_OtherTenantPullRequestRunsBesideASlowOne checks that a slow
+// pull request for one Tenant does not hold back a pull request for another Tenant
 // on the same replica.
-func TestForgeRunners_OtherTeamPullRequestRunsBesideASlowOne(t *testing.T) {
+func TestForgeRunners_OtherTenantPullRequestRunsBesideASlowOne(t *testing.T) {
 	s := startLedgerActionNATS(t)
 	url := s.ClientURL()
 	ring := sharding.NewRing(8)
@@ -817,7 +817,7 @@ func TestForgeRunners_OtherTeamPullRequestRunsBesideASlowOne(t *testing.T) {
 	var calls atomic.Int32
 	block := make(chan struct{})
 	startForgeReplica(t, url, "A", forgeapi.VerbPullRequest, ring, held,
-		stampOps{id: "A", calls: &calls, block: block, blockTeam: "payments"})
+		stampOps{id: "A", calls: &calls, block: block, blockTenant: "payments"})
 
 	client, err := nats.Connect(url)
 	if err != nil {
@@ -833,7 +833,7 @@ func TestForgeRunners_OtherTeamPullRequestRunsBesideASlowOne(t *testing.T) {
 	}
 	// The runner subscribes in its own goroutine, so an early publish is
 	// dropped. Publish again until the forge sees the request.
-	bodyA := prBodyTeam(t, "payments", time.Now().Add(forgeapi.PullRequestTimeout))
+	bodyA := prBodyTenant(t, "payments", time.Now().Add(forgeapi.PullRequestTimeout))
 	for i := 0; i < 50 && calls.Load() == 0; i++ {
 		if err := client.PublishRequest(subject, inboxA, bodyA); err != nil {
 			t.Fatal(err)
@@ -849,7 +849,7 @@ func TestForgeRunners_OtherTeamPullRequestRunsBesideASlowOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bodyB := prBodyTeam(t, "billing", time.Now().Add(forgeapi.PullRequestTimeout))
+	bodyB := prBodyTenant(t, "billing", time.Now().Add(forgeapi.PullRequestTimeout))
 	if err := client.PublishRequest(subject, inboxB, bodyB); err != nil {
 		t.Fatal(err)
 	}
@@ -882,10 +882,10 @@ func TestForgeRunners_OtherTeamPullRequestRunsBesideASlowOne(t *testing.T) {
 	}
 }
 
-// TestHandleForgePullRequest_HeldTeamAnswersBusy checks that a pull request for a
-// Team whose lock is held is refused at once with pull_request_busy, and makes
+// TestHandleForgePullRequest_HeldTenantAnswersBusy checks that a pull request for a
+// Tenant whose lock is held is refused at once with pull_request_busy, and makes
 // no forge call.
-func TestHandleForgePullRequest_HeldTeamAnswersBusy(t *testing.T) {
+func TestHandleForgePullRequest_HeldTenantAnswersBusy(t *testing.T) {
 	ring := sharding.NewRing(8)
 	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
 	locks := keylock.New()
@@ -916,9 +916,9 @@ func TestHandleForgePullRequest_HeldTeamAnswersBusy(t *testing.T) {
 	}
 }
 
-// TestHandleForgePullRequest_FreedTeamRunsAgain checks that after a busy refusal
-// and an unlock, a new pull request for the Team runs.
-func TestHandleForgePullRequest_FreedTeamRunsAgain(t *testing.T) {
+// TestHandleForgePullRequest_FreedTenantRunsAgain checks that after a busy refusal
+// and an unlock, a new pull request for the Tenant runs.
+func TestHandleForgePullRequest_FreedTenantRunsAgain(t *testing.T) {
 	ring := sharding.NewRing(8)
 	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
 	locks := keylock.New()
@@ -946,16 +946,16 @@ func TestHandleForgePullRequest_FreedTeamRunsAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !rep.OK {
-		t.Fatalf("reply %+v, want OK after the Team lock was freed", rep.Status)
+		t.Fatalf("reply %+v, want OK after the Tenant lock was freed", rep.Status)
 	}
 	if n := calls.Load(); n != 1 {
 		t.Fatalf("forge calls %d, want 1", n)
 	}
 }
 
-// TestHandleForgePullRequest_OtherTeamIgnoresHeldLock checks that a lock held
-// for one Team does not delay a pull request for another Team.
-func TestHandleForgePullRequest_OtherTeamIgnoresHeldLock(t *testing.T) {
+// TestHandleForgePullRequest_OtherTenantIgnoresHeldLock checks that a lock held
+// for one Tenant does not delay a pull request for another Tenant.
+func TestHandleForgePullRequest_OtherTenantIgnoresHeldLock(t *testing.T) {
 	ring := sharding.NewRing(8)
 	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
 	locks := keylock.New()
@@ -967,7 +967,7 @@ func TestHandleForgePullRequest_OtherTeamIgnoresHeldLock(t *testing.T) {
 	start := time.Now()
 	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, ownerEnter(held, ring), locks, prBody(t))
 	if waited := time.Since(start); waited > 2*time.Second {
-		t.Fatalf("the call took %v behind another Team's lock", waited)
+		t.Fatalf("the call took %v behind another Tenant's lock", waited)
 	}
 	var rep forgeapi.PullRequestReply
 	if err := json.Unmarshal(got, &rep); err != nil {

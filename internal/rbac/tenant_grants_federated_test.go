@@ -11,8 +11,8 @@ import (
 
 // federatedGrantCopy returns a tenant-member copy with the source-binding
 // annotation the federation projection writes.
-func federatedGrantCopy(name, team, jobs, from string, subjects ...v1alpha1.SubjectRef) *v1alpha1.JenkinsRoleBinding {
-	b := federatedTenantCopy(name, team, jobs, subjects...)
+func federatedGrantCopy(name, tenant, jobs, from string, subjects ...v1alpha1.SubjectRef) *v1alpha1.JenkinsRoleBinding {
+	b := federatedTenantCopy(name, tenant, jobs, subjects...)
 	b.Annotations[AnnotationFederatedBindings] = from
 	return b
 }

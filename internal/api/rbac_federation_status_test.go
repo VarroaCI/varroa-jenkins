@@ -95,14 +95,14 @@ func TestFederationStatusReportsFederatedPerHive(t *testing.T) {
 
 func TestFederationStatusRecordsSkipOnEveryHive(t *testing.T) {
 	r, _, store := statusFederationReconciler(t, []bus.ClusterInfo{{Name: "dev-cluster"}, {Name: "edge"}})
-	addSourceBinding(t, r, store, &v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "team-empty"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{}}})
+	addSourceBinding(t, r, store, &v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "tenant-empty"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{}}})
 	addSourceBinding(t, r, store, &v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "tenant"}, Spec: v1alpha1.VarroaRoleBindingSpec{
 		RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "bob"}},
 		Scope: &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "team-a"}}},
 	}})
 
 	r.Reconcile(context.Background())
-	for name, reason := range map[string]string{"team-empty": rbac.SkipNoSubjects, "tenant": rbac.SkipNoTenantWrite} {
+	for name, reason := range map[string]string{"tenant-empty": rbac.SkipNoSubjects, "tenant": rbac.SkipNoTenantWrite} {
 		status := storedStatus(t, store, name)
 		if len(status.Federation) != 2 {
 			t.Fatalf("%s federation = %#v, want one entry per hive", name, status.Federation)

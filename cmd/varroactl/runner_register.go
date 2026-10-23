@@ -36,13 +36,13 @@ func addRunnerGroup(root *cobra.Command) {
 	}
 
 	registerCmd := &cobra.Command{
-		Use:   "register NAME --tenant TEAM --remote-fs PATH",
+		Use:   "register NAME --tenant TENANT --remote-fs PATH",
 		Short: "Register an external runner and print the launch instruction",
 		Args:  cobra.MaximumNArgs(1),
 		RunE:  runRunnerRegister,
 	}
-	registerCmd.Flags().String("tenant", "", "the pipelines Team that owns this runner (required)")
-	registerCmd.Flags().StringSlice("labels", nil, "unprefixed label suffixes; the operator prefixes each one with <team>-")
+	registerCmd.Flags().String("tenant", "", "the pipelines Tenant that owns this runner (required)")
+	registerCmd.Flags().StringSlice("labels", nil, "unprefixed label suffixes; the operator prefixes each one with <tenant>-")
 	registerCmd.Flags().String("launcher", "inbound", "connection direction: inbound or ssh")
 	registerCmd.Flags().String("host", "", "the SSH target (ssh launcher only)")
 	registerCmd.Flags().Int("port", 0, "the SSH port (ssh launcher only)")
@@ -60,7 +60,7 @@ func addRunnerGroup(root *cobra.Command) {
 		Args:  cobra.NoArgs,
 		RunE:  makeRunGet(runnersNounOpts),
 	}
-	listCmd.Flags().String("tenant", "", "filter by tenant (team)")
+	listCmd.Flags().String("tenant", "", "filter by tenant (tenant)")
 	runnerCmd.AddCommand(listCmd)
 
 	deleteCmd := &cobra.Command{
@@ -93,7 +93,7 @@ func runRunnerRegister(cmd *cobra.Command, args []string) error {
 	launcher := client.ComponentsSchemasRunnerSpecLauncher(launcherFlag)
 
 	spec := client.ComponentsSchemasRunnerSpec{
-		Team:     tenant,
+		Tenant:   tenant,
 		Launcher: launcher,
 		RemoteFS: remoteFS,
 	}
@@ -259,7 +259,7 @@ func printRunnerRegistration(cmd *cobra.Command, tenant, name string, entry *cli
 // inboundInstruction renders the exact launch command design D12 states:
 //
 //	java -jar agent.jar -url https://<door host>/runners/<token>/ \
-//	  -name <team>-<runner> -secret <token> -webSocket -workDir <remoteFS>
+//	  -name <tenant>-<runner> -secret <token> -webSocket -workDir <remoteFS>
 func inboundInstruction(doorURL, nodeName, token, remoteFS string) string {
 	return fmt.Sprintf(
 		"java -jar agent.jar -url %s \\\n  -name %s -secret %s -webSocket -workDir %s",
@@ -287,7 +287,7 @@ func sshInstruction(spec client.ComponentsSchemasRunnerSpec) string {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "SSH runner. The cell dials %s:%d.\n", host, port)
-	fmt.Fprintf(&b, "Create the Secret %q in the Team's agent namespace.\n", cred)
+	fmt.Fprintf(&b, "Create the Secret %q in the Tenant's agent namespace.\n", cred)
 	fmt.Fprintln(&b, "The Secret needs the label varroa.dev/runner-credential=true.")
 	fmt.Fprintln(&b, "The Secret needs the data keys username, privateKey, and, optionally, passphrase.")
 	fmt.Fprintf(&b, "Remote FS: %s\n", spec.RemoteFS)

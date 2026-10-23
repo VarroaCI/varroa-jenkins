@@ -13,7 +13,7 @@ import (
 func TestJobPathEncoding(t *testing.T) {
 	mux := http.NewServeMux()
 	var got string
-	mux.HandleFunc("GET /pipelines/{team}/jobs/{job}/runs", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /pipelines/{tenant}/jobs/{job}/runs", func(w http.ResponseWriter, r *http.Request) {
 		got = r.PathValue("job")
 		w.WriteHeader(http.StatusOK)
 	})

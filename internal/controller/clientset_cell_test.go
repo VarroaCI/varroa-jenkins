@@ -190,14 +190,14 @@ func TestCreateStatefulSet_PoolCellPodLabel(t *testing.T) {
 	t.Run("the operator value wins over podLabels and the overlay", func(t *testing.T) {
 		spec := base()
 		spec.CellPool = "big"
-		spec.PodOverrides = &v1alpha1.PodOverrides{PodLabels: map[string]string{cells.LabelCellPool: "other", "team": "a"}}
+		spec.PodOverrides = &v1alpha1.PodOverrides{PodLabels: map[string]string{cells.LabelCellPool: "other", "tenant": "a"}}
 		spec.ResourceOverlay = &v1alpha1.ResourceOverlay{StatefulSet: "spec:\n  template:\n    metadata:\n      labels:\n        varroa.dev/cell-pool: overlay\n"}
 		labels := createdPodLabels(t, spec)
 		if labels[cells.LabelCellPool] != "big" {
 			t.Errorf("pod label = %q, want big", labels[cells.LabelCellPool])
 		}
-		if labels["team"] != "a" {
-			t.Errorf("podLabels entry team = %q, want a", labels["team"])
+		if labels["tenant"] != "a" {
+			t.Errorf("podLabels entry tenant = %q, want a", labels["tenant"])
 		}
 	})
 }

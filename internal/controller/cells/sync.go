@@ -13,7 +13,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
-// SyncPolicy carries the seven Team.spec.pipelines ledger and rehydration
+// SyncPolicy carries the seven Tenant.spec.pipelines ledger and rehydration
 // settings, plus the tenant's export grants, that an "announce" request's
 // policy field holds (design D6, D10). It is the zero value for a
 // controller with no cell role.
@@ -30,22 +30,22 @@ type SyncPolicy struct {
 	// the jobs and locks this tenant exports, and the callers each entry
 	// admits. Nil for a controller with no cell role, or for a tenant
 	// that exports nothing.
-	Exports []v1alpha1.TeamExport
+	Exports []v1alpha1.TenantExport
 
 	// Retention carries the tenant's record-store windows (the tenant
 	// window and the per-job rules). Nil for a tenant that sets none.
-	Retention *v1alpha1.TeamPipelinesRetention
+	Retention *v1alpha1.TenantPipelinesRetention
 
 	// ConcurrencyLimits carries the tenant's named job-set build caps. Nil
 	// for a tenant that sets none.
-	ConcurrencyLimits []v1alpha1.TeamConcurrencyLimit
+	ConcurrencyLimits []v1alpha1.TenantConcurrencyLimit
 
 	// CellMaxRuns is the per-tenant build cap of the pool that owns the
 	// tenant's cell. Zero means no cap.
 	CellMaxRuns int32
 
 	// Webhook carries the tenant's completion webhook, resolved from the
-	// Secret the Team names. Nil when the tenant declares no webhook or
+	// Secret the Tenant names. Nil when the tenant declares no webhook or
 	// its Secret is not usable. It never travels in the policy JSON; the
 	// announce request carries it on its own field.
 	Webhook *WebhookSync
@@ -87,11 +87,11 @@ func webhookSyncEqual(a, b *WebhookSync) bool {
 }
 
 // SyncPolicyFromPipelines reads the seven settings and the export grants
-// off a Team's spec.pipelines, applying the same defaults
+// off a Tenant's spec.pipelines, applying the same defaults
 // api/v1alpha1's Effective* accessors apply. A nil spec answers the zero
 // SyncPolicy, matching a controller with no cell role, and contributes no
 // export policy.
-func SyncPolicyFromPipelines(p *v1alpha1.TeamPipelinesSpec) SyncPolicy {
+func SyncPolicyFromPipelines(p *v1alpha1.TenantPipelinesSpec) SyncPolicy {
 	if p == nil {
 		return SyncPolicy{}
 	}
@@ -136,7 +136,7 @@ type DeadInstance struct {
 type AnnounceMember struct {
 	Cell      string
 	Namespace string
-	// Role is v1alpha1.TeamMemberRoleActive or TeamMemberRoleStandby.
+	// Role is v1alpha1.TenantMemberRoleActive or TenantMemberRoleStandby.
 	Role string
 	// Slot is set only on an active member.
 	Slot *int32
@@ -196,7 +196,7 @@ func membersEqual(a, b []AnnounceMember) bool {
 
 // AnnounceRequest is one tenant's placement announcement (design D6, kind
 // "announce"). The caller sends it immediately before a write that raises
-// Team.status.placement.generation, at the same generation when the cell
+// Tenant.status.placement.generation, at the same generation when the cell
 // instance, the policy, or the rehydration state changes, and once every
 // ten minutes as a resync.
 type AnnounceRequest struct {
@@ -222,7 +222,7 @@ type AnnounceRequest struct {
 	Members []AnnounceMember
 	// AgentNamespace is the tenant's spec.pipelines.agentNamespace. The
 	// core reads it from the placement row, because a member cluster
-	// holds the Team object.
+	// holds the Tenant object.
 	AgentNamespace string
 }
 
@@ -340,7 +340,7 @@ type HomesRequest struct {
 type HomesMember struct {
 	Cell      string
 	Namespace string
-	// Role is v1alpha1.TeamMemberRoleActive or TeamMemberRoleStandby.
+	// Role is v1alpha1.TenantMemberRoleActive or TenantMemberRoleStandby.
 	Role string
 	// Slot is set only on an active member.
 	Slot *int32

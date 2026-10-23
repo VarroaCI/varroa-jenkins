@@ -11,11 +11,11 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
-// validateMarker posts marker to /pipelines/{team}/markers/validate for
-// team "ctrl-a" and returns the recorded response.
+// validateMarker posts marker to /pipelines/{tenant}/markers/validate for
+// tenant "ctrl-a" and returns the recorded response.
 func validateMarker(t *testing.T, srv *Server, marker string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := doWriteRequest("/pipelines/ctrl-a/markers/validate", map[string]string{"team": "ctrl-a"}, testClaims(),
+	req := doWriteRequest("/pipelines/ctrl-a/markers/validate", map[string]string{"tenant": "ctrl-a"}, testClaims(),
 		map[string]string{"marker": marker})
 	rec := httptest.NewRecorder()
 	srv.handleValidatePipelineMarker(rec, req)
@@ -90,8 +90,8 @@ func TestHandleValidatePipelineMarker_ValidMarkerResolvesTemplate(t *testing.T) 
 // TestHandleValidatePipelineMarker_UnauthorizedGetsNoFindings asserts
 // task 7.2a's "an unauthorized caller gets ... no findings and no
 // template name" case: a caller with no pipelines:read grant on the
-// tenant gets the same error response the team's other pipeline reads
-// answer for an unreadable team (design D1's anti-enumeration 404, per
+// tenant gets the same error response the tenant's other pipeline reads
+// answer for an unreadable tenant (design D1's anti-enumeration 404, per
 // TenantResolver.Resolve's own contract), never the findings shape.
 func TestHandleValidatePipelineMarker_UnauthorizedGetsNoFindings(t *testing.T) {
 	client := newTemplateFixture(t)
@@ -114,10 +114,10 @@ func TestHandleValidatePipelineMarker_UnauthorizedGetsNoFindings(t *testing.T) {
 	}
 }
 
-// placedTeamMarkerTemplatesYAML delivers one PipelineTemplate document,
+// placedTenantMarkerTemplatesYAML delivers one PipelineTemplate document,
 // used as either the cell's own bundle content or the tenant's own
-// bundle content in the placed-Team tests below.
-func placedTeamMarkerTemplatesYAML(name, version string) string {
+// bundle content in the placed-Tenant tests below.
+func placedTenantMarkerTemplatesYAML(name, version string) string {
 	return `
 templates:
   - apiVersion: varroa.dev/v1
@@ -133,12 +133,12 @@ templates:
 `
 }
 
-// newPlacedTeamMarkerFixture seeds a placed Team "payments" on cell
+// newPlacedTenantMarkerFixture seeds a placed Tenant "payments" on cell
 // "ctrl-a" (namespace "test-ns"): the cell's own bundle delivers
-// "cell-template", and the Team's own tenant bundle
+// "cell-template", and the Tenant's own tenant bundle
 // (spec.pipelines.composedBundleRef) delivers "payments-template".
 // Design D13: the marker validate endpoint reads the tenant bundle only.
-func newPlacedTeamMarkerFixture(t *testing.T) *fakeResourceClient {
+func newPlacedTenantMarkerFixture(t *testing.T) *fakeResourceClient {
 	t.Helper()
 	client := newFakeResourceClient()
 	client.controllers = map[string]*v1alpha1.Controller{
@@ -158,23 +158,23 @@ func newPlacedTeamMarkerFixture(t *testing.T) *fakeResourceClient {
 		},
 	}
 	client.configMaps = map[string]map[string]string{
-		"bundle-cell-content":   {"pipeline-templates.yaml": placedTeamMarkerTemplatesYAML("cell-template", "1.0.0")},
-		"bundle-tenant-content": {"pipeline-templates.yaml": placedTeamMarkerTemplatesYAML("payments-template", "1.0.0")},
+		"bundle-cell-content":   {"pipeline-templates.yaml": placedTenantMarkerTemplatesYAML("cell-template", "1.0.0")},
+		"bundle-tenant-content": {"pipeline-templates.yaml": placedTenantMarkerTemplatesYAML("payments-template", "1.0.0")},
 	}
-	seedTeam(t, client.crdStore, placedTeamObjectWithBundle("payments", "core", "test-ns", "ctrl-a", "bundle-tenant", "test-ns"))
+	seedTenant(t, client.crdStore, placedTenantObjectWithBundle("payments", "core", "test-ns", "ctrl-a", "test-ns"))
 	return client
 }
 
-// TestHandleValidatePipelineMarker_PlacedTeamUsesTenantBundle asserts
-// design D13: a placed Team's marker validation reads the tenant's own
+// TestHandleValidatePipelineMarker_PlacedTenantUsesTenantBundle asserts
+// design D13: a placed Tenant's marker validation reads the tenant's own
 // bundle, not the cell's, so a template the tenant bundle delivers
 // resolves even though the cell bundle does not carry it.
-func TestHandleValidatePipelineMarker_PlacedTeamUsesTenantBundle(t *testing.T) {
-	client := newPlacedTeamMarkerFixture(t)
+func TestHandleValidatePipelineMarker_PlacedTenantUsesTenantBundle(t *testing.T) {
+	client := newPlacedTenantMarkerFixture(t)
 	authz := resolverAuthorizer("payments")
 	srv := pipelinesTestServer(client, authz, newFakeRecordReader(), nil)
 
-	req := doWriteRequest("/pipelines/payments/markers/validate", map[string]string{"team": "payments"}, testClaims(),
+	req := doWriteRequest("/pipelines/payments/markers/validate", map[string]string{"tenant": "payments"}, testClaims(),
 		map[string]string{"marker": "apiVersion: varroa.dev/v1\nkind: Pipeline\ntemplate: payments-template\ntemplateVersion: \"1\"\n"})
 	rec := httptest.NewRecorder()
 	srv.handleValidatePipelineMarker(rec, req)
@@ -199,11 +199,11 @@ func TestHandleValidatePipelineMarker_PlacedTeamUsesTenantBundle(t *testing.T) {
 // bundle, and that the tenant's own bundle never delivered, is invisible
 // to the tenant's marker validation.
 func TestHandleValidatePipelineMarker_CellBundleOnlyTemplateNotVisible(t *testing.T) {
-	client := newPlacedTeamMarkerFixture(t)
+	client := newPlacedTenantMarkerFixture(t)
 	authz := resolverAuthorizer("payments")
 	srv := pipelinesTestServer(client, authz, newFakeRecordReader(), nil)
 
-	req := doWriteRequest("/pipelines/payments/markers/validate", map[string]string{"team": "payments"}, testClaims(),
+	req := doWriteRequest("/pipelines/payments/markers/validate", map[string]string{"tenant": "payments"}, testClaims(),
 		map[string]string{"marker": "apiVersion: varroa.dev/v1\nkind: Pipeline\ntemplate: cell-template\ntemplateVersion: \"1\"\n"})
 	rec := httptest.NewRecorder()
 	srv.handleValidatePipelineMarker(rec, req)
@@ -224,9 +224,9 @@ func TestHandleValidatePipelineMarker_CellBundleOnlyTemplateNotVisible(t *testin
 }
 
 // TestHandleValidatePipelineMarker_NoBundleReportsOneFinding asserts the
-// varroa-cli delta's "A team with no bundle produces a finding" case: a
+// varroa-cli delta's "A tenant with no bundle produces a finding" case: a
 // controller with no composed bundle at all delivers no template, so
-// validation reports one finding naming the team.
+// validation reports one finding naming the tenant.
 func TestHandleValidatePipelineMarker_NoBundleReportsOneFinding(t *testing.T) {
 	client := newFakeResourceClient()
 	client.controllers = map[string]*v1alpha1.Controller{

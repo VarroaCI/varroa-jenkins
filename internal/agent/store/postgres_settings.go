@@ -83,8 +83,8 @@ type settingsJSON struct {
 	Provider          string            `json:"provider"`
 	Model             string            `json:"model"`
 	DataSharing       string            `json:"data_sharing"`
-	// TeamAgentUnattended holds the unattended grants, keyed namespace/name.
-	TeamAgentUnattended map[string]agent.UnattendedGrant `json:"team_agent_unattended"`
+	// TenantAgentUnattended holds the unattended grants, keyed namespace/name.
+	TenantAgentUnattended map[string]agent.UnattendedGrant `json:"tenant_agent_unattended"`
 }
 
 // decodeSettingsJSON reads the settings column into st. A user scope takes
@@ -106,7 +106,7 @@ func decodeSettingsJSON(raw []byte, scope string, st *agent.Settings) error {
 	st.Provider = w.Provider
 	st.Model = w.Model
 	st.DataSharing = agent.DataLogs
-	st.TeamAgentUnattended = w.TeamAgentUnattended
+	st.TenantAgentUnattended = w.TenantAgentUnattended
 	if w.Enabled != nil {
 		st.Enabled = *w.Enabled
 	}

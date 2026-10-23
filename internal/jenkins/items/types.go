@@ -296,7 +296,7 @@ type Trigger struct {
 
 // GenericTrigger starts a build when a webhook call reaches the
 // generic-webhook-trigger endpoint with this token. The token is the
-// job's own secret. A tenant door call must carry "<team>:<name>".
+// job's own secret. A tenant door call must carry "<tenant>:<name>".
 type GenericTrigger struct {
 	Token                  string            `yaml:"token"`
 	CauseString            string            `yaml:"causeString,omitempty"`

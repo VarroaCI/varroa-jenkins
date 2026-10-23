@@ -98,7 +98,7 @@ func TestInjectPipelineTemplates_JenkinsfileBodySurvives(t *testing.T) {
 
 // TestInjectPipelineTemplates_AppendsAcrossCalls proves the injector never
 // replaces an earlier call's entries: the controller's own bundle (folder
-// "") and each placed tenant's fragment (folder <team>) can each call this
+// "") and each placed tenant's fragment (folder <tenant>) can each call this
 // once, in turn, and every entry survives. The two calls deliver different
 // identities (name+version), so this proves append behavior only; the
 // identity-collision and dedup rules across calls have their own tests

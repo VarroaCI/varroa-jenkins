@@ -72,7 +72,7 @@ func TestHandleControllerJenkinsLink(t *testing.T) {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	buildNo := int64(12)
 
-	t.Run("cell run answers the build page under the Team", func(t *testing.T) {
+	t.Run("cell run answers the build page under the Tenant", func(t *testing.T) {
 		reader := newFakeRecordReader()
 		reader.addRun(recordstore.Run{
 			RunID: "run-cell", Cluster: "core", Namespace: "test-ns", Cell: "ctrl",

@@ -25,10 +25,10 @@ clusterQuery:
   schema:
     type: string
 
-teamQuery:
-  name: team
+tenantQuery:
+  name: tenant
   in: query
-  description: Team name filter for the runner list.
+  description: Tenant name filter for the runner list.
   required: false
   schema:
     type: string
@@ -65,11 +65,11 @@ force:
   schema:
     type: boolean
 
-team:
-  name: team
+tenant:
+  name: tenant
   in: path
   description: >
-    Team or controller name that addresses one pipelines tenant.
+    Tenant or controller name that addresses one pipelines tenant.
   required: true
   schema:
     type: string

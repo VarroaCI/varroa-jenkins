@@ -24,7 +24,7 @@ function renderCard(canScan = false) {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <MultibranchCard team="alpha" jobPath="alpha/app" canScan={canScan} />
+        <MultibranchCard tenant="alpha" jobPath="alpha/app" canScan={canScan} />
       </MemoryRouter>
     </QueryClientProvider>,
   );

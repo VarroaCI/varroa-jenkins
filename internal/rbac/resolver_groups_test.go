@@ -33,17 +33,17 @@ func TestResolver_GroupBindingFromResolvedGroups(t *testing.T) {
 		},
 	}
 	controllers := []*v1alpha1.Controller{
-		{ObjectMeta: metav1.ObjectMeta{Name: "test-ctrl", Namespace: "team-a"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "test-ctrl", Namespace: "tenant-a"}},
 	}
 
 	r := testResolver(roles, bindings, controllers, false)
 
-	granted := r.EffectiveAPICapabilities(&auth.Claims{Subject: "u", Groups: []string{"a"}}, "team-a", "test-ctrl")
+	granted := r.EffectiveAPICapabilities(&auth.Claims{Subject: "u", Groups: []string{"a"}}, "tenant-a", "test-ctrl")
 	if !granted["controllers"]["read"] {
 		t.Error("group a in Claims.Groups: expected controllers:read")
 	}
 
-	denied := r.EffectiveAPICapabilities(&auth.Claims{Subject: "u", Groups: []string{"b"}}, "team-a", "test-ctrl")
+	denied := r.EffectiveAPICapabilities(&auth.Claims{Subject: "u", Groups: []string{"b"}}, "tenant-a", "test-ctrl")
 	if denied["controllers"]["read"] {
 		t.Error("group b in Claims.Groups: expected no controllers:read")
 	}

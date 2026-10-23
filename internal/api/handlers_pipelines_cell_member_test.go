@@ -8,18 +8,18 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
-// TestGetTeamCellReportsAMemberPlacedTeam asserts a Team that only a
+// TestGetTenantCellReportsAMemberPlacedTenant asserts a Tenant that only a
 // member cluster holds answers its placed cell, not notCellHosted: the
 // core finds it through the record-store placement row.
-func TestGetTeamCellReportsAMemberPlacedTeam(t *testing.T) {
-	client, reader := teamCellFixture(t, []string{teamCellTenant})
-	reader.tenantUsage["remote/cells/cell-a/"+teamCellTenant] = []recordstore.CellJobUsage{
-		{JobPath: teamCellTenant + "/release/eu", CellUsageCounts: recordstore.CellUsageCounts{RunningNow: 2, Jobs: 1}},
+func TestGetTenantCellReportsAMemberPlacedTenant(t *testing.T) {
+	client, reader := tenantCellFixture(t, []string{tenantCellTenant})
+	reader.tenantUsage["remote/cells/cell-a/"+tenantCellTenant] = []recordstore.CellJobUsage{
+		{JobPath: tenantCellTenant + "/release/eu", CellUsageCounts: recordstore.CellUsageCounts{RunningNow: 2, Jobs: 1}},
 	}
 	placements := &fakePlacementReader{rows: map[string][]recordstore.TenantPlacement{
-		teamCellTenant: {{Cluster: "remote", Namespace: "cells", Cell: "cell-a", Generation: 1}},
+		tenantCellTenant: {{Cluster: "remote", Namespace: "cells", Cell: "cell-a", Generation: 1}},
 	}}
-	authorizer := teamCellAuthorizer([]string{teamCellTenant}, nil)
+	authorizer := tenantCellAuthorizer([]string{tenantCellTenant}, nil)
 	store := storeFromFake(client)
 	brood := newFakeBrood(client)
 	srv := NewServer(&Dependencies{
@@ -28,17 +28,17 @@ func TestGetTeamCellReportsAMemberPlacedTeam(t *testing.T) {
 		Brood:             brood,
 		Authorizer:        authorizer,
 		RecordStore:       reader,
-		TenantResolver:    NewTeamTenantResolver(store, brood, authorizer, WithMemberPlacements(placements)),
+		TenantResolver:    NewTenantTenantResolver(store, brood, authorizer, WithMemberPlacements(placements)),
 		Logger:            slog.Default(),
 		OperatorNamespace: "test-ns",
 	})
 
-	rec := doTeamCellRequest(t, srv, teamCellTenant)
+	rec := doTenantCellRequest(t, srv, tenantCellTenant)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
 	}
-	body := decodeTeamCell(t, rec)
-	if body.State != teamCellPlaced {
+	body := decodeTenantCell(t, rec)
+	if body.State != tenantCellPlaced {
 		t.Errorf("state = %q, want placed", body.State)
 	}
 	if body.Cluster != "remote" || body.Namespace != "cells" || body.Cell != "cell-a" {

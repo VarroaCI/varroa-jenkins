@@ -821,8 +821,8 @@ Hibernation is not a power state — use "varroactl hibernate controller" to
 park a controller and "varroactl wake controller" to wake it.
 
 Examples:
-  varroactl power controller team-a/my-ctrl running
-  varroactl power controller team-a/my-ctrl stopped`,
+  varroactl power controller tenant-a/my-ctrl running
+  varroactl power controller tenant-a/my-ctrl stopped`,
 		Args: cobra.ExactArgs(2),
 	}
 }

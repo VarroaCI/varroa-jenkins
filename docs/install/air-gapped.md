@@ -58,7 +58,7 @@ Use `--registry-config` for registry credentials. Use `--insecure` only for plai
 The export does not read these image sources:
 
 - Images in pipeline scripts and in pod template steps.
-- Images in Team and CellPool pod templates that users create through the API.
+- Images in Tenant and CellPool pod templates that users create through the API.
 - Images that plugins pull at run time.
 
 Name a bundle directory with `--bundle-dir` to include the JCasC pod templates that name images. Use `--image` for any other image. The manifest lists these sources under `unseen`. Mirror them by hand.

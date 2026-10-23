@@ -95,7 +95,7 @@ items:
 // resolve.
 const (
 	definitionGitRepo = "https://github.com/acme/infra"
-	definitionGitPath = "bundles/team"
+	definitionGitPath = "bundles/tenant"
 )
 
 // definitionBundleName names every bundle these tests walk.
@@ -454,7 +454,7 @@ func TestResolveDeclaredInput_DeclaredRootIsCleared(t *testing.T) {
 		jobPath string
 	}{
 		{"controller tenant", "", "acme/app-a"},
-		{"placed Team", "team-a", "team-a/acme/app-a"},
+		{"placed Tenant", "team-a", "team-a/acme/app-a"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -474,26 +474,26 @@ func TestResolveDeclaredInput_DeclaredRootIsCleared(t *testing.T) {
 	}
 }
 
-// TestResolveDeclaredInput_PlacedTeamFolderReRoot asserts a placed Team
-// compares a candidate's items under the Team folder.
-func TestResolveDeclaredInput_PlacedTeamFolderReRoot(t *testing.T) {
+// TestResolveDeclaredInput_PlacedTenantFolderReRoot asserts a placed Tenant
+// compares a candidate's items under the Tenant folder.
+func TestResolveDeclaredInput_PlacedTenantFolderReRoot(t *testing.T) {
 	client := newFakeResourceClient()
 	seedCatalogItem(client, "items-a", "team-ns", definitionItemContent)
 	srv := definitionTestServer(client)
 
-	// A placed Team's own bundle lives in the cell's namespace, not in
+	// A placed Tenant's own bundle lives in the cell's namespace, not in
 	// the catalog's.
 	b := newBundleBuilder("cells-ns").addItemRef("items-a", "sha-item")
 	ref := TenantRef{Folder: "team-a"}
 	got := srv.resolveDeclaredInput(context.Background(), "", b.cb, ref, "team-a/acme/app-a")
 	if got == nil {
-		t.Fatal("a placed Team's candidate must match in the re-rooted path space, got nil")
+		t.Fatal("a placed Tenant's candidate must match in the re-rooted path space, got nil")
 	}
 	if got.Kind != "itemRef" || got.Name != "items-a" {
 		t.Fatalf("declaredBy = %+v, want the itemRef candidate", got)
 	}
 	if got := srv.resolveDeclaredInput(context.Background(), "", b.cb, ref, "acme/app-a"); got != nil {
-		t.Fatalf("declaredBy = %+v, want nil: a placed Team never matches an unprefixed path", got)
+		t.Fatalf("declaredBy = %+v, want nil: a placed Tenant never matches an unprefixed path", got)
 	}
 }
 
@@ -626,7 +626,7 @@ func TestFindDeclaredItem_BundleRef(t *testing.T) {
 		}
 	})
 
-	t.Run("a placed Team reads its own bundle, not the cell's", func(t *testing.T) {
+	t.Run("a placed Tenant reads its own bundle, not the cell's", func(t *testing.T) {
 		client := newFakeResourceClient()
 		client.controllers = map[string]*v1alpha1.Controller{
 			"ctrl-b": {
@@ -642,37 +642,37 @@ func TestFindDeclaredItem_BundleRef(t *testing.T) {
 				}},
 				Status: v1alpha1.ComposedBundleStatus{ContentRef: "bundle-cell-content"},
 			},
-			"bundle-team": {
-				ObjectMeta: metav1.ObjectMeta{Name: "bundle-team", Namespace: "team-ns"},
+			"bundle-tenant": {
+				ObjectMeta: metav1.ObjectMeta{Name: "bundle-tenant", Namespace: "team-ns"},
 				Spec: v1alpha1.ComposedBundleSpec{Inputs: []v1alpha1.ComposedInput{
 					{GitSource: &v1alpha1.GitBundleSource{RepoURL: definitionGitRepo, Path: definitionGitPath}},
 				}},
 				Status: v1alpha1.ComposedBundleStatus{
-					ContentRef:        "bundle-team-content",
+					ContentRef:        "bundle-tenant-content",
 					ObservedRevisions: map[string]string{"0": "sha-tenant"},
 				},
 			},
 		}
 		client.configMaps = map[string]map[string]string{
-			"bundle-cell-content": {"items.yaml": singlePipelineItemsYAML},
-			"bundle-team-content": {"items.yaml": singlePipelineItemsYAML},
+			"bundle-cell-content":   {"items.yaml": singlePipelineItemsYAML},
+			"bundle-tenant-content": {"items.yaml": singlePipelineItemsYAML},
 		}
 		srv := definitionTestServer(client)
-		seedTeam(t, client.crdStore, placedTeamObjectWithBundle("team-a", "cluster-1", "cells-ns", "ctrl-b", "bundle-team", "team-ns"))
+		seedTenant(t, client.crdStore, placedTenantObjectWithBundle("team-a", "cluster-1", "cells-ns", "ctrl-b", "team-ns"))
 
 		_, item, declaredBy, err := srv.findDeclaredItem(context.Background(),
-			TenantRef{Namespace: "test-ns", Controller: "ctrl-b", Team: "team-a", Folder: "team-a"}, "team-a/acme/app-a")
+			TenantRef{Namespace: "test-ns", Controller: "ctrl-b", TenantName: "team-a", Folder: "team-a"}, "team-a/acme/app-a")
 		if err != nil {
 			t.Fatalf("findDeclaredItem: %v", err)
 		}
 		if item == nil || declaredBy == nil {
 			t.Fatalf("item/declaredBy = %v/%v, want both present", item, declaredBy)
 		}
-		if want := (bundleRefJSON{Namespace: "team-ns", Name: "bundle-team"}); declaredBy.Bundle != want {
-			t.Fatalf("bundle = %+v, want the Team's own bundle %+v", declaredBy.Bundle, want)
+		if want := (bundleRefJSON{Namespace: "team-ns", Name: "bundle-tenant"}); declaredBy.Bundle != want {
+			t.Fatalf("bundle = %+v, want the Tenant's own bundle %+v", declaredBy.Bundle, want)
 		}
 		if declaredBy.Revision != "sha-tenant" {
-			t.Errorf("revision = %q, want the Team bundle input's own revision", declaredBy.Revision)
+			t.Errorf("revision = %q, want the Tenant bundle input's own revision", declaredBy.Revision)
 		}
 	})
 }
@@ -799,15 +799,15 @@ const tenantVarInKeyItems = `items:
           command: echo hi
 `
 
-// TestControllerItemManifest_PlacedTeamUnknownKeyGivesNoManifest asserts a
-// placed Team whose items.yaml holds an unknown key gives no definition, as
+// TestControllerItemManifest_PlacedTenantUnknownKeyGivesNoManifest asserts a
+// placed Tenant whose items.yaml holds an unknown key gives no definition, as
 // the cell holds that tenant.
-func TestControllerItemManifest_PlacedTeamUnknownKeyGivesNoManifest(t *testing.T) {
-	client := newPlacedTeamFixture(t)
+func TestControllerItemManifest_PlacedTenantUnknownKeyGivesNoManifest(t *testing.T) {
+	client := newPlacedTenantFixture(t)
 	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantUnknownKeyItems}
 	srv := definitionTestServer(client)
 
-	ref := TenantRef{Folder: "payments", Team: "payments", Controller: "cell-1", Namespace: "test-ns"}
+	ref := TenantRef{Folder: "payments", TenantName: "payments", Controller: "cell-1", Namespace: "test-ns"}
 	_, _, manifest, err := srv.controllerItemManifest(context.Background(), ref)
 	if err != nil {
 		t.Fatalf("controllerItemManifest: %v", err)
@@ -817,18 +817,18 @@ func TestControllerItemManifest_PlacedTeamUnknownKeyGivesNoManifest(t *testing.T
 	}
 }
 
-// TestControllerItemManifest_PlacedTeamVarInKeyKeepsManifest asserts a
-// placed Team that names a key with ${var} keeps its definition: the
+// TestControllerItemManifest_PlacedTenantVarInKeyKeepsManifest asserts a
+// placed Tenant that names a key with ${var} keeps its definition: the
 // variable resolves before the strict parse, as in the cell.
-func TestControllerItemManifest_PlacedTeamVarInKeyKeepsManifest(t *testing.T) {
-	client := newPlacedTeamFixture(t)
+func TestControllerItemManifest_PlacedTenantVarInKeyKeepsManifest(t *testing.T) {
+	client := newPlacedTenantFixture(t)
 	client.configMaps["payments-content"] = map[string]string{
 		"items.yaml":     tenantVarInKeyItems,
 		"variables.yaml": "field: builders\n",
 	}
 	srv := definitionTestServer(client)
 
-	ref := TenantRef{Folder: "payments", Team: "payments", Controller: "cell-1", Namespace: "test-ns"}
+	ref := TenantRef{Folder: "payments", TenantName: "payments", Controller: "cell-1", Namespace: "test-ns"}
 	_, _, manifest, err := srv.controllerItemManifest(context.Background(), ref)
 	if err != nil {
 		t.Fatalf("controllerItemManifest: %v", err)
@@ -838,21 +838,21 @@ func TestControllerItemManifest_PlacedTeamVarInKeyKeepsManifest(t *testing.T) {
 	}
 }
 
-// TestControllerItemManifest_PlacedTeamWithNoLocalControllerParsesStrictly
-// asserts the strict read does not depend on a controller in the Team's
+// TestControllerItemManifest_PlacedTenantWithNoLocalControllerParsesStrictly
+// asserts the strict read does not depend on a controller in the Tenant's
 // own namespace. The gate is the placement, not the controller.
-func TestControllerItemManifest_PlacedTeamWithNoLocalControllerParsesStrictly(t *testing.T) {
-	client := newPlacedTeamFixture(t)
+func TestControllerItemManifest_PlacedTenantWithNoLocalControllerParsesStrictly(t *testing.T) {
+	client := newPlacedTenantFixture(t)
 	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantUnknownKeyItems}
 	srv := definitionTestServer(client)
 
-	ref := TenantRef{Folder: "payments", Team: "payments", Controller: "absent", Namespace: "test-ns"}
+	ref := TenantRef{Folder: "payments", TenantName: "payments", Controller: "absent", Namespace: "test-ns"}
 	_, _, manifest, err := srv.controllerItemManifest(context.Background(), ref)
 	if err != nil {
 		t.Fatalf("controllerItemManifest: %v", err)
 	}
 	if manifest != nil {
-		t.Fatalf("manifest = %+v, want nil: a placed Team with no local controller parses strictly", manifest)
+		t.Fatalf("manifest = %+v, want nil: a placed Tenant with no local controller parses strictly", manifest)
 	}
 }
 

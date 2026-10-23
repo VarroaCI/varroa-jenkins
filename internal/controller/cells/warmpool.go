@@ -1,5 +1,5 @@
 // Package cells holds the tenant-placement and cell-pool logic for the
-// jenkins-cells feature (design D4, D5): binding a pipelines Team to a
+// jenkins-cells feature (design D4, D5): binding a pipelines Tenant to a
 // shared cell Controller, and keeping a pool of unassigned cells ready to
 // receive one.
 package cells
@@ -145,14 +145,14 @@ func (r *WarmPoolReconciler) chartMaxTenants() int32 {
 // Reconcile runs one pass: it creates a pool for each requested profile when
 // auto-creation is on, then sizes and reports every pool that exists.
 func (r *WarmPoolReconciler) Reconcile(ctx context.Context) error {
-	teams, err := crdstore.List[v1alpha1.Team](ctx, r.Store, "", "")
+	tenants, err := crdstore.List[v1alpha1.Tenant](ctx, r.Store, "", "")
 	if err != nil {
-		return fmt.Errorf("list Teams: %w", err)
+		return fmt.Errorf("list Tenants: %w", err)
 	}
 
 	var created []*v1alpha1.CellPool
 	if r.Config.Enabled {
-		created = r.createMissingPools(ctx, teams)
+		created = r.createMissingPools(ctx, tenants)
 	}
 
 	pools, err := crdstore.List[v1alpha1.CellPool](ctx, r.Store, "", "")
@@ -170,7 +170,7 @@ func (r *WarmPoolReconciler) Reconcile(ctx context.Context) error {
 
 	sort.Slice(pools, func(i, j int) bool { return pools[i].Name < pools[j].Name })
 	for _, pool := range pools {
-		r.reconcilePool(ctx, pool, teams, names)
+		r.reconcilePool(ctx, pool, tenants, names)
 	}
 	return nil
 }
@@ -190,13 +190,13 @@ func mergePools(listed, created []*v1alpha1.CellPool) []*v1alpha1.CellPool {
 }
 
 // createMissingPools creates CellPool/<profile> for each profile a pipelines
-// Team requests and no pool serves yet (design D7). It never writes the spec
+// Tenant requests and no pool serves yet (design D7). It never writes the spec
 // of a pool that already exists, so an operator's edit survives every tick
 // and every operator restart.
-func (r *WarmPoolReconciler) createMissingPools(ctx context.Context, teams []*v1alpha1.Team) []*v1alpha1.CellPool {
+func (r *WarmPoolReconciler) createMissingPools(ctx context.Context, tenants []*v1alpha1.Tenant) []*v1alpha1.CellPool {
 	log := r.logger()
 	var created []*v1alpha1.CellPool
-	for _, profile := range requestedProfiles(teams) {
+	for _, profile := range requestedProfiles(tenants) {
 		if _, err := crdstore.Get[v1alpha1.CellPool](ctx, r.Store, profile, ""); err == nil {
 			continue
 		}
@@ -243,15 +243,15 @@ func (r *WarmPoolReconciler) seededPool(profile string) *v1alpha1.CellPool {
 	return pool
 }
 
-// requestedProfiles collects every profile a pipelines Team names. A pool is
+// requestedProfiles collects every profile a pipelines Tenant names. A pool is
 // a durable object, so the pass no longer collects the profile a placed
 // tenant's live cell runs: the pool created for that profile stays after the
-// Team changes spec.pipelines.profile.
-func requestedProfiles(teams []*v1alpha1.Team) []string {
+// Tenant changes spec.pipelines.profile.
+func requestedProfiles(tenants []*v1alpha1.Tenant) []string {
 	set := map[string]bool{}
-	for _, team := range teams {
-		if team.Spec.Pipelines != nil && team.Spec.Pipelines.Profile != "" {
-			set[team.Spec.Pipelines.Profile] = true
+	for _, tenant := range tenants {
+		if tenant.Spec.Pipelines != nil && tenant.Spec.Pipelines.Profile != "" {
+			set[tenant.Spec.Pipelines.Profile] = true
 		}
 	}
 	profiles := make([]string, 0, len(set))
@@ -278,7 +278,7 @@ func (r *WarmPoolReconciler) controllerNames(ctx context.Context) (map[string]bo
 }
 
 // reconcilePool runs the ordered pass of design D5 for one pool.
-func (r *WarmPoolReconciler) reconcilePool(ctx context.Context, pool *v1alpha1.CellPool, teams []*v1alpha1.Team, names map[string]bool) {
+func (r *WarmPoolReconciler) reconcilePool(ctx context.Context, pool *v1alpha1.CellPool, tenants []*v1alpha1.Tenant, names map[string]bool) {
 	log := r.logger()
 
 	if pool.DeletionTimestamp != nil && !pool.DeletionTimestamp.IsZero() {
@@ -314,7 +314,7 @@ func (r *WarmPoolReconciler) reconcilePool(ctx context.Context, pool *v1alpha1.C
 
 	free := freeCells(owned)
 	capPerCell := r.poolCapacity(pool)
-	desiredFree := r.desiredFreeCount(pool, owned, teams, capPerCell)
+	desiredFree := r.desiredFreeCount(pool, owned, tenants, capPerCell)
 
 	// gateReason holds the fill precondition's refusal, when the pass
 	// wanted to create at least one cell and a precondition refused it. It
@@ -511,7 +511,7 @@ func (r *WarmPoolReconciler) poolCapacity(pool *v1alpha1.CellPool) int32 {
 
 // desiredFreeCount computes one target for the pass (design D5 step 5), so
 // the pass never fills and drains in the same tick.
-func (r *WarmPoolReconciler) desiredFreeCount(pool *v1alpha1.CellPool, owned []*v1alpha1.Controller, teams []*v1alpha1.Team, capPerCell int32) int {
+func (r *WarmPoolReconciler) desiredFreeCount(pool *v1alpha1.CellPool, owned []*v1alpha1.Controller, tenants []*v1alpha1.Tenant, capPerCell int32) int {
 	// fits deliberately excludes free cells. A free cell is already
 	// counted by len(free), so counting its capacity again would hide real
 	// demand and stall a warm: 0 pool.
@@ -520,26 +520,26 @@ func (r *WarmPoolReconciler) desiredFreeCount(pool *v1alpha1.CellPool, owned []*
 	summary := SummarizeCellPool(pool)
 	for _, cell := range owned {
 		ownedNames[cell.Name] = true
-		tenants := cellTenantCount(cell)
-		if tenants == 0 {
+		hosted := cellTenantCount(cell)
+		if hosted == 0 {
 			continue
 		}
 		capacity := resolveCellCapacity(cellMaxTenants(cell), &summary, r.chartMaxTenants())
-		if spare := int(capacity) - tenants; spare > 0 {
+		if spare := int(capacity) - hosted; spare > 0 {
 			fits = append(fits, cellFit{name: cell.Name, spare: spare})
 		}
 	}
 
 	deficit := 0
-	for _, team := range teams {
-		if team.Spec.Pipelines == nil || ResolvedPoolName(team.Spec.Pipelines) != pool.Name {
+	for _, tenant := range tenants {
+		if tenant.Spec.Pipelines == nil || ResolvedPoolName(tenant.Spec.Pipelines) != pool.Name {
 			continue
 		}
 		// A tenant asks the pool for one cell for each active slot and
 		// each standby. Counting it as one unit would stop a warm: 0
 		// pool from creating a cell once slot 0 binds, and every other
 		// slot would stay pending for good.
-		unmet := unmetMemberDemand(team, ownedNames)
+		unmet := unmetMemberDemand(tenant, ownedNames)
 		if unmet == 0 {
 			continue
 		}
@@ -548,7 +548,7 @@ func (r *WarmPoolReconciler) desiredFreeCount(pool *v1alpha1.CellPool, owned []*
 		// with the spare capacity of the tenant's own member cells left
 		// a vacated standby unreplaced for good: the demand read as met
 		// while no cell could take it.
-		deficit += unmet - takeMemberFits(fits, memberCellNames(team.Status.Placement), unmet)
+		deficit += unmet - takeMemberFits(fits, memberCellNames(tenant.Status.Placement), unmet)
 	}
 	needed := (deficit + int(capPerCell) - 1) / int(capPerCell)
 	desired := int(pool.Spec.Warm)
@@ -816,8 +816,8 @@ func (r *WarmPoolReconciler) drainSurplus(ctx context.Context, pool *v1alpha1.Ce
 	return deleted
 }
 
-// fencedCells answers the cells a Team placement currently names, keyed
-// "namespace/name". status.placement is the fence, and TeamReconciler writes
+// fencedCells answers the cells a Tenant placement currently names, keyed
+// "namespace/name". status.placement is the fence, and TenantReconciler writes
 // it **before** it patches the bound cell's tenant list, so a cell is fenced
 // for a window in which its own status.cell.tenants is still empty. A drain
 // that read only the tenant list would delete such a cell out from under the
@@ -825,13 +825,13 @@ func (r *WarmPoolReconciler) drainSurplus(ctx context.Context, pool *v1alpha1.Ce
 // written after it is read covers nothing here, which is why the placement
 // pass claims the cell before it writes the fence.
 func (r *WarmPoolReconciler) fencedCells(ctx context.Context) (map[string]bool, error) {
-	teams, err := crdstore.List[v1alpha1.Team](ctx, r.Store, "", "")
+	tenants, err := crdstore.List[v1alpha1.Tenant](ctx, r.Store, "", "")
 	if err != nil {
 		return nil, err
 	}
-	fenced := make(map[string]bool, len(teams))
-	for _, team := range teams {
-		p := team.Status.Placement
+	fenced := make(map[string]bool, len(tenants))
+	for _, tenant := range tenants {
+		p := tenant.Status.Placement
 		if p == nil {
 			continue
 		}
@@ -860,9 +860,9 @@ func cellKey(namespace, name string) string { return namespace + "/" + name }
 // A placement with an empty member list reads as its scalar cell alone,
 // so a tenant the pass has not written a member list for counts one bound
 // member.
-func unmetMemberDemand(team *v1alpha1.Team, ownedNames map[string]bool) int {
-	wanted := int(team.Spec.Pipelines.EffectiveMembers() + team.Spec.Pipelines.EffectiveStandby())
-	bound := boundMemberCount(team.Status.Placement, ownedNames)
+func unmetMemberDemand(tenant *v1alpha1.Tenant, ownedNames map[string]bool) int {
+	wanted := int(tenant.Spec.Pipelines.EffectiveMembers() + tenant.Spec.Pipelines.EffectiveStandby())
+	bound := boundMemberCount(tenant.Status.Placement, ownedNames)
 	if bound >= wanted {
 		return 0
 	}
@@ -872,7 +872,7 @@ func unmetMemberDemand(team *v1alpha1.Team, ownedNames map[string]bool) int {
 // boundMemberCount counts the tenant's members that sit on a cell the pool
 // owns. A cell holds at most one member of a tenant, so each owned cell
 // counts once.
-func boundMemberCount(p *v1alpha1.TeamPlacementStatus, ownedNames map[string]bool) int {
+func boundMemberCount(p *v1alpha1.TenantPlacementStatus, ownedNames map[string]bool) int {
 	count := 0
 	for name := range memberCellNames(p) {
 		if ownedNames[name] {
@@ -884,7 +884,7 @@ func boundMemberCount(p *v1alpha1.TeamPlacementStatus, ownedNames map[string]boo
 
 // memberCellNames names every cell the tenant's members hold. A placement
 // with an empty member list reads as its scalar cell alone.
-func memberCellNames(p *v1alpha1.TeamPlacementStatus) map[string]bool {
+func memberCellNames(p *v1alpha1.TenantPlacementStatus) map[string]bool {
 	out := map[string]bool{}
 	if p == nil {
 		return out
@@ -938,7 +938,7 @@ func takeMemberFits(fits []cellFit, held map[string]bool, want int) int {
 //
 // The pass's own free snapshot is stale by the time a drain runs. The
 // interleaving it must survive: this pass lists a cell as free; the placement
-// pass then claims that cell, writes a Team's status.placement fence onto it,
+// pass then claims that cell, writes a Tenant's status.placement fence onto it,
 // and patches the tenant onto its status.cell.tenants; this drain, still
 // holding the old snapshot, deletes the cell the tenant now runs on. Five
 // guards close it — a fresh read of the cell, a live claim on that fresh

@@ -106,12 +106,12 @@ hook to the organization instead. See [Tenant webhooks](webhooks.md).
 
 | Field | Value |
 |---|---|
-| Target URL | `https://<host>/hibernation/<token>/teams/<team>/queue/gitea-webhook/post` |
+| Target URL | `https://<host>/hibernation/<token>/tenants/<tenant>/queue/gitea-webhook/post` |
 | Content type | `application/json` |
 | Secret | The value of `status.pipelines.webhookSecret` |
 | Events | Push and pull request |
 
-The `<token>` and the `<team>` come from the tenant. The webhook must reach the dashboard
+The `<token>` and the `<tenant>` come from the tenant. The webhook must reach the dashboard
 host on port 443.
 
 ## Network
@@ -179,7 +179,7 @@ share the head commit. Both builds report the same status context on that commit
 writes the context when each build completes. The build that completes last sets the context, so
 an older build can replace the result of the newer build.
 
-To keep the newer result, set `Team.spec.pipelines.concurrency` to `cancelInProgress`. The newer
+To keep the newer result, set `Tenant.spec.pipelines.concurrency` to `cancelInProgress`. The newer
 build then cancels the older build when it claims its build number. The recorder publishes the cancel asynchronously. The older build therefore usually completes
 first. The newer build then usually writes the last status. The order of those writes is not
 guaranteed. Until the newer build completes, the context can show the cancelled build's state.
@@ -197,6 +197,6 @@ gets this link. The link has this form:
 https://<dashboard>/headless/<cluster>/<namespace>/<cell>/job/<job path>/<n>/display/redirect
 ```
 
-The door opens `/pipelines/<team>/<job>/<runId>`. A multibranch build link has the same form,
-for example `…/job/<team>/job/<repo>/job/PR-<n>/<b>/display/redirect`. See
+The door opens `/pipelines/<tenant>/<job>/<runId>`. A multibranch build link has the same form,
+for example `…/job/<tenant>/job/<repo>/job/PR-<n>/<b>/display/redirect`. See
 [Headless controllers](../security/headless-controllers.md) for the door.

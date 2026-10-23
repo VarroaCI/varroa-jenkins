@@ -129,7 +129,7 @@ func (r *BroodScheduleReconciler) Reconcile(ctx context.Context, req reconcile.R
 	); err != nil {
 		tenancyViolated = true
 	}
-	// Schedule-specific: at-most-one cluster in team-namespace mode.
+	// Schedule-specific: at-most-one cluster in tenant-namespace mode.
 	if cr.Namespace != r.operatorNamespace && len(cr.Spec.Template.Clusters) > 1 {
 		tenancyViolated = true
 	}
@@ -465,7 +465,7 @@ func buildCommand(cr *v1alpha1.BroodSchedule) []string {
 
 	// The BroodOperation is created in the schedule's own namespace. Without this
 	// the BFF defaults to the operator namespace, which denies the operator-scoped
-	// (non-admin) schedule identity in team-namespace mode.
+	// (non-admin) schedule identity in tenant-namespace mode.
 	cmd = append(cmd, "--namespace="+cr.Namespace)
 
 	t := cr.Spec.Template.Targets

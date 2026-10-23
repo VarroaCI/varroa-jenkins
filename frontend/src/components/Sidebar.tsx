@@ -17,7 +17,7 @@ const GROUPS: NavGroup[] = [
     { to: "/pipelines", label: "Pipelines", icon: Waypoints, gate: "pipelines" },
     { to: "/controllers", label: "Controllers", icon: Server },
     { to: "/cells", label: "Cells", icon: Hexagon, gate: "cells" },
-    { to: "/agents", label: "Team agents", icon: Bot, gate: "agents" },
+    { to: "/agents", label: "Tenant agents", icon: Bot, gate: "agents" },
     { to: "/plugins", label: "Plugins", icon: PlugZap },
     { to: "/clusters", label: "Clusters", icon: Network },
     { to: "/activity", label: "Activity", icon: Activity },

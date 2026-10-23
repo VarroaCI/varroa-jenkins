@@ -70,12 +70,12 @@ public class VarroaQueueTaskDispatcher extends QueueTaskDispatcher {
 
     /**
      * Returns every tenant named by the node's reserved
-     * {@code varroa-tenant-<team>} labels. The set is empty when the node
+     * {@code varroa-tenant-<tenant>} labels. The set is empty when the node
      * carries no such label, and holds more than one entry when the node
      * carries labels for more than one tenant — an ambiguous node the
      * fence must trust for no tenant. Never parses the user-facing
-     * {@code <team>-} label prefix: it is ambiguous on its own, because
-     * the teams {@code pay} and {@code pay-prod} both match a node
+     * {@code <tenant>-} label prefix: it is ambiguous on its own, because
+     * the tenants {@code pay} and {@code pay-prod} both match a node
      * labelled {@code pay-prod-linux}.
      */
     private static Set<String> tenantLabelsOf(Node node) {

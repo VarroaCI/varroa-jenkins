@@ -29,8 +29,8 @@ const maxUnescapePasses = 3
 // limit stops the attempt. It
 // returns the number of statuses that it wrote.
 func (o *Ops) EndPendingStatus(ctx context.Context, req forgeapi.CommitStatusRequest) (int, error) {
-	if req.Team == "" || req.Repo == "" || req.SHA == "" || req.JobPath == "" || req.Reason == "" {
-		return 0, replyErr(forgeapi.CodeInvalidRequest, "team, repo, sha, jobPath and reason are required")
+	if req.Tenant == "" || req.Repo == "" || req.SHA == "" || req.JobPath == "" || req.Reason == "" {
+		return 0, replyErr(forgeapi.CodeInvalidRequest, "tenant, repo, sha, jobPath and reason are required")
 	}
 	if req.BuildNumber <= 0 {
 		return 0, replyErr(forgeapi.CodeInvalidRequest, "build number must be positive")
@@ -39,7 +39,7 @@ func (o *Ops) EndPendingStatus(ctx context.Context, req forgeapi.CommitStatusReq
 	if err != nil {
 		return 0, replyErr(forgeapi.CodeRepoURLInvalid, "%v", err)
 	}
-	creds, err := o.chooseCredential(ctx, req.Team, repo.Host)
+	creds, err := o.chooseCredential(ctx, req.Tenant, repo.Host)
 	if err != nil {
 		return 0, err
 	}

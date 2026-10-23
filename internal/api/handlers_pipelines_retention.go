@@ -11,7 +11,7 @@ import (
 // default.
 const defaultRecordStoreRunRetention = 365 * 24 * time.Hour
 
-// pipelineRetentionJSON is the retention block of GET /pipelines/{team}.
+// pipelineRetentionJSON is the retention block of GET /pipelines/{tenant}.
 // Every value is in whole days. The store window caps each tenant and job
 // window, so EffectiveDays never exceeds StoreDays.
 type pipelineRetentionJSON struct {

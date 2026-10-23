@@ -9,7 +9,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/agent"
 	"github.com/varroaci/varroa-jenkins/internal/agent/loop"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/accept"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/accept"
 )
 
 // sessionVerb names what a route does with one session. The access table of
@@ -26,10 +26,10 @@ const (
 )
 
 // assistantGate refuses an assistant session to a caller without
-// assistant:use. A Team agent session needs no assistant grant, because its
+// assistant:use. A Tenant agent session needs no assistant grant, because its
 // tenant table decides. It writes the refusal and returns false.
 func (s *Server) assistantGate(w http.ResponseWriter, claims *auth.Claims, sess agent.Session) bool {
-	if sess.Kind == agent.KindTeamAgent || s.assistantCanUse(claims) {
+	if sess.Kind == agent.KindTenantAgent || s.assistantCanUse(claims) {
 		return true
 	}
 	s.writeJSONError(w, http.StatusForbidden, "forbidden")
@@ -37,12 +37,12 @@ func (s *Server) assistantGate(w http.ResponseWriter, claims *auth.Claims, sess 
 }
 
 // sessionAllowed applies the rule of verb to sess. An assistant session keeps
-// the A1 owner rules. A Team agent session follows the tenant table: a
+// the A1 owner rules. A Tenant agent session follows the tenant table: a
 // reader views it, a writer decides or cancels it, and an admin views and
 // cancels every session.
 func (s *Server) sessionAllowed(ctx context.Context, claims *auth.Claims, sess agent.Session, verb sessionVerb) bool {
-	if sess.Kind == agent.KindTeamAgent {
-		return s.teamAgentSessionAllowed(ctx, claims, sess, verb)
+	if sess.Kind == agent.KindTenantAgent {
+		return s.tenantAgentSessionAllowed(ctx, claims, sess, verb)
 	}
 	if verb == sessionDecide {
 		return sess.Principal == claims.Subject
@@ -50,24 +50,24 @@ func (s *Server) sessionAllowed(ctx context.Context, claims *auth.Claims, sess a
 	return sess.Principal == claims.Subject || s.assistantIsAdmin(claims)
 }
 
-// teamAgentSessionAllowed applies the Team agent rows of the access table.
-// A Team agent subject never decides an approval, so an agent cannot approve
+// tenantAgentSessionAllowed applies the Tenant agent rows of the access table.
+// A Tenant agent subject never decides an approval, so an agent cannot approve
 // its own write.
-func (s *Server) teamAgentSessionAllowed(ctx context.Context, claims *auth.Claims, sess agent.Session, verb sessionVerb) bool {
+func (s *Server) tenantAgentSessionAllowed(ctx context.Context, claims *auth.Claims, sess agent.Session, verb sessionVerb) bool {
 	if verb == sessionDecide && accept.IsPrincipal(claims.Subject) {
 		return false
 	}
 	if verb != sessionDecide && s.assistantIsAdmin(claims) {
 		return true
 	}
-	return s.teamAgentTenantAllows(ctx, claims, sess, verb)
+	return s.tenantAgentTenantAllows(ctx, claims, sess, verb)
 }
 
-// teamAgentTenantAllows applies the tenant rows of the access table to a Team
+// tenantAgentTenantAllows applies the tenant rows of the access table to a Tenant
 // agent session. A view needs a tenant read grant, and any other verb needs a
-// tenant write grant on one of the Team's tenants.
-func (s *Server) teamAgentTenantAllows(ctx context.Context, claims *auth.Claims, sess agent.Session, verb sessionVerb) bool {
-	refs, serr := s.resolveTeamTenants(ctx, claims, sess.Team)
+// tenant write grant on one of the Tenant's tenants.
+func (s *Server) tenantAgentTenantAllows(ctx context.Context, claims *auth.Claims, sess agent.Session, verb sessionVerb) bool {
+	refs, serr := s.resolveTenantTenants(ctx, claims, sess.Tenant)
 	if serr != nil {
 		return false
 	}
@@ -84,7 +84,7 @@ func (s *Server) teamAgentTenantAllows(ctx context.Context, claims *auth.Claims,
 
 // transcriptFull reports whether claims reads tool result content of sess.
 // A tool result holds data that the owner's grants fetched, so only the
-// principal, or a tenant reader of a Team agent session, reads it.
+// principal, or a tenant reader of a Tenant agent session, reads it.
 func (s *Server) transcriptFull(ctx context.Context, claims *auth.Claims, sess agent.Session) bool {
 	if claims == nil {
 		return false
@@ -92,8 +92,8 @@ func (s *Server) transcriptFull(ctx context.Context, claims *auth.Claims, sess a
 	if sess.Principal == claims.Subject {
 		return true
 	}
-	if sess.Kind == agent.KindTeamAgent {
-		return s.teamAgentTenantAllows(ctx, claims, sess, sessionView)
+	if sess.Kind == agent.KindTenantAgent {
+		return s.tenantAgentTenantAllows(ctx, claims, sess, sessionView)
 	}
 	return false
 }
@@ -117,12 +117,12 @@ func (s *Server) sessionFor(w http.ResponseWriter, r *http.Request, rt *Assistan
 	return sess, true
 }
 
-// hostForSession returns the tool host that acts as claims for sess. A Team
-// agent approval runs with the team_agent origin, so its activity is stamped
-// as the Team agent's.
+// hostForSession returns the tool host that acts as claims for sess. A Tenant
+// agent approval runs with the tenant_agent origin, so its activity is stamped
+// as the Tenant agent's.
 func (rt *AssistantRuntime) hostForSession(claims *auth.Claims, sess agent.Session) loop.ToolHost {
-	if sess.Kind == agent.KindTeamAgent && rt.HostForOrigin != nil {
-		return rt.HostForOrigin(claims, agent.ActivitySourceTeamAgent)
+	if sess.Kind == agent.KindTenantAgent && rt.HostForOrigin != nil {
+		return rt.HostForOrigin(claims, agent.ActivitySourceTenantAgent)
 	}
 	return rt.HostFor(claims)
 }

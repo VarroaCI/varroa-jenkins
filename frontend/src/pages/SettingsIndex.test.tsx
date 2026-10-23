@@ -98,7 +98,7 @@ describe("SettingsIndex", () => {
     expect(screen.queryByText("Varroa Role Bindings")).not.toBeInTheDocument();
     expect(screen.queryByText("Jenkins Roles")).not.toBeInTheDocument();
     expect(screen.queryByText("Jenkins Role Bindings")).not.toBeInTheDocument();
-    expect(screen.queryByText("Teams")).not.toBeInTheDocument();
+    expect(screen.queryByText("Tenants")).not.toBeInTheDocument();
     expect(screen.queryByText("Identity")).not.toBeInTheDocument();
   });
 
@@ -135,7 +135,7 @@ describe("SettingsIndex", () => {
       "Users", "Groups", "Built-in Roles",
       "Varroa Roles", "Varroa Role Bindings",
       "Jenkins Roles", "Jenkins Role Bindings",
-      "Teams", "Provisioning", "Versions", "Identity", "Update Center",
+      "Tenants", "Provisioning", "Versions", "Identity", "Update Center",
     ];
     for (const label of expected) {
       expect(screen.getByText(label)).toBeInTheDocument();

@@ -141,7 +141,7 @@ func TestArtifactSessionPolicy_ScopesToCellPrefix(t *testing.T) {
 }
 
 func TestArtifactSessionName(t *testing.T) {
-	if got := artifactSessionName("core", "team_a", "cell-big-0"); got != "varroa-core-team-a-cell-big-0" {
+	if got := artifactSessionName("core", "tenant_a", "cell-big-0"); got != "varroa-core-tenant-a-cell-big-0" {
 		t.Errorf("session name = %q", got)
 	}
 	long1 := artifactSessionName("core", strings.Repeat("n", 40), "cell-"+strings.Repeat("a", 30)+"-1")

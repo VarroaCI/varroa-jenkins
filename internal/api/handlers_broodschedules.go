@@ -102,9 +102,9 @@ func (s *Server) handleBroodScheduleCreate(w http.ResponseWriter, r *http.Reques
 		s.writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Schedule-specific: at most one cluster in team-namespace mode.
+	// Schedule-specific: at most one cluster in tenant-namespace mode.
 	if ns != s.deps.OperatorNamespace && len(req.Spec.Template.Clusters) > 1 {
-		s.writeJSONError(w, http.StatusBadRequest, "at most one cluster allowed in team namespace")
+		s.writeJSONError(w, http.StatusBadRequest, "at most one cluster allowed in tenant namespace")
 		return
 	}
 

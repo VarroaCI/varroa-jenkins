@@ -43,7 +43,7 @@ func (b *searchFanoutBrood) ListAll(context.Context, string, string) ([]ClusterC
 
 // searchFanoutConfigBrood answers ListCatalogItems per cluster. A cluster
 // named in errs fails with that error. Every other cluster returns one
-// catalog item whose name contains "team".
+// catalog item whose name contains "tenant".
 type searchFanoutConfigBrood struct {
 	ConfigBrood
 	errs map[string]error
@@ -53,7 +53,7 @@ func (c *searchFanoutConfigBrood) ListCatalogItems(_ context.Context, cluster, _
 	if err := c.errs[cluster]; err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(bus.CatalogItemSummary{Name: "team-" + cluster, Namespace: "ns-a", Type: "pipeline"})
+	raw, err := json.Marshal(bus.CatalogItemSummary{Name: "tenant-" + cluster, Namespace: "ns-a", Type: "pipeline"})
 	if err != nil {
 		return nil, err
 	}
@@ -91,9 +91,9 @@ func searchFanoutServer(brood Brood, config ConfigBrood) *Server {
 	})
 }
 
-// coreTeamController is the one controller row that every fan-out test
+// coreTenantController is the one controller row that every fan-out test
 // returns from the core cluster.
-var coreTeamController = ClusterController{Cluster: "core", CR: &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "team-core", Namespace: "ns-a"}}}
+var coreTenantController = ClusterController{Cluster: "core", CR: &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "tenant-core", Namespace: "ns-a"}}}
 
 func findFanoutRows(rows []ClusterFanoutStatus, name string) []ClusterFanoutStatus {
 	var out []ClusterFanoutStatus
@@ -107,7 +107,7 @@ func findFanoutRows(rows []ClusterFanoutStatus, name string) []ClusterFanoutStat
 
 func TestSearch_ReportsFailedMemberCluster(t *testing.T) {
 	brood := &searchFanoutBrood{
-		controllers: []ClusterController{coreTeamController},
+		controllers: []ClusterController{coreTenantController},
 		statuses: []ClusterFanoutStatus{
 			{Name: "core", OK: true},
 			{Name: "member-b", OK: false, Error: "cluster unreachable"},
@@ -115,7 +115,7 @@ func TestSearch_ReportsFailedMemberCluster(t *testing.T) {
 	}
 	server := searchFanoutServer(brood, &searchFanoutConfigBrood{})
 
-	resp, err := server.Search(context.Background(), fanoutClaims, "team", "")
+	resp, err := server.Search(context.Background(), fanoutClaims, "tenant", "")
 	if err != nil {
 		t.Fatalf("Search error = %v", err)
 	}
@@ -133,7 +133,7 @@ func TestSearch_ReportsFailedMemberCluster(t *testing.T) {
 
 func TestSearch_CatalogFailureMarksClusterIncomplete(t *testing.T) {
 	brood := &searchFanoutBrood{
-		controllers: []ClusterController{coreTeamController},
+		controllers: []ClusterController{coreTenantController},
 		statuses: []ClusterFanoutStatus{
 			{Name: "core", OK: true},
 			{Name: "member-b", OK: true},
@@ -142,7 +142,7 @@ func TestSearch_CatalogFailureMarksClusterIncomplete(t *testing.T) {
 	config := &searchFanoutConfigBrood{errs: map[string]error{"member-b": errors.New("catalog down")}}
 	server := searchFanoutServer(brood, config)
 
-	resp, err := server.Search(context.Background(), fanoutClaims, "team", "")
+	resp, err := server.Search(context.Background(), fanoutClaims, "tenant", "")
 	if err != nil {
 		t.Fatalf("Search error = %v", err)
 	}
@@ -157,7 +157,7 @@ func TestSearch_CatalogFailureMarksClusterIncomplete(t *testing.T) {
 
 func TestSearch_CatalogFailureAppendsToFailedRow(t *testing.T) {
 	brood := &searchFanoutBrood{
-		controllers: []ClusterController{coreTeamController},
+		controllers: []ClusterController{coreTenantController},
 		statuses: []ClusterFanoutStatus{
 			{Name: "core", OK: true},
 			{Name: "member-b", OK: false, Error: "cluster unreachable"},
@@ -166,7 +166,7 @@ func TestSearch_CatalogFailureAppendsToFailedRow(t *testing.T) {
 	config := &searchFanoutConfigBrood{errs: map[string]error{"member-b": errors.New("catalog down")}}
 	server := searchFanoutServer(brood, config)
 
-	resp, err := server.Search(context.Background(), fanoutClaims, "team", "")
+	resp, err := server.Search(context.Background(), fanoutClaims, "tenant", "")
 	if err != nil {
 		t.Fatalf("Search error = %v", err)
 	}
@@ -196,13 +196,13 @@ func TestSearch_EmptyQueryReturnsEmptyClusters(t *testing.T) {
 
 func TestSearch_ClusterListFailureMarksEveryRowIncomplete(t *testing.T) {
 	brood := &searchFanoutBrood{
-		controllers: []ClusterController{coreTeamController},
+		controllers: []ClusterController{coreTenantController},
 		statuses:    []ClusterFanoutStatus{{Name: "core", OK: true}},
 		clustersErr: errors.New("kv unreachable"),
 	}
 	server := searchFanoutServer(brood, &searchFanoutConfigBrood{})
 
-	resp, err := server.Search(context.Background(), fanoutClaims, "team", "")
+	resp, err := server.Search(context.Background(), fanoutClaims, "tenant", "")
 	if err != nil {
 		t.Fatalf("Search error = %v", err)
 	}
@@ -214,7 +214,7 @@ func TestSearch_ClusterListFailureMarksEveryRowIncomplete(t *testing.T) {
 
 func TestHandleSearch_EnvelopeCarriesClusters(t *testing.T) {
 	brood := &searchFanoutBrood{
-		controllers: []ClusterController{coreTeamController},
+		controllers: []ClusterController{coreTenantController},
 		statuses: []ClusterFanoutStatus{
 			{Name: "core", OK: true},
 			{Name: "member-b", OK: false, Error: "cluster unreachable"},
@@ -222,7 +222,7 @@ func TestHandleSearch_EnvelopeCarriesClusters(t *testing.T) {
 	}
 	server := searchFanoutServer(brood, &searchFanoutConfigBrood{})
 
-	request := httptest.NewRequest("GET", "/api/v1/search?q=team", nil)
+	request := httptest.NewRequest("GET", "/api/v1/search?q=tenant", nil)
 	request = request.WithContext(auth.ContextWithClaims(request.Context(), fanoutClaims))
 	response := httptest.NewRecorder()
 	server.handleSearch(response, request)

@@ -460,7 +460,7 @@ items:
           properties:
             - kubernetes:
                 permittedClouds:
-                    - team-a
+                    - tenant-a
     - kind: folder
       name: challenge-credential-type-sshprivatekey
       items:

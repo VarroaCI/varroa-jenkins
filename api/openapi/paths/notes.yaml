@@ -79,7 +79,7 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
-/api/v1/pipelines/{team}/jobs/{job}/notes:
+/api/v1/pipelines/{tenant}/jobs/{job}/notes:
   get:
     operationId: listJobNotes
     tags: [Pipelines]
@@ -88,7 +88,7 @@
       Each run note carries the build number of its run when the record
       store still holds the run. A job note carries a null runId.
     parameters:
-      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/tenant'
       - $ref: '../components/parameters.yaml#/job'
     responses:
       "200":

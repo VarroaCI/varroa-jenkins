@@ -57,7 +57,7 @@ Reasons rank from the top row down. The status reports the highest that applies.
 
 ## Create a pool
 
-The operator creates `CellPool/<profile>` for each profile a pipelines `Team` requests, when
+The operator creates `CellPool/<profile>` for each profile a pipelines `Tenant` requests, when
 `cells.warmPool.enabled` is true. The chart values seed the new pool:
 
 ```yaml

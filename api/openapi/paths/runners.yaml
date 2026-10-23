@@ -10,7 +10,7 @@
       omitted from the list rather than causing the whole request to be
       refused.
     parameters:
-      - $ref: '../components/parameters.yaml#/teamQuery'
+      - $ref: '../components/parameters.yaml#/tenantQuery'
     responses:
       "200":
         description: Runner list (N6 envelope).
@@ -32,8 +32,8 @@
     tags: [runners]
     summary: >-
       Registers a runner for a pipelines tenant. Requires the runners:create
-      verb and a write grant on spec.team; refuses a spec.team that names no
-      Team with 400.
+      verb and a write grant on spec.tenant; refuses a spec.tenant that names no
+      Tenant with 400.
     requestBody:
       required: true
       content:
@@ -87,7 +87,7 @@
     operationId: patchRunner
     tags: [runners]
     summary: >-
-      Merge-patches a runner's spec. spec.team and spec.launcher are
+      Merge-patches a runner's spec. spec.tenant and spec.launcher are
       immutable; a patch that changes either is refused with 400.
     parameters:
       - $ref: '../components/parameters.yaml#/name'

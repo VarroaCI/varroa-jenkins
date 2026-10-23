@@ -6,14 +6,14 @@ This file is the root contract for agents and contributors. Several subtrees hav
 
 Varroa is a Kubernetes-native operator that manages Jenkins controllers at scale. It has these parts:
 
-- A Go backend split into six binaries. `varroa-operator` reconciles the CRDs. `varroa-gateway` serves mite gRPC on `:9090`. `varroa-bff` serves the HTTP API and SSE on `:8080`. `varroa-updatecenter` is an opt-in in-cluster plugin update center. `varroa-recorder` is the opt-in build record store. `varroa-agent` runs Team agent sessions.
+- A Go backend split into six binaries. `varroa-operator` reconciles the CRDs. `varroa-gateway` serves mite gRPC on `:9090`. `varroa-bff` serves the HTTP API and SSE on `:8080`. `varroa-updatecenter` is an opt-in in-cluster plugin update center. `varroa-recorder` is the opt-in build record store. `varroa-agent` runs Tenant agent sessions.
 - A **mite** sidecar (`cmd/mite/`) in every Jenkins pod. It receives commands over gRPC with mTLS.
 - A React/TypeScript dashboard (`frontend/`).
 - A Helm chart (`charts/varroa/`) that deploys Varroa, Dex, and NATS. You bring your own observability stack.
 - A `VarroaSecurityRealm` Jenkins plugin (`plugin/`). The image carries it, and an init container delivers it to each Jenkins pod.
 - `varroactl`, a CLI with an MCP bridge for agents.
 
-Two controller shapes exist. A classic controller is one Jenkins per `Controller` CR. A cell controller (`spec.cell.enabled`) is a shared, disposable Jenkins. It hosts several `Team` tenants and keeps build history in the record store.
+Two controller shapes exist. A classic controller is one Jenkins per `Controller` CR. A cell controller (`spec.cell.enabled`) is a shared, disposable Jenkins. It hosts several `Tenant` tenants and keeps build history in the record store.
 
 ## Project Principles
 
@@ -71,7 +71,7 @@ Update the closest `AGENTS.md` after a change that affects a subtree's purpose, 
 
 - [api](api/AGENTS.md): CRD Go types (`v1alpha1`, group `varroa.dev/v1alpha1`) and the OpenAPI 3 contract with its client codegen.
 - [cmd](cmd/AGENTS.md): the binaries. Indexes [mite](cmd/mite/AGENTS.md) and [varroactl](cmd/varroactl/AGENTS.md).
-- [internal](internal/AGENTS.md): the Go backend packages hub. Indexes `controller`, `api`, `mite`, `bundle`, `rbac`, `bus`, `recordstore`, `agent`, and `teamagent`.
+- [internal](internal/AGENTS.md): the Go backend packages hub. Indexes `controller`, `api`, `mite`, `bundle`, `rbac`, `bus`, `recordstore`, `agent`, and `tenantagent`.
 - [bundles](bundles/AGENTS.md): JCasC content embedded in the operator binary, including the built-in starter bundle.
 - [pkg](pkg/AGENTS.md): the consumable Go surface: generated OpenAPI client, stream helper, embedded templates.
 - [frontend](frontend/AGENTS.md): the React/TypeScript/Vite dashboard and its test and build gates.

@@ -360,7 +360,7 @@ func TestBootstrapLocalAdmin_KeepsExistingUser(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        bootstrapAdminUser,
 			Namespace:   "default",
-			Labels:      map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByLocal, "team": "ops"},
+			Labels:      map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByLocal, "tenant": "ops"},
 			Annotations: map[string]string{"a": "b"},
 		},
 		Spec: v1alpha1.UserSpec{
@@ -378,7 +378,7 @@ func TestBootstrapLocalAdmin_KeepsExistingUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.Labels["team"] != "ops" || got.Labels[v1alpha1.LabelManagedBy] != v1alpha1.ManagedByLocal {
+	if got.Labels["tenant"] != "ops" || got.Labels[v1alpha1.LabelManagedBy] != v1alpha1.ManagedByLocal {
 		t.Errorf("labels = %v, want the existing labels", got.Labels)
 	}
 	if got.Annotations["a"] != "b" {

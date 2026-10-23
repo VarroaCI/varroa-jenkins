@@ -50,10 +50,10 @@ const (
 // parsedRehydrationPath is one validated rehydration file path.
 type parsedRehydrationPath struct {
 	kind rehydrationPathKind
-	// jobPath is the job's human path, "/"-joined ("team/pipeline").
+	// jobPath is the job's human path, "/"-joined ("tenant/pipeline").
 	jobPath string
 	// jobDirParts are the filesystem path parts under jenkinsHomeDir that
-	// name the job's own directory ("jobs", "team", "jobs", "pipeline").
+	// name the job's own directory ("jobs", "tenant", "jobs", "pipeline").
 	jobDirParts []string
 	// buildNumber is set only for a shape that names a build.
 	buildNumber int

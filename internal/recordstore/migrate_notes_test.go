@@ -32,16 +32,16 @@ func TestMigration00039RunNotes(t *testing.T) {
 		t.Fatalf("run_notes indexes = %d, want 4", indexes)
 	}
 
-	if _, err := db.ExecContext(ctx, `INSERT INTO varroa.run_notes (id, cluster, team, job_path, principal, body)
+	if _, err := db.ExecContext(ctx, `INSERT INTO varroa.run_notes (id, cluster, tenant, job_path, principal, body)
 		VALUES (gen_random_uuid(), 'c', 't', 'j', 'p', 'a job note')`); err != nil {
 		t.Fatalf("a job note must insert: %v", err)
 	}
 	sessionID := "0190a1f0-0000-7000-8000-000000000001"
-	if _, err := db.ExecContext(ctx, `INSERT INTO varroa.run_notes (id, cluster, team, job_path, principal, session_id, body)
+	if _, err := db.ExecContext(ctx, `INSERT INTO varroa.run_notes (id, cluster, tenant, job_path, principal, session_id, body)
 		VALUES (gen_random_uuid(), 'c', 't', 'j', 'p', $1, 'first')`, sessionID); err != nil {
 		t.Fatalf("first session note: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO varroa.run_notes (id, cluster, team, job_path, principal, session_id, body)
+	if _, err := db.ExecContext(ctx, `INSERT INTO varroa.run_notes (id, cluster, tenant, job_path, principal, session_id, body)
 		VALUES (gen_random_uuid(), 'c', 't', 'j', 'p', $1, 'second')`, sessionID); err == nil {
 		t.Fatal("a second note for one session succeeded")
 	}

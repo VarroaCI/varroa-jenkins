@@ -16,15 +16,15 @@ import (
 
 const issueUID = "uid-agent-a"
 
-// seedAgent seeds one TeamAgent in the namespace default, owned by Team
+// seedAgent seeds one TenantAgent in the namespace default, owned by Tenant
 // payments. Its issue output names the test repository on the fixture forge.
-func seedAgent(t *testing.T, fx *fixture, mutate func(*v1alpha1.TeamAgent)) {
+func seedAgent(t *testing.T, fx *fixture, mutate func(*v1alpha1.TenantAgent)) {
 	t.Helper()
-	ta := &v1alpha1.TeamAgent{
+	ta := &v1alpha1.TenantAgent{
 		ObjectMeta: metav1.ObjectMeta{Name: "agent-a", Namespace: "default", UID: issueUID},
-		Spec: v1alpha1.TeamAgentSpec{
-			TeamRef: v1alpha1.TeamAgentTeamRef{Name: "payments"},
-			Outputs: v1alpha1.TeamAgentOutputs{Issues: &v1alpha1.TeamAgentIssueOutput{
+		Spec: v1alpha1.TenantAgentSpec{
+			TenantRef: v1alpha1.TenantAgentTenantRef{Name: "payments"},
+			Outputs: v1alpha1.TenantAgentOutputs{Issues: &v1alpha1.TenantAgentIssueOutput{
 				Repo: testRepoURL, Forge: "gitea", Labels: []string{"ops", "bug"},
 			}},
 		},
@@ -37,13 +37,13 @@ func seedAgent(t *testing.T, fx *fixture, mutate func(*v1alpha1.TeamAgent)) {
 
 func issueReq(labels ...string) forgeapi.IssueRequest {
 	return forgeapi.IssueRequest{
-		Team:      "payments",
-		TeamAgent: forgeapi.TeamAgentRef{Namespace: "default", Name: "agent-a", UID: issueUID},
-		Title:     "Build is flaky",
-		Body:      "Three runs failed.",
-		Labels:    labels,
-		Actor:     "agent:default/payments/agent-a",
-		SessionID: "s-1",
+		Tenant:      "payments",
+		TenantAgent: forgeapi.TenantAgentRef{Namespace: "default", Name: "agent-a", UID: issueUID},
+		Title:       "Build is flaky",
+		Body:        "Three runs failed.",
+		Labels:      labels,
+		Actor:       "agent:default/payments/agent-a",
+		SessionID:   "s-1",
 	}
 }
 
@@ -67,7 +67,7 @@ func TestIssue_OpensOnGitea(t *testing.T) {
 func TestIssue_GitHubForge(t *testing.T) {
 	fx := newFixture(t, "agents-payments")
 	fx.kind = forge.KindGitHub
-	seedAgent(t, fx, func(ta *v1alpha1.TeamAgent) { ta.Spec.Outputs.Issues.Forge = "github" })
+	seedAgent(t, fx, func(ta *v1alpha1.TenantAgent) { ta.Spec.Outputs.Issues.Forge = "github" })
 	c := pushable()
 	oneWriter(fx, c)
 	if rep := fx.ops.Issue(context.Background(), issueReq(), "varroa-system"); !rep.OK {
@@ -78,25 +78,25 @@ func TestIssue_GitHubForge(t *testing.T) {
 func TestIssue_Refusals(t *testing.T) {
 	type tc struct {
 		name   string
-		mutate func(*v1alpha1.TeamAgent)
+		mutate func(*v1alpha1.TenantAgent)
 		req    func(forgeapi.IssueRequest) forgeapi.IssueRequest
 		setup  func(*testing.T, *fixture)
 		code   string
 	}
 	writer := func(fx *fixture) { oneWriter(fx, pushable()) }
 	cases := []tc{
-		{name: "UIDMismatch", req: func(r forgeapi.IssueRequest) forgeapi.IssueRequest { r.TeamAgent.UID = "other"; return r },
+		{name: "UIDMismatch", req: func(r forgeapi.IssueRequest) forgeapi.IssueRequest { r.TenantAgent.UID = "other"; return r },
 			setup: func(t *testing.T, fx *fixture) { writer(fx) }, code: forgeapi.CodeInvalidRequest},
-		{name: "NotAccepted", mutate: func(ta *v1alpha1.TeamAgent) { ta.Namespace = "elsewhere"; ta.Name = "agent-x" },
+		{name: "NotAccepted", mutate: func(ta *v1alpha1.TenantAgent) { ta.Namespace = "elsewhere"; ta.Name = "agent-x" },
 			req: func(r forgeapi.IssueRequest) forgeapi.IssueRequest {
-				r.TeamAgent.Namespace, r.TeamAgent.Name = "elsewhere", "agent-x"
+				r.TenantAgent.Namespace, r.TenantAgent.Name = "elsewhere", "agent-x"
 				return r
 			}, setup: func(t *testing.T, fx *fixture) { writer(fx) }, code: forgeapi.CodeInvalidRequest},
-		{name: "OutputOff", mutate: func(ta *v1alpha1.TeamAgent) { ta.Spec.Outputs.Issues = nil },
+		{name: "OutputOff", mutate: func(ta *v1alpha1.TenantAgent) { ta.Spec.Outputs.Issues = nil },
 			setup: func(t *testing.T, fx *fixture) { writer(fx) }, code: forgeapi.CodeInvalidRequest},
 		{name: "LabelOutsideSet", req: func(r forgeapi.IssueRequest) forgeapi.IssueRequest { r.Labels = []string{"secret"}; return r },
 			setup: func(t *testing.T, fx *fixture) { writer(fx) }, code: forgeapi.CodeInvalidRequest},
-		{name: "ForgeMismatch", mutate: func(ta *v1alpha1.TeamAgent) { ta.Spec.Outputs.Issues.Forge = "github" },
+		{name: "ForgeMismatch", mutate: func(ta *v1alpha1.TenantAgent) { ta.Spec.Outputs.Issues.Forge = "github" },
 			setup: func(t *testing.T, fx *fixture) { writer(fx) }, code: forgeapi.CodeForgeUnsupported},
 		{name: "NoCredential", setup: func(t *testing.T, fx *fixture) {}, code: forgeapi.CodeNoMatchingCredential},
 		{name: "NoReadableCredential", setup: func(t *testing.T, fx *fixture) {

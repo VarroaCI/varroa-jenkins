@@ -1,6 +1,6 @@
 {{- if and .Values.networkPolicy.enabled .Values.agentRunner.enabled (not (include "varroa.isHive" .)) }}
 ---
-# Policy: Team agent runner. It reaches NATS, the BFF MCP endpoint, the record
+# Policy: Tenant agent runner. It reaches NATS, the BFF MCP endpoint, the record
 # store, and the assistant's model providers. It has no git or forge egress:
 # the operator owns every forge call.
 apiVersion: networking.k8s.io/v1
@@ -34,7 +34,7 @@ spec:
           port: 4222
 {{- end }}
 {{ include "varroa.np.apiServerEgress" . | nindent 4 }}
-    # The BFF MCP endpoint, the only path a Team agent session takes to a tool.
+    # The BFF MCP endpoint, the only path a Tenant agent session takes to a tool.
     - to:
         - podSelector:
             matchLabels:

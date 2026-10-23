@@ -15,12 +15,12 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
-// memberTeamBrood answers GetTeamBundleContent from a map keyed by
-// cluster/team. It records each member call. Every other ConfigBrood method
+// memberTenantBrood answers GetTenantBundleContent from a map keyed by
+// cluster/tenant. It records each member call. Every other ConfigBrood method
 // is unused by these reads and panics if reached.
-type memberTeamBrood struct {
+type memberTenantBrood struct {
 	ConfigBrood
-	replies map[string]memberTeamReply
+	replies map[string]memberTenantReply
 	// items answers GetCatalogItem, keyed cluster/ns/name. itemErr, when
 	// set, answers every GetCatalogItem call instead.
 	items   map[string]*v1alpha1.CatalogItem
@@ -29,7 +29,7 @@ type memberTeamBrood struct {
 }
 
 // GetCatalogItem answers from items. A miss is a member not-found.
-func (f *memberTeamBrood) GetCatalogItem(_ context.Context, cluster, ns, name string) (json.RawMessage, error) {
+func (f *memberTenantBrood) GetCatalogItem(_ context.Context, cluster, ns, name string) (json.RawMessage, error) {
 	key := cluster + "/" + ns + "/" + name
 	f.calls = append(f.calls, "item:"+key)
 	if f.itemErr != nil {
@@ -68,30 +68,30 @@ func (f *memberCellBrood) Get(ctx context.Context, cluster, ns, name string) (*v
 	return cr, nil
 }
 
-type memberTeamReply struct {
+type memberTenantReply struct {
 	cb      *v1alpha1.ComposedBundle
 	content map[string]string
 	held    bool
 	err     error
 }
 
-func (f *memberTeamBrood) GetTeamBundleContent(_ context.Context, cluster, team string) (*v1alpha1.ComposedBundle, map[string]string, bool, error) {
-	key := cluster + "/" + team
+func (f *memberTenantBrood) GetTenantBundleContent(_ context.Context, cluster, tenant string) (*v1alpha1.ComposedBundle, map[string]string, bool, error) {
+	key := cluster + "/" + tenant
 	f.calls = append(f.calls, key)
 	r, ok := f.replies[key]
 	if !ok {
-		return nil, nil, false, &BroodError{Code: bus.CodeNotFound, Msg: "team not found"}
+		return nil, nil, false, &BroodError{Code: bus.CodeNotFound, Msg: "tenant not found"}
 	}
 	return r.cb, r.content, r.held, r.err
 }
 
-// memberTeamRef is a placed Team that member-a holds and the core does not.
-var memberTeamRef = TenantRef{
+// memberTenantRef is a placed Tenant that member-a holds and the core does not.
+var memberTenantRef = TenantRef{
 	Cluster: "member-a", Namespace: "cells", Controller: "cell-a",
-	Team: "payments", Tenant: "payments", Folder: "payments",
+	TenantName: "payments", Tenant: "payments", Folder: "payments",
 }
 
-func memberTeamServer(t *testing.T, brood *memberTeamBrood) *Server {
+func memberTenantServer(t *testing.T, brood *memberTenantBrood) *Server {
 	t.Helper()
 	client := newFakeResourceClient()
 	srv := NewServer(&Dependencies{
@@ -109,13 +109,13 @@ func memberBundle() *v1alpha1.ComposedBundle {
 	return &v1alpha1.ComposedBundle{ObjectMeta: metav1.ObjectMeta{Name: "payments-bundle", Namespace: "cells"}}
 }
 
-func TestControllerItemManifest_MemberPlacedTeamReadsMemberBundle(t *testing.T) {
-	brood := &memberTeamBrood{replies: map[string]memberTeamReply{
-		"member-a/payments": {cb: memberBundle(), content: map[string]string{"items.yaml": teamItemsYAML}},
+func TestControllerItemManifest_MemberPlacedTenantReadsMemberBundle(t *testing.T) {
+	brood := &memberTenantBrood{replies: map[string]memberTenantReply{
+		"member-a/payments": {cb: memberBundle(), content: map[string]string{"items.yaml": tenantItemsYAML}},
 	}}
-	srv := memberTeamServer(t, brood)
+	srv := memberTenantServer(t, brood)
 
-	_, _, manifest, err := srv.controllerItemManifest(context.Background(), memberTeamRef)
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), memberTenantRef)
 	if err != nil {
 		t.Fatalf("controllerItemManifest: %v", err)
 	}
@@ -128,13 +128,13 @@ func TestControllerItemManifest_MemberPlacedTeamReadsMemberBundle(t *testing.T) 
 	}
 }
 
-func TestControllerItemManifest_MemberPlacedTeamUnknownKeyGivesNoManifest(t *testing.T) {
-	brood := &memberTeamBrood{replies: map[string]memberTeamReply{
+func TestControllerItemManifest_MemberPlacedTenantUnknownKeyGivesNoManifest(t *testing.T) {
+	brood := &memberTenantBrood{replies: map[string]memberTenantReply{
 		"member-a/payments": {cb: memberBundle(), content: map[string]string{"items.yaml": tenantUnknownKeyItems}},
 	}}
-	srv := memberTeamServer(t, brood)
+	srv := memberTenantServer(t, brood)
 
-	_, _, manifest, err := srv.controllerItemManifest(context.Background(), memberTeamRef)
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), memberTenantRef)
 	if err != nil {
 		t.Fatalf("controllerItemManifest: %v", err)
 	}
@@ -143,16 +143,16 @@ func TestControllerItemManifest_MemberPlacedTeamUnknownKeyGivesNoManifest(t *tes
 	}
 }
 
-func TestControllerItemManifest_MemberPlacedTeamVarInKeyKeepsManifest(t *testing.T) {
-	brood := &memberTeamBrood{replies: map[string]memberTeamReply{
+func TestControllerItemManifest_MemberPlacedTenantVarInKeyKeepsManifest(t *testing.T) {
+	brood := &memberTenantBrood{replies: map[string]memberTenantReply{
 		"member-a/payments": {cb: memberBundle(), content: map[string]string{
 			"items.yaml":     tenantVarInKeyItems,
 			"variables.yaml": "field: builders\n",
 		}},
 	}}
-	srv := memberTeamServer(t, brood)
+	srv := memberTenantServer(t, brood)
 
-	_, _, manifest, err := srv.controllerItemManifest(context.Background(), memberTeamRef)
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), memberTenantRef)
 	if err != nil {
 		t.Fatalf("controllerItemManifest: %v", err)
 	}
@@ -161,36 +161,36 @@ func TestControllerItemManifest_MemberPlacedTeamVarInKeyKeepsManifest(t *testing
 	}
 }
 
-func TestTeamPipelineBundleContent_MemberNotFoundAnswersNil(t *testing.T) {
-	brood := &memberTeamBrood{replies: map[string]memberTeamReply{
-		"member-a/payments": {err: &BroodError{Code: bus.CodeNotFound, Msg: "team not found"}},
+func TestTenantPipelineBundleContent_MemberNotFoundAnswersNil(t *testing.T) {
+	brood := &memberTenantBrood{replies: map[string]memberTenantReply{
+		"member-a/payments": {err: &BroodError{Code: bus.CodeNotFound, Msg: "tenant not found"}},
 	}}
-	srv := memberTeamServer(t, brood)
+	srv := memberTenantServer(t, brood)
 
-	cb, content, _, err := srv.teamPipelineBundleContent(context.Background(), memberTeamRef)
+	cb, content, _, err := srv.tenantPipelineBundleContent(context.Background(), memberTenantRef)
 	if cb != nil || content != nil || err != nil {
 		t.Fatalf("got (%v, %v, %v), want nil, nil, nil", cb, content, err)
 	}
 }
 
-func TestTeamPipelineBundleContent_MemberUnreachableReturnsError(t *testing.T) {
-	brood := &memberTeamBrood{replies: map[string]memberTeamReply{
+func TestTenantPipelineBundleContent_MemberUnreachableReturnsError(t *testing.T) {
+	brood := &memberTenantBrood{replies: map[string]memberTenantReply{
 		"member-a/payments": {err: &ErrClusterUnreachable{Cluster: "member-a"}},
 	}}
-	srv := memberTeamServer(t, brood)
+	srv := memberTenantServer(t, brood)
 
-	if _, _, _, err := srv.teamPipelineBundleContent(context.Background(), memberTeamRef); err == nil {
+	if _, _, _, err := srv.tenantPipelineBundleContent(context.Background(), memberTenantRef); err == nil {
 		t.Fatal("err = nil, want the unreachable member error")
 	}
 }
 
-func TestTeamPipelineBundleContent_LocalClusterNotFoundDoesNotCallMember(t *testing.T) {
-	brood := &memberTeamBrood{}
-	srv := memberTeamServer(t, brood)
+func TestTenantPipelineBundleContent_LocalClusterNotFoundDoesNotCallMember(t *testing.T) {
+	brood := &memberTenantBrood{}
+	srv := memberTenantServer(t, brood)
 
-	localRef := memberTeamRef
+	localRef := memberTenantRef
 	localRef.Cluster = "core"
-	cb, content, _, err := srv.teamPipelineBundleContent(context.Background(), localRef)
+	cb, content, _, err := srv.tenantPipelineBundleContent(context.Background(), localRef)
 	if cb != nil || content != nil || err != nil {
 		t.Fatalf("got (%v, %v, %v), want nil, nil, nil", cb, content, err)
 	}
@@ -199,7 +199,7 @@ func TestTeamPipelineBundleContent_LocalClusterNotFoundDoesNotCallMember(t *test
 	}
 }
 
-// memberItemBundle is a member-placed Team's bundle with one itemRef input,
+// memberItemBundle is a member-placed Tenant's bundle with one itemRef input,
 // payments-items, that the member resolves in catalog-ns.
 func memberItemBundle() *v1alpha1.ComposedBundle {
 	return &v1alpha1.ComposedBundle{
@@ -214,10 +214,10 @@ func memberItemBundle() *v1alpha1.ComposedBundle {
 	}
 }
 
-// memberTeamServerWithCells builds a server over client's local store, with
+// memberTenantServerWithCells builds a server over client's local store, with
 // brood as the ConfigBrood and cells as the Brood. The local calls go to a
 // fake Brood over client. Seed client before the call.
-func memberTeamServerWithCells(t *testing.T, client *fakeResourceClient, brood *memberTeamBrood, cells *memberCellBrood) *Server {
+func memberTenantServerWithCells(t *testing.T, client *fakeResourceClient, brood *memberTenantBrood, cells *memberCellBrood) *Server {
 	t.Helper()
 	cells.Brood = newFakeBrood(client)
 	return NewServer(&Dependencies{
@@ -230,33 +230,33 @@ func memberTeamServerWithCells(t *testing.T, client *fakeResourceClient, brood *
 	})
 }
 
-// memberPaymentsItemBrood serves teamItemsYAML as the member's bundle content
+// memberPaymentsItemBrood serves tenantItemsYAML as the member's bundle content
 // and as the content of the member's payments-items CatalogItem.
-func memberPaymentsItemBrood() *memberTeamBrood {
-	return &memberTeamBrood{
-		replies: map[string]memberTeamReply{
-			"member-a/payments": {cb: memberItemBundle(), content: map[string]string{"items.yaml": teamItemsYAML}},
+func memberPaymentsItemBrood() *memberTenantBrood {
+	return &memberTenantBrood{
+		replies: map[string]memberTenantReply{
+			"member-a/payments": {cb: memberItemBundle(), content: map[string]string{"items.yaml": tenantItemsYAML}},
 		},
 		items: map[string]*v1alpha1.CatalogItem{
 			"member-a/catalog-ns/payments-items": {
 				ObjectMeta: metav1.ObjectMeta{Name: "payments-items", Namespace: "catalog-ns"},
 				Spec:       v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem},
-				Status:     v1alpha1.CatalogItemStatus{Content: teamItemsYAML},
+				Status:     v1alpha1.CatalogItemStatus{Content: tenantItemsYAML},
 			},
 		},
 	}
 }
 
-// TestFindDeclaredItem_MemberPlacedTeamReadsCatalogItemFromMember asserts the
+// TestFindDeclaredItem_MemberPlacedTenantReadsCatalogItemFromMember asserts the
 // declaredBy itemRef is read on the member that holds the bundle, not on the
 // core store, which holds a same-named item that declares another job.
-func TestFindDeclaredItem_MemberPlacedTeamReadsCatalogItemFromMember(t *testing.T) {
+func TestFindDeclaredItem_MemberPlacedTenantReadsCatalogItemFromMember(t *testing.T) {
 	brood := memberPaymentsItemBrood()
 	client := newFakeResourceClient()
 	seedCatalogItem(client, "payments-items", "catalog-ns", "items:\n  - kind: folder\n    name: other\n")
-	srv := memberTeamServerWithCells(t, client, brood, &memberCellBrood{})
+	srv := memberTenantServerWithCells(t, client, brood, &memberCellBrood{})
 
-	_, item, declaredBy, err := srv.findDeclaredItem(context.Background(), memberTeamRef, "payments/release/eu")
+	_, item, declaredBy, err := srv.findDeclaredItem(context.Background(), memberTenantRef, "payments/release/eu")
 	if err != nil {
 		t.Fatalf("findDeclaredItem: %v", err)
 	}
@@ -276,10 +276,10 @@ func TestFindDeclaredItem_MemberPlacedTeamReadsCatalogItemFromMember(t *testing.
 	}
 }
 
-// TestFindDeclaredItem_MemberPlacedTeamReadsCellFromMember asserts the
+// TestFindDeclaredItem_MemberPlacedTenantReadsCellFromMember asserts the
 // profile's cell is read on the member, not on the core store, which holds a
 // same-named controller at another version.
-func TestFindDeclaredItem_MemberPlacedTeamReadsCellFromMember(t *testing.T) {
+func TestFindDeclaredItem_MemberPlacedTenantReadsCellFromMember(t *testing.T) {
 	brood := memberPaymentsItemBrood()
 	client := newFakeResourceClient()
 	client.controllers = map[string]*v1alpha1.Controller{"cell-a": {
@@ -290,9 +290,9 @@ func TestFindDeclaredItem_MemberPlacedTeamReadsCellFromMember(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "cells"},
 		Spec:       v1alpha1.ControllerSpec{Version: "2.570"},
 	}}}
-	srv := memberTeamServerWithCells(t, client, brood, cells)
+	srv := memberTenantServerWithCells(t, client, brood, cells)
 
-	cr, _, _, err := srv.findDeclaredItem(context.Background(), memberTeamRef, "payments/release/eu")
+	cr, _, _, err := srv.findDeclaredItem(context.Background(), memberTenantRef, "payments/release/eu")
 	if err != nil {
 		t.Fatalf("findDeclaredItem: %v", err)
 	}
@@ -306,9 +306,9 @@ func TestFindDeclaredItem_MemberPlacedTeamReadsCellFromMember(t *testing.T) {
 func TestFindDeclaredItem_MemberCatalogItemNotFoundGivesNoDeclarer(t *testing.T) {
 	brood := memberPaymentsItemBrood()
 	brood.items = nil
-	srv := memberTeamServerWithCells(t, newFakeResourceClient(), brood, &memberCellBrood{})
+	srv := memberTenantServerWithCells(t, newFakeResourceClient(), brood, &memberCellBrood{})
 
-	_, item, declaredBy, err := srv.findDeclaredItem(context.Background(), memberTeamRef, "payments/release/eu")
+	_, item, declaredBy, err := srv.findDeclaredItem(context.Background(), memberTenantRef, "payments/release/eu")
 	if err != nil {
 		t.Fatalf("findDeclaredItem: %v", err)
 	}
@@ -323,9 +323,9 @@ func TestFindDeclaredItem_MemberCatalogItemNotFoundGivesNoDeclarer(t *testing.T)
 func TestFindDeclaredItem_MemberCatalogItemReadErrorGivesNoDeclarer(t *testing.T) {
 	brood := memberPaymentsItemBrood()
 	brood.itemErr = &ErrClusterUnreachable{Cluster: "member-a"}
-	srv := memberTeamServerWithCells(t, newFakeResourceClient(), brood, &memberCellBrood{})
+	srv := memberTenantServerWithCells(t, newFakeResourceClient(), brood, &memberCellBrood{})
 
-	_, item, declaredBy, err := srv.findDeclaredItem(context.Background(), memberTeamRef, "payments/release/eu")
+	_, item, declaredBy, err := srv.findDeclaredItem(context.Background(), memberTenantRef, "payments/release/eu")
 	if err != nil {
 		t.Fatalf("findDeclaredItem: %v", err)
 	}
@@ -335,12 +335,12 @@ func TestFindDeclaredItem_MemberCatalogItemReadErrorGivesNoDeclarer(t *testing.T
 }
 
 // TestControllerItemManifest_MemberCellNotFoundKeepsManifest asserts a member
-// with no cell for the Team keeps the manifest.
+// with no cell for the Tenant keeps the manifest.
 func TestControllerItemManifest_MemberCellNotFoundKeepsManifest(t *testing.T) {
 	brood := memberPaymentsItemBrood()
-	srv := memberTeamServerWithCells(t, newFakeResourceClient(), brood, &memberCellBrood{})
+	srv := memberTenantServerWithCells(t, newFakeResourceClient(), brood, &memberCellBrood{})
 
-	cr, _, manifest, err := srv.controllerItemManifest(context.Background(), memberTeamRef)
+	cr, _, manifest, err := srv.controllerItemManifest(context.Background(), memberTenantRef)
 	if err != nil {
 		t.Fatalf("controllerItemManifest: %v", err)
 	}
@@ -354,9 +354,9 @@ func TestControllerItemManifest_MemberCellNotFoundKeepsManifest(t *testing.T) {
 func TestControllerItemManifest_MemberCellReadErrorKeepsManifest(t *testing.T) {
 	brood := memberPaymentsItemBrood()
 	cells := &memberCellBrood{err: &ErrClusterUnreachable{Cluster: "member-a"}}
-	srv := memberTeamServerWithCells(t, newFakeResourceClient(), brood, cells)
+	srv := memberTenantServerWithCells(t, newFakeResourceClient(), brood, cells)
 
-	cr, _, manifest, err := srv.controllerItemManifest(context.Background(), memberTeamRef)
+	cr, _, manifest, err := srv.controllerItemManifest(context.Background(), memberTenantRef)
 	if err != nil {
 		t.Fatalf("controllerItemManifest: %v", err)
 	}
@@ -365,14 +365,14 @@ func TestControllerItemManifest_MemberCellReadErrorKeepsManifest(t *testing.T) {
 	}
 }
 
-// TestControllerItemManifest_LocalClusterTeamNeverReadsMemberCell asserts a
-// Team on the local cluster never reads a member cell.
-func TestControllerItemManifest_LocalClusterTeamNeverReadsMemberCell(t *testing.T) {
+// TestControllerItemManifest_LocalClusterTenantNeverReadsMemberCell asserts a
+// Tenant on the local cluster never reads a member cell.
+func TestControllerItemManifest_LocalClusterTenantNeverReadsMemberCell(t *testing.T) {
 	brood := memberPaymentsItemBrood()
 	cells := &memberCellBrood{}
-	srv := memberTeamServerWithCells(t, newFakeResourceClient(), brood, cells)
+	srv := memberTenantServerWithCells(t, newFakeResourceClient(), brood, cells)
 
-	localRef := memberTeamRef
+	localRef := memberTenantRef
 	localRef.Cluster = "core"
 	if _, _, _, err := srv.controllerItemManifest(context.Background(), localRef); err != nil {
 		t.Fatalf("controllerItemManifest: %v", err)

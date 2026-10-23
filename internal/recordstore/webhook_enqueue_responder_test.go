@@ -23,15 +23,15 @@ func TestWebhookEnqueue_OneRowPerCall(t *testing.T) {
 		t.Fatalf("store tenant webhook: %v", err)
 	}
 	session := uuid.NewString()
-	req := TeamAgentWebhookRequest{
+	req := TenantAgentWebhookRequest{
 		Cluster: testCluster, Tenant: testTenant, SessionID: session, CallID: "call-1",
 		Principal: "agent:ns/team/a", Body: json.RawMessage(`{"text":"hello"}`),
 	}
-	first, err := EnqueueTeamAgentWebhook(context.Background(), pool, req, time.Now().UTC())
+	first, err := EnqueueTenantAgentWebhook(context.Background(), pool, req, time.Now().UTC())
 	if err != nil || !first.OK {
 		t.Fatalf("first enqueue: %+v, %v", first, err)
 	}
-	second, err := EnqueueTeamAgentWebhook(context.Background(), pool, req, time.Now().UTC())
+	second, err := EnqueueTenantAgentWebhook(context.Background(), pool, req, time.Now().UTC())
 	if err != nil || !second.OK {
 		t.Fatalf("repeat enqueue: %+v, %v", second, err)
 	}
@@ -41,7 +41,7 @@ func TestWebhookEnqueue_OneRowPerCall(t *testing.T) {
 	var n int
 	if err := db.QueryRow(`
 		SELECT count(*) FROM varroa.webhook_deliveries WHERE delivery_key = $1
-	`, "team_agent.message:"+session+":call-1").Scan(&n); err != nil {
+	`, "tenant_agent.message:"+session+":call-1").Scan(&n); err != nil {
 		t.Fatalf("count deliveries: %v", err)
 	}
 	if n != 1 {
@@ -56,11 +56,11 @@ func TestWebhookEnqueue_NoWebhook(t *testing.T) {
 
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacement(t, db, testTenant, testNamespace, "cell-a", 0, "pod-a", "", nil)
-	req := TeamAgentWebhookRequest{
+	req := TenantAgentWebhookRequest{
 		Cluster: testCluster, Tenant: testTenant, SessionID: uuid.NewString(), CallID: "call-x",
 		Principal: "agent:ns/team/a", Body: json.RawMessage(`{"text":"hello"}`),
 	}
-	resp, err := EnqueueTeamAgentWebhook(context.Background(), pool, req, time.Now().UTC())
+	resp, err := EnqueueTenantAgentWebhook(context.Background(), pool, req, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -83,11 +83,11 @@ func TestWebhookEnqueue_SessionIDAsRunID(t *testing.T) {
 		t.Fatalf("store tenant webhook: %v", err)
 	}
 	session := uuid.NewString()
-	req := TeamAgentWebhookRequest{
+	req := TenantAgentWebhookRequest{
 		Cluster: testCluster, Tenant: testTenant, SessionID: session, CallID: "call-2",
 		Principal: "agent:ns/team/a", Body: json.RawMessage(`{"text":"hello"}`),
 	}
-	resp, err := EnqueueTeamAgentWebhook(context.Background(), pool, req, time.Now().UTC())
+	resp, err := EnqueueTenantAgentWebhook(context.Background(), pool, req, time.Now().UTC())
 	if err != nil || !resp.OK {
 		t.Fatalf("enqueue: %+v, %v", resp, err)
 	}

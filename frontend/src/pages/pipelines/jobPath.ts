@@ -18,8 +18,8 @@ export function stripTenantFolder(tenantFolder: string, jobPath: string): string
  * and the case key each take one path segment. The case key is opaque and
  * can hold a "/", so it is encoded as one segment and never parsed.
  */
-export function testCaseHref(team: string, jobPath: string, caseKey: string): string {
-  return `/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(jobPath)}/tests/${encodeURIComponent(caseKey)}`;
+export function testCaseHref(tenant: string, jobPath: string, caseKey: string): string {
+  return `/pipelines/${encodeURIComponent(tenant)}/${encodeURIComponent(jobPath)}/tests/${encodeURIComponent(caseKey)}`;
 }
 
 /** The route state a case link passes. The history page names the class

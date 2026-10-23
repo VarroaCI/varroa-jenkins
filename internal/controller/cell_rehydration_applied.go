@@ -30,7 +30,7 @@ func rehydrationApplied(entry *v1alpha1.CellRehydrationEntry, generation int64, 
 }
 
 // rehydrationExpired reports whether a still-pending tenant has retried
-// past Team.spec.pipelines.rehydrateDeadline (design D13, task 6.3).
+// past Tenant.spec.pipelines.rehydrateDeadline (design D13, task 6.3).
 // pendingSince is when this generation/cellInstance combination first
 // became pending; the caller resets it whenever the placement changes or
 // the tenant becomes applied, and a zero pendingSince (no pending streak

@@ -50,7 +50,7 @@ func TestRecordPendingSignatures_CapsItemsAndRequesters(t *testing.T) {
 		var reqs []*mitev1.PendingSignatureRequester
 		for j := 0; j < 5; j++ {
 			reqs = append(reqs, &mitev1.PendingSignatureRequester{
-				Tenant:      "team",
+				Tenant:      "tenant",
 				JobPath:     fmt.Sprintf("team/job-%d-%d", i, j),
 				BuildNumber: int64(j),
 				RunId:       "run",

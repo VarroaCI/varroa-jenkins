@@ -20,7 +20,7 @@ reconciler phases, gRPC server internals, or HTTP route handlers — those are
 One entrypoint per subfolder, each with its own top-of-file doc comment
 stating what it is/is not responsible for:
 
-- Operator flag `--team-agents` (env `VARROA_TEAM_AGENTS`) starts the leader-elected `teamagent` ticker on a core install.
+- Operator flag `--tenant-agents` (env `VARROA_TENANT_AGENTS`) starts the leader-elected `tenantagent` ticker on a core install.
 - **`operator/`** (`bin/varroa-operator`) — registers the controller-runtime
   reconciler for `Controller` CRDs; drives the `Pending→Provisioning→Running→
   Connected→Failed` phase state machine over NATS and serves the per-controller
@@ -80,7 +80,7 @@ stating what it is/is not responsible for:
   Every replica also subscribes to `events.brood.<cluster>`
   (`brood_watch.go`): a `disconnected` event enqueues an on-demand
   reconcile for the named Controller, which performs the pod read, and
-  wakes the `team` ticker through its buffered, size-one `wake` channel.
+  wakes the `tenant` ticker through its buffered, size-one `wake` channel.
   A `connected` event calls `TriggerOwnedReconcile`, which enqueues only on
   the replica that owns the Controller and routes no wake patch, because
   every replica receives the broadcast. That reconcile reads the new epoch
@@ -88,13 +88,13 @@ stating what it is/is not responsible for:
   **The event decides nothing** — it only removes latency, so a foreign
   cluster, any other event value, and a missed message all cost one tick
   and no more, and the wake send never blocks.
-  A `connected` event does not wake the `team` ticker. The Controller
+  A `connected` event does not wake the `tenant` ticker. The Controller
   informer wakes it on every replica when `controller.CellSeedStateChanged`
   reports a change of a cell's per-tenant seed answer. Only the leader runs
   the ticker. `BusTransport.OnCommandResult` is set to
   `Reconciler.NotifyCommandResult`, so an applied rehydration result wakes
   its owned Controller at once.
-  Every replica also serves `operator.<cluster>.forge.check` and `.forge.read` (`forge_ops.go`), with no queue group and only the Team's shard owner replying. Each verb runs four requests at a time under a 25-second deadline (`forgeRequestTimeout`), below the requester's 30 seconds. `forge.pullrequest` runs four requests at a time, and one at a time for each Team (`keylock`, key `forgeops.ShardKey`). A second pull request for a Team is refused at once with `pull_request_busy`. The Team lock never waits, so no bus slot is held for a wait. It refuses with `request_expired` when less than 15 seconds of work time remain before the requester's deadline minus 20 seconds. `forge.issue` runs four at a time, under the requester's deadline minus 5 seconds and at most 25 seconds. It refuses with `request_expired` when less than 10 seconds remain.
+  Every replica also serves `operator.<cluster>.forge.check` and `.forge.read` (`forge_ops.go`), with no queue group and only the Tenant's shard owner replying. Each verb runs four requests at a time under a 25-second deadline (`forgeRequestTimeout`), below the requester's 30 seconds. `forge.pullrequest` runs four requests at a time, and one at a time for each Tenant (`keylock`, key `forgeops.ShardKey`). A second pull request for a Tenant is refused at once with `pull_request_busy`. The Tenant lock never waits, so no bus slot is held for a wait. It refuses with `request_expired` when less than 15 seconds of work time remain before the requester's deadline minus 20 seconds. `forge.issue` runs four at a time, under the requester's deadline minus 5 seconds and at most 25 seconds. It refuses with `request_expired` when less than 10 seconds remain.
 - **`gateway/`** (`bin/varroa-gateway`) — terminates mTLS/gRPC from mite
   sidecars on `:9090` and bridges each `CommandStream` to NATS
   (`mite.<cluster>.<ns>.<name>.{in,out,content,desired}`). Loads the shared CA from the `varroa-ca`
@@ -126,7 +126,7 @@ stating what it is/is not responsible for:
   `update-center.actual.json` + plugin `.hpi` blobs from an `internal/oci`
   BlobStore; local storage mode is single-replica (PVC), oci mode is stateless.
   Built by `make build` into the same product image as the other backends.
-- **`agentrunner/`** (`bin/varroa-agent`) — the Team agent runner. It consumes `varroa_activity`, starts Team agent sessions, and runs them through the BFF MCP endpoint. HTTP on `:8080` with `/healthz`, `/readyz`, `/metrics`. It flags `-bus-url`, `-bus-ca-file`, `-bus-pass-file`, and `-port`; the rest comes from the environment (`internal/teamagent/config`). It connects as the NATS user `agentrunner` and answers no request.
+- **`agentrunner/`** (`bin/varroa-agent`) — the Tenant agent runner. It consumes `varroa_activity`, starts Tenant agent sessions, and runs them through the BFF MCP endpoint. HTTP on `:8080` with `/healthz`, `/readyz`, `/metrics`. It flags `-bus-url`, `-bus-ca-file`, `-bus-pass-file`, and `-port`; the rest comes from the environment (`internal/tenantagent/config`). It connects as the NATS user `agentrunner` and answers no request.
 - **`recorder/`** (`bin/varroa-recorder`) — the build-record store
   recorder; HTTP on `:8080` with only `/healthz`, `/readyz`, `/metrics`.
   The only writer of `internal/recordstore`'s Postgres tables, the only

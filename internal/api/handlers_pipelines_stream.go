@@ -20,11 +20,11 @@ type runStreamTenant struct {
 	granted bool
 }
 
-// handleTeamRunStream streams live run notifications for one team. A
+// handleTenantRunStream streams live run notifications for one tenant. A
 // pipelines ticket opens it, so the ticket's claims decide the visible
 // tenants. It writes no frame at connect: the page refetches when the
 // stream reports itself open.
-func (s *Server) handleTeamRunStream(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleTenantRunStream(w http.ResponseWriter, r *http.Request) {
 	if s.deps.RecordStore == nil {
 		s.pipelinesUnavailable(w)
 		return
@@ -42,7 +42,7 @@ func (s *Server) handleTeamRunStream(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	claims := auth.ClaimsFromContext(ctx)
-	refs, serr := s.resolveTeamTenants(ctx, claims, r.PathValue("team"))
+	refs, serr := s.resolveTenantTenants(ctx, claims, r.PathValue("tenant"))
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return

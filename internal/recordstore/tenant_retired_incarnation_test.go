@@ -86,7 +86,7 @@ func TestARetiredIncarnationCannotTakeTheRowBack(t *testing.T) {
 }
 
 // TestTenantPurgeRetiresNoIncarnation asserts a teardown purge that reports
-// no deleted Team leaves the retired list alone. A Team that drops spec.pipelines keeps its uid, and
+// no deleted Tenant leaves the retired list alone. A Tenant that drops spec.pipelines keeps its uid, and
 // its next announcement after it adds the field again is accepted.
 func TestTenantPurgeRetiresNoIncarnation(t *testing.T) {
 	t.Parallel()
@@ -102,7 +102,7 @@ func TestTenantPurgeRetiresNoIncarnation(t *testing.T) {
 	}
 
 	if resp := sendTenantSync(t, pool, conn, announceIncarnation(1, "pod-1", "uid-a")); !resp.Ok || resp.Stale {
-		t.Fatalf("the same Team's announcement was refused: %+v", resp)
+		t.Fatalf("the same Tenant's announcement was refused: %+v", resp)
 	}
 	row := readTenantPlacement(t, db, testTenant)
 	if row.generation != 1 || len(row.retired) != 0 {
@@ -110,10 +110,10 @@ func TestTenantPurgeRetiresNoIncarnation(t *testing.T) {
 	}
 }
 
-// TestADeletedTeamPurgeRetiresItsIncarnation asserts a teardown purge for
-// a deleted Team retires its incarnation. A late announcement of that Team
+// TestADeletedTenantPurgeRetiresItsIncarnation asserts a teardown purge for
+// a deleted Tenant retires its incarnation. A late announcement of that Tenant
 // is then stale, and the row keeps the reset generation.
-func TestADeletedTeamPurgeRetiresItsIncarnation(t *testing.T) {
+func TestADeletedTenantPurgeRetiresItsIncarnation(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
@@ -122,7 +122,7 @@ func TestADeletedTeamPurgeRetiresItsIncarnation(t *testing.T) {
 	sendTenantSync(t, pool, conn, announceIncarnation(6, "pod-1", "uid-a"))
 	if err := purgeTenant(t.Context(), slog.Default(), pool, TenantPurgeRequest{
 		Cluster: testCluster, Tenant: testTenant, PlacementGeneration: 6, Incarnation: "uid-a",
-		TeamDeleted: true,
+		TenantDeleted: true,
 	}); err != nil {
 		t.Fatalf("teardown purge: %v", err)
 	}
@@ -132,25 +132,25 @@ func TestADeletedTeamPurgeRetiresItsIncarnation(t *testing.T) {
 	}
 
 	if resp := sendTenantSync(t, pool, conn, announceIncarnation(6, "pod-1", "uid-a")); !resp.Stale || resp.Ok {
-		t.Fatalf("the late announcement of the deleted Team = %+v, want stale", resp)
+		t.Fatalf("the late announcement of the deleted Tenant = %+v, want stale", resp)
 	}
 	if row := readTenantPlacement(t, db, testTenant); row.generation != 0 {
 		t.Fatalf("generation after the late announcement = %d, want 0", row.generation)
 	}
 
 	if resp := sendTenantSync(t, pool, conn, announceIncarnation(1, "pod-2", "uid-b")); !resp.Ok || resp.Stale {
-		t.Fatalf("a new Team of the same name was refused: %+v", resp)
+		t.Fatalf("a new Tenant of the same name was refused: %+v", resp)
 	}
 	row = readTenantPlacement(t, db, testTenant)
 	if row.incarnation != "uid-b" || len(row.retired) != 1 || row.retired[0] != "uid-a" {
-		t.Fatalf("row after the new Team = %+v, want uid-b with only uid-a retired", row)
+		t.Fatalf("row after the new Tenant = %+v, want uid-b with only uid-a retired", row)
 	}
 }
 
-// TestADeletedTeamPurgeOfANewerIncarnationRetiresNothing asserts a purge
-// for a deleted Team leaves a row that a newer Team of the same name
+// TestADeletedTenantPurgeOfANewerIncarnationRetiresNothing asserts a purge
+// for a deleted Tenant leaves a row that a newer Tenant of the same name
 // already owns.
-func TestADeletedTeamPurgeOfANewerIncarnationRetiresNothing(t *testing.T) {
+func TestADeletedTenantPurgeOfANewerIncarnationRetiresNothing(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
@@ -159,7 +159,7 @@ func TestADeletedTeamPurgeOfANewerIncarnationRetiresNothing(t *testing.T) {
 	sendTenantSync(t, pool, conn, announceIncarnation(2, "pod-2", "uid-new"))
 	if err := purgeTenant(t.Context(), slog.Default(), pool, TenantPurgeRequest{
 		Cluster: testCluster, Tenant: testTenant, PlacementGeneration: 6, Incarnation: "uid-old",
-		TeamDeleted: true,
+		TenantDeleted: true,
 	}); err != nil {
 		t.Fatalf("teardown purge: %v", err)
 	}
@@ -169,17 +169,17 @@ func TestADeletedTeamPurgeOfANewerIncarnationRetiresNothing(t *testing.T) {
 	}
 }
 
-// TestADeletedTeamPurgeWithNoRowWritesNoRow asserts a purge for a deleted
-// Team with no placement row writes no row, so a deleted tenant never gets
+// TestADeletedTenantPurgeWithNoRowWritesNoRow asserts a purge for a deleted
+// Tenant with no placement row writes no row, so a deleted tenant never gets
 // a row of its own.
-func TestADeletedTeamPurgeWithNoRowWritesNoRow(t *testing.T) {
+func TestADeletedTenantPurgeWithNoRowWritesNoRow(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
 
 	if err := purgeTenant(t.Context(), slog.Default(), pool, TenantPurgeRequest{
 		Cluster: testCluster, Tenant: testTenant, PlacementGeneration: 3, Incarnation: "uid-a",
-		TeamDeleted: true,
+		TenantDeleted: true,
 	}); err != nil {
 		t.Fatalf("teardown purge: %v", err)
 	}

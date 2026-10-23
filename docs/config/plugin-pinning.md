@@ -46,7 +46,7 @@ apiVersion: varroa.dev/v1alpha1
 kind: Controller
 metadata:
   name: demo
-  namespace: teams-platform
+  namespace: tenants-platform
 spec:
   pluginSpec:
     policy: pinned
@@ -70,7 +70,7 @@ apply endpoint or dashboard.
 Check the pending change before approval:
 
 ```bash
-kubectl get controller demo -n teams-platform \
+kubectl get controller demo -n tenants-platform \
   -o jsonpath='{.status.pendingPluginRoll}{"\n"}'
 ```
 

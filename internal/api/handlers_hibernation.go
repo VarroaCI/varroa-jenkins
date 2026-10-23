@@ -67,13 +67,13 @@ const maxWebhookBodyBytes = 1 << 20 // 1 MiB
 //	/hibernation/{token}/clusters/{cluster}/ns/{ns}/queue/{ctrl}/{path...}
 //	/hibernation/{token}/clusters/{cluster}/ns/{ns}/redirect/{ctrl}/{path...}
 //	/hibernation/{token}/clusters/{cluster}/ns/{ns}/status/{ctrl}
-//	/hibernation/{token}/teams/{team}/queue/{path...}
+//	/hibernation/{token}/tenants/{tenant}/queue/{path...}
 //
 // The controller shape needs at least six segments naming the literal
 // "clusters" and "ns" tokens; the tenant shape needs at least five naming
-// the literal "teams" and "queue" tokens. Any other shape is 404 (design.md
+// the literal "tenants" and "queue" tokens. Any other shape is 404 (design.md
 // D13). The literal-segment checks stop a malformed URL from routing with
-// arbitrary segments read as a cluster, a namespace, or a team.
+// arbitrary segments read as a cluster, a namespace, or a tenant.
 func (s *Server) HandleHibernationDispatch(w http.ResponseWriter, r *http.Request) {
 	remain := strings.TrimPrefix(r.URL.Path, "/hibernation/")
 	parts := strings.SplitN(remain, "/", 7)
@@ -81,7 +81,7 @@ func (s *Server) HandleHibernationDispatch(w http.ResponseWriter, r *http.Reques
 	switch {
 	case len(parts) >= 6 && parts[1] == "clusters" && parts[3] == "ns":
 		s.handleControllerHibernationDispatch(w, r, parts)
-	case len(parts) >= 5 && parts[1] == "teams" && parts[3] == "queue":
+	case len(parts) >= 5 && parts[1] == "tenants" && parts[3] == "queue":
 		s.handleTenantHibernationDispatch(w, r, parts)
 	default:
 		http.Error(w, "404 not found", http.StatusNotFound)
@@ -121,21 +121,21 @@ func (s *Server) handleControllerHibernationDispatch(w http.ResponseWriter, r *h
 }
 
 // handleTenantHibernationDispatch implements the tenant shape:
-// {token}/teams/{team}/queue/{path...}. Only the queue action exists for a
+// {token}/tenants/{tenant}/queue/{path...}. Only the queue action exists for a
 // tenant; a cell serves no browsable URL, so redirect and status stay
 // controller-only (design.md D13).
 func (s *Server) handleTenantHibernationDispatch(w http.ResponseWriter, r *http.Request, parts []string) {
 	token := parts[0]
-	team := parts[2]
+	tenant := parts[2]
 	// parts[4:] holds the replay path, possibly still split across more
 	// than one element when the SplitN(..., 7) cap above landed inside it;
 	// re-joining with "/" reconstructs the original path regardless.
 	path := strings.Join(parts[4:], "/")
-	if team == "" {
+	if tenant == "" {
 		http.Error(w, "404 not found", http.StatusNotFound)
 		return
 	}
-	s.handleTenantHibernationQueue(w, r, token, team, path)
+	s.handleTenantHibernationQueue(w, r, token, tenant, path)
 }
 
 // checkWakeToken validates the token against the controller's status.wakeToken.
@@ -266,21 +266,21 @@ func (s *Server) handleHibernationQueue(w http.ResponseWriter, r *http.Request, 
 
 // handleTenantHibernationQueue implements the tenant queue endpoint per
 // design.md D13 and specs/hibernation-wake/spec.md's ten-step order.
-func (s *Server) handleTenantHibernationQueue(w http.ResponseWriter, r *http.Request, token, team, path string) {
+func (s *Server) handleTenantHibernationQueue(w http.ResponseWriter, r *http.Request, token, tenant, path string) {
 	if s.deps.Brood == nil {
 		s.deps.Logger.Error("brood not configured, cannot resolve local cluster for a tenant webhook")
 		writeWakeError(w, http.StatusInternalServerError)
 		return
 	}
 
-	// Step 1: read the Team. An unknown Team answers the same 401 body as
-	// a bad token, so the response never confirms a Team's existence.
-	tm, err := crdstore.Get[v1alpha1.Team](r.Context(), s.deps.Store, team, "")
+	// Step 1: read the Tenant. An unknown Tenant answers the same 401 body as
+	// a bad token, so the response never confirms a Tenant's existence.
+	tm, err := crdstore.Get[v1alpha1.Tenant](r.Context(), s.deps.Store, tenant, "")
 	if err != nil {
 		writeWakeError(w, http.StatusUnauthorized)
 		return
 	}
-	var pipelines v1alpha1.TeamPipelinesStatus
+	var pipelines v1alpha1.TenantPipelinesStatus
 	if tm.Status.Pipelines != nil {
 		pipelines = *tm.Status.Pipelines
 	}
@@ -328,7 +328,7 @@ func (s *Server) handleTenantHibernationQueue(w http.ResponseWriter, r *http.Req
 	}
 
 	// Step 5a: the path must match the forge and carry the tenant fence.
-	if !tenantPathServes(path, forge, team, r.URL.Query()) {
+	if !tenantPathServes(path, forge, tenant, r.URL.Query()) {
 		http.Error(w, "400 bad request", http.StatusBadRequest)
 		return
 	}
@@ -358,7 +358,7 @@ func (s *Server) handleTenantHibernationQueue(w http.ResponseWriter, r *http.Req
 		"bodyB64":    base64.StdEncoding.EncodeToString(body),
 		"receivedAt": time.Now().UTC().Format(time.RFC3339),
 		"cluster":    cluster,
-		"team":       team,
+		"tenant":     tenant,
 		"forge":      forge,
 		"deliveryId": deliveryID,
 	}
@@ -370,7 +370,7 @@ func (s *Server) handleTenantHibernationQueue(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Step 8: publish to JetStream with ack. webhook.<cluster>.tenant.<team>
+	// Step 8: publish to JetStream with ack. webhook.<cluster>.tenant.<tenant>
 	// is already captured by the existing WebhookWildcard/replay-consumer
 	// filter, so no stream or consumer configuration changes.
 	busConn := s.deps.BusConn
@@ -379,7 +379,7 @@ func (s *Server) handleTenantHibernationQueue(w http.ResponseWriter, r *http.Req
 		http.Error(w, "503 service unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	pubAck, err := busConn.PublishJetStream(bus.WebhookTenantSubject(cluster, team), envData)
+	pubAck, err := busConn.PublishJetStream(bus.WebhookTenantSubject(cluster, tenant), envData)
 	if err != nil || pubAck == nil {
 		s.deps.Logger.Error("tenant jetstream publish failed", "error", err)
 		http.Error(w, "503 service unavailable", http.StatusServiceUnavailable)
@@ -534,10 +534,10 @@ func (s *Server) handleHibernationStatus(w http.ResponseWriter, r *http.Request,
 // tenantPathServes reports whether a tenant door delivery may reach the
 // replay path. A GitHub path needs a GitHub delivery, and a Gitea path needs
 // a Gitea or Forgejo delivery. The generic trigger path needs a token that
-// names the tenant: "<team>:<name>". A Kubernetes name never holds ":", so
+// names the tenant: "<tenant>:<name>". A Kubernetes name never holds ":", so
 // one tenant cannot use another tenant's prefix. Any other allowlisted path
 // passes.
-func tenantPathServes(path, forge, team string, q url.Values) bool {
+func tenantPathServes(path, forge, tenant string, q url.Values) bool {
 	if strings.HasPrefix(path, "github-webhook/") {
 		return forge == "github"
 	}
@@ -545,7 +545,7 @@ func tenantPathServes(path, forge, team string, q url.Values) bool {
 		return forge == "gitea"
 	}
 	if strings.HasPrefix(path, "generic-webhook-trigger/invoke") {
-		prefix := team + ":"
+		prefix := tenant + ":"
 		tok := q.Get("token")
 		return strings.HasPrefix(tok, prefix) && len(tok) > len(prefix)
 	}

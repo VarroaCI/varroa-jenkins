@@ -1424,15 +1424,15 @@ func ValidateBroodTenancy(spec v1alpha1.BroodOperationSpec, crNamespace, operato
 	isOperatorNS := crNamespace == operatorNamespace
 
 	if !isOperatorNS {
-		// Team mode: namespaces must not be set; names are bare.
+		// Tenant mode: namespaces must not be set; names are bare.
 		if len(spec.Targets.Namespaces) > 0 {
-			return fmt.Errorf("namespaces not allowed in team namespace")
+			return fmt.Errorf("namespaces not allowed in tenant namespace")
 		}
 		// Names must be bare (no "/").
 		if spec.Targets.Selector == nil {
 			for _, n := range spec.Targets.Names {
 				if strings.Contains(n, "/") {
-					return fmt.Errorf("qualified name %q not allowed in team namespace", n)
+					return fmt.Errorf("qualified name %q not allowed in tenant namespace", n)
 				}
 			}
 		}

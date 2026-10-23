@@ -22,7 +22,7 @@ func TestGroup_List(t *testing.T) {
 			"items": []map[string]any{
 				{
 					"name":        "team-a",
-					"displayName": "Team A",
+					"displayName": "Tenant A",
 					"memberCount": float64(3),
 					"source":      "local",
 				},

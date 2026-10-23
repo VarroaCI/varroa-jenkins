@@ -91,7 +91,7 @@ func TestBroodScheduleCreate(t *testing.T) {
 		code := run([]string{"broodschedule", "create", "sel-sched",
 			"--verb", "restart",
 			"--cron", "0 * * * *",
-			"--selector-json", `{"matchLabels":{"team":"payments","tier":"prod"}}`,
+			"--selector-json", `{"matchLabels":{"tenant":"payments","tier":"prod"}}`,
 			"--server", srv.URL,
 		})
 		if code != 0 {
@@ -125,7 +125,7 @@ func TestBroodScheduleCreate(t *testing.T) {
 		code := run([]string{"broodschedule", "create", "test-sched",
 			"--verb", "reconcile",
 			"--cron", "*/5 * * * *",
-			"--selector", "team=payments",
+			"--selector", "tenant=payments",
 			"--names", "ctrl-1",
 			"--server", srv.URL,
 		})
@@ -207,7 +207,7 @@ func TestBroodScheduleCreateSpecConstruction(t *testing.T) {
 	_ = cmd.Flags().Set("order", "name")
 	_ = cmd.Flags().Set("ttl", "300")
 
-	spec := buildSpecMap("reconcile", "", `{"matchLabels":{"team":"payments"}}`, "", nil, cmd)
+	spec := buildSpecMap("reconcile", "", `{"matchLabels":{"tenant":"payments"}}`, "", nil, cmd)
 
 	// Verify the structure.
 	if spec["action"].(map[string]interface{})["verb"] != "reconcile" {

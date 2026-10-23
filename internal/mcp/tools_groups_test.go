@@ -77,12 +77,12 @@ func groupStore(t *testing.T) *crdstore.Fake {
 	crdstore.MustSeed(store, &v1alpha1.Group{
 		ObjectMeta: metav1.ObjectMeta{Name: "team-a"},
 		Spec: v1alpha1.GroupSpec{
-			DisplayName: "Team A",
+			DisplayName: "Tenant A",
 			Members:     []string{"alice", "bob", "carol"},
 		},
 	})
 	crdstore.MustSeed(store, &v1alpha1.Group{
-		ObjectMeta: metav1.ObjectMeta{Name: "team-empty"},
+		ObjectMeta: metav1.ObjectMeta{Name: "tenant-empty"},
 		Spec:       v1alpha1.GroupSpec{DisplayName: "Empty"},
 	})
 	return store
@@ -201,8 +201,8 @@ func TestListGroups_DefaultsToSummary(t *testing.T) {
 	if item["name"] != "team-a" {
 		t.Errorf("name = %v, want team-a", item["name"])
 	}
-	if item["displayName"] != "Team A" {
-		t.Errorf("displayName = %v, want Team A", item["displayName"])
+	if item["displayName"] != "Tenant A" {
+		t.Errorf("displayName = %v, want Tenant A", item["displayName"])
 	}
 	// JSON-decoded numbers come back as float64.
 	if item["memberCount"] != float64(3) {
@@ -218,7 +218,7 @@ func TestListGroups_DefaultsToSummary(t *testing.T) {
 // A group with no members is a legitimate summary, not an omission: it must
 // surface with memberCount 0 rather than vanishing or dropping the field.
 func TestListGroups_EmptyGroupHasZeroMemberCount(t *testing.T) {
-	item := findItem(t, listGroupsResult(t, map[string]interface{}{}), "team-empty")
+	item := findItem(t, listGroupsResult(t, map[string]interface{}{}), "tenant-empty")
 	if item["memberCount"] != float64(0) {
 		t.Errorf("memberCount = %v, want 0 for an empty group", item["memberCount"])
 	}

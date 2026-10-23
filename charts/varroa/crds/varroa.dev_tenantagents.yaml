@@ -1,0 +1,310 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: tenantagents.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: TenantAgent
+    listKind: TenantAgentList
+    plural: tenantagents
+    singular: tenantagent
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.tenantRef.name
+      name: TENANT
+      type: string
+    - jsonPath: .spec.enabled
+      name: ENABLED
+      type: boolean
+    - jsonPath: .status.conditions[?(@.type=='Paused')].status
+      name: PAUSED
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          TenantAgent is the Schema for the tenant agents API. It configures one agent
+          that works for one pipelines Tenant.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: TenantAgentSpec configures one Tenant agent.
+            properties:
+              budgets:
+                description: Budgets caps the tokens of a session and of a day.
+                properties:
+                  day:
+                    description: Day caps the tokens of one UTC day.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  session:
+                    description: Session caps the tokens of one session.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                type: object
+              dataSharing:
+                description: DataSharing selects how much run data the agent reads.
+                enum:
+                - none
+                - metadata
+                - logs
+                type: string
+              enabled:
+                description: Enabled turns the agent on. A nil value means enabled.
+                type: boolean
+              instructions:
+                description: Instructions names the file that holds the standing instructions.
+                properties:
+                  path:
+                    description: Path names the file inside the source repository.
+                    pattern: ^[A-Za-z0-9._/-]{1,512}$
+                    type: string
+                  source:
+                    description: Source names a CatalogSource in the same namespace.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - source
+                type: object
+                x-kubernetes-validations:
+                - message: instructions.path must be relative with no .. segment
+                  rule: '!has(self.path) || (!self.path.startsWith(''/'') && !self.path.matches(''(^|/)[.][.](/|$)''))'
+              model:
+                description: |-
+                  Model names the provider model. It is empty when the assistant
+                  default applies.
+                type: string
+              outputs:
+                description: Outputs turns on the outputs the agent may use.
+                properties:
+                  issues:
+                    description: Issues allows the agent to open issues on a forge.
+                    properties:
+                      forge:
+                        description: Forge selects the forge kind of Repo.
+                        enum:
+                        - github
+                        - gitea
+                        type: string
+                      labels:
+                        description: Labels lists the labels an issue may carry.
+                        items:
+                          maxLength: 50
+                          type: string
+                        maxItems: 16
+                        type: array
+                      repo:
+                        description: Repo is the repository URL. Only https is accepted.
+                        maxLength: 2048
+                        pattern: ^https://
+                        type: string
+                    required:
+                    - forge
+                    - repo
+                    type: object
+                  notes:
+                    description: Notes allows the agent to write notes on runs and
+                      jobs.
+                    type: boolean
+                  webhook:
+                    description: Webhook allows the agent to send a message to the
+                      tenant webhook.
+                    type: boolean
+                type: object
+              provider:
+                description: |-
+                  Provider names the model provider. It is empty when the assistant
+                  default applies.
+                type: string
+              tenantRef:
+                description: TenantRef names the pipelines Tenant the agent works
+                  for.
+                properties:
+                  name:
+                    maxLength: 47
+                    minLength: 1
+                    pattern: ^[^/.]+$
+                    type: string
+                required:
+                - name
+                type: object
+              triggers:
+                description: Triggers lists the events that start a session.
+                items:
+                  description: TenantAgentTrigger starts a session when its event
+                    occurs.
+                  properties:
+                    debounce:
+                      description: Debounce is the minimum gap between two sessions
+                        for this trigger.
+                      type: string
+                    type:
+                      enum:
+                      - run.failed
+                      - run.interrupted
+                      - cron.missed
+                      - signature.refused
+                      - scan.failed
+                      - lock.held
+                      - placement.moved
+                      - manual
+                      type: string
+                  required:
+                  - type
+                  type: object
+                  x-kubernetes-validations:
+                  - message: triggers[].debounce is not allowed on the manual trigger
+                    rule: '!(self.type == ''manual'' && has(self.debounce))'
+                  - message: triggers[].debounce must be between 1m and 24h
+                    rule: '!has(self.debounce) || (duration(self.debounce) >= duration(''1m'')
+                      && duration(self.debounce) <= duration(''24h''))'
+                maxItems: 8
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              unattendedWrites:
+                description: |-
+                  UnattendedWrites lists the write tools that run without a person's
+                  approval. The enum is generated from the policy package.
+                items:
+                  enum:
+                  - run_pipeline
+                  - restart_run
+                  - scan_multibranch
+                  type: string
+                maxItems: 3
+                type: array
+                x-kubernetes-list-type: set
+            required:
+            - tenantRef
+            type: object
+          status:
+            description: |-
+              TenantAgentStatus reports the state of one Tenant agent. The operator and the
+              recorder write it; the spec is the only input a person edits.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              instructionsSHA:
+                description: InstructionsSHA is the commit that the last instructions
+                  read used.
+                type: string
+              lastSession:
+                description: LastSession names the most recent session.
+                properties:
+                  at:
+                    format: date-time
+                    type: string
+                  id:
+                    type: string
+                  state:
+                    type: string
+                  trigger:
+                    type: string
+                required:
+                - at
+                - id
+                - state
+                - trigger
+                type: object
+              observedGeneration:
+                description: ObservedGeneration is the metadata.generation the last
+                  reconcile saw.
+                format: int64
+                type: integer
+              spendToday:
+                description: SpendToday is the tokens the agent spent on the current
+                  UTC day.
+                format: int64
+                type: integer
+            type: object
+        type: object
+        x-kubernetes-validations:
+        - message: metadata.name must be at most 63 characters
+          rule: size(self.metadata.name) <= 63
+    served: true
+    storage: true
+    subresources:
+      status: {}

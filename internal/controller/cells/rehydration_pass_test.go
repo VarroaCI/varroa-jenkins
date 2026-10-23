@@ -8,9 +8,9 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
-func rehydratedTestCondition(status *v1alpha1.TeamStatus) *v1alpha1.TeamCondition {
+func rehydratedTestCondition(status *v1alpha1.TenantStatus) *v1alpha1.TenantCondition {
 	for i := range status.Conditions {
-		if status.Conditions[i].Type == v1alpha1.TeamConditionRehydrated {
+		if status.Conditions[i].Type == v1alpha1.TenantConditionRehydrated {
 			return &status.Conditions[i]
 		}
 	}
@@ -18,7 +18,7 @@ func rehydratedTestCondition(status *v1alpha1.TeamStatus) *v1alpha1.TeamConditio
 }
 
 func TestRehydrationPass_UnplacedIsNoOp(t *testing.T) {
-	status := &v1alpha1.TeamStatus{}
+	status := &v1alpha1.TenantStatus{}
 	out := RehydrationPass(status, RehydrationInputs{CellInstance: "uid-1"})
 	if out.MarkedUnrehydrated {
 		t.Fatal("expected no mark for an unplaced tenant")
@@ -29,31 +29,31 @@ func TestRehydrationPass_UnplacedIsNoOp(t *testing.T) {
 }
 
 func TestRehydrationPass_GenerationChangeMarksPending(t *testing.T) {
-	status := &v1alpha1.TeamStatus{
-		Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
+	status := &v1alpha1.TenantStatus{
+		Placement: &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
 	}
 	out := RehydrationPass(status, RehydrationInputs{CellInstance: "uid-1"})
 	if !out.MarkedUnrehydrated {
 		t.Fatal("expected the first-placement generation to mark unrehydrated")
 	}
 	cond := rehydratedTestCondition(status)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TeamReasonRehydrationPending {
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TenantReasonRehydrationPending {
 		t.Fatalf("expected Rehydrated=False/RehydrationPending, got %+v", cond)
 	}
 }
 
 func TestRehydrationPass_CellInstanceChangeMarksPending(t *testing.T) {
-	status := &v1alpha1.TeamStatus{
-		Placement:   &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
-		Rehydration: &v1alpha1.TeamRehydrationStatus{Generation: 1, CellInstance: "uid-1"},
-		Conditions:  []v1alpha1.TeamCondition{{Type: v1alpha1.TeamConditionRehydrated, Status: metav1.ConditionTrue, Reason: v1alpha1.TeamReasonTenantRehydrated}},
+	status := &v1alpha1.TenantStatus{
+		Placement:   &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
+		Rehydration: &v1alpha1.TenantRehydrationStatus{Generation: 1, CellInstance: "uid-1"},
+		Conditions:  []v1alpha1.TenantCondition{{Type: v1alpha1.TenantConditionRehydrated, Status: metav1.ConditionTrue, Reason: v1alpha1.TenantReasonTenantRehydrated}},
 	}
 	out := RehydrationPass(status, RehydrationInputs{CellInstance: "uid-2"})
 	if !out.MarkedUnrehydrated {
 		t.Fatal("expected a cell instance change to mark unrehydrated")
 	}
 	cond := rehydratedTestCondition(status)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TeamReasonRehydrationPending {
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TenantReasonRehydrationPending {
 		t.Fatalf("expected Rehydrated=False/RehydrationPending, got %+v", cond)
 	}
 }
@@ -63,10 +63,10 @@ func TestRehydrationPass_CellInstanceChangeMarksPending(t *testing.T) {
 // than assuming it whenever neither trigger fired, so a matching, applied
 // entry must be supplied for the condition to stay True.
 func TestRehydrationPass_UnchangedIsNoOp(t *testing.T) {
-	status := &v1alpha1.TeamStatus{
-		Placement:   &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
-		Rehydration: &v1alpha1.TeamRehydrationStatus{Generation: 1, CellInstance: "uid-1"},
-		Conditions:  []v1alpha1.TeamCondition{{Type: v1alpha1.TeamConditionRehydrated, Status: metav1.ConditionTrue, Reason: v1alpha1.TeamReasonTenantRehydrated}},
+	status := &v1alpha1.TenantStatus{
+		Placement:   &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
+		Rehydration: &v1alpha1.TenantRehydrationStatus{Generation: 1, CellInstance: "uid-1"},
+		Conditions:  []v1alpha1.TenantCondition{{Type: v1alpha1.TenantConditionRehydrated, Status: metav1.ConditionTrue, Reason: v1alpha1.TenantReasonTenantRehydrated}},
 	}
 	entry := &v1alpha1.CellRehydrationEntry{Generation: 1, CellInstance: "uid-1", Applied: true}
 	out := RehydrationPass(status, RehydrationInputs{CellInstance: "uid-1", Entry: entry})
@@ -74,7 +74,7 @@ func TestRehydrationPass_UnchangedIsNoOp(t *testing.T) {
 		t.Fatal("expected no mark when neither the generation nor the cell instance changed")
 	}
 	cond := rehydratedTestCondition(status)
-	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != v1alpha1.TeamReasonTenantRehydrated {
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != v1alpha1.TenantReasonTenantRehydrated {
 		t.Fatalf("expected the condition to stay True/TenantRehydrated, got %+v", cond)
 	}
 }
@@ -82,12 +82,12 @@ func TestRehydrationPass_UnchangedIsNoOp(t *testing.T) {
 // TestRehydrationPass_RealTransitionStampsLastTransitionTime proves a
 // first-time Rehydrated condition, and a later real transition, both get
 // a non-zero LastTransitionTime — never the zero time a caller that
-// builds a TeamCondition literal with no explicit field defaults to.
+// builds a TenantCondition literal with no explicit field defaults to.
 // TestRehydrationPass_UnchangedIsNoOp above already covers the sibling
 // case: an unchanged condition keeps its prior timestamp.
 func TestRehydrationPass_RealTransitionStampsLastTransitionTime(t *testing.T) {
-	status := &v1alpha1.TeamStatus{
-		Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
+	status := &v1alpha1.TenantStatus{
+		Placement: &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
 	}
 	RehydrationPass(status, RehydrationInputs{CellInstance: "uid-1", Entry: nil})
 	first := rehydratedTestCondition(status)
@@ -107,8 +107,8 @@ func TestRehydrationPass_RealTransitionStampsLastTransitionTime(t *testing.T) {
 // --- task 6.5: the four Rehydrated reasons, from the copied cell entry ---
 
 func TestRehydrationPass_AppliedEntryIsTenantRehydrated(t *testing.T) {
-	status := &v1alpha1.TeamStatus{
-		Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
+	status := &v1alpha1.TenantStatus{
+		Placement: &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
 	}
 	entry := &v1alpha1.CellRehydrationEntry{Generation: 1, CellInstance: "uid-1", Applied: true, Records: 3}
 	out := RehydrationPass(status, RehydrationInputs{CellInstance: "uid-1", Entry: entry})
@@ -116,7 +116,7 @@ func TestRehydrationPass_AppliedEntryIsTenantRehydrated(t *testing.T) {
 		t.Fatal("expected no mark for an applied entry")
 	}
 	cond := rehydratedTestCondition(status)
-	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != v1alpha1.TeamReasonTenantRehydrated {
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != v1alpha1.TenantReasonTenantRehydrated {
 		t.Fatalf("expected Rehydrated=True/TenantRehydrated, got %+v", cond)
 	}
 	if status.Rehydration == nil || status.Rehydration.Records != 3 {
@@ -125,22 +125,22 @@ func TestRehydrationPass_AppliedEntryIsTenantRehydrated(t *testing.T) {
 }
 
 func TestRehydrationPass_NoMatchingEntryIsPending(t *testing.T) {
-	status := &v1alpha1.TeamStatus{
-		Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
+	status := &v1alpha1.TenantStatus{
+		Placement: &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
 	}
 	out := RehydrationPass(status, RehydrationInputs{CellInstance: "uid-1", Entry: nil})
 	if !out.MarkedUnrehydrated {
 		t.Fatal("expected a mark when no entry has landed yet")
 	}
 	cond := rehydratedTestCondition(status)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TeamReasonRehydrationPending {
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TenantReasonRehydrationPending {
 		t.Fatalf("expected Rehydrated=False/RehydrationPending, got %+v", cond)
 	}
 }
 
 func TestRehydrationPass_DeferredJobIsPending(t *testing.T) {
-	status := &v1alpha1.TeamStatus{
-		Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
+	status := &v1alpha1.TenantStatus{
+		Placement: &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
 	}
 	entry := &v1alpha1.CellRehydrationEntry{Generation: 1, CellInstance: "uid-1", Applied: true, Deferred: []string{"team/job-a"}}
 	out := RehydrationPass(status, RehydrationInputs{CellInstance: "uid-1", Entry: entry})
@@ -148,7 +148,7 @@ func TestRehydrationPass_DeferredJobIsPending(t *testing.T) {
 		t.Fatal("expected a mark for a deferred job")
 	}
 	cond := rehydratedTestCondition(status)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TeamReasonRehydrationPending {
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TenantReasonRehydrationPending {
 		t.Fatalf("expected Rehydrated=False/RehydrationPending, got %+v", cond)
 	}
 	if len(status.Rehydration.Deferred) != 1 || status.Rehydration.Deferred[0] != "team/job-a" {
@@ -157,8 +157,8 @@ func TestRehydrationPass_DeferredJobIsPending(t *testing.T) {
 }
 
 func TestRehydrationPass_UnseededJobsIsTruncated(t *testing.T) {
-	status := &v1alpha1.TeamStatus{
-		Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
+	status := &v1alpha1.TenantStatus{
+		Placement: &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
 	}
 	entry := &v1alpha1.CellRehydrationEntry{Generation: 1, CellInstance: "uid-1", Applied: true, UnseededJobs: 5}
 	out := RehydrationPass(status, RehydrationInputs{CellInstance: "uid-1", Entry: entry})
@@ -166,14 +166,14 @@ func TestRehydrationPass_UnseededJobsIsTruncated(t *testing.T) {
 		t.Fatal("expected a mark for unseeded jobs")
 	}
 	cond := rehydratedTestCondition(status)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TeamReasonRehydrationTruncated {
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TenantReasonRehydrationTruncated {
 		t.Fatalf("expected Rehydrated=False/RehydrationTruncated, got %+v", cond)
 	}
 }
 
 func TestRehydrationPass_EntryErrorIsFailed(t *testing.T) {
-	status := &v1alpha1.TeamStatus{
-		Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
+	status := &v1alpha1.TenantStatus{
+		Placement: &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
 	}
 	entry := &v1alpha1.CellRehydrationEntry{Generation: 1, CellInstance: "uid-1", Error: "mite rejected a path"}
 	out := RehydrationPass(status, RehydrationInputs{CellInstance: "uid-1", Entry: entry})
@@ -181,7 +181,7 @@ func TestRehydrationPass_EntryErrorIsFailed(t *testing.T) {
 		t.Fatal("expected a mark for a whole-bundle error")
 	}
 	cond := rehydratedTestCondition(status)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TeamReasonRehydrationFailed ||
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TenantReasonRehydrationFailed ||
 		cond.Message != "mite rejected a path" {
 		t.Fatalf("expected Rehydrated=False/RehydrationFailed naming the error, got %+v", cond)
 	}
@@ -193,8 +193,8 @@ func TestRehydrationPass_EntryErrorIsFailed(t *testing.T) {
 // rehydrateDeadline passes, and this pass surfaces it the same way it
 // surfaces a mite-reported error — it computes no deadline of its own.
 func TestRehydrationPass_DeadlineExpiredEntryErrorIsFailed(t *testing.T) {
-	status := &v1alpha1.TeamStatus{
-		Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
+	status := &v1alpha1.TenantStatus{
+		Placement: &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
 	}
 	entry := &v1alpha1.CellRehydrationEntry{
 		Generation: 1, CellInstance: "uid-1",
@@ -206,7 +206,7 @@ func TestRehydrationPass_DeadlineExpiredEntryErrorIsFailed(t *testing.T) {
 		t.Fatal("expected a mark once the deadline entry error lands")
 	}
 	cond := rehydratedTestCondition(status)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TeamReasonRehydrationFailed {
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TenantReasonRehydrationFailed {
 		t.Fatalf("expected Rehydrated=False/RehydrationFailed, got %+v", cond)
 	}
 	if cond.Message == "" {
@@ -222,10 +222,10 @@ func TestRehydrationPass_DeadlineExpiredEntryErrorIsFailed(t *testing.T) {
 // absent) in the status patch and crdstore's clearStatusFields registry
 // never fires for it.
 func TestRehydrationPass_TeardownClearsRehydration(t *testing.T) {
-	status := &v1alpha1.TeamStatus{
+	status := &v1alpha1.TenantStatus{
 		Placement:   nil, // finishTeardown already ran this tick
-		Rehydration: &v1alpha1.TeamRehydrationStatus{Generation: 1, CellInstance: "uid-1"},
-		Conditions:  []v1alpha1.TeamCondition{{Type: v1alpha1.TeamConditionRehydrated, Status: metav1.ConditionTrue, Reason: v1alpha1.TeamReasonTenantRehydrated}},
+		Rehydration: &v1alpha1.TenantRehydrationStatus{Generation: 1, CellInstance: "uid-1"},
+		Conditions:  []v1alpha1.TenantCondition{{Type: v1alpha1.TenantConditionRehydrated, Status: metav1.ConditionTrue, Reason: v1alpha1.TenantReasonTenantRehydrated}},
 	}
 	out := RehydrationPass(status, RehydrationInputs{CellInstance: "uid-1"})
 	if out.MarkedUnrehydrated {
@@ -241,18 +241,18 @@ func TestRehydrationPass_TeardownClearsRehydration(t *testing.T) {
 
 // TestRehydrationPass_NeverTouchesOtherStatusFields asserts that this
 // pass changes only status.Rehydration and the Rehydrated condition —
-// no other Team status field, so it cannot regress an unrelated field a
+// no other Tenant status field, so it cannot regress an unrelated field a
 // sibling pass (placement, pipelines) already wrote this tick.
 func TestRehydrationPass_NeverTouchesOtherStatusFields(t *testing.T) {
-	status := &v1alpha1.TeamStatus{
+	status := &v1alpha1.TenantStatus{
 		ObservedGeneration: 7,
 		GroupRef:           "group-a",
 		BindingRef:         "binding-a",
-		Placement:          &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
-		Pipelines:          &v1alpha1.TeamPipelinesStatus{AgentNamespace: "payments-ns"},
-		Conditions: []v1alpha1.TeamCondition{
-			{Type: v1alpha1.TeamConditionPlaced, Status: metav1.ConditionTrue, Reason: v1alpha1.TeamReasonTenantPlaced},
-			{Type: v1alpha1.TeamConditionReady, Status: metav1.ConditionTrue, Reason: "Ready"},
+		Placement:          &v1alpha1.TenantPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1},
+		Pipelines:          &v1alpha1.TenantPipelinesStatus{AgentNamespace: "payments-ns"},
+		Conditions: []v1alpha1.TenantCondition{
+			{Type: v1alpha1.TenantConditionPlaced, Status: metav1.ConditionTrue, Reason: v1alpha1.TenantReasonTenantPlaced},
+			{Type: v1alpha1.TenantConditionReady, Status: metav1.ConditionTrue, Reason: "Ready"},
 		},
 	}
 	entry := &v1alpha1.CellRehydrationEntry{Generation: 1, CellInstance: "uid-1", Applied: true}
@@ -271,9 +271,9 @@ func TestRehydrationPass_NeverTouchesOtherStatusFields(t *testing.T) {
 	ready := false
 	for _, c := range status.Conditions {
 		switch c.Type {
-		case v1alpha1.TeamConditionPlaced:
+		case v1alpha1.TenantConditionPlaced:
 			placed = true
-		case v1alpha1.TeamConditionReady:
+		case v1alpha1.TenantConditionReady:
 			ready = true
 		}
 	}

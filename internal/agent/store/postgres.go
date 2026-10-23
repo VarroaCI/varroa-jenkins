@@ -142,8 +142,8 @@ func update(ctx context.Context, tx pgx.Tx, sql string, args ...any) error {
 }
 
 // sessionCols lists the columns of agent_sessions in the order scanSession reads.
-const sessionCols = `id, kind, principal, team, cluster, trigger, context, provider, model,
-  key_source, data_sharing, instructions_sha, team_agent_generation, state,
+const sessionCols = `id, kind, principal, tenant, cluster, trigger, context, provider, model,
+  key_source, data_sharing, instructions_sha, tenant_agent_generation, state,
   COALESCE(skip_reason, ''), prompt_tokens, completion_tokens, steps,
   COALESCE(lease_owner, ''), lease_expires_at, started_at, ended_at`
 
@@ -152,9 +152,9 @@ func scanSession(row pgx.Row) (agent.Session, error) {
 	var s agent.Session
 	var kind, keySource, dataSharing, state, skip string
 	var ctxRaw []byte
-	err := row.Scan(&s.ID, &kind, &s.Principal, &s.Team, &s.Cluster, &s.Trigger, &ctxRaw,
+	err := row.Scan(&s.ID, &kind, &s.Principal, &s.Tenant, &s.Cluster, &s.Trigger, &ctxRaw,
 		&s.Provider, &s.Model, &keySource, &dataSharing, &s.InstructionsSHA,
-		&s.TeamAgentGeneration, &state, &skip, &s.PromptTokens, &s.CompletionTokens, &s.Steps,
+		&s.TenantAgentGeneration, &state, &skip, &s.PromptTokens, &s.CompletionTokens, &s.Steps,
 		&s.LeaseOwner, &s.LeaseExpiresAt, &s.StartedAt, &s.EndedAt)
 	if err != nil {
 		return agent.Session{}, err

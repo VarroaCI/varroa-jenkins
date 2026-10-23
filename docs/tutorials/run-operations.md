@@ -16,7 +16,7 @@ the lock, and a second run waits for it. See
 [Cross-tenant pipelines](../config/cross-tenant-pipelines.md) for the lock name form, the three
 lock states, and the timeout budget.
 
-The **Locks** card on the team home lists the locks your tenant holds and the locks its runs wait
+The **Locks** card on the tenant home lists the locks your tenant holds and the locks its runs wait
 on. A row names the lock, the state, the holder, and the time since the wait or the acquisition
 started. The card reads the locks again on a `lock` event, at most once every two seconds. It
 shows no queue position.
@@ -201,19 +201,19 @@ An MCP client uses the `restart_run` tool with `run` and `stage`. The `get_run` 
 
 Two pipelines tenants, a producer and a caller, connect through a grant and a trigger.
 
-On the producer tenant's `Team`, export the job to the caller:
+On the producer tenant's `Tenant`, export the job to the caller:
 
 ```yaml
 spec:
   pipelines:
     profile: jenkins-lts
-    agentNamespace: team-platform
+    agentNamespace: tenant-platform
     exports:
       - job: "release"
         callers: ["payments"]
 ```
 
-Apply the `Team` and wait about one reconcile tick for the grant to reach the record store.
+Apply the `Tenant` and wait about one reconcile tick for the grant to reach the record store.
 
 On the caller tenant's job item, declare a `varroaUpstream` trigger naming the producer:
 

@@ -2331,17 +2331,17 @@ func searchControllerLink(cluster, namespace, name string) string {
 	return "/controllers/" + url.PathEscape(cluster) + "/" + url.PathEscape(namespace) + "/" + url.PathEscape(name)
 }
 
-// searchJobLink builds a "job" search result's link. team is the
-// resolved team segment TenantRefFromRow derives from the row's tenant
+// searchJobLink builds a "job" search result's link. tenant is the
+// resolved tenant segment TenantRefFromRow derives from the row's tenant
 // column, not the raw tenant value.
-func searchJobLink(team, jobPath string) string {
-	return "/pipelines/" + url.PathEscape(team) + "/" + url.PathEscape(jobPath)
+func searchJobLink(tenant, jobPath string) string {
+	return "/pipelines/" + url.PathEscape(tenant) + "/" + url.PathEscape(jobPath)
 }
 
 // searchRunLink builds a "run" search result's link, the job link plus
 // the run identity.
-func searchRunLink(team, jobPath, runID string) string {
-	return searchJobLink(team, jobPath) + "/" + url.PathEscape(runID)
+func searchRunLink(tenant, jobPath, runID string) string {
+	return searchJobLink(tenant, jobPath) + "/" + url.PathEscape(runID)
 }
 
 // searchActivityLink builds an "activity" search result's link: the
@@ -2395,10 +2395,10 @@ func runSearchDescription(run recordstore.RunSearchResult) string {
 // (Tenants) and namespace grants (JobRunNamespaces): a tenant-scoped
 // pipelines:read grant carries no controllers:read, so the D5 scope
 // alone would never admit that row (ruling y). Tenants unions
-// Resolver.TenantGrants (which enumerates existing Team objects) with
+// Resolver.TenantGrants (which enumerates existing Tenant objects) with
 // every tenant name in the caller's scope-partitioned bindings, so a
 // tenant-scoped binding still contributes its tenant name even when the
-// Team it names has been deleted. A cluster-wide binding's role never
+// Tenant it names has been deleted. A cluster-wide binding's role never
 // appears in either Tenants or the D5 scope (a cluster-wide binding
 // names no tenant, and the D5 scope reflects controllers:read, not
 // pipelines:read), so AllTenants carries that case directly from
@@ -2426,7 +2426,7 @@ func (s *Server) searchRecords(ctx context.Context, claims *auth.Claims, q, name
 		if refErr != nil || !s.deps.Authorizer.CanReadPipeline(claims, ref, j.JobPath) {
 			continue
 		}
-		out = append(out, SearchResult{Type: "job", Cluster: j.Cluster, Namespace: j.Namespace, Name: j.JobPath, Link: searchJobLink(ref.Team, j.JobPath)})
+		out = append(out, SearchResult{Type: "job", Cluster: j.Cluster, Namespace: j.Namespace, Name: j.JobPath, Link: searchJobLink(ref.TenantName, j.JobPath)})
 	}
 	for _, run := range found.Runs {
 		if !s.deps.Authorizer.CanReadRun(claims, RunTenantRow{Tenant: run.Tenant, JobPath: run.JobPath}) {
@@ -2436,7 +2436,7 @@ func (s *Server) searchRecords(ctx context.Context, claims *auth.Claims, q, name
 		if refErr != nil {
 			continue
 		}
-		out = append(out, SearchResult{Type: "run", Cluster: run.Cluster, Namespace: run.Namespace, Name: run.JobPath, Description: runSearchDescription(run), Link: searchRunLink(runRef.Team, run.JobPath, run.RunID)})
+		out = append(out, SearchResult{Type: "run", Cluster: run.Cluster, Namespace: run.Namespace, Name: run.JobPath, Description: runSearchDescription(run), Link: searchRunLink(runRef.TenantName, run.JobPath, run.RunID)})
 	}
 	for _, e := range found.Activity {
 		if !s.deps.Authorizer.CanReadActivityEvent(claims, e) {
@@ -2449,10 +2449,10 @@ func (s *Server) searchRecords(ctx context.Context, claims *auth.Claims, q, name
 
 // tenantGrantNames returns the deduped set of tenant names perms grants a
 // pipelines capability on. It unions two sources: perms.Tenants (every
-// grant Resolver.TenantGrants found by enumerating live Team objects),
+// grant Resolver.TenantGrants found by enumerating live Tenant objects),
 // and every tenant name named in perms.Scopes whose scope's capabilities
 // hold a pipelines verb. TenantGrants alone omits a tenant-scoped binding
-// whose Team has been deleted, even though CanReadRun's binding path
+// whose Tenant has been deleted, even though CanReadRun's binding path
 // still authorizes the rows that binding grants; the second source keeps
 // that tenant name in the record-store pushdown (ruling y) regardless.
 func tenantGrantNames(perms rbac.PermissionScopes) []string {
@@ -2643,7 +2643,7 @@ func parseActivityQuery(r *http.Request, backfill activity.Backfill) (activity.Q
 		}
 		return slices.Contains(allowed, value)
 	}
-	if !valid(q.Source, "operator", "mite", "jenkins", "user", "api", "mcp", "assistant", "team_agent") || !valid(q.Severity, "info", "warning", "error") {
+	if !valid(q.Source, "operator", "mite", "jenkins", "user", "api", "mcp", "assistant", "tenant_agent") || !valid(q.Severity, "info", "warning", "error") {
 		return q, fmt.Errorf("invalid activity filter")
 	}
 	return q, nil

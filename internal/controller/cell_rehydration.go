@@ -132,7 +132,7 @@ func (r *Reconciler) commitNumberOnlyProgress(cellKey, cellInstance string, jobP
 // rehydrationTenantState is one placed tenant's state at the start of a
 // tick: its entry from before this tick's rebuild and its placement.
 type rehydrationTenantState struct {
-	team      *v1alpha1.Team
+	tenant    *v1alpha1.Tenant
 	existing  *v1alpha1.CellRehydrationEntry
 	placement rehydrationPlacement
 	applied   bool
@@ -164,8 +164,8 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 		return nil
 	}
 	cellKey := cr.Namespace + "/" + cr.Name
-	teams := r.listPlacedTeams(ctx, cr)
-	if len(teams) == 0 {
+	tenants := r.listPlacedTenants(ctx, cr)
+	if len(tenants) == 0 {
 		r.dropRehydrationInFlight(cellKey)
 		r.dropRepoScans(cellKey)
 		pruneBranchScanFailedWarnings(cr.Status.Cell)
@@ -181,17 +181,17 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 	// First pass: decide for each tenant whether it is applied, past its
 	// deadline, or pending. The pending set decides whether the tenants
 	// of an in-flight push still hold it.
-	states := make([]rehydrationTenantState, 0, len(teams))
+	states := make([]rehydrationTenantState, 0, len(tenants))
 	pendingSet := make(map[string]rehydrationPlacement)
-	existingByTenant := make(map[string]*v1alpha1.CellRehydrationEntry, len(teams))
-	for _, team := range teams {
-		tenant := team.Name
+	existingByTenant := make(map[string]*v1alpha1.CellRehydrationEntry, len(tenants))
+	for _, obj := range tenants {
+		tenant := obj.Name
 		generation := int64(0)
-		if team.Status.Placement != nil {
-			generation = team.Status.Placement.Generation
+		if obj.Status.Placement != nil {
+			generation = obj.Status.Placement.Generation
 		}
 		st := rehydrationTenantState{
-			team:      team,
+			tenant:    obj,
 			existing:  findCellRehydrationEntry(cr, tenant),
 			placement: rehydrationPlacement{Generation: generation, CellInstance: cellInstance},
 		}
@@ -204,9 +204,9 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 		}
 		st.builds = v1alpha1.DefaultRehydrateBuilds
 		rehydrateDeadline := v1alpha1.DefaultRehydrateDeadline().Duration
-		if team.Spec.Pipelines != nil {
-			st.builds = team.Spec.Pipelines.EffectiveRehydrateBuilds()
-			rehydrateDeadline = team.Spec.Pipelines.EffectiveRehydrateDeadline()
+		if obj.Spec.Pipelines != nil {
+			st.builds = obj.Spec.Pipelines.EffectiveRehydrateBuilds()
+			rehydrateDeadline = obj.Spec.Pipelines.EffectiveRehydrateDeadline()
 		}
 		pendingSince := r.rehydrationPendingSinceFor(cellKey, tenant, generation, cellInstance, now)
 		st.expired = rehydrationExpired(pendingSince, rehydrateDeadline, now)
@@ -216,7 +216,7 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 		states = append(states, st)
 	}
 
-	entries := make([]v1alpha1.CellRehydrationEntry, 0, len(teams))
+	entries := make([]v1alpha1.CellRehydrationEntry, 0, len(tenants))
 	if cr.Status.Cell == nil {
 		cr.Status.Cell = &v1alpha1.CellStatus{}
 	}
@@ -225,10 +225,10 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 	// and the rebuild after it fetch each tenant's records only once.
 	outcomes := make(map[string]tenantSeedOutcome)
 	outcomeFor := func(st rehydrationTenantState) tenantSeedOutcome {
-		o, ok := outcomes[st.team.Name]
+		o, ok := outcomes[st.tenant.Name]
 		if !ok {
 			o = r.gatherTenantSeeds(ctx, cellKey, st, opts)
-			outcomes[st.team.Name] = o
+			outcomes[st.tenant.Name] = o
 		}
 		return o
 	}
@@ -246,7 +246,7 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 	if held := heldRehydrationPlan(inFlight, pendingSet, existingByTenant, now); held != nil {
 		holds := true
 		for _, st := range states {
-			if _, covered := held.Tenants[st.team.Name]; covered || st.applied || st.expired {
+			if _, covered := held.Tenants[st.tenant.Name]; covered || st.applied || st.expired {
 				continue
 			}
 			if len(outcomeFor(st).seeds) > 0 {
@@ -256,7 +256,7 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 		}
 		if holds {
 			for _, st := range states {
-				_, covered := held.Tenants[st.team.Name]
+				_, covered := held.Tenants[st.tenant.Name]
 				switch {
 				case st.applied || covered:
 					entries = append(entries, *st.existing)
@@ -289,7 +289,7 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 	sentTenants := make(map[string]rehydrationPlacement)
 
 	for _, st := range states {
-		tenant := st.team.Name
+		tenant := st.tenant.Name
 		if st.applied {
 			entries = append(entries, *st.existing)
 			continue
@@ -483,7 +483,7 @@ type tenantSeedOutcome struct {
 // job. A job whose render fails goes to failedPaths, so the fence still
 // counts it as unseeded.
 func (r *Reconciler) gatherTenantSeeds(ctx context.Context, cellKey string, st rehydrationTenantState, opts rehydrate.Options) tenantSeedOutcome {
-	tenant := st.team.Name
+	tenant := st.tenant.Name
 	jobRecords, err := fetchTenantJobRecords(ctx, r.recordsFunc, r.clusterName, tenant, int(st.builds))
 	if err != nil {
 		if r.Logger != nil {
@@ -515,7 +515,7 @@ func (r *Reconciler) gatherTenantSeeds(ctx context.Context, cellKey string, st r
 // job failed to render keeps its previous entry, or gets a new one, so
 // the fence still sees it as unseeded rather than absent from status.
 func (r *Reconciler) appendUnseededEntry(entries []v1alpha1.CellRehydrationEntry, cellKey string, st rehydrationTenantState, o tenantSeedOutcome, now time.Time) []v1alpha1.CellRehydrationEntry {
-	tenant := st.team.Name
+	tenant := st.tenant.Name
 	switch {
 	case o.empty:
 		r.clearRehydrationPendingSince(cellKey, tenant)
@@ -541,7 +541,7 @@ func expiredEntry(st rehydrationTenantState, cellInstance string, now time.Time)
 			st.existing.Generation == st.placement.Generation &&
 			st.existing.CellInstance == cellInstance
 	}
-	return deadlineEntry(st.team.Name, st.placement.Generation, cellInstance, deferred, released, now)
+	return deadlineEntry(st.tenant.Name, st.placement.Generation, cellInstance, deferred, released, now)
 }
 
 // keepTenants answers the tenants of a kept in-flight push, or nil.

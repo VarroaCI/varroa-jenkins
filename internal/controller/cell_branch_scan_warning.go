@@ -37,7 +37,7 @@ func branchScanFailedWarnings(cell *v1alpha1.CellStatus, scans []*mitev1.Rehydra
 	for _, tenant := range tenants {
 		out = append(out, v1alpha1.TenantWarning{
 			Tenant:  tenant,
-			Reason:  v1alpha1.TeamReasonBranchScanFailed,
+			Reason:  v1alpha1.TenantReasonBranchScanFailed,
 			Message: joinScanMessages(messagesByTenant[tenant]),
 		})
 	}
@@ -78,7 +78,7 @@ func branchScanFailedAfter(existing []v1alpha1.TenantWarning, cell *v1alpha1.Cel
 	}
 	kept := make([]v1alpha1.TenantWarning, 0, len(existing))
 	for _, w := range existing {
-		if w.Reason == v1alpha1.TeamReasonBranchScanFailed && tenants[w.Tenant] {
+		if w.Reason == v1alpha1.TenantReasonBranchScanFailed && tenants[w.Tenant] {
 			continue
 		}
 		kept = append(kept, w)
@@ -106,7 +106,7 @@ func pruneBranchScanFailedWarnings(cell *v1alpha1.CellStatus) {
 	}
 	var kept []v1alpha1.TenantWarning
 	for _, w := range cell.TenantWarnings {
-		if w.Reason == v1alpha1.TeamReasonBranchScanFailed && !deferring[w.Tenant] {
+		if w.Reason == v1alpha1.TenantReasonBranchScanFailed && !deferring[w.Tenant] {
 			continue
 		}
 		kept = append(kept, w)

@@ -418,7 +418,7 @@ func TestOnRunStateChunk_RestartSourceTenantGraceClearsOnPublish(t *testing.T) {
 		t.Fatalf("first ack = %+v, want BUSY", ack)
 	}
 
-	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{"team/pipeline": {tenant: "team"}}})
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{"team/pipeline": {tenant: "tenant"}}})
 	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 2, 2, []byte("x")))
 	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusStored {
 		t.Fatalf("retry ack = %+v, want STORED", ack)

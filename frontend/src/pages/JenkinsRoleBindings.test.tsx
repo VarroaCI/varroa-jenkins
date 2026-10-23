@@ -33,7 +33,7 @@ const folderScopeBinding = createJenkinsRoleBinding({
   spec: {
     subjects: [{ kind: "Group", name: "developers" }],
     roleRef: "jenkins-global-reader",
-    jenkinsScope: { type: "Folder", folder: "/teams/backend" },
+    jenkinsScope: { type: "Folder", folder: "/tenants/backend" },
   },
 });
 
@@ -96,7 +96,7 @@ describe("JenkinsRoleBindings", () => {
     expect(screen.getByText("Group: developers")).toBeInTheDocument();
     expect(screen.getByText("User: alice")).toBeInTheDocument();
     // Jenkins scope
-    expect(screen.getByText("Folder: /teams/backend")).toBeInTheDocument();
+    expect(screen.getByText("Folder: /tenants/backend")).toBeInTheDocument();
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByText("jenkins-binding-folder").closest("td")).toHaveAttribute("data-label", "Name");
   });

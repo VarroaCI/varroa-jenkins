@@ -20,7 +20,7 @@ track a moving latest image. For an LTS-line profile, `resolveVersion` selects
 the exact patch release deployed and used for plugin resolution.
 
 ```bash
-kubectl patch controller demo -n teams-platform --type merge \
+kubectl patch controller demo -n tenants-platform --type merge \
   -p '{"spec":{"version":"2.555"}}'
 ```
 

@@ -301,14 +301,14 @@ func TestLiftTenantPodTemplates_SkipRules(t *testing.T) {
 			if !reflect.DeepEqual(kept, tc.wantKept) {
 				t.Errorf("kept = %v, want %v", kept, tc.wantKept)
 			}
-			if got := warningMessages(lift.Warnings, v1alpha1.TeamReasonPodTemplateSkipped); !reflect.DeepEqual(got, tc.wantSkips) {
+			if got := warningMessages(lift.Warnings, v1alpha1.TenantReasonPodTemplateSkipped); !reflect.DeepEqual(got, tc.wantSkips) {
 				t.Errorf("skips = %q, want %q", got, tc.wantSkips)
 			}
 			for _, w := range lift.Warnings {
 				if w.Tenant != "payments" {
 					t.Errorf("warning names tenant %q, want payments", w.Tenant)
 				}
-				if w.Reason != v1alpha1.TeamReasonPodTemplateSkipped {
+				if w.Reason != v1alpha1.TenantReasonPodTemplateSkipped {
 					t.Errorf("unexpected warning %+v", w)
 				}
 			}
@@ -400,7 +400,7 @@ func TestLiftTenantPodTemplates_Residue(t *testing.T) {
 			if len(lift.Templates) != tc.wantKept {
 				t.Errorf("kept %d templates, want %d", len(lift.Templates), tc.wantKept)
 			}
-			if got := warningMessages(lift.Warnings, v1alpha1.TeamReasonBundleKeysIgnored); !reflect.DeepEqual(got, tc.wantWarns) {
+			if got := warningMessages(lift.Warnings, v1alpha1.TenantReasonBundleKeysIgnored); !reflect.DeepEqual(got, tc.wantWarns) {
 				t.Errorf("warnings = %q, want %q", got, tc.wantWarns)
 			}
 		})
@@ -413,7 +413,7 @@ func TestLiftTenantPodTemplates_Unparseable(t *testing.T) {
 		if len(lift.Templates) != 0 {
 			t.Errorf("%q: expected no template, got %+v", doc, lift.Templates)
 		}
-		msgs := warningMessages(lift.Warnings, v1alpha1.TeamReasonBundleKeysIgnored)
+		msgs := warningMessages(lift.Warnings, v1alpha1.TenantReasonBundleKeysIgnored)
 		if len(msgs) != 1 || !strings.HasPrefix(msgs[0], `tenant bundle key "jenkins.yaml" does not parse: `) {
 			t.Errorf("%q: unexpected warnings %q", doc, msgs)
 		}

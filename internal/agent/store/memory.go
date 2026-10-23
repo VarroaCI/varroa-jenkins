@@ -193,7 +193,7 @@ func (m *Memory) ListSessions(_ context.Context, q SessionQuery) (SessionPage, e
 		if q.Prompt != "" && s.Context[agent.CtxPrompt] != q.Prompt {
 			continue
 		}
-		if q.Team != "" && s.Team != q.Team {
+		if q.Tenant != "" && s.Tenant != q.Tenant {
 			continue
 		}
 		if q.State != "" && s.State != q.State {
@@ -755,21 +755,21 @@ func (m *Memory) SetInstructionsSHA(_ context.Context, id uuid.UUID, owner, sha 
 	return nil
 }
 
-// PutTeamAgentUnattended sets or removes one TeamAgent's unattended grant on
+// PutTenantAgentUnattended sets or removes one TenantAgent's unattended grant on
 // the global scope.
-func (m *Memory) PutTeamAgentUnattended(_ context.Context, key string, grant *agent.UnattendedGrant, by string) error {
+func (m *Memory) PutTenantAgentUnattended(_ context.Context, key string, grant *agent.UnattendedGrant, by string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	st := m.settings[agent.ScopeGlobal]
 	if grant == nil {
-		delete(st.TeamAgentUnattended, key)
+		delete(st.TenantAgentUnattended, key)
 	} else {
-		if st.TeamAgentUnattended == nil {
-			st.TeamAgentUnattended = map[string]agent.UnattendedGrant{}
+		if st.TenantAgentUnattended == nil {
+			st.TenantAgentUnattended = map[string]agent.UnattendedGrant{}
 		}
 		g := *grant
 		g.Tools = append([]string(nil), grant.Tools...)
-		st.TeamAgentUnattended[key] = g
+		st.TenantAgentUnattended[key] = g
 	}
 	st.UpdatedAt = m.now()
 	st.UpdatedBy = by
@@ -819,11 +819,11 @@ func cloneSettings(s agent.Settings) agent.Settings {
 	for k, v := range s.TenantDataSharing {
 		out.TenantDataSharing[k] = v
 	}
-	if s.TeamAgentUnattended != nil {
-		out.TeamAgentUnattended = make(map[string]agent.UnattendedGrant, len(s.TeamAgentUnattended))
-		for k, g := range s.TeamAgentUnattended {
+	if s.TenantAgentUnattended != nil {
+		out.TenantAgentUnattended = make(map[string]agent.UnattendedGrant, len(s.TenantAgentUnattended))
+		for k, g := range s.TenantAgentUnattended {
 			g.Tools = append([]string(nil), g.Tools...)
-			out.TeamAgentUnattended[k] = g
+			out.TenantAgentUnattended[k] = g
 		}
 	}
 	return out

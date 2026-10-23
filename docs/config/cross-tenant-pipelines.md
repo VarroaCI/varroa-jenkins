@@ -140,18 +140,18 @@ minutes. A producer run that completes before that export starts no subscriber b
 ## The export grant
 
 A tenant exports nothing by default. Grant another tenant access on the producing tenant's
-`Team`:
+`Tenant`:
 
 ```yaml
 apiVersion: varroa.dev/v1alpha1
-kind: Team
+kind: Tenant
 metadata:
   name: platform
 spec:
-  namespaces: ["team-platform"]
+  namespaces: ["tenant-platform"]
   pipelines:
     profile: jenkins-lts
-    agentNamespace: team-platform
+    agentNamespace: tenant-platform
     exports:
       - job: "release/*"
         callers: ["payments", "search"]
@@ -159,8 +159,8 @@ spec:
         callers: ["payments"]
 ```
 
-Each entry names exactly one of two kinds, a `job` glob or a `locks` glob, plus `callers`, the Team
-names allowed to use it. `callers` is required and holds at least one Team name. A `job` glob matches the tenant's own job paths. A `locks` glob matches
+Each entry names exactly one of two kinds, a `job` glob or a `locks` glob, plus `callers`, the Tenant
+names allowed to use it. `callers` is required and holds at least one Tenant name. A `job` glob matches the tenant's own job paths. A `locks` glob matches
 the bare names of the tenant's own locks. Three metacharacters apply: `*` matches any characters
 except `/`, `**` crosses `/`, and `?` matches one character.
 
@@ -213,7 +213,7 @@ A caller takes another tenant's lock only when that tenant
 exports the name under `locks`.
 
 The lock list shows each lock as the owner tenant, a `/`, and the bare name. A controller tenant
-is `<namespace>/<controller>`, so its lock `deploy-prod` shows as `team-pay/ci/deploy-prod`.
+is `<namespace>/<controller>`, so its lock `deploy-prod` shows as `tenant-pay/ci/deploy-prod`.
 
 Inside the block, `varroa.lock.name` reads the bare name, and `varroa.lock.tenant` reads the owner
 tenant. Both read `null` outside a block.

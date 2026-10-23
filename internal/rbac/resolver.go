@@ -14,7 +14,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
-	"github.com/varroaci/varroa-jenkins/internal/teamagent/accept"
+	"github.com/varroaci/varroa-jenkins/internal/tenantagent/accept"
 )
 
 // BySubjectIndex is the index name for VarroaRoleBindings indexed by subject.
@@ -106,7 +106,7 @@ type Resolver struct {
 	jenkinsRoleLister       cache.GenericLister
 	jenkinsRoleBindingIndex cache.Indexer
 	controllerLister        cache.GenericLister
-	teamLister              cache.GenericLister
+	tenantLister            cache.GenericLister
 	defaultRead             bool
 	userClaimNames          []string // e.g. ["sub", "preferred_username"]
 	// userIndex holds the idp-managed User objects. It is nil until
@@ -131,16 +131,16 @@ func (r *Resolver) SetUserDirectory(idx cache.Indexer, namespace string) {
 // userClaimNames map JWT claims to VarroaRoleBinding User subjects (e.g.
 // sub,preferred_username). Group subjects read Claims.Groups, which the OIDC
 // validator resolves from the configured group claims.
-// teamInformer feeds tenant capability resolution's Team-membership path and
+// tenantInformer feeds tenant capability resolution's Tenant-membership path and
 // the Jenkins member role of each tenant (JenkinsRoleAssignments). A nil
-// teamInformer leaves that path contributing nothing.
+// tenantInformer leaves that path contributing nothing.
 func NewResolver(
 	roleInformer cache.SharedIndexInformer,
 	roleBindingInformer cache.SharedIndexInformer,
 	jenkinsRoleInformer cache.SharedIndexInformer,
 	jenkinsRoleBindingInformer cache.SharedIndexInformer,
 	controllerInformer cache.SharedIndexInformer,
-	teamInformer cache.SharedIndexInformer,
+	tenantInformer cache.SharedIndexInformer,
 	defaultRead bool,
 	userClaimNames []string,
 ) *Resolver {
@@ -162,10 +162,10 @@ func NewResolver(
 		defaultRead:    defaultRead,
 		userClaimNames: userClaimNames,
 	}
-	if teamInformer != nil {
-		r.teamLister = cache.NewGenericLister(
-			teamInformer.GetIndexer(),
-			schema.GroupResource{Group: "varroa.dev", Resource: "teams"},
+	if tenantInformer != nil {
+		r.tenantLister = cache.NewGenericLister(
+			tenantInformer.GetIndexer(),
+			schema.GroupResource{Group: "varroa.dev", Resource: "tenants"},
 		)
 	}
 	return r
@@ -644,8 +644,8 @@ type TenantGrant struct {
 }
 
 // EffectiveTenantCapabilities returns one entry per grant the caller holds
-// on the tenant ref names. It reads the Team named by a pipelines tenant,
-// through the teamLister. It never reads a Controller.
+// on the tenant ref names. It reads the Tenant named by a pipelines tenant,
+// through the tenantLister. It never reads a Controller.
 //
 // The result is a list, not one merged set: a caller can hold an unnarrowed
 // pipelines:write grant from one binding and a narrowed pipelines:read grant
@@ -668,8 +668,8 @@ func (r *Resolver) EffectiveTenantCapabilities(claims *auth.Claims, ref ParsedTe
 	}
 
 	switch ref.Kind {
-	case TenantTeam:
-		return r.effectiveTeamTenantGrants(subjectKeys, ref.Team)
+	case TenantTenant:
+		return r.effectiveTenantTenantGrants(subjectKeys, ref.Tenant)
 	case TenantController:
 		return r.effectiveControllerTenantGrants(subjectKeys, ref)
 	default:
@@ -677,14 +677,14 @@ func (r *Resolver) EffectiveTenantCapabilities(claims *auth.Claims, ref ParsedTe
 	}
 }
 
-// effectiveTeamTenantGrants resolves the three paths D4 defines for a
-// pipelines tenant: Team membership, a tenant-scoped binding, and a
+// effectiveTenantTenantGrants resolves the three paths D4 defines for a
+// pipelines tenant: Tenant membership, a tenant-scoped binding, and a
 // cluster-wide binding.
-func (r *Resolver) effectiveTeamTenantGrants(subjectKeys []string, team string) []TenantGrant {
+func (r *Resolver) effectiveTenantTenantGrants(subjectKeys []string, tenant string) []TenantGrant {
 	var grants []TenantGrant
 
-	// Path 1: Team membership.
-	if g, ok := r.teamMembershipGrant(subjectKeys, team); ok {
+	// Path 1: Tenant membership.
+	if g, ok := r.tenantMembershipGrant(subjectKeys, tenant); ok {
 		grants = append(grants, g)
 	}
 
@@ -703,7 +703,7 @@ func (r *Resolver) effectiveTeamTenantGrants(subjectKeys []string, team string) 
 		// scope.tenants entry, so two bindings that narrow differently
 		// stay separate.
 		for _, t := range sc.Tenants {
-			if t.Name != team {
+			if t.Name != tenant {
 				continue
 			}
 			if caps, ok := r.roleCapabilities(binding.Spec.RoleRef); ok {
@@ -715,28 +715,28 @@ func (r *Resolver) effectiveTeamTenantGrants(subjectKeys []string, team string) 
 	return grants
 }
 
-// teamMembershipGrant resolves path 1: the caller matches the Team's
+// tenantMembershipGrant resolves path 1: the caller matches the Tenant's
 // effective subject set. It returns false when the resolver has no
-// teamLister, when no Team of that name exists, when the caller does not
-// match, when the Team's roleRef is "admin", or when no VarroaRole of that
+// tenantLister, when no Tenant of that name exists, when the caller does not
+// match, when the Tenant's roleRef is "admin", or when no VarroaRole of that
 // name exists.
-func (r *Resolver) teamMembershipGrant(subjectKeys []string, teamName string) (TenantGrant, bool) {
-	if r.teamLister == nil {
+func (r *Resolver) tenantMembershipGrant(subjectKeys []string, tenantName string) (TenantGrant, bool) {
+	if r.tenantLister == nil {
 		return TenantGrant{}, false
 	}
-	obj, err := r.teamLister.Get(teamName)
+	obj, err := r.tenantLister.Get(tenantName)
 	if err != nil {
 		return TenantGrant{}, false
 	}
-	team, ok := obj.(*v1alpha1.Team)
+	tenant, ok := obj.(*v1alpha1.Tenant)
 	if !ok {
 		return TenantGrant{}, false
 	}
-	if !callerInTeamSubjectSet(subjectKeys, team) {
+	if !callerInTenantSubjectSet(subjectKeys, tenant) {
 		return TenantGrant{}, false
 	}
 
-	role := team.Spec.RoleRef
+	role := tenant.Spec.RoleRef
 	if role == "" {
 		role = "developer"
 	}
@@ -751,25 +751,25 @@ func (r *Resolver) teamMembershipGrant(subjectKeys []string, teamName string) (T
 	return TenantGrant{Capabilities: caps}, true
 }
 
-// callerInTeamSubjectSet reports whether the caller's subject keys match the
-// Team's effective subject set: the managed Group "team-<name>", only when
-// status.groupRef names it AND TeamRBACReady is true, unioned with every
+// callerInTenantSubjectSet reports whether the caller's subject keys match the
+// Tenant's effective subject set: the managed Group "tenant-<name>", only when
+// status.groupRef names it AND TenantRBACReady is true, unioned with every
 // entry of spec.subjects. spec.members is never matched directly — those
 // usernames belong to the managed Group, which the local auth provider
 // already resolves into the caller's groups claim.
-func callerInTeamSubjectSet(subjectKeys []string, team *v1alpha1.Team) bool {
+func callerInTenantSubjectSet(subjectKeys []string, tenant *v1alpha1.Tenant) bool {
 	keys := make(map[string]bool, len(subjectKeys))
 	for _, k := range subjectKeys {
 		keys[k] = true
 	}
 
-	wantGroupRef := "team-" + team.Name
-	if team.Status.GroupRef == wantGroupRef && teamRBACReady(team) {
+	wantGroupRef := "tenant-" + tenant.Name
+	if tenant.Status.GroupRef == wantGroupRef && tenantRBACReady(tenant) {
 		if keys[subjectIndexKey("Group", wantGroupRef)] {
 			return true
 		}
 	}
-	for _, s := range team.Spec.Subjects {
+	for _, s := range tenant.Spec.Subjects {
 		if keys[subjectIndexKey(s.Kind, s.Name)] {
 			return true
 		}
@@ -777,12 +777,12 @@ func callerInTeamSubjectSet(subjectKeys []string, team *v1alpha1.Team) bool {
 	return false
 }
 
-// teamRBACReady reports whether the Team's TeamRBACReady condition is True.
+// tenantRBACReady reports whether the Tenant's TenantRBACReady condition is True.
 // A stale groupRef survives a Group-ownership collision, so the condition,
 // not the groupRef field alone, is what closes that window.
-func teamRBACReady(team *v1alpha1.Team) bool {
-	for _, c := range team.Status.Conditions {
-		if c.Type == v1alpha1.TeamConditionRBACReady {
+func tenantRBACReady(tenant *v1alpha1.Tenant) bool {
+	for _, c := range tenant.Status.Conditions {
+		if c.Type == v1alpha1.TenantConditionRBACReady {
 			return c.Status == metav1.ConditionTrue
 		}
 	}
@@ -887,10 +887,10 @@ func GrantsPipelinesVerb(caps APICapabilitySet) bool {
 	return false
 }
 
-// TenantGrants lists every Team and evaluates each one, returning one
+// TenantGrants lists every Tenant and evaluates each one, returning one
 // TenantCapabilities entry per grant that holds a pipelines verb. It never
-// reads Team.spec.pipelines: that field belongs to a later change and does
-// not exist yet. A Team that later drops the field keeps its members'
+// reads Tenant.spec.pipelines: that field belongs to a later change and does
+// not exist yet. A Tenant that later drops the field keeps its members'
 // access to the records its tenant already produced.
 //
 // The result is ordered by tenant name, then by each entry's sorted Jobs
@@ -900,21 +900,21 @@ func GrantsPipelinesVerb(caps APICapabilitySet) bool {
 // non-nil slice.
 func (r *Resolver) TenantGrants(claims *auth.Claims) []TenantCapabilities {
 	out := []TenantCapabilities{}
-	if claims == nil || r.teamLister == nil {
+	if claims == nil || r.tenantLister == nil {
 		return out
 	}
 
-	objs, err := r.teamLister.List(labels.Everything())
+	objs, err := r.tenantLister.List(labels.Everything())
 	if err != nil {
 		return out
 	}
 	names := make([]string, 0, len(objs))
 	for _, obj := range objs {
-		team, ok := obj.(*v1alpha1.Team)
+		tenant, ok := obj.(*v1alpha1.Tenant)
 		if !ok {
 			continue
 		}
-		names = append(names, team.Name)
+		names = append(names, tenant.Name)
 	}
 	sort.Strings(names)
 
@@ -1234,8 +1234,8 @@ func (r *Resolver) JenkinsRoleAssignments(controller *v1alpha1.Controller) ([]Ro
 	// Synthesize: one Item-type role and one Agent-type role per tenant
 	// placed on this cell (controller.Status.Cell.Tenants), each assigned
 	// to the tenant's service-identity group authority
-	// "ROLE:varroa:tenant:<team>" (VarroaSecurityRealm synthesizes that
-	// authority for the principal "svc-<team>" with no persisted record —
+	// "ROLE:varroa:tenant:<tenant>" (VarroaSecurityRealm synthesizes that
+	// authority for the principal "svc-<tenant>" with no persisted record —
 	// see the tenant-isolation build-identity requirement). A
 	// JenkinsRoleBinding can never produce either role name: the resolver
 	// appends a scope suffix to a bound role, so a direct-set (rather than
@@ -1251,20 +1251,20 @@ func (r *Resolver) JenkinsRoleAssignments(controller *v1alpha1.Controller) ([]Ro
 	// checks this permission for the build's authentication before the
 	// plugin's own QueueTaskDispatcher fence runs, and a role-strategy
 	// agent pattern matches node names, never labels, so no pattern can
-	// name the reserved "varroa-tenant-<team>" label the operator stamps
+	// name the reserved "varroa-tenant-<tenant>" label the operator stamps
 	// on the tenant's pod templates. Ownership is the fence's job: it
 	// refuses every node that does not carry the tenant's own label.
 	if controller.Status.Cell != nil {
 		aliases := r.userPrincipalAliases()
-		for _, team := range controller.Status.Cell.Tenants {
-			itemRole := TenantItemRoleName(team)
+		for _, tenant := range controller.Status.Cell.Tenants {
+			itemRole := TenantItemRoleName(tenant)
 			tenantSubj := SubjectAssignment{Kind: "Group", Name: "ROLE:" + itemRole}
 
 			itemKey := accKey{name: itemRole, scopeKey: ""}
 			acc[itemKey] = &RoleAssignment{
 				RoleName: itemRole,
 				RoleType: "Item",
-				Pattern:  TenantItemRolePattern(team),
+				Pattern:  TenantItemRolePattern(tenant),
 				Permissions: []string{
 					"hudson.model.Item.Read",
 					"hudson.model.Item.Build",
@@ -1282,9 +1282,9 @@ func (r *Resolver) JenkinsRoleAssignments(controller *v1alpha1.Controller) ([]Ro
 				Subjects: []SubjectAssignment{tenantSubj},
 			}
 
-			agentKey := accKey{name: "varroa:tenant-agent:" + team, scopeKey: ""}
+			agentKey := accKey{name: "varroa:tenant-agent:" + tenant, scopeKey: ""}
 			acc[agentKey] = &RoleAssignment{
-				RoleName:    "varroa:tenant-agent:" + team,
+				RoleName:    "varroa:tenant-agent:" + tenant,
 				RoleType:    "Agent",
 				Pattern:     ".*",
 				Permissions: []string{"hudson.model.Computer.Build"},
@@ -1292,7 +1292,7 @@ func (r *Resolver) JenkinsRoleAssignments(controller *v1alpha1.Controller) ([]Ro
 			}
 
 			// The member role grants the person checks. See tenantMemberRoles.
-			for _, role := range r.tenantMemberRoles(team, aliases) {
+			for _, role := range r.tenantMemberRoles(tenant, aliases) {
 				upsertAssignment(acc, role.Name, "Item", role.Pattern, role.Permissions, role.Subjects)
 			}
 		}
@@ -1531,7 +1531,7 @@ func groupValues(c *auth.Claims) []string {
 }
 
 // userSubjectValues returns the user identity values that match kind:User
-// bindings. A Team agent subject is the only value, whatever the configured
+// bindings. A Tenant agent subject is the only value, whatever the configured
 // user claims are. A human identity never yields a value with the agent
 // prefix, so an agent binding cannot match a human.
 func userSubjectValues(claims *auth.Claims, claimNames []string) []string {

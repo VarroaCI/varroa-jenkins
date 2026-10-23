@@ -24,7 +24,7 @@ func TestDesiredFederatedCRsReportsOneOutcomePerBinding(t *testing.T) {
 	alice := []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}
 	vrbs := []*v1alpha1.VarroaRoleBinding{
 		outcomeBinding("no-subjects", "ref-role", nil, nil),
-		outcomeBinding("tenant", "ref-role", alice, &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "team-a"}}}),
+		outcomeBinding("tenant", "ref-role", alice, &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "tenant-a"}}}),
 		outcomeBinding("missing-role", "ghost", alice, nil),
 		outcomeBinding("pipelines-only", "pipelines-role", alice, nil),
 		outcomeBinding("missing-jenkins-role", "dangling-role", alice, nil),
@@ -94,8 +94,8 @@ func TestDesiredFederatedCRsReportsOneOutcomePerBinding(t *testing.T) {
 func TestDesiredFederatedCRsTenantWriteGetsOneChildPerTenant(t *testing.T) {
 	alice := []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}
 	scope := &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{
-		{Name: "team-a", Jobs: []string{"deploy/*"}},
-		{Name: "team-b"},
+		{Name: "tenant-a", Jobs: []string{"deploy/*"}},
+		{Name: "tenant-b"},
 	}}
 	vrbs := []*v1alpha1.VarroaRoleBinding{outcomeBinding("tenant-write", "pipelines-writer", alice, scope)}
 	roles := map[string]*v1alpha1.VarroaRole{
@@ -117,7 +117,7 @@ func TestDesiredFederatedCRsTenantWriteGetsOneChildPerTenant(t *testing.T) {
 	if len(bindings) != 2 {
 		t.Fatalf("bindings = %d, want 2", len(bindings))
 	}
-	byTeam := map[string]*v1alpha1.JenkinsRoleBinding{}
+	byTenant := map[string]*v1alpha1.JenkinsRoleBinding{}
 	for _, b := range bindings {
 		if b.Labels[LabelFederatedTenantMember] != "true" || b.Labels[LabelFederatedFrom] != "pipelines-writer" {
 			t.Fatalf("labels = %#v, want tenant-member and federated-from", b.Labels)
@@ -125,28 +125,28 @@ func TestDesiredFederatedCRsTenantWriteGetsOneChildPerTenant(t *testing.T) {
 		if b.Spec.ControllerScope != nil || b.Spec.JenkinsScope != nil {
 			t.Fatalf("spec scopes = %#v / %#v, want none", b.Spec.ControllerScope, b.Spec.JenkinsScope)
 		}
-		byTeam[b.Annotations[AnnotationFederatedTenant]] = b
+		byTenant[b.Annotations[AnnotationFederatedTenant]] = b
 	}
-	narrowed := byTeam["team-a"]
-	if narrowed == nil || narrowed.Spec.RoleRef != "varroa:tenant-member:team-a" {
-		t.Fatalf("team-a copy = %#v", narrowed)
+	narrowed := byTenant["tenant-a"]
+	if narrowed == nil || narrowed.Spec.RoleRef != "varroa:tenant-member:tenant-a" {
+		t.Fatalf("tenant-a copy = %#v", narrowed)
 	}
 	if narrowed.Annotations[AnnotationFederatedTenantJobs] != `["deploy/*"]` {
-		t.Fatalf("team-a jobs annotation = %q", narrowed.Annotations[AnnotationFederatedTenantJobs])
+		t.Fatalf("tenant-a jobs annotation = %q", narrowed.Annotations[AnnotationFederatedTenantJobs])
 	}
-	whole := byTeam["team-b"]
-	if whole == nil || whole.Spec.RoleRef != "varroa:tenant-member:team-b" {
-		t.Fatalf("team-b copy = %#v", whole)
+	whole := byTenant["tenant-b"]
+	if whole == nil || whole.Spec.RoleRef != "varroa:tenant-member:tenant-b" {
+		t.Fatalf("tenant-b copy = %#v", whole)
 	}
 	if _, has := whole.Annotations[AnnotationFederatedTenantJobs]; has {
-		t.Fatalf("team-b carries a jobs annotation: %#v", whole.Annotations)
+		t.Fatalf("tenant-b carries a jobs annotation: %#v", whole.Annotations)
 	}
 }
 
 // A tenant entry with an empty job list grants nothing, so the binding skips.
 func TestDesiredFederatedCRsTenantEmptyJobsSkips(t *testing.T) {
 	alice := []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}
-	scope := &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "team-a", Jobs: []string{}}}}
+	scope := &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "tenant-a", Jobs: []string{}}}}
 	vrbs := []*v1alpha1.VarroaRoleBinding{outcomeBinding("empty", "pipelines-writer", alice, scope)}
 	roles := map[string]*v1alpha1.VarroaRole{
 		"pipelines-writer": {
@@ -339,7 +339,7 @@ func TestDesiredFederatedCRsExpandsAllTenantsSubjects(t *testing.T) {
 	}
 	expand := func(in []v1alpha1.SubjectRef) []v1alpha1.SubjectRef {
 		out := append([]v1alpha1.SubjectRef(nil), in...)
-		return append(out, v1alpha1.SubjectRef{Kind: "Group", Name: "team-owners"})
+		return append(out, v1alpha1.SubjectRef{Kind: "Group", Name: "tenant-owners"})
 	}
 	_, bindings, _, _ := DesiredFederatedCRs(vrbs, fedRoleLookup(roles), fedJenkinsRoleLookup(jenkinsRoles), expand)
 

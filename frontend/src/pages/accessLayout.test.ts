@@ -67,6 +67,6 @@ describe("Admin & access layout", () => {
   });
 
   it("the placement column does not wrap", () => {
-    expect(ruleBody(read("Teams.module.css"), ".memberList li")).toMatch(/white-space:\s*nowrap/);
+    expect(ruleBody(read("Tenants.module.css"), ".memberList li")).toMatch(/white-space:\s*nowrap/);
   });
 });

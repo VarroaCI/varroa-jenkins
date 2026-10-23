@@ -17,7 +17,7 @@ import org.jvnet.hudson.test.JenkinsRule;
 
 /**
  * Tests for {@code VarroaSecurityRealm.VarroaUserDetailsService}'s tenant
- * service identity answer (task 10.3b): {@code svc-<team>} synthesizes an
+ * service identity answer (task 10.3b): {@code svc-<tenant>} synthesizes an
  * authority set with no persisted {@code User} record, and an unhosted
  * tenant still throws.
  */

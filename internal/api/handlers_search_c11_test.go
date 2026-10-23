@@ -47,8 +47,8 @@ var nsScopedClaims = &auth.Claims{Subject: "ns-user"}
 // syntheticTenantAuthorizer grants pipelines:read namespace-scoped on
 // "ns-a", the shape that authorizes a synthetic (single-controller) tenant
 // such as "ns-a/cell-a": effectiveControllerTenantGrants admits a
-// namespace-scoped binding, unlike effectiveTeamTenantGrants' tenant-scoped
-// path that namespaceScopedAuthorizer uses for the Team-kind tests above.
+// namespace-scoped binding, unlike effectiveTenantTenantGrants' tenant-scoped
+// path that namespaceScopedAuthorizer uses for the Tenant-kind tests above.
 func syntheticTenantAuthorizer() *Authorizer {
 	roles := []*v1alpha1.VarroaRole{
 		{ObjectMeta: metav1.ObjectMeta{Name: "pipelines-viewer"}, Spec: v1alpha1.VarroaRoleSpec{
@@ -68,14 +68,14 @@ func syntheticTenantAuthorizer() *Authorizer {
 // --- 11.4: link shapes ---
 
 func TestSearchLinkShapes(t *testing.T) {
-	// searchJobLink and searchRunLink take the already-resolved team
+	// searchJobLink and searchRunLink take the already-resolved tenant
 	// segment, not the raw tenant column; this asserts only their
-	// percent-encoding. TestSearchRecords_LinkUsesResolvedTeamSegment
-	// below asserts that searchRecords supplies the resolved team.
-	if got, want := searchJobLink("team one", "svc/main"), "/pipelines/team%20one/svc%2Fmain"; got != want {
+	// percent-encoding. TestSearchRecords_LinkUsesResolvedTenantSegment
+	// below asserts that searchRecords supplies the resolved tenant.
+	if got, want := searchJobLink("tenant one", "svc/main"), "/pipelines/tenant%20one/svc%2Fmain"; got != want {
 		t.Fatalf("job link = %q, want %q", got, want)
 	}
-	if got, want := searchRunLink("team one", "svc/main", "r 1"), "/pipelines/team%20one/svc%2Fmain/r%201"; got != want {
+	if got, want := searchRunLink("tenant one", "svc/main", "r 1"), "/pipelines/tenant%20one/svc%2Fmain/r%201"; got != want {
 		t.Fatalf("run link = %q, want %q", got, want)
 	}
 	got := searchActivityLink(activity.Event{Cluster: "core", Namespace: "ns-a", Controller: "ctrl-a", Type: "controller.created", Actor: "nb"})
@@ -221,12 +221,12 @@ func TestSearchRecords_AppliesAuthorizationPerRow(t *testing.T) {
 	}
 }
 
-// --- 8.12: a job row and a run row carry the resolved team segment, not
+// --- 8.12: a job row and a run row carry the resolved tenant segment, not
 // the raw tenant column ---
 
-func TestSearchRecords_LinkUsesResolvedTeamSegment(t *testing.T) {
+func TestSearchRecords_LinkUsesResolvedTenantSegment(t *testing.T) {
 	// Tenant "ns-a/cell-a" is a synthetic (single-controller) tenant.
-	// TenantRefFromRow parses it as TenantController, whose team segment
+	// TenantRefFromRow parses it as TenantController, whose tenant segment
 	// is the controller name "cell-a", not the raw tenant string.
 	reader := &fixedSearchReader{results: recordstore.SearchResults{
 		Jobs: []recordstore.JobSearchResult{

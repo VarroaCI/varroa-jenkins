@@ -66,7 +66,7 @@ function detail(state: AssistantSessionDetail["session"]["state"], approvals: As
 }
 
 function renderCard() {
-  return renderWithProviders(<ProposePipelineCard team="payments" />);
+  return renderWithProviders(<ProposePipelineCard tenant="payments" />);
 }
 
 beforeEach(() => {

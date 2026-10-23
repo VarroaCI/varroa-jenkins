@@ -3,10 +3,10 @@ import { contextDiffers, contextLabel, routeContext } from "./routeContext";
 
 describe("routeContext", () => {
   it.each([
-    ["/pipelines/payments/payments%2Fapi/tests/case1", { route: "test-case", team: "payments", job: "payments/api" }],
-    ["/pipelines/payments/payments%2Fapi/0192f0e4", { route: "build", team: "payments", job: "payments/api", run: "0192f0e4" }],
-    ["/pipelines/payments/payments%2Fapi", { route: "job", team: "payments", job: "payments/api" }],
-    ["/pipelines/payments", { route: "team", team: "payments" }],
+    ["/pipelines/payments/payments%2Fapi/tests/case1", { route: "test-case", tenant: "payments", job: "payments/api" }],
+    ["/pipelines/payments/payments%2Fapi/0192f0e4", { route: "build", tenant: "payments", job: "payments/api", run: "0192f0e4" }],
+    ["/pipelines/payments/payments%2Fapi", { route: "job", tenant: "payments", job: "payments/api" }],
+    ["/pipelines/payments", { route: "tenant", tenant: "payments" }],
     ["/controllers/core/ci/main", { route: "controller", controller: "core/ci/main" }],
     ["/cells", { route: "cells" }],
     ["/locks", { route: "locks" }],
@@ -30,15 +30,15 @@ describe("routeContext", () => {
   });
 
   it("compares the objects a context names", () => {
-    expect(contextDiffers({ team: "a" }, { team: "a" })).toBe(false);
-    expect(contextDiffers({ team: "a" }, { team: "b" })).toBe(true);
+    expect(contextDiffers({ tenant: "a" }, { tenant: "a" })).toBe(false);
+    expect(contextDiffers({ tenant: "a" }, { tenant: "b" })).toBe(true);
     expect(contextDiffers({ run: "1" }, {})).toBe(true);
   });
 
   it("labels each route", () => {
-    expect(contextLabel({ route: "build", team: "p", job: "j", run: "0192f0e4abcdef" })).toBe("Build 0192f0e4 of p/j");
-    expect(contextLabel({ route: "job", team: "p", job: "j" })).toBe("Job p/j");
-    expect(contextLabel({ route: "team", team: "p" })).toBe("Team p");
+    expect(contextLabel({ route: "build", tenant: "p", job: "j", run: "0192f0e4abcdef" })).toBe("Build 0192f0e4 of p/j");
+    expect(contextLabel({ route: "job", tenant: "p", job: "j" })).toBe("Job p/j");
+    expect(contextLabel({ route: "tenant", tenant: "p" })).toBe("Tenant p");
     expect(contextLabel({ route: "controller", controller: "c/n/x" })).toBe("Controller c/n/x");
     expect(contextLabel({ route: "controller", controller: "c/n/x", cell: "c/n/x" })).toBe("Cell c/n/x");
     expect(contextLabel({ route: "cells" })).toBe("Cells");
