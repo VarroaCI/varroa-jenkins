@@ -40,8 +40,7 @@ branch inventories stay in place. Each tenant keeps its cell.
    dispatcher then sends it to the receiver. Before the window, pause
    the pipeline and agent activity that enqueues webhooks. Wait until
    the pending count reaches zero, and keep that activity paused until
-   step 5 ends. A delivery leased while step 5 changes the tenant uid
-   can end as `dropped`.
+   step 5 ends.
 3. Run the dry run. It reads the clusters and writes nothing:
 
    ```bash
