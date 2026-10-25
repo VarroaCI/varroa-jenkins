@@ -2,6 +2,7 @@ package pluginlock
 
 import (
 	"os"
+	"reflect"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -108,6 +109,35 @@ func TestSeeds_RoundTripsAgainstVersionProfilesManifest(t *testing.T) {
 			}
 			if seed.Spec.PluginSetRef.Name != wantPluginSetName {
 				t.Errorf("PluginSetRef.Name: got %q, want %q", seed.Spec.PluginSetRef.Name, wantPluginSetName)
+			}
+		})
+	}
+}
+
+// TestSeeds_PluginsMatchLock checks that each seed plugins.yaml holds the same
+// core list and plugin entries as the lock set of the same version. The seed
+// is the copy that the operator embeds, so a drift would install a different
+// set from the one the lock pins.
+func TestSeeds_PluginsMatchLock(t *testing.T) {
+	for _, sp := range Seeds() {
+		sp := sp
+		t.Run(sp.Version, func(t *testing.T) {
+			set, ok := parsedLock.Sets[sp.Version]
+			if !ok {
+				t.Fatalf("lock has no set for seed %q", sp.Version)
+			}
+			var seed struct {
+				Core    []string      `yaml:"core"`
+				Plugins []PluginEntry `yaml:"plugins"`
+			}
+			if err := yaml.Unmarshal([]byte(sp.Plugins), &seed); err != nil {
+				t.Fatalf("failed to parse seed plugins.yaml: %v", err)
+			}
+			if !reflect.DeepEqual(seed.Core, set.Core) {
+				t.Errorf("core: seed %v, lock %v", seed.Core, set.Core)
+			}
+			if !reflect.DeepEqual(seed.Plugins, set.Plugins) {
+				t.Errorf("plugins differ between seed and lock set %q", sp.Version)
 			}
 		})
 	}

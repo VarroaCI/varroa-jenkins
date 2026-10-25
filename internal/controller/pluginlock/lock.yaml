@@ -28,6 +28,10 @@ sets:
       - generic-webhook-trigger
       - github-checks
       - skip-notifications-trait
+      - pipeline-utility-steps
+      - ws-cleanup
+      - ssh-agent
+      - timestamper
     plugins:
       - artifactId: antisamy-markup-formatter
         version: "173.v680e3a_b_69ff3"
@@ -69,6 +73,8 @@ sets:
         version: "422.vc7e8b_51488c6"
       - artifactId: cloudbees-folder
         version: "6.1106.v3a_d9a_6d2465e"
+      - artifactId: commons-compress-api
+        version: "1.28.0-96.v8da_8cfa_57e2b_"
       - artifactId: commons-lang3-api
         version: "3.20.0-109.ve43756e2d2b_4"
       - artifactId: commons-text-api
@@ -169,6 +175,8 @@ sets:
         version: "4547.v52f3080db_8cd"
       - artifactId: mailer
         version: "534.v1b_36f5864073"
+      - artifactId: matrix-project
+        version: "917.v22eda_817646e"
       - artifactId: maven-plugin
         version: "3.27"
       - artifactId: mcp-server
@@ -207,12 +215,16 @@ sets:
         version: "345.va_96187909426"
       - artifactId: pipeline-stage-tags-metadata
         version: "2.2293.v6e7193cec599"
+      - artifactId: pipeline-utility-steps
+        version: "3.810.va_7672d206740"
       - artifactId: plain-credentials
         version: "199.v9f8e1f741799"
       - artifactId: plugin-util-api
         version: "7.1341.v039f146993d9"
       - artifactId: prism-api
         version: "1.30.0-741.v034eb_0b_0a_a_fa_"
+      - artifactId: resource-disposer
+        version: "0.25"
       - artifactId: role-strategy
         version: "867.vd09254229f9b_"
       - artifactId: scm-api
@@ -227,6 +239,8 @@ sets:
         version: "2.5-149.v72471e9c6371"
       - artifactId: snakeyaml-engine-api
         version: "3.1.1-12.v4320c7d6f89c"
+      - artifactId: ssh-agent
+        version: "433.v9e73d67c3f74"
       - artifactId: ssh-credentials
         version: "372.va_250881b_08cd"
       - artifactId: ssh-slaves
@@ -235,6 +249,8 @@ sets:
         version: "3.384.vc89b_5e138cf9"
       - artifactId: structs
         version: "362.va_b_695ef4fdf9"
+      - artifactId: timestamper
+        version: "1.30"
       - artifactId: token-macro
         version: "477.vd4f0dc3cb_cf1"
       - artifactId: trilead-api
@@ -265,6 +281,8 @@ sets:
         version: "724.v538c2362b_dfb_"
       - artifactId: workflow-support
         version: "1015.v785e5a_b_b_8b_22"
+      - artifactId: ws-cleanup
+        version: "0.49"
     bootstrap:
       - artifactId: varroa-mite-auth
         version: "1.0-SNAPSHOT"
@@ -438,6 +456,10 @@ sets:
       - generic-webhook-trigger
       - github-checks
       - skip-notifications-trait
+      - pipeline-utility-steps
+      - ws-cleanup
+      - ssh-agent
+      - timestamper
     plugins:
       - artifactId: antisamy-markup-formatter
         version: "173.v680e3a_b_69ff3"
@@ -479,6 +501,8 @@ sets:
         version: "422.vc7e8b_51488c6"
       - artifactId: cloudbees-folder
         version: "6.1106.v3a_d9a_6d2465e"
+      - artifactId: commons-compress-api
+        version: "1.28.0-96.v8da_8cfa_57e2b_"
       - artifactId: commons-lang3-api
         version: "3.20.0-109.ve43756e2d2b_4"
       - artifactId: commons-text-api
@@ -579,6 +603,8 @@ sets:
         version: "4547.v52f3080db_8cd"
       - artifactId: mailer
         version: "534.v1b_36f5864073"
+      - artifactId: matrix-project
+        version: "928.v1effc3f3a_236"
       - artifactId: maven-plugin
         version: "3.27"
       - artifactId: mcp-server
@@ -617,12 +643,16 @@ sets:
         version: "345.va_96187909426"
       - artifactId: pipeline-stage-tags-metadata
         version: "2.2293.v6e7193cec599"
+      - artifactId: pipeline-utility-steps
+        version: "3.810.va_7672d206740"
       - artifactId: plain-credentials
         version: "199.v9f8e1f741799"
       - artifactId: plugin-util-api
         version: "7.1341.v039f146993d9"
       - artifactId: prism-api
         version: "1.30.0-741.v034eb_0b_0a_a_fa_"
+      - artifactId: resource-disposer
+        version: "0.25"
       - artifactId: role-strategy
         version: "898.vc050ed2424ca_"
       - artifactId: scm-api
@@ -637,6 +667,8 @@ sets:
         version: "2.5-149.v72471e9c6371"
       - artifactId: snakeyaml-engine-api
         version: "3.1.1-12.v4320c7d6f89c"
+      - artifactId: ssh-agent
+        version: "433.v9e73d67c3f74"
       - artifactId: ssh-credentials
         version: "372.va_250881b_08cd"
       - artifactId: ssh-slaves
@@ -645,6 +677,8 @@ sets:
         version: "3.384.vc89b_5e138cf9"
       - artifactId: structs
         version: "362.va_b_695ef4fdf9"
+      - artifactId: timestamper
+        version: "1.30"
       - artifactId: token-macro
         version: "477.vd4f0dc3cb_cf1"
       - artifactId: trilead-api
@@ -675,6 +709,8 @@ sets:
         version: "724.v538c2362b_dfb_"
       - artifactId: workflow-support
         version: "1015.v785e5a_b_b_8b_22"
+      - artifactId: ws-cleanup
+        version: "0.49"
     bootstrap:
       - artifactId: varroa-mite-auth
         version: "1.0-SNAPSHOT"

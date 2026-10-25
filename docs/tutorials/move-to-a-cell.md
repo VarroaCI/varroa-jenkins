@@ -213,6 +213,21 @@ The record store keeps the log and the artifacts after the cell restarts.
 
 Read [Read and run pipelines](pipelines.md#open-a-tenant), [Open a build](pipelines.md#open-a-build) and [Operate a run](run-operations.md).
 
+## Steps a cell provides
+
+A cell installs these plugins. A Jenkinsfile can call their steps with no bundle change.
+
+| Plugin | Steps |
+|---|---|
+| `pipeline-utility-steps` | `readJSON`, `writeJSON`, `readYaml`, `writeYaml`, `readProperties`, `findFiles`, `zip`, `unzip` |
+| `ws-cleanup` | `cleanWs` |
+| `ssh-agent` | `sshagent` |
+| `timestamper` | `timestamps`, and the `timestamps()` option |
+
+The `sshagent` step runs the `ssh-agent` program in the current container. The image of the `<tenant>-default` template has it. A container from your own pod template must also have it. A runner host must have it on its `PATH`.
+
+The `timestamps()` option writes the time at the start of each log line. The build log shows this text as Jenkins writes it. The log viewer's **Timestamps** button shows the time that Varroa received the line.
+
 ## Patterns a cell does not run
 
 | Pattern | Replacement |
