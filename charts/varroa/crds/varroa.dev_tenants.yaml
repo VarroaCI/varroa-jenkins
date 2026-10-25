@@ -368,6 +368,23 @@ spec:
                     maximum: 8
                     minimum: 0
                     type: integer
+                  triggers:
+                    description: Triggers selects which forge events start a run of
+                      this tenant.
+                    properties:
+                      checksRerun:
+                        default: true
+                        description: ChecksRerun lets a GitHub check re-run request
+                          start a run. Nil means on.
+                        type: boolean
+                      commentPattern:
+                        description: |-
+                          CommentPattern is an RE2 pattern. A new pull-request comment whose
+                          trimmed body matches it starts a run of the pull-request job. Empty
+                          means off.
+                        maxLength: 256
+                        type: string
+                    type: object
                 required:
                 - agentNamespace
                 - profile

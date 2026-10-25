@@ -5202,6 +5202,9 @@ type ComponentsSchemasTenantPipelines struct {
 
 	// Standby The number of warm members this tenant keeps. A standby holds the folder and no slot. It takes a slot whose holder dies. Default 0.
 	Standby *int32 `json:"standby,omitempty"`
+
+	// Triggers Forge events that start a run of a pipelines tenant. A pull-request comment starts a run when it matches commentPattern. A GitHub check re-run request starts a run when checksRerun is on.
+	Triggers *ComponentsSchemasTenantTriggers `json:"triggers,omitempty"`
 }
 
 // ComponentsSchemasTenantPipelinesConcurrency This tenant's job concurrency policy. "allow" (default) runs builds side by side. "cancelInProgress" cancels the running build of the same job path when a new one starts.
@@ -5300,6 +5303,15 @@ type ComponentsSchemasTenantScope struct {
 
 	// Name A tenant is a Tenant name.
 	Name string `json:"name"`
+}
+
+// ComponentsSchemasTenantTriggers Forge events that start a run of a pipelines tenant. A pull-request comment starts a run when it matches commentPattern. A GitHub check re-run request starts a run when checksRerun is on.
+type ComponentsSchemasTenantTriggers struct {
+	// ChecksRerun Lets a GitHub check re-run request start a run. Defaults to true.
+	ChecksRerun *bool `json:"checksRerun,omitempty"`
+
+	// CommentPattern RE2 pattern for a new pull-request comment. The trimmed comment body must match it. Empty means off.
+	CommentPattern *string `json:"commentPattern,omitempty"`
 }
 
 // ComponentsSchemasTenantWebhook A completion webhook. The record store posts a signed JSON payload to url for each run this tenant completes. The signing key lives in the Secret that secretRef names, in the tenant's agent namespace.

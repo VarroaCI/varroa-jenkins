@@ -62,6 +62,10 @@ func (s stampOps) Issue(ctx context.Context, _ forgeapi.IssueRequest, _ string) 
 	return forgeapi.IssueReply{Status: forgeapi.Status{OK: true}, Number: 1, URL: s.id}
 }
 
+func (s stampOps) Permission(_ context.Context, _ forgeapi.PermissionRequest) forgeapi.PermissionReply {
+	return forgeapi.PermissionReply{Status: forgeapi.Status{OK: true}, Permission: "write"}
+}
+
 func (s stampOps) PullRequest(ctx context.Context, req forgeapi.PullRequestRequest) forgeapi.PullRequestReply {
 	if s.calls != nil {
 		s.calls.Add(1)

@@ -436,6 +436,9 @@ export default function TenantForm() {
               // The form has no notifications control. The saved value
               // passes through, so an edit never drops the webhook.
               notifications: tenant?.pipelines?.notifications,
+              // The form has no triggers control. The saved value passes
+              // through, so an edit never drops the re-run settings.
+              triggers: tenant?.pipelines?.triggers,
               retention: form.pipelinesRetention,
               concurrencyLimits: form.pipelinesConcurrencyLimits,
               badge: { enabled: form.pipelinesBadgeEnabled },

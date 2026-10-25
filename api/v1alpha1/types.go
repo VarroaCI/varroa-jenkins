@@ -1674,6 +1674,25 @@ type TenantPipelinesSpec struct {
 	// Badge turns on the anonymous build status badge of this tenant's jobs.
 	// +optional
 	Badge *TenantBadgeSpec `json:"badge,omitempty"`
+
+	// Triggers selects which forge events start a run of this tenant.
+	// +optional
+	Triggers *TenantTriggersSpec `json:"triggers,omitempty"`
+}
+
+// TenantTriggersSpec selects which forge events start a run of this tenant.
+type TenantTriggersSpec struct {
+	// CommentPattern is an RE2 pattern. A new pull-request comment whose
+	// trimmed body matches it starts a run of the pull-request job. Empty
+	// means off.
+	// +kubebuilder:validation:MaxLength=256
+	// +optional
+	CommentPattern string `json:"commentPattern,omitempty"`
+
+	// ChecksRerun lets a GitHub check re-run request start a run. Nil means on.
+	// +kubebuilder:default=true
+	// +optional
+	ChecksRerun *bool `json:"checksRerun,omitempty"`
 }
 
 // TenantBadgeSpec controls the anonymous build status badge. A badge URL

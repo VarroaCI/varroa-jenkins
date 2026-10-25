@@ -547,8 +547,10 @@ the root AGENTS.md greenfield rule.
   run-trigger-endpoint spec lists):
   `VarroaRunTriggerAction.java`, a protected
   `RootAction` at `/varroa-run`, requires `ROLE:varroa:system-mite`. `POST
-  /varroa-run/trigger` reads `runId`, `intentKey`, `jobPath`, `parameters`, and
-  `actor`; stamps a `VarroaIntentAction` carrying the caller's run identifier, intent
+  /varroa-run/trigger` reads `runId`, `intentKey`, `jobPath`, `parameters`, `actor`, and
+  `cause`. A non-empty `cause` replaces the default short description of the `VarroaUserCause`
+  (`VarroaUserCause(userId, description)`, cut to 512 characters); an empty one keeps the
+  default `Started by <actor> through Varroa`. It stamps a `VarroaIntentAction` carrying the caller's run identifier, intent
   key (origin `VARROA_INTENT`, so the claim gate reads the key straight off the
   action instead of deriving one), and actor unchanged, plus a `ParametersAction` built from the
   job's declared parameter definitions; an omitted value takes the declared

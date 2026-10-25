@@ -511,6 +511,16 @@ export interface TenantPipelines {
   notifications?: TenantNotifications;
   /** Record-store windows for this tenant's runs. Only an operator sets it. */
   retention?: TenantPipelinesRetention;
+  /** Forge events that start a run. The form has no control for it. */
+  triggers?: TenantTriggers;
+}
+
+/** Forge events that start a run of a pipelines tenant. */
+export interface TenantTriggers {
+  /** RE2 pattern for a new pull-request comment. Empty means off. */
+  commentPattern?: string;
+  /** Lets a GitHub check re-run request start a run. Defaults to true. */
+  checksRerun?: boolean;
 }
 
 /** Outward notifications of a pipelines tenant. */

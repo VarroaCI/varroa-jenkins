@@ -921,6 +921,10 @@ func main() {
 			handle: func(ctx context.Context, d []byte) []byte {
 				return handleForgePullRequest(ctx, logger, forgeAnswerer, enterTenant, forgePullRequestLocks, d)
 			}},
+		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbPermission, limit: forgeConcurrency, logger: logger,
+			handle: func(ctx context.Context, d []byte) []byte {
+				return handleForgePermission(ctx, logger, forgeAnswerer, enterTenant, d)
+			}},
 	} {
 		if err := mgr.Add(r); err != nil {
 			logger.Error("failed to add forge runner", "verb", r.verb, "error", err)

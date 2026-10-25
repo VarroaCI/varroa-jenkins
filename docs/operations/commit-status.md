@@ -22,6 +22,26 @@ The GitHub App needs "Checks: write" on the repository. A classic or fine-graine
 access token cannot publish a check. Store the App credential as a `githubApp` tenant
 credential. See [Projected credentials](cells.md#what-composes-a-tenant).
 
+### Re-run a check
+
+A user selects **Re-run** on a check that Varroa reported. GitHub sends the re-run request only
+to the GitHub App that created the check. Point that App at the tenant door:
+
+- Webhook URL: `https://<host>/hibernation/<token>/tenants/<tenant>/queue/github-webhook/`.
+  Read `<token>` from `status.pipelines.webhookToken`.
+- Webhook secret: the value of `status.pipelines.webhookSecret`.
+- Events: subscribe the App to **Check run** and **Check suite**.
+
+One App serves one tenant. A second tenant needs its own App.
+
+A re-run starts a build of the branch's current head. It does not rebuild the original commit.
+A re-run keeps the fork trust decision of the branch source. **Re-run all checks** on a pull
+request from a fork starts no build. The tenant rules are in
+[Re-run from GitHub](webhooks.md#re-run-from-github).
+
+If an earlier run of the same revision is still live, the record store marks the new run
+`DUPLICATE`. The new run does not build. Re-run after the earlier run completes.
+
 ## Plain jobs
 
 A plain pipeline job has no SCM source that reports a status. Call the `githubNotify` step

@@ -107,6 +107,13 @@ type Client interface {
 	SetCommitStatus(ctx context.Context, r Repo, sha string, s CommitStatus) error
 }
 
+// PermissionReader is implemented by a client whose forge reports the
+// repository permission of one user. The answer is one of none, read,
+// triage, write, maintain, or admin.
+type PermissionReader interface {
+	CollaboratorPermission(ctx context.Context, r Repo, login string) (string, error)
+}
+
 // OwnerScope is implemented by a client whose forge can say whether the
 // credential sees every repository of an owner, private ones included. The
 // operator asks for it before it treats a 404 as a gone repository. A client that does not

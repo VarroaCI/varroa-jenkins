@@ -973,6 +973,9 @@ message TriggerBuildPayload {
   string job_path = 3;
   map<string, string> parameters = 4;
   string actor = 5;
+  // The short description of the run cause. Empty means the default
+  // Varroa cause.
+  string cause = 6;
 }
 
 message ActingUser {

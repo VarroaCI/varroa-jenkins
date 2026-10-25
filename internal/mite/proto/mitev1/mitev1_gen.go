@@ -1423,6 +1423,7 @@ type TriggerBuildPayload struct {
 	JobPath    string            `json:"job_path"`
 	Parameters map[string]string `json:"parameters,omitempty"`
 	Actor      string            `json:"actor,omitempty"`
+	Cause      string            `json:"cause,omitempty"`
 }
 
 type CommandType int32

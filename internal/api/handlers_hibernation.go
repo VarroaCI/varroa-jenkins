@@ -333,6 +333,15 @@ func (s *Server) handleTenantHibernationQueue(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Step 5b: a GitHub re-run event starts a run from the door. The door
+	// never buffers or replays it, so the event leaves no JetStream message.
+	if forge == "github" && strings.HasPrefix(path, "github-webhook/") && isRerunEvent(r.Header.Get("X-GitHub-Event")) {
+		s.acceptRerunEvent(tm, tenant, r.Header.Get("X-GitHub-Event"), deriveDeliveryID(r, forge), body)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"accepted"}`))
+		return
+	}
+
 	// Step 6: derive the delivery id.
 	deliveryID := deriveDeliveryID(r, forge)
 

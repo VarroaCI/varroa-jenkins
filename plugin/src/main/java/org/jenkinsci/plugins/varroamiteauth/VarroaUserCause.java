@@ -5,6 +5,7 @@ import hudson.triggers.SCMTrigger;
 import hudson.triggers.TimerTrigger;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * The cause a build carries when Varroa triggers it.
@@ -26,16 +27,53 @@ import java.util.List;
  */
 public class VarroaUserCause extends Cause {
 
-    private final String userId;
+    /** The cap on the description. A longer description is cut to this length. */
+    static final int MAX_DESCRIPTION_LENGTH = 512;
 
-    /** Creates a cause for {@code userId}. A null value reads as empty. */
+    private final String userId;
+    private final String description;
+
+    /** Creates a cause for {@code userId} with the default description. */
     public VarroaUserCause(String userId) {
+        this(userId, "");
+    }
+
+    /**
+     * Creates a cause for {@code userId}. A non-empty {@code description}
+     * replaces the default short description. It is stripped of control
+     * characters and cut to {@value #MAX_DESCRIPTION_LENGTH} characters. A
+     * null value reads as empty.
+     */
+    public VarroaUserCause(String userId, String description) {
         this.userId = userId != null ? userId : "";
+        this.description = normalizeDescription(description);
     }
 
     /** Answers the Varroa actor that triggered the build. */
     public String getUserId() {
         return userId;
+    }
+
+    /** Answers the description that replaces the default, or the empty string. */
+    public String getDescription() {
+        return description;
+    }
+
+    private static String normalizeDescription(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        StringBuilder cleaned = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (!Character.isISOControl(c)) {
+                cleaned.append(c);
+            }
+        }
+        String trimmed = cleaned.toString().trim();
+        return trimmed.length() > MAX_DESCRIPTION_LENGTH
+                ? trimmed.substring(0, MAX_DESCRIPTION_LENGTH)
+                : trimmed;
     }
 
     /**
@@ -127,17 +165,25 @@ public class VarroaUserCause extends Cause {
 
     @Override
     public String getShortDescription() {
+        // A cause that XStream read from an older build record has no
+        // description field, so the field can be null here.
+        if (description != null && !description.isEmpty()) {
+            return description;
+        }
         return "Started by " + userId + " through Varroa";
     }
 
     @Override
     public boolean equals(Object other) {
-        return other instanceof VarroaUserCause
-                && userId.equals(((VarroaUserCause) other).userId);
+        if (!(other instanceof VarroaUserCause)) {
+            return false;
+        }
+        VarroaUserCause that = (VarroaUserCause) other;
+        return userId.equals(that.userId) && Objects.equals(description, that.description);
     }
 
     @Override
     public int hashCode() {
-        return userId.hashCode();
+        return Objects.hash(userId, description);
     }
 }
