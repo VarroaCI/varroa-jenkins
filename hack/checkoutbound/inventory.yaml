@@ -450,6 +450,8 @@ identifiers:
     reason: Dashboard link. The user's browser opens it. No component dials it.
   - host: json-schema.org
     reason: JSON Schema dialect identifier in the pipeline template validator.
+  - host: www.w3.org
+    reason: SVG namespace identifier in the build badge. A browser reads it. No component dials it.
   - host: xml.org
     reason: SAX feature identifier in the changelog parser. Never dialed.
   - host: apache.org

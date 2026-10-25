@@ -124,6 +124,34 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
+/api/v1/pipelines/{tenant}/jobs/{job}/badge:
+  get:
+    operationId: getJobBadge
+    tags: [Pipelines]
+    summary: Reports whether the anonymous build badge of a job is on, and its URL path.
+    description: >
+      The badge door itself sits at the host root and is not part of this
+      operation. The path in the answer is the host-root path of that door.
+      The token in the path is the badge credential, so a caller that reads
+      the job may copy the URL. The path is absent while the tenant's badge
+      switch is off.
+    parameters:
+      - $ref: '../components/parameters.yaml#/tenant'
+      - $ref: '../components/parameters.yaml#/job'
+    responses:
+      "200":
+        description: The badge state of the job.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JobBadge'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
 /api/v1/pipelines/{tenant}/jobs/{job}/scan:
   post:
     operationId: scanMultibranch

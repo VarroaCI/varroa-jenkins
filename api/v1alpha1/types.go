@@ -1670,6 +1670,19 @@ type TenantPipelinesSpec struct {
 	// The record store posts the completion webhook for each run.
 	// +optional
 	Notifications *TenantNotificationsSpec `json:"notifications,omitempty"`
+
+	// Badge turns on the anonymous build status badge of this tenant's jobs.
+	// +optional
+	Badge *TenantBadgeSpec `json:"badge,omitempty"`
+}
+
+// TenantBadgeSpec controls the anonymous build status badge. A badge URL
+// carries the tenant's badge token, so the URL itself is the credential.
+type TenantBadgeSpec struct {
+	// Enabled serves the badge without a session. Default false.
+	// +kubebuilder:default=false
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // TenantExport is one grant a pipelines tenant makes to other tenants: a
@@ -1903,6 +1916,9 @@ type TenantPipelinesStatus struct {
 	// Minted once, on the tick that first sees spec.pipelines; never
 	// regenerated.
 	WebhookSecret string `json:"webhookSecret,omitempty"`
+	// BadgeToken is the credential in every badge URL of this tenant.
+	// Minted once; never regenerated. Clear it to rotate.
+	BadgeToken string `json:"badgeToken,omitempty"`
 	// PurgeAttempts counts retries of the teardown schedule purge, so a
 	// restart does not lose the count. Bounded at ten attempts.
 	PurgeAttempts int32 `json:"purgeAttempts,omitempty"`

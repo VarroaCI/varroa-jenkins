@@ -3017,6 +3017,14 @@ type ComponentsSchemasJenkinsVersionProfile struct {
 	AdditionalProperties map[string]interface{}  `json:"-"`
 }
 
+// ComponentsSchemasJobBadge GET /pipelines/{tenant}/jobs/{job}/badge. The path is set only while the badge is on.
+type ComponentsSchemasJobBadge struct {
+	Enabled bool `json:"enabled"`
+
+	// Path The host-root path of the badge SVG, with the badge token in it.
+	Path *string `json:"path,omitempty"`
+}
+
 // ComponentsSchemasJobBranchHead One branch, change request, or tag of a multibranch job.
 type ComponentsSchemasJobBranchHead struct {
 	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
@@ -4926,6 +4934,12 @@ type ComponentsSchemasTenantAgentUnattendedResult struct {
 	UnattendedGranted []string `json:"unattendedGranted"`
 }
 
+// ComponentsSchemasTenantBadge spec.pipelines.badge. The anonymous build status badge of the tenant's jobs. A badge URL carries the tenant's badge token, so the URL itself is the credential. Tenant pipelines admins may write it.
+type ComponentsSchemasTenantBadge struct {
+	// Enabled Serves the badge without a session. Defaults to false.
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
 // ComponentsSchemasTenantCapabilities One grant the caller holds on one pipelines tenant. A tenant name may appear in more than one entry, because the caller can hold two grants on it with different job globs; they are never merged.
 type ComponentsSchemasTenantCapabilities struct {
 	// Capabilities Resource-to-verb-to-allowed capability map.
@@ -5101,6 +5115,9 @@ type ComponentsSchemasTenantNotifications struct {
 type ComponentsSchemasTenantPipelines struct {
 	// AgentNamespace Kubernetes namespace this tenant's agents run in. Must be one of the tenant's own namespaces. Required when pipelines is set.
 	AgentNamespace string `json:"agentNamespace"`
+
+	// Badge spec.pipelines.badge. The anonymous build status badge of the tenant's jobs. A badge URL carries the tenant's badge token, so the URL itself is the credential. Tenant pipelines admins may write it.
+	Badge *ComponentsSchemasTenantBadge `json:"badge,omitempty"`
 
 	// CellPool The CellPool the placement pass selects a cell from. Empty means the profile's default pool: the pool whose name equals profile. A tenant that needs a cell of its own names a pool whose maxTenantsPerCell is 1.
 	CellPool *string `json:"cellPool,omitempty"`
@@ -7257,6 +7274,9 @@ type ClientInterface interface {
 
 	// GetPipelineJob request
 	GetPipelineJob(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetJobBadge request
+	GetJobBadge(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListJobBranches request
 	ListJobBranches(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -9569,6 +9589,18 @@ func (c *Client) GetTenantCell(ctx context.Context, tenant ComponentsParametersT
 
 func (c *Client) GetPipelineJob(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetPipelineJobRequest(c.Server, tenant, job)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetJobBadge(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetJobBadgeRequest(c.Server, tenant, job)
 	if err != nil {
 		return nil, err
 	}
@@ -17034,6 +17066,47 @@ func NewGetPipelineJobRequest(server string, tenant ComponentsParametersTenant, 
 	return req, nil
 }
 
+// NewGetJobBadgeRequest generates requests for GetJobBadge
+func NewGetJobBadgeRequest(server string, tenant ComponentsParametersTenant, job ComponentsParametersJob) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "job", runtime.ParamLocationPath, job)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/jobs/%s/badge", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListJobBranchesRequest generates requests for ListJobBranches
 func NewListJobBranchesRequest(server string, tenant ComponentsParametersTenant, job ComponentsParametersJob) (*http.Request, error) {
 	var err error
@@ -20258,6 +20331,9 @@ type ClientWithResponsesInterface interface {
 
 	// GetPipelineJobWithResponse request
 	GetPipelineJobWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*GetPipelineJobResponse, error)
+
+	// GetJobBadgeWithResponse request
+	GetJobBadgeWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*GetJobBadgeResponse, error)
 
 	// ListJobBranchesWithResponse request
 	ListJobBranchesWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobBranchesResponse, error)
@@ -23866,6 +23942,31 @@ func (r GetPipelineJobResponse) StatusCode() int {
 	return 0
 }
 
+type GetJobBadgeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasJobBadge
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetJobBadgeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetJobBadgeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListJobBranchesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -27055,6 +27156,15 @@ func (c *ClientWithResponses) GetPipelineJobWithResponse(ctx context.Context, te
 		return nil, err
 	}
 	return ParseGetPipelineJobResponse(rsp)
+}
+
+// GetJobBadgeWithResponse request returning *GetJobBadgeResponse
+func (c *ClientWithResponses) GetJobBadgeWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*GetJobBadgeResponse, error) {
+	rsp, err := c.GetJobBadge(ctx, tenant, job, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetJobBadgeResponse(rsp)
 }
 
 // ListJobBranchesWithResponse request returning *ListJobBranchesResponse
@@ -34074,6 +34184,53 @@ func ParseGetPipelineJobResponse(rsp *http.Response) (*GetPipelineJobResponse, e
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest ComponentsSchemasPipelineJobDetail
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetJobBadgeResponse parses an HTTP response from a GetJobBadgeWithResponse call
+func ParseGetJobBadgeResponse(rsp *http.Response) (*GetJobBadgeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetJobBadgeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasJobBadge
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

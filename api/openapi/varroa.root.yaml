@@ -348,6 +348,8 @@ paths:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1jobs~1{job}'
   /api/v1/pipelines/{tenant}/jobs/{job}/branches:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1jobs~1{job}~1branches'
+  /api/v1/pipelines/{tenant}/jobs/{job}/badge:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1jobs~1{job}~1badge'
   /api/v1/pipelines/{tenant}/jobs/{job}/runs:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1jobs~1{job}~1runs'
   /api/v1/pipelines/{tenant}/jobs/{job}/scan:

@@ -66,6 +66,7 @@ import type {
   PipelineListResponse,
   PipelineJobDetail,
   JobBranchList,
+  JobBadge,
   ScanRequestedResponse,
   RunListResponse,
   CreateRunRequest,
@@ -1185,6 +1186,12 @@ export function getPipelineJob(tenant: string, jobPath: string): Promise<Pipelin
  * multibranch job. The inventory can be up to ten minutes stale. */
 export function listJobBranches(tenant: string, jobPath: string): Promise<JobBranchList> {
   return bffFetch<JobBranchList>(`${jobBase(tenant, jobPath)}/branches`);
+}
+
+/** getJobBadge reads whether the anonymous build badge of a job is on, and
+ * its host-root path when it is. */
+export function getJobBadge(tenant: string, jobPath: string): Promise<JobBadge> {
+  return bffFetch<JobBadge>(`${jobBase(tenant, jobPath)}/badge`);
 }
 
 /** scanMultibranch requests a scan of a multibranch job's branches and pull

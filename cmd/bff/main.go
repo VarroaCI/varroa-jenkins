@@ -896,6 +896,9 @@ func main() {
 	// hibernation surface above: unauthenticated, token-guarded by the URL
 	// itself.
 	mux.HandleFunc("/runners/", apiServer.HandleRunnerDoor)
+	// Build badge door at the host root: unauthenticated, token-guarded by the
+	// URL itself.
+	mux.HandleFunc(api.JobBadgePattern, apiServer.HandleJobBadge)
 
 	// --- Auth provider construction ---
 	var provider auth.Provider

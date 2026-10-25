@@ -225,6 +225,7 @@ var routeManifest = []route{
 	{Method: "GET", Path: "/api/v1/pipelines"},
 	{Method: "GET", Path: "/api/v1/pipelines/{tenant}"},
 	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/jobs/{job}"},
+	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/jobs/{job}/badge"},
 	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/jobs/{job}/branches"},
 	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/jobs/{job}/notes"},
 	{Method: "GET", Path: "/api/v1/pipelines/{tenant}/jobs/{job}/runs"},

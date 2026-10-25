@@ -60,6 +60,8 @@ interface FormData {
   pipelinesRetention?: TenantPipelines["retention"];
   /** Kept so a UI save does not erase the limits a tenant admin set. */
   pipelinesConcurrencyLimits?: TenantPipelines["concurrencyLimits"];
+  /** The anonymous build badge switch. A tenant pipelines admin may change it. */
+  pipelinesBadgeEnabled: boolean;
 }
 
 function emptyForm(): FormData {
@@ -87,6 +89,7 @@ function emptyForm(): FormData {
     pipelinesCronCatchUp: "one",
     pipelinesCronGrace: "",
     pipelinesExports: [],
+    pipelinesBadgeEnabled: false,
   };
 }
 
@@ -123,6 +126,7 @@ function formFromTenant(tenant: TenantEntry): FormData {
     })),
     pipelinesRetention: tenant.pipelines?.retention,
     pipelinesConcurrencyLimits: tenant.pipelines?.concurrencyLimits,
+    pipelinesBadgeEnabled: tenant.pipelines?.badge?.enabled === true,
   };
 }
 
@@ -434,6 +438,7 @@ export default function TenantForm() {
               notifications: tenant?.pipelines?.notifications,
               retention: form.pipelinesRetention,
               concurrencyLimits: form.pipelinesConcurrencyLimits,
+              badge: { enabled: form.pipelinesBadgeEnabled },
             }
           : undefined,
       };
@@ -782,6 +787,16 @@ export default function TenantForm() {
                 onChange={(e) => updateField("pipelinesCronBackstop", e.target.checked)}
               />
               <label htmlFor="pipelinesCronBackstop">Backstop cron scheduler</label>
+            </div>
+
+            <div className={styles.toggleRow}>
+              <input
+                type="checkbox"
+                id="pipelinesBadgeEnabled"
+                checked={form.pipelinesBadgeEnabled}
+                onChange={(e) => updateField("pipelinesBadgeEnabled", e.target.checked)}
+              />
+              <label htmlFor="pipelinesBadgeEnabled">Anonymous build badges</label>
             </div>
 
             <div className={styles.field}>

@@ -356,6 +356,13 @@ federation, activity persistence, and SSE fanout.
   never hibernates, so it publishes no wake. Both shapes share the JetStream `varroa_webhooks`
   stream and its existing `webhook.>` capture; the door never resolves placement, only the
   operator's replay consumer does, at delivery time.
+- The anonymous build badge door (`handlers_badge.go`, `badge_svg.go`): `HandleJobBadge`
+  serves `GET /badges/{tenant}/{token}/{file}.svg` at the host root. It answers an SVG only when
+  `spec.pipelines.badge.enabled` is true and the token matches `status.pipelines.badgeToken`
+  in constant time. Every refusal answers the same `404 not found` body with `no-store`. The
+  door reads the record store only. It never calls Jenkins. `handleGetJobBadge` answers the
+  job page's `{enabled, path}` state. `renderBadgeSVG` writes no external reference, so the
+  SVG holds no `href`.
 - The agent WebSocket door (`handlers_runner_door.go`, design `add-external-runners`
   D7/D8): `HandleRunnerDoor` serves `/runners/{token}/{login,jnlpJars/agent.jar,wsagents/}`
   at the host root, outside `/api/v1` and outside auth — the URL's token is the only

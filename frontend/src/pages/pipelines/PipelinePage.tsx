@@ -18,6 +18,7 @@ import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { RunDrawer } from "./RunDrawer";
 import { MultibranchCard } from "./MultibranchCard";
 import { JobHealthCard } from "./JobHealthCard";
+import { JobBadgeCard } from "./JobBadgeCard";
 import { forgeFileHref, forgeTreeHref } from "./forgeLink";
 import { RevisionLink } from "./RevisionLink";
 import { TRIGGER_LABEL, changeRequestLabel, queueWaitMs, safeWebUrl } from "./runMeta";
@@ -382,6 +383,7 @@ export default function PipelinePage() {
       <NotesCard mode="job" tenant={tenant ?? ""} job={job ?? ""} />
 
       <TargetApprovalsCard kind="job" targetRef={`${tenant}/${job}`} viewer={viewer} />
+      <JobBadgeCard tenant={tenant!} jobPath={jobDetail.jobPath} kind={jobDetail.kind} jobLabel={folderRelativeJobPath} />
 
       <div className={styles.cardGrid}>
         {jobDetail.kind !== "multibranch" && jobDetail.kind !== "organizationFolder" && (

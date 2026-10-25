@@ -192,3 +192,24 @@ Each entry sets exactly one of `job` or `locks`, plus `callers`, the list of Ten
 to use it. An edit to `exports` takes one reconcile tick to reach the record store that enforces
 the grant. See [Cross-tenant pipelines](../config/cross-tenant-pipelines.md) for the caller-side
 `varroa` steps and the fleet lock.
+
+## Anonymous build badges
+
+A pipelines tenant can serve a status badge for each of its jobs without a session. The badge is
+off by default. Turn it on under `spec.pipelines.badge`:
+
+```yaml
+spec:
+  pipelines:
+    badge:
+      enabled: true
+```
+
+The badge URL holds the tenant's badge token in its path, so the URL is the credential. A caller
+with the URL reads the job name and its last result. The operator mints the token once. To rotate
+it, clear the token. The next reconcile tick mints a new one, and the old URLs answer 404:
+
+```sh
+kubectl patch tenant payments --subresource=status --type=json \
+  -p '[{"op":"remove","path":"/status/pipelines/badgeToken"}]'
+```

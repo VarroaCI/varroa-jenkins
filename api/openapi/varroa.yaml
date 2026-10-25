@@ -8292,6 +8292,20 @@ components:
       - metadata
       - spec
       type: object
+    components_schemas_JobBadge:
+      additionalProperties: false
+      description: |
+        GET /pipelines/{tenant}/jobs/{job}/badge. The path is set only while the badge is on.
+      properties:
+        enabled:
+          type: boolean
+        path:
+          description: The host-root path of the badge SVG, with the badge token in
+            it.
+          type: string
+      required:
+      - enabled
+      type: object
     components_schemas_JobBranchHead:
       additionalProperties: false
       description: One branch, change request, or tag of a multibranch job.
@@ -11705,6 +11719,17 @@ components:
       - enabled
       - unattendedGranted
       type: object
+    components_schemas_TenantBadge:
+      additionalProperties: false
+      description: spec.pipelines.badge. The anonymous build status badge of the tenant's
+        jobs. A badge URL carries the tenant's badge token, so the URL itself is the
+        credential. Tenant pipelines admins may write it.
+      properties:
+        enabled:
+          default: false
+          description: Serves the badge without a session. Defaults to false.
+          type: boolean
+      type: object
     components_schemas_TenantCapabilities:
       additionalProperties: false
       description: One grant the caller holds on one pipelines tenant. A tenant name
@@ -12051,6 +12076,8 @@ components:
             of the tenant's own namespaces. Required when pipelines is set.
           minLength: 1
           type: string
+        badge:
+          $ref: '#/components/schemas/components_schemas_TenantBadge'
         cellPool:
           description: 'The CellPool the placement pass selects a cell from. Empty
             means the profile''s default pool: the pool whose name equals profile.
@@ -17276,6 +17303,31 @@ paths:
           $ref: '#/components/responses/components_responses_ServiceUnavailable'
       summary: Returns one job's summary, definition, triggers, parameters, and dependency
         edges.
+      tags:
+      - Pipelines
+  /api/v1/pipelines/{tenant}/jobs/{job}/badge:
+    get:
+      description: |
+        The badge door itself sits at the host root and is not part of this operation. The path in the answer is the host-root path of that door. The token in the path is the badge credential, so a caller that reads the job may copy the URL. The path is absent while the tenant's badge switch is off.
+      operationId: getJobBadge
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_tenant'
+      - $ref: '#/components/parameters/components_parameters_job'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_JobBadge'
+          description: The badge state of the job.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Reports whether the anonymous build badge of a job is on, and its URL
+        path.
       tags:
       - Pipelines
   /api/v1/pipelines/{tenant}/jobs/{job}/branches:

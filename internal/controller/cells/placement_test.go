@@ -1158,6 +1158,24 @@ func TestPlace_CredentialsMintedOnceAndStable(t *testing.T) {
 	if status.Pipelines.WebhookToken != token || status.Pipelines.WebhookSecret != secret {
 		t.Error("a stored credential must never be regenerated")
 	}
+
+	badge := status.Pipelines.BadgeToken
+	if len(badge) != 32 {
+		t.Fatalf("expected a 16-byte badge token, hex-encoded: %q", badge)
+	}
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if status.Pipelines.BadgeToken != badge {
+		t.Error("a stored badge token must never be regenerated")
+	}
+	status.Pipelines.BadgeToken = ""
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if len(status.Pipelines.BadgeToken) != 32 || status.Pipelines.BadgeToken == badge {
+		t.Errorf("a cleared badge token must be minted again with a new value: %q", status.Pipelines.BadgeToken)
+	}
 }
 
 // --- placement.cluster (task 6.6a) ---

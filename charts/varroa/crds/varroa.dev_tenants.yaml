@@ -78,6 +78,16 @@ spec:
                       AgentNamespace is the Kubernetes namespace this tenant's agents run
                       in. Must be one of spec.namespaces.
                     type: string
+                  badge:
+                    description: Badge turns on the anonymous build status badge of
+                      this tenant's jobs.
+                    properties:
+                      enabled:
+                        default: false
+                        description: Enabled serves the badge without a session. Default
+                          false.
+                        type: boolean
+                    type: object
                   cellPool:
                     description: |-
                       CellPool names the CellPool the placement pass selects a cell from.
@@ -472,6 +482,11 @@ spec:
                       is placed. Teardown reads it to find the tenant ServiceAccount and its
                       token Secret after spec.pipelines is gone, the same way Placement
                       keeps naming a cell after the placement pass stops writing to it.
+                    type: string
+                  badgeToken:
+                    description: |-
+                      BadgeToken is the credential in every badge URL of this tenant.
+                      Minted once; never regenerated. Clear it to rotate.
                     type: string
                   pendingPurgeCell:
                     description: |-
