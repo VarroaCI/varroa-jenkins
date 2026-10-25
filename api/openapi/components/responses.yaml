@@ -81,3 +81,17 @@ ServiceUnavailable:
     application/json:
       schema:
         $ref: './schemas.yaml#/Error'
+
+PayloadTooLarge:
+  description: The request body or a field exceeds its size limit.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'
+
+BadGateway:
+  description: The upstream service answered with an error or an unreadable reply.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'

@@ -5568,6 +5568,58 @@ PipelineMarkerValidateResponse:
       type: string
   additionalProperties: false
 
+JenkinsfileLintRequest:
+  type: object
+  description: POST /pipelines/{tenant}/lint.
+  required: [jenkinsfile]
+  properties:
+    jenkinsfile:
+      type: string
+      maxLength: 262144
+      description: The Jenkinsfile text, at most 256 KiB.
+  additionalProperties: false
+
+JenkinsfileLintError:
+  type: object
+  description: One finding of a Jenkinsfile lint.
+  required: [source, message]
+  properties:
+    source:
+      type: string
+      enum: [jenkins, varroa]
+      description: jenkins is the declarative linter. varroa is a cell script rule.
+    rule:
+      type: string
+      description: The Varroa rule id. Present when source is varroa.
+    line:
+      type: integer
+      minimum: 1
+    column:
+      type: integer
+      minimum: 1
+    message:
+      type: string
+  additionalProperties: false
+
+JenkinsfileLintResponse:
+  type: object
+  description: >
+    valid is true when errors is empty. cell and namespace name the cell
+    that linted the text.
+  required: [valid, cell, namespace, errors]
+  properties:
+    valid:
+      type: boolean
+    cell:
+      type: string
+    namespace:
+      type: string
+    errors:
+      type: array
+      items:
+        $ref: '#/JenkinsfileLintError'
+  additionalProperties: false
+
 RunStage:
   type: object
   required: [stageId, name, status]

@@ -15,10 +15,10 @@ import (
 )
 
 // =============================================================================
-// Pipeline tools (14): run_pipeline, list_runs, get_run, get_run_log,
+// Pipeline tools (15): run_pipeline, list_runs, get_run, get_run_log,
 // list_job_branches, get_job_health, list_fleet_locks, release_fleet_lock,
 // proceed_run_input, abort_run_input, replay_run, restart_run,
-// scan_multibranch, get_tenant_cell
+// scan_multibranch, get_tenant_cell, lint_jenkinsfile
 //
 // Design D1a: these tools call the same internal services the
 // pipelines HTTP handlers call (internal/api's RunPipeline, ListRuns,
@@ -56,6 +56,38 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 	registerScanMultibranchTool(mcpServer, deps)
 	registerRestartRunTool(mcpServer, deps)
 	registerGetTenantCellTool(mcpServer, deps)
+	registerLintJenkinsfileTool(mcpServer, deps)
+}
+
+// registerLintJenkinsfileTool registers lint_jenkinsfile: it lints a
+// Jenkinsfile on the tenant's cell. It calls the same service the lint HTTP
+// route calls and writes no state.
+func registerLintJenkinsfileTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	lintTool := mcp.NewTool("lint_jenkinsfile",
+		mcp.WithDescription("Lint a declarative Jenkinsfile on the tenant's cell. Returns valid and a list of errors with line and column. Writes nothing."),
+		mcp.WithString("tenant", mcp.Required(), mcp.Description("The tenant name")),
+		mcp.WithString("jenkinsfile", mcp.Required(), mcp.Description("The Jenkinsfile text, at most 256 KiB")),
+	)
+	addTool(mcpServer, kindRead, lintTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
+		args := getArgs(req)
+		tenant := strArg(args, "tenant")
+		if tenant == "" {
+			return mcp.NewToolResultError("tenant is required"), nil
+		}
+		text := strArg(args, "jenkinsfile")
+		if text == "" {
+			return mcp.NewToolResultError("jenkinsfile is required"), nil
+		}
+		body, serr := api.NewServer(deps).LintJenkinsfile(ctx, claims, tenant, text)
+		if serr != nil {
+			return mcp.NewToolResultError(serr.Error()), nil
+		}
+		return resultJSON(body)
+	})
 }
 
 // registerGetTenantCellTool registers get_tenant_cell: the cell that hosts a

@@ -267,6 +267,20 @@ A multibranch job shows its `main` branch by default. Type a branch name in the 
 the card to show that branch. Badges are off by default. See
 [Anonymous build badges](../operations/multi-tenancy.md#anonymous-build-badges).
 
+## Lint a Jenkinsfile
+
+Send a Jenkinsfile to the tenant's cell before you commit it. The cell runs the Jenkins declarative linter. The lint checks declarative syntax only. A cell-hosted tenant also runs the Varroa cell rules, such as `no-job-dsl`, which reject a Job DSL step.
+
+Post the file text to `POST /api/v1/pipelines/{tenant}/lint` as the `jenkinsfile` field. The file is at most 256 KiB. The answer carries `valid` and an `errors` list. Each error has a `source` (`jenkins` or `varroa`), a `message`, and, when the linter gives one, a `line` and a `column`.
+
+Or run the same check from a shell:
+
+```bash
+varroactl lint jenkinsfile --tenant payments --file Jenkinsfile
+```
+
+The lint never starts or wakes a cell. A hibernated or stopped cell answers 409, so start a run to wake the cell, then lint again. A tenant placed on a member cluster also answers 409, because the lint reaches only a cell on the core cluster.
+
 ## Next steps
 
 [Operate a run](run-operations.md) covers fleet locks, the failure digest, the summary line, and

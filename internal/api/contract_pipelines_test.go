@@ -199,6 +199,18 @@ func init() {
 			WantStatus: http.StatusServiceUnavailable,
 		},
 
+		// The Jenkinsfile lint resolves {tenant} through TenantResolver
+		// before it reaches a cell, so with the resolver unset it answers
+		// the uniform 503 the other tenant paths answer.
+		contractCase{
+			Name:       "lintJenkinsfile-tenantResolverDisabled",
+			Method:     "POST",
+			Path:       "/api/v1/pipelines/payments/lint",
+			Body:       map[string]string{"jenkinsfile": "pipeline {}\n"},
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+
 		// The tenant run stream reads no record-store row, but it answers
 		// 503 through pipelinesUnavailable while RecordStore is unset, so
 		// the handler refuses the stream rather than opening a dead one.

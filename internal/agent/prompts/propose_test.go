@@ -14,7 +14,7 @@ func TestProposePipelineTextNamesTheTools(t *testing.T) {
 	if !ok {
 		t.Fatal("propose-pipeline is not registered")
 	}
-	for _, want := range []string{"read_repo_file", "open_pull_request", "varroa/propose-pipeline"} {
+	for _, want := range []string{"read_repo_file", "lint_jenkinsfile", "open_pull_request", "varroa/propose-pipeline"} {
 		if !strings.Contains(p.Text, want) {
 			t.Errorf("prompt text does not name %q", want)
 		}
