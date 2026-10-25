@@ -433,6 +433,16 @@ const (
 	OciSource ComponentsSchemasJobDeclaredByKind = "ociSource"
 )
 
+// Defines values for ComponentsSchemasJobHealthBucket.
+const (
+	ComponentsSchemasJobHealthBucketCloudy       ComponentsSchemasJobHealthBucket = "cloudy"
+	ComponentsSchemasJobHealthBucketPartlyCloudy ComponentsSchemasJobHealthBucket = "partlyCloudy"
+	ComponentsSchemasJobHealthBucketRainy        ComponentsSchemasJobHealthBucket = "rainy"
+	ComponentsSchemasJobHealthBucketStormy       ComponentsSchemasJobHealthBucket = "stormy"
+	ComponentsSchemasJobHealthBucketSunny        ComponentsSchemasJobHealthBucket = "sunny"
+	ComponentsSchemasJobHealthBucketUnknown      ComponentsSchemasJobHealthBucket = "unknown"
+)
+
 // Defines values for ComponentsSchemasLogEntryLevel.
 const (
 	DEBUG ComponentsSchemasLogEntryLevel = "DEBUG"
@@ -497,14 +507,6 @@ const (
 	UNSTABLE ComponentsSchemasPipelineDependencyEdgeResult = "UNSTABLE"
 )
 
-// Defines values for ComponentsSchemasPipelineJobDetailHealth.
-const (
-	ComponentsSchemasPipelineJobDetailHealthClear   ComponentsSchemasPipelineJobDetailHealth = "clear"
-	ComponentsSchemasPipelineJobDetailHealthCloudy  ComponentsSchemasPipelineJobDetailHealth = "cloudy"
-	ComponentsSchemasPipelineJobDetailHealthRain    ComponentsSchemasPipelineJobDetailHealth = "rain"
-	ComponentsSchemasPipelineJobDetailHealthUnknown ComponentsSchemasPipelineJobDetailHealth = "unknown"
-)
-
 // Defines values for ComponentsSchemasPipelineJobDetailKind.
 const (
 	ComponentsSchemasPipelineJobDetailKindBranch             ComponentsSchemasPipelineJobDetailKind = "branch"
@@ -532,14 +534,6 @@ const (
 const (
 	Password ComponentsSchemasPipelineParameterUiWidget = "password"
 	Textarea ComponentsSchemasPipelineParameterUiWidget = "textarea"
-)
-
-// Defines values for ComponentsSchemasPipelineSummaryHealth.
-const (
-	ComponentsSchemasPipelineSummaryHealthClear   ComponentsSchemasPipelineSummaryHealth = "clear"
-	ComponentsSchemasPipelineSummaryHealthCloudy  ComponentsSchemasPipelineSummaryHealth = "cloudy"
-	ComponentsSchemasPipelineSummaryHealthRain    ComponentsSchemasPipelineSummaryHealth = "rain"
-	ComponentsSchemasPipelineSummaryHealthUnknown ComponentsSchemasPipelineSummaryHealth = "unknown"
 )
 
 // Defines values for ComponentsSchemasPipelineSummaryKind.
@@ -699,9 +693,9 @@ const (
 
 // Defines values for ComponentsSchemasTenantAgentConditionStatus.
 const (
-	ComponentsSchemasTenantAgentConditionStatusFalse   ComponentsSchemasTenantAgentConditionStatus = "False"
-	ComponentsSchemasTenantAgentConditionStatusTrue    ComponentsSchemasTenantAgentConditionStatus = "True"
-	ComponentsSchemasTenantAgentConditionStatusUnknown ComponentsSchemasTenantAgentConditionStatus = "Unknown"
+	False   ComponentsSchemasTenantAgentConditionStatus = "False"
+	True    ComponentsSchemasTenantAgentConditionStatus = "True"
+	Unknown ComponentsSchemasTenantAgentConditionStatus = "Unknown"
 )
 
 // Defines values for ComponentsSchemasTenantAgentErrorCode.
@@ -3101,6 +3095,45 @@ type ComponentsSchemasJobDeclaredByForge string
 // ComponentsSchemasJobDeclaredByKind defines model for ComponentsSchemasJobDeclaredBy.Kind.
 type ComponentsSchemasJobDeclaredByKind string
 
+// ComponentsSchemasJobHealth One job's health over its last JobHealthWindow finished build runs. SUCCESS passes. FAILURE, UNSTABLE, and ABORTED fail. INTERRUPTED and NOT_BUILT do not count.
+type ComponentsSchemasJobHealth struct {
+	// Bucket The weather bucket of the score: above 80 sunny, above 60 partlyCloudy, above 40 cloudy, above 20 rainy, and anything lower stormy. unknown when no run counts.
+	Bucket ComponentsSchemasJobHealthBucket `json:"bucket"`
+
+	// Counted The number of runs in the window that count.
+	Counted int `json:"counted"`
+
+	// Passed The number of counted runs that passed.
+	Passed int `json:"passed"`
+
+	// Score The percentage of counted runs that passed, rounded down. Absent when no run counts.
+	Score *int `json:"score,omitempty"`
+
+	// Window The number of recent finished build runs the health reads.
+	Window int `json:"window"`
+}
+
+// ComponentsSchemasJobHealthBucket The weather bucket of the score: above 80 sunny, above 60 partlyCloudy, above 40 cloudy, above 20 rainy, and anything lower stormy. unknown when no run counts.
+type ComponentsSchemasJobHealthBucket string
+
+// ComponentsSchemasJobTrendPoint One finished build run of a job's trend. Points are newest first.
+type ComponentsSchemasJobTrendPoint struct {
+	BuildNumber *int64 `json:"buildNumber,omitempty"`
+	DurationMs  *int64 `json:"durationMs,omitempty"`
+	Result      string `json:"result"`
+	RunId       string `json:"runId"`
+
+	// Tests One run's suite counters. Passed is the total minus the failed and skipped counters, never below zero.
+	Tests *ComponentsSchemasJobTrendTests `json:"tests,omitempty"`
+}
+
+// ComponentsSchemasJobTrendTests One run's suite counters. Passed is the total minus the failed and skipped counters, never below zero.
+type ComponentsSchemasJobTrendTests struct {
+	Failed  int `json:"failed"`
+	Passed  int `json:"passed"`
+	Skipped int `json:"skipped"`
+}
+
 // ComponentsSchemasKeyMeta Non-secret metadata for an API key.
 type ComponentsSchemasKeyMeta struct {
 	// Created ISO 8601 creation time.
@@ -3402,10 +3435,11 @@ type ComponentsSchemasPipelineJobDetail struct {
 	Definition *ComponentsSchemasPipelineDefinition `json:"definition,omitempty"`
 
 	// Dependencies The job's cross-tenant dependency edges (design D13). Both arrays are empty, never omitted, for a job that declares no cross-tenant trigger and has no subscriber.
-	Dependencies    ComponentsSchemasPipelineDependencies    `json:"dependencies"`
-	DurationTrendMs *[]int64                                 `json:"durationTrendMs,omitempty"`
-	Health          ComponentsSchemasPipelineJobDetailHealth `json:"health"`
-	JobPath         string                                   `json:"jobPath"`
+	Dependencies ComponentsSchemasPipelineDependencies `json:"dependencies"`
+
+	// Health One job's health over its last JobHealthWindow finished build runs. SUCCESS passes. FAILURE, UNSTABLE, and ABORTED fail. INTERRUPTED and NOT_BUILT do not count.
+	Health  ComponentsSchemasJobHealth `json:"health"`
+	JobPath string                     `json:"jobPath"`
 
 	// Kind The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job.
 	Kind ComponentsSchemasPipelineJobDetailKind `json:"kind"`
@@ -3427,15 +3461,15 @@ type ComponentsSchemasPipelineJobDetail struct {
 	Tenant string `json:"tenant"`
 
 	// TenantFolder The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.
-	TenantFolder string                             `json:"tenantFolder"`
-	Triggers     *ComponentsSchemasPipelineTriggers `json:"triggers,omitempty"`
+	TenantFolder string `json:"tenantFolder"`
+
+	// Trend The job's finished build runs in the health window, newest first. Empty when the job has no finished run.
+	Trend    []ComponentsSchemasJobTrendPoint   `json:"trend"`
+	Triggers *ComponentsSchemasPipelineTriggers `json:"triggers,omitempty"`
 
 	// Waiting Queued runs of this job that a concurrency cap holds. Absent when none waits.
 	Waiting *[]ComponentsSchemasRunWaitEntry `json:"waiting,omitempty"`
 }
-
-// ComponentsSchemasPipelineJobDetailHealth defines model for ComponentsSchemasPipelineJobDetail.Health.
-type ComponentsSchemasPipelineJobDetailHealth string
 
 // ComponentsSchemasPipelineJobDetailKind The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job.
 type ComponentsSchemasPipelineJobDetailKind string
@@ -3552,9 +3586,9 @@ type ComponentsSchemasPipelineSummary struct {
 	// DurationTrendMs The most recent runs' duration, newest first.
 	DurationTrendMs *[]int64 `json:"durationTrendMs,omitempty"`
 
-	// Health The weather glyph, computed from the last five runs: clear when all passed, cloudy when one or two failed, rain when three or more failed, unknown for a job that has never run.
-	Health  ComponentsSchemasPipelineSummaryHealth `json:"health"`
-	JobPath string                                 `json:"jobPath"`
+	// Health One job's health over its last JobHealthWindow finished build runs. SUCCESS passes. FAILURE, UNSTABLE, and ABORTED fail. INTERRUPTED and NOT_BUILT do not count.
+	Health  ComponentsSchemasJobHealth `json:"health"`
+	JobPath string                     `json:"jobPath"`
 
 	// Kind The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job. Any other job reports unknown.
 	Kind ComponentsSchemasPipelineSummaryKind `json:"kind"`
@@ -3568,9 +3602,6 @@ type ComponentsSchemasPipelineSummary struct {
 	// Pending True when every tenant that declares this job reports a complete job list that lacks it. False when a declaring tenant has an unknown inventory, when a declaring tenant holds the job, when the job has a run, and when no tenant declares the job.
 	Pending bool `json:"pending"`
 }
-
-// ComponentsSchemasPipelineSummaryHealth The weather glyph, computed from the last five runs: clear when all passed, cloudy when one or two failed, rain when three or more failed, unknown for a job that has never run.
-type ComponentsSchemasPipelineSummaryHealth string
 
 // ComponentsSchemasPipelineSummaryKind The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job. Any other job reports unknown.
 type ComponentsSchemasPipelineSummaryKind string

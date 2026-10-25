@@ -1,0 +1,47 @@
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+}
+
+.heading {
+  margin: 0.75rem 0 0.35rem;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.square {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  background: var(--idle);
+}
+
+.resultPassed { background: var(--ok); }
+.resultUnstable { background: var(--warn); }
+.resultFailed { background: var(--bad); }
+.resultUncounted { background: var(--idle); opacity: 0.5; }
+
+.chart {
+  display: block;
+  width: 100%;
+  height: 80px;
+}
+
+.durationBar { fill: var(--idle); }
+.testPassed { fill: var(--ok); }
+.testFailed { fill: var(--bad); }
+.testSkipped { fill: var(--idle); }

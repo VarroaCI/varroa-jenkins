@@ -52,6 +52,18 @@ type fakePipelineReader struct {
 
 	// testCases is keyed by run id, for ListTestCases.
 	testCases map[string][]recordstore.TestCase
+
+	// summaries is keyed by job path, for GetJobSummary.
+	summaries map[string]recordstore.JobSummary
+}
+
+// GetJobSummary answers the seeded summary of one job path. A job with no
+// seeded summary answers an empty one, as the record store does.
+func (f *fakePipelineReader) GetJobSummary(_ context.Context, _, _, jobPath string) (recordstore.JobSummary, error) {
+	if s, ok := f.summaries[jobPath]; ok {
+		return s, nil
+	}
+	return recordstore.JobSummary{JobPath: jobPath}, nil
 }
 
 // ListTestCases answers the seeded case rows of one run.
@@ -80,6 +92,7 @@ func newFakePipelineReader() *fakePipelineReader {
 		locksByTenant: map[string][]recordstore.FleetLock{},
 		testCases:     map[string][]recordstore.TestCase{},
 		downstream:    map[string][]recordstore.Run{},
+		summaries:     map[string]recordstore.JobSummary{},
 	}
 }
 

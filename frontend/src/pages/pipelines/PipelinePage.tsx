@@ -17,6 +17,7 @@ import JobBreadcrumbs from "./JobBreadcrumbs";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { RunDrawer } from "./RunDrawer";
 import { MultibranchCard } from "./MultibranchCard";
+import { JobHealthCard } from "./JobHealthCard";
 import { forgeFileHref, forgeTreeHref } from "./forgeLink";
 import { RevisionLink } from "./RevisionLink";
 import { TRIGGER_LABEL, changeRequestLabel, queueWaitMs, safeWebUrl } from "./runMeta";
@@ -383,6 +384,9 @@ export default function PipelinePage() {
       <TargetApprovalsCard kind="job" targetRef={`${tenant}/${job}`} viewer={viewer} />
 
       <div className={styles.cardGrid}>
+        {jobDetail.kind !== "multibranch" && jobDetail.kind !== "organizationFolder" && (
+          <JobHealthCard tenant={tenant ?? ""} jobPath={jobDetail.jobPath} health={jobDetail.health} trend={jobDetail.trend} />
+        )}
         <Card title="Defined by">
           <dl className={styles.kv}>
             {definition?.jenkinsfileRepo && (

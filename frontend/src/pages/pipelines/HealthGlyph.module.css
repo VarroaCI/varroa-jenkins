@@ -1,0 +1,10 @@
+.healthCell {
+  display: flex;
+  align-items: center;
+}
+
+.sunny { color: var(--ok-text); }
+.partlyCloudy { color: var(--warn-text); }
+.cloudy { color: var(--warn-text); }
+.rainy { color: var(--bad-text); }
+.stormy { color: var(--bad-text); }

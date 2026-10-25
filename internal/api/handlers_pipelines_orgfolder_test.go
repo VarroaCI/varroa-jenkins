@@ -108,8 +108,8 @@ func TestListPipelinesDiscoveredMultibranchFromInventory(t *testing.T) {
 	if !ok {
 		t.Fatalf("acme/new-mb absent although the inventory reports it: %+v", resp.Items)
 	}
-	if row.Kind != "multibranch" || row.Health != "unknown" {
-		t.Fatalf("acme/new-mb = kind %q health %q, want multibranch unknown", row.Kind, row.Health)
+	if row.Kind != "multibranch" || row.Health.Bucket != "unknown" {
+		t.Fatalf("acme/new-mb = kind %q health %q, want multibranch unknown", row.Kind, row.Health.Bucket)
 	}
 }
 

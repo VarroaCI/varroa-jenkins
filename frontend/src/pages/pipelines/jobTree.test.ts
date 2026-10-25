@@ -81,12 +81,12 @@ describe("buildJobTree", () => {
 
   it("renders a declared job that has never run as an ordinary job node", () => {
     const tree = buildJobTree(
-      [createPipelineSummary({ jobPath: "payments/release/eu", health: "unknown" })],
+      [createPipelineSummary({ jobPath: "payments/release/eu" })],
       [],
       "payments",
     );
     expect(tree[0].children[0]).toMatchObject({ kind: "job", name: "eu" });
-    expect(tree[0].children[0].summary?.health).toBe("unknown");
+    expect(tree[0].children[0].summary?.health.bucket).toBe("unknown");
   });
 
   it("sorts a folder before a job, then alphabetically inside each group", () => {

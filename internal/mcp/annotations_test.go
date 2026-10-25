@@ -123,6 +123,7 @@ var expectedToolKinds = map[string]toolKind{
 	"get_run":            kindRead,
 	"get_run_log":        kindRead,
 	"list_job_branches":  kindRead,
+	"get_job_health":     kindRead,
 	"list_fleet_locks":   kindRead,
 	"release_fleet_lock": kindDelete,
 	"proceed_run_input":  kindAction,

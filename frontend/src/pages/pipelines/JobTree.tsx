@@ -1,9 +1,10 @@
 import type { CSSProperties, KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
-import { ChevronRight, CloudRain, CloudSun, Sun, type LucideIcon } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { age } from "../../components/activityTimeline.util";
-import type { PipelineHealth, PipelineSummary } from "../../types";
+import type { PipelineSummary } from "../../types";
 import { breakablePath } from "./breakablePath";
+import { HealthGlyph } from "./HealthGlyph";
 import { isFoldable, type JobTreeNode } from "./jobTree";
 import styles from "./JobTree.module.css";
 
@@ -28,27 +29,6 @@ export function formatDuration(ms: number | undefined): string {
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
-}
-
-const HEALTH_GLYPH: Record<"clear" | "cloudy" | "rain", { Icon: LucideIcon; label: string; cls: string }> = {
-  clear: { Icon: Sun, label: "Clear: none of the last five runs failed", cls: styles.healthClear },
-  cloudy: { Icon: CloudSun, label: "Cloudy: one or two of the last five runs failed", cls: styles.healthCloudy },
-  rain: { Icon: CloudRain, label: "Rain: three or more of the last five runs failed", cls: styles.healthRain },
-};
-
-/**
- * HealthGlyph renders the weather glyph naming its own state, so a screen
- * reader announces the state rather than the image. A job that has never
- * run carries health "unknown" and renders no glyph.
- */
-function HealthGlyph({ health }: { health: PipelineHealth }) {
-  if (health === "unknown") return null;
-  const { Icon, label, cls } = HEALTH_GLYPH[health];
-  return (
-    <span className={`${styles.healthCell} ${cls}`} role="img" aria-label={label} title={label}>
-      <Icon aria-hidden="true" size={18} />
-    </span>
-  );
 }
 
 /** Sparkline draws the last-8-durations trend as one inline SVG polyline.

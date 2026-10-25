@@ -1456,10 +1456,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   (`runwindow.go`, 24 hours before the `run_id` time to 7 days after
   it), then to an unbounded one. The bound is a fast path alone, and it
   never decides whether a row is readable. Every job aggregate
-  (`JobWindowStats`, `addJobRecentResults`, `addJobLastRuns`,
+  (`JobWindowStats`, `addJobRecentRuns`, `addJobLastRuns`,
   `addJobDurationTrends`) carries
   `AND result IS DISTINCT FROM 'TRIGGER_FAILED'`, never `<>`, because a
-  running row holds a null `result`. `ListRuns` and `SearchRecords`
+  running row holds a null `result`. `addJobRecentRuns` fills `JobSummary.RecentRuns` with
+  the job's last `JobHealthWindow` (10) finished build runs, with each run's build number,
+  duration, and suite counters; the API computes job health and trend from that window. `ListRuns` and `SearchRecords`
   carry no such predicate.
   `JobSummary` is record-derived only: no job definition, no trigger
   state, no job that has never run — the pipelines API supplies those

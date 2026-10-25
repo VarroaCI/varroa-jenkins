@@ -55,8 +55,8 @@ it is not wired, `search` still returns the first four.
 The result also carries `clusters`, one read status for each cluster with `name`, `ok`, and `error`.
 A cluster with `ok: false` returned incomplete results.
 
-The MCP server also exposes thirteen pipeline tools: `run_pipeline`, `list_runs`,
-`get_run`, `get_run_log`, `list_job_branches`, `list_fleet_locks`, `release_fleet_lock`,
+The MCP server also exposes fourteen pipeline tools: `run_pipeline`, `list_runs`,
+`get_run`, `get_run_log`, `list_job_branches`, `get_job_health`, `list_fleet_locks`, `release_fleet_lock`,
 `proceed_run_input`, `abort_run_input`, `replay_run`, `restart_run`, `scan_multibranch`, and `get_tenant_cell`. They operate on the
 build record store. The `scan_multibranch` tool starts a scan of a multibranch job or an organization folder and returns
 a `scanId` and the state `requested`. A job that is neither answers an error. Read the result with `list_job_branches`, in `lastScan`. The `run_pipeline` tool starts a build and returns a
@@ -76,6 +76,12 @@ The `proceed_run_input` tool answers a paused input step of a run. It takes
 The `abort_run_input` tool rejects that step, and takes `run` and `input`. An
 agent reads the run's `inputs` array with `get_run` first. Both tools answer
 that the request was sent, so the agent reads the run again for the outcome.
+
+The `get_job_health` tool takes `tenant` and `job`. It returns the job's `health`, which is the
+same object the job page shows, and its `trend`, the job's finished runs newest first. Health counts
+the last ten finished runs: SUCCESS passes, and FAILURE, UNSTABLE, and ABORTED fail. INTERRUPTED and
+NOT_BUILT do not count. The `trend` carries each run's duration and suite counters when it recorded
+them. The tool gives the same answer as the job detail.
 
 The `get_tenant_cell` tool takes `tenant` and returns the cell that hosts the tenant's tenant. It carries the Tenant's tenant warning when one holds. It gives the same answer as `GET /api/v1/pipelines/{tenant}/cell`.
 

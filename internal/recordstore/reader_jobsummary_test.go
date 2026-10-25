@@ -57,8 +57,8 @@ func TestListJobSummariesGroupsByJobPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("acme/app-a missing from %v", byPath)
 	}
-	if len(appA.RecentResults) != 2 || appA.RecentResults[0] != "FAILURE" || appA.RecentResults[1] != "SUCCESS" {
-		t.Fatalf("acme/app-a RecentResults = %v, want [FAILURE SUCCESS] newest first", appA.RecentResults)
+	if len(appA.RecentRuns) != 2 || appA.RecentRuns[0].Result != "FAILURE" || appA.RecentRuns[1].Result != "SUCCESS" {
+		t.Fatalf("acme/app-a RecentRuns = %v, want [FAILURE SUCCESS] newest first", appA.RecentRuns)
 	}
 	if appA.LastRun == nil || appA.LastRun.RunID != newestA.String() {
 		t.Fatalf("acme/app-a LastRun = %v, want the newest run %s", appA.LastRun, newestA)
@@ -71,19 +71,19 @@ func TestListJobSummariesGroupsByJobPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("acme/app-b missing from %v", byPath)
 	}
-	if len(appB.RecentResults) != 1 || appB.RecentResults[0] != "SUCCESS" {
-		t.Fatalf("acme/app-b RecentResults = %v, want [SUCCESS]", appB.RecentResults)
+	if len(appB.RecentRuns) != 1 || appB.RecentRuns[0].Result != "SUCCESS" {
+		t.Fatalf("acme/app-b RecentRuns = %v, want [SUCCESS]", appB.RecentRuns)
 	}
 	if len(appB.DurationTrendMs) != 0 {
 		t.Fatalf("acme/app-b DurationTrendMs = %v, want none (its only run has no duration)", appB.DurationTrendMs)
 	}
 }
 
-// TestJobSummaryRecentResultsCapsAtFiveAndSkipsUnfinishedRuns asserts
-// RecentResults holds only a job's newest jobHealthRecentResultsSize
-// finished runs, newest first, and that a run with no result yet
-// (RUNNING) is skipped rather than occupying one of the five slots.
-func TestJobSummaryRecentResultsCapsAtFiveAndSkipsUnfinishedRuns(t *testing.T) {
+// TestJobSummaryRecentRunsCapsAtWindowAndSkipsUnfinishedRuns asserts
+// RecentRuns holds only a job's newest JobHealthWindow finished build
+// runs, newest first, and that a run with no result yet (RUNNING) is
+// skipped rather than occupying one of the window slots.
+func TestJobSummaryRecentRunsCapsAtWindowAndSkipsUnfinishedRuns(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
@@ -91,8 +91,9 @@ func TestJobSummaryRecentResultsCapsAtFiveAndSkipsUnfinishedRuns(t *testing.T) {
 	ctx := context.Background()
 
 	base := time.Now().UTC().Add(-time.Hour)
+	total := JobHealthWindow + 2
 	var wantNewestFirst []string
-	for i := 0; i < jobHealthRecentResultsSize+2; i++ {
+	for i := 0; i < total; i++ {
 		result := "SUCCESS"
 		if i < 3 {
 			result = "FAILURE"
@@ -100,14 +101,14 @@ func TestJobSummaryRecentResultsCapsAtFiveAndSkipsUnfinishedRuns(t *testing.T) {
 		seedJobSummaryRun(t, db, "acme/app-d", base.Add(time.Duration(i)*time.Minute), result, nil)
 		wantNewestFirst = append([]string{result}, wantNewestFirst...)
 	}
-	wantNewestFirst = wantNewestFirst[:jobHealthRecentResultsSize]
+	wantNewestFirst = wantNewestFirst[:JobHealthWindow]
 	// A newer run still running has no result yet: it must not occupy
-	// one of the five slots or shift an older finished run out of them.
+	// one of the window slots or shift an older finished run out of them.
 	runID := uuid.New()
 	if _, err := db.Exec(`
 		INSERT INTO varroa.runs (run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path, status)
 		VALUES ($1, $2, $3, $4, $5, 'cell-a', $6, $7, 'RUNNING')
-	`, runID, base.Add(time.Duration(jobHealthRecentResultsSize+2)*time.Minute), "manual:jobsummary-"+runID.String(), testCluster, testNamespace, testTenant, "acme/app-d"); err != nil {
+	`, runID, base.Add(time.Duration(total)*time.Minute), "manual:jobsummary-"+runID.String(), testCluster, testNamespace, testTenant, "acme/app-d"); err != nil {
 		t.Fatalf("seed running run: %v", err)
 	}
 
@@ -115,13 +116,62 @@ func TestJobSummaryRecentResultsCapsAtFiveAndSkipsUnfinishedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJobSummary: %v", err)
 	}
-	if len(summary.RecentResults) != jobHealthRecentResultsSize {
-		t.Fatalf("RecentResults = %v, want %d entries", summary.RecentResults, jobHealthRecentResultsSize)
+	if len(summary.RecentRuns) != JobHealthWindow {
+		t.Fatalf("RecentRuns has %d entries, want %d", len(summary.RecentRuns), JobHealthWindow)
 	}
-	for i, got := range summary.RecentResults {
-		if got != wantNewestFirst[i] {
-			t.Fatalf("RecentResults = %v, want %v newest first", summary.RecentResults, wantNewestFirst)
+	for i, got := range summary.RecentRuns {
+		if got.Result != wantNewestFirst[i] {
+			t.Fatalf("RecentRuns results differ at %d: got %q, want %v newest first", i, got.Result, wantNewestFirst)
 		}
+	}
+}
+
+// TestJobSummaryRecentRunsCarryDurationAndTestTotals asserts each
+// RecentRuns entry carries its build number, duration, and suite
+// counters from the runs row, and that a run which recorded none of
+// them keeps nil pointers rather than zero values.
+func TestJobSummaryRecentRunsCarryDurationAndTestTotals(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	reader := NewReader(pool)
+	ctx := context.Background()
+
+	base := time.Now().UTC().Add(-time.Hour)
+	duration := int64(4200)
+	withData := seedJobSummaryRun(t, db, "acme/app-e", base, "UNSTABLE", &duration)
+	bare := seedJobSummaryRun(t, db, "acme/app-e", base.Add(time.Minute), "SUCCESS", nil)
+	if _, err := db.Exec(`
+		UPDATE varroa.runs SET build_number = 42, tests_total = 10, tests_failed = 2, tests_skipped = 1
+		WHERE run_id = $1
+	`, withData); err != nil {
+		t.Fatalf("set run counters: %v", err)
+	}
+
+	summary, err := reader.GetJobSummary(ctx, testCluster, testTenant, "acme/app-e")
+	if err != nil {
+		t.Fatalf("GetJobSummary: %v", err)
+	}
+	if len(summary.RecentRuns) != 2 {
+		t.Fatalf("RecentRuns has %d entries, want 2", len(summary.RecentRuns))
+	}
+	newest, older := summary.RecentRuns[0], summary.RecentRuns[1]
+	if newest.RunID != bare.String() || newest.BuildNumber != nil || newest.DurationMs != nil ||
+		newest.TestsTotal != nil || newest.TestsFailed != nil || newest.TestsSkipped != nil {
+		t.Fatalf("bare run = %+v, want nil build number, duration, and counters", newest)
+	}
+	if older.RunID != withData.String() || older.Result != "UNSTABLE" {
+		t.Fatalf("older run = %+v, want run %s with result UNSTABLE", older, withData)
+	}
+	if older.BuildNumber == nil || *older.BuildNumber != 42 {
+		t.Fatalf("build number = %v, want 42", older.BuildNumber)
+	}
+	if older.DurationMs == nil || *older.DurationMs != duration {
+		t.Fatalf("duration = %v, want %d", older.DurationMs, duration)
+	}
+	if older.TestsTotal == nil || *older.TestsTotal != 10 || older.TestsFailed == nil || *older.TestsFailed != 2 ||
+		older.TestsSkipped == nil || *older.TestsSkipped != 1 {
+		t.Fatalf("suite counters = %v/%v/%v, want 10/2/1", older.TestsTotal, older.TestsFailed, older.TestsSkipped)
 	}
 }
 
@@ -152,9 +202,9 @@ func TestJobSummaryDurationTrendDoesNotReachPastTheNewestRuns(t *testing.T) {
 	}
 }
 
-// TestGetJobSummaryUnknownJobHasNoRecentResults asserts a job with no
-// run at all returns an empty RecentResults and a nil LastRun.
-func TestGetJobSummaryUnknownJobHasNoRecentResults(t *testing.T) {
+// TestGetJobSummaryUnknownJobHasNoRecentRuns asserts a job with no
+// run at all returns an empty RecentRuns and a nil LastRun.
+func TestGetJobSummaryUnknownJobHasNoRecentRuns(t *testing.T) {
 	t.Parallel()
 
 	pool, _ := setupLedgerPool(t)
@@ -168,8 +218,8 @@ func TestGetJobSummaryUnknownJobHasNoRecentResults(t *testing.T) {
 	if summary.LastRun != nil {
 		t.Fatalf("LastRun = %v, want nil", summary.LastRun)
 	}
-	if len(summary.RecentResults) != 0 {
-		t.Fatalf("RecentResults = %v, want none", summary.RecentResults)
+	if len(summary.RecentRuns) != 0 {
+		t.Fatalf("RecentRuns = %v, want none", summary.RecentRuns)
 	}
 }
 

@@ -64,8 +64,9 @@ names the run's top-level stage in progress. A running build with no stage in pr
 
 **Pipelines** holds the tenant's folder tree. A job row carries its health, its last build, its
 branch, its last eight build durations, and when it last ran. **Queue wait** shows the job's
-median wait from queue entry to start over the last 30 days. Health is a weather glyph: clear when the last five runs passed, cloudy when one or two failed, and rain when three
-or more failed. A job that never ran shows no glyph and an empty last build.
+median wait from queue entry to start over the last 30 days. Health is a weather glyph. A job
+that never finished a counted build shows no glyph and an empty last build. See
+[Read a job's health](#read-a-jobs-health).
 
 A folder that its cell holds shows no declared job; run history shows. See [Cells and Pipelines Tenants](../operations/cells.md).
 
@@ -97,6 +98,36 @@ A caller whose grant carries `jobs` globs reads only the matching jobs and runni
 folder holding no readable job does not appear at all. See
 [Varroa RBAC](../security/varroa-rbac.md#scope-a-binding-to-a-pipelines-tenant) for how an
 administrator writes those globs.
+
+## Read a job's health
+
+A job page opens with a **Health** card. Health counts the job's last ten finished build runs.
+A run that succeeded passes. A run that failed, was unstable, or was aborted fails. A run that
+was interrupted or was not built does not count, so it does not change the score.
+
+The score is the share of counted runs that passed, rounded down. The glyph names the bucket:
+
+| Bucket | Score | Glyph |
+|---|---|---|
+| Sunny | above 80 | sun |
+| Partly cloudy | above 60 | cloud and sun |
+| Cloudy | above 40 | cloud |
+| Rainy | above 20 | cloud and rain |
+| Stormy | 20 or below | cloud and lightning |
+
+A job with no counted run reads **No counted build yet**, and it shows no glyph.
+
+The card also shows three charts over the same runs, oldest on the left:
+
+- **Results** is one square for each run. Each square links to its build page. A run that was
+  interrupted or was not built is grey, and its label says it is not counted.
+- **Duration** is one bar for each run that recorded a duration. Hover a bar to read its build
+  number, duration, and result.
+- **Tests** is one stacked bar for each run that recorded suite counters: passed, failed, and
+  skipped. The chart appears only when at least one run recorded them.
+
+A multibranch job or an organization folder holds no runs of its own, so it has no Health card.
+Each branch job has its own health.
 
 ## Open a build
 

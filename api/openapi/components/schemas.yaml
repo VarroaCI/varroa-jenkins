@@ -4727,6 +4727,65 @@ RunningRun:
       description: The job's usual duration, from its duration trend.
   additionalProperties: false
 
+JobHealth:
+  type: object
+  description: >
+    One job's health over its last JobHealthWindow finished build runs.
+    SUCCESS passes. FAILURE, UNSTABLE, and ABORTED fail. INTERRUPTED and
+    NOT_BUILT do not count.
+  required: [bucket, window, counted, passed]
+  properties:
+    bucket:
+      type: string
+      enum: [sunny, partlyCloudy, cloudy, rainy, stormy, unknown]
+      description: >
+        The weather bucket of the score: above 80 sunny, above 60
+        partlyCloudy, above 40 cloudy, above 20 rainy, and anything lower
+        stormy. unknown when no run counts.
+    score:
+      type: integer
+      minimum: 0
+      maximum: 100
+      description: The percentage of counted runs that passed, rounded down. Absent when no run counts.
+    window:
+      type: integer
+      description: The number of recent finished build runs the health reads.
+    counted:
+      type: integer
+      description: The number of runs in the window that count.
+    passed:
+      type: integer
+      description: The number of counted runs that passed.
+JobTrendTests:
+  type: object
+  description: >
+    One run's suite counters. Passed is the total minus the failed and
+    skipped counters, never below zero.
+  required: [passed, failed, skipped]
+  properties:
+    passed:
+      type: integer
+    failed:
+      type: integer
+    skipped:
+      type: integer
+JobTrendPoint:
+  type: object
+  description: One finished build run of a job's trend. Points are newest first.
+  required: [runId, result]
+  properties:
+    runId:
+      type: string
+    buildNumber:
+      type: integer
+      format: int64
+    result:
+      type: string
+    durationMs:
+      type: integer
+      format: int64
+    tests:
+      $ref: '#/JobTrendTests'
 PipelineSummary:
   type: object
   description: >
@@ -4737,12 +4796,7 @@ PipelineSummary:
     jobPath:
       type: string
     health:
-      type: string
-      enum: [clear, cloudy, rain, unknown]
-      description: >
-        The weather glyph, computed from the last five runs: clear when
-        all passed, cloudy when one or two failed, rain when three or
-        more failed, unknown for a job that has never run.
+      $ref: '#/JobHealth'
     kind:
       type: string
       enum: [pipeline, multibranch, organizationFolder, branch, unknown]
@@ -5022,7 +5076,7 @@ PipelineParameter:
 PipelineJobDetail:
   type: object
   description: GET /pipelines/{tenant}/jobs/{job}.
-  required: [jobPath, kind, pending, health, last30Days, tenantFolder, tenant, dependencies]
+  required: [jobPath, kind, pending, health, trend, last30Days, tenantFolder, tenant, dependencies]
   properties:
     jobPath:
       type: string
@@ -5043,8 +5097,14 @@ PipelineJobDetail:
         inventory, when a declaring tenant holds the job, when the job has a
         run, and when no tenant declares the job.
     health:
-      type: string
-      enum: [clear, cloudy, rain, unknown]
+      $ref: '#/JobHealth'
+    trend:
+      type: array
+      description: >
+        The job's finished build runs in the health window, newest first.
+        Empty when the job has no finished run.
+      items:
+        $ref: '#/JobTrendPoint'
     tenantFolder:
       type: string
       description: >
@@ -5058,11 +5118,6 @@ PipelineJobDetail:
         "<namespace>/<controller>" for a synthetic tenant.
     lastBuild:
       $ref: '#/RunSummary'
-    durationTrendMs:
-      type: array
-      items:
-        type: integer
-        format: int64
     definition:
       $ref: '#/PipelineDefinition'
     triggers:

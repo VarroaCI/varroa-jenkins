@@ -1623,7 +1623,37 @@ export interface FleetPluginDrilldown {
 // Mirrors api/openapi/components/schemas.yaml exactly; see AGENTS.md's rule
 // that this file is hand-maintained, not generated.
 
-export type PipelineHealth = "clear" | "cloudy" | "rain" | "unknown";
+/** PipelineHealthBucket is the weather bucket of a job's health. */
+export type PipelineHealthBucket = "sunny" | "partlyCloudy" | "cloudy" | "rainy" | "stormy" | "unknown";
+
+/**
+ * JobHealth is one job's health over its last window of finished build
+ * runs. SUCCESS passes; FAILURE, UNSTABLE, and ABORTED fail; INTERRUPTED
+ * and NOT_BUILT do not count. score is absent when no run counts.
+ */
+export interface JobHealth {
+  bucket: PipelineHealthBucket;
+  score?: number;
+  window: number;
+  counted: number;
+  passed: number;
+}
+
+/** JobTrendTests is one run's suite counters. */
+export interface JobTrendTests {
+  passed: number;
+  failed: number;
+  skipped: number;
+}
+
+/** JobTrendPoint is one finished build run of a job's trend, newest first. */
+export interface JobTrendPoint {
+  runId: string;
+  buildNumber?: number;
+  result: string;
+  durationMs?: number;
+  tests?: JobTrendTests;
+}
 
 /** TriggerSource names the kind of cause that started a run. */
 export type TriggerSource = "user" | "webhook" | "cron" | "upstream" | "replay" | "restart" | "scm" | "other";
@@ -1745,7 +1775,7 @@ export type PipelineItemKind =
  */
 export interface PipelineSummary {
   jobPath: string;
-  health: PipelineHealth;
+  health: JobHealth;
   kind: PipelineItemKind;
   /** True when every tenant that declares this job reports a complete job list that lacks it. */
   pending: boolean;
@@ -1950,9 +1980,10 @@ export interface PipelineJobDetail {
    * Tenant tenant, or "<namespace>/<controller>" for a synthetic tenant.
    * Pass this, not the URL tenant segment, to canAccessTenantPipeline. */
   tenant: string;
-  health: PipelineHealth;
+  health: JobHealth;
+  /** The job's finished build runs in the health window, newest first. */
+  trend: JobTrendPoint[];
   lastBuild?: RunSummary;
-  durationTrendMs?: number[];
   definition?: PipelineDefinition;
   triggers?: PipelineTriggers;
   parameters?: PipelineParameter[];
