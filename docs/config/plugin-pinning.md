@@ -33,8 +33,8 @@ is not a conflict. `PluginPinConflict` does not change what gets installed.
 plugins:
   - artifactId: sonar
     version: "2.17.3"
-  - artifactId: timestamper
-    version: "1.28"
+  - artifactId: ansicolor
+    version: "542.v03d235fee02d"
 ```
 
 Commit the file that the bundle manifest names, then wait for reconciliation.
@@ -53,8 +53,8 @@ spec:
     entries:
       - artifactId: sonar
         version: "2.17.3"
-      - artifactId: timestamper
-        version: "1.28"
+      - artifactId: ansicolor
+        version: "542.v03d235fee02d"
 ```
 
 Include every required non-core plugin: these entries replace the bundle

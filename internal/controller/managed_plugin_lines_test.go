@@ -77,3 +77,27 @@ func TestManagedPluginLines_NonCellKeepsJobDSL(t *testing.T) {
 		t.Fatalf("managedPluginLines() = %v, want %v", got, want)
 	}
 }
+
+func TestManagedPluginLines_CellKeepsUtilityPins(t *testing.T) {
+	cr := &v1alpha1.Controller{}
+	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+	coreSet := append(cellJobDSLCoreSet(),
+		pluginlock.PluginEntry{ArtifactID: "pipeline-utility-steps", Version: "3.810.va_7672d206740"},
+		pluginlock.PluginEntry{ArtifactID: "ws-cleanup", Version: "0.49"},
+		pluginlock.PluginEntry{ArtifactID: "ssh-agent", Version: "433.v9e73d67c3f74"},
+		pluginlock.PluginEntry{ArtifactID: "timestamper", Version: "1.30"},
+	)
+
+	got := managedPluginLines(cr, nil, coreSet)
+	want := []string{
+		"git:1",
+		"kubernetes:2",
+		"pipeline-utility-steps:3.810.va_7672d206740",
+		"ws-cleanup:0.49",
+		"ssh-agent:433.v9e73d67c3f74",
+		"timestamper:1.30",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("managedPluginLines() = %v, want %v", got, want)
+	}
+}
