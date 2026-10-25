@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.7.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.6.0...v0.7.0) (2026-10-25)
+
+
+### Features
+
+* **mcp:** add MCP Apps views for four read tools ([0398312](https://github.com/VarroaCI/varroa-jenkins/commit/03983122c49b0b80cf7bea34a0cc3b5e074f5151))
+* **pluginlock:** pin cell utility plugins in the core set ([e5c6a80](https://github.com/VarroaCI/varroa-jenkins/commit/e5c6a80c0d092655a2fefc9635954fc0f376c054))
+* **tenant:** rename Team to Tenant ([9934185](https://github.com/VarroaCI/varroa-jenkins/commit/9934185ab998e1fe8f9dd7c146bdb33df2e3c656))
+
+
+### Bug Fixes
+
+* **agent:** deny pending approvals when a session ends ([00aa6a8](https://github.com/VarroaCI/varroa-jenkins/commit/00aa6a8c8f1ec886ae343953687541a747827342))
+* **assistant:** answer approval_expired for a decision on an expired approval ([a1eeed9](https://github.com/VarroaCI/varroa-jenkins/commit/a1eeed9bd4d323b2c31c73a3a403d77d66457e07))
+* **assistant:** publish a session notice for each session a sweep ends ([e32107b](https://github.com/VarroaCI/varroa-jenkins/commit/e32107bf1e681db54fdb1f13927f2cbb3ad69361))
+* **assistant:** withhold tool results from non-owners ([4461958](https://github.com/VarroaCI/varroa-jenkins/commit/4461958ad046ff2c8edaeb4cd1ad3775c5022691))
+* **controller:** recreate an owned or labelled Secret when a delete races the update ([470317f](https://github.com/VarroaCI/varroa-jenkins/commit/470317fc7a4028efc722456151cd0d12c9fa800d))
+* **controller:** recreate the bootstrap Secret when a delete races the write ([10cf5f3](https://github.com/VarroaCI/varroa-jenkins/commit/10cf5f3ff66302cd63b54dbbe5b8ba21fbede740))
+* **controller:** repair a spec claim that failed after the create ([87904eb](https://github.com/VarroaCI/varroa-jenkins/commit/87904eb3d69bbda59fbe91c512b64b42a8c0382c))
+* **controller:** retry the Secret write when a Create answers AlreadyExists ([546049d](https://github.com/VarroaCI/varroa-jenkins/commit/546049d1ac268c6f6b36b491b7ccbe711168b07c))
+* **controller:** stop update recreating a deleted controller ([cb53130](https://github.com/VarroaCI/varroa-jenkins/commit/cb531300e7a066789f0f43dce7dd7b3e42e5a1d4))
+* **hack:** close the cutover script gaps from the live run ([c40f6a0](https://github.com/VarroaCI/varroa-jenkins/commit/c40f6a0bbd2bf3cbb50ac53684587c535de388cb))
+* **mcp:** apply REST user checks to update_user and delete_user ([01537ff](https://github.com/VarroaCI/varroa-jenkins/commit/01537ff9e1402ecdb3b550725abba72f5e6fa46f))
+* **recordstore:** webhook dispatch decides from the stored incarnation ([9d3709b](https://github.com/VarroaCI/varroa-jenkins/commit/9d3709bb95449240b6b240acf202a675e605d1d3))
+
 ## [0.6.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.5.0...v0.6.0) (2026-10-21)
 
 
