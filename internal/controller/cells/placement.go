@@ -542,8 +542,9 @@ func refusalMessage(reason string) string {
 	}
 }
 
-// mintCredentials mints the two door credentials, once, when spec.pipelines
-// first appears. A stored value is never regenerated.
+// mintCredentials mints the three door credentials, once, when spec.pipelines
+// first appears. A stored value is never regenerated; a cleared value is
+// minted again on the next tick.
 func mintCredentials(status *v1alpha1.TenantStatus) {
 	if status.Pipelines == nil {
 		status.Pipelines = &v1alpha1.TenantPipelinesStatus{}
@@ -553,6 +554,11 @@ func mintCredentials(status *v1alpha1.TenantStatus) {
 	}
 	if status.Pipelines.WebhookSecret == "" {
 		status.Pipelines.WebhookSecret = randHex(32)
+	}
+	// The badge token is separate from the webhook token. A webhook token
+	// can trigger builds; a badge URL can only read a result.
+	if status.Pipelines.BadgeToken == "" {
+		status.Pipelines.BadgeToken = randHex(16)
 	}
 }
 

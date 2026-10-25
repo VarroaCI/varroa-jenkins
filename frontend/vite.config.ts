@@ -11,6 +11,10 @@ export default defineConfig({
         target: process.env.VARROA_API_URL || "http://localhost:8080",
         changeOrigin: true,
       },
+      "/badges": {
+        target: process.env.VARROA_API_URL || "http://localhost:8080",
+        changeOrigin: true,
+      },
     },
   },
   test: {

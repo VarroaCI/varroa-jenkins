@@ -1,0 +1,31 @@
+.body {
+  display: grid;
+  gap: 12px;
+}
+
+.preview {
+  justify-self: start;
+  max-width: 100%;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.field input {
+  font-family: var(--mono, ui-monospace, monospace);
+  width: 100%;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.note {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13px;
+}

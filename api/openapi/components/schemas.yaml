@@ -404,6 +404,8 @@ TenantPipelines:
         list exports nothing.
     notifications:
       $ref: '#/TenantNotifications'
+    badge:
+      $ref: '#/TenantBadge'
     retention:
       $ref: '#/TenantPipelinesRetention'
     concurrencyLimits:
@@ -416,6 +418,19 @@ TenantPipelines:
         one time. A build over a limit waits in the queue. A tenant pipelines
         admin may write this field.
   additionalProperties: false
+
+TenantBadge:
+  type: object
+  description: >-
+    spec.pipelines.badge. The anonymous build status badge of the tenant's
+    jobs. A badge URL carries the tenant's badge token, so the URL itself is
+    the credential. Tenant pipelines admins may write it.
+  additionalProperties: false
+  properties:
+    enabled:
+      type: boolean
+      default: false
+      description: Serves the badge without a session. Defaults to false.
 
 TenantNotifications:
   type: object
@@ -4502,6 +4517,20 @@ ChangeRequest:
       type: string
       description: Web link to the change request on the forge.
   additionalProperties: false
+
+JobBadge:
+  type: object
+  description: >
+    GET /pipelines/{tenant}/jobs/{job}/badge. The path is set only while the
+    badge is on.
+  required: [enabled]
+  additionalProperties: false
+  properties:
+    enabled:
+      type: boolean
+    path:
+      type: string
+      description: The host-root path of the badge SVG, with the badge token in it.
 
 JobBranchList:
   type: object

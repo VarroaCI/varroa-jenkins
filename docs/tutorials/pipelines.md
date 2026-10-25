@@ -249,6 +249,24 @@ cancels another branch's build.
 
 Use `cancelInProgress` when a pull request builds again against a new target commit. The newer build then usually sets the last commit status.
 
+## Show a build badge
+
+The job page shows a status badge when the tenant turns badges on. The card shows the badge
+preview, its URL, and a Markdown snippet. Copy the snippet into a README.
+
+The badge shows the result of the newest completed build. A build that failed to trigger does not
+count. The colours are:
+
+- Green: passing.
+- Red: failing.
+- Yellow: unstable.
+- Grey: aborted, not built, interrupted, or no runs.
+- Blue: a build runs, and no completed build exists.
+
+A multibranch job shows its `main` branch by default. Type a branch name in the **Branch** field of
+the card to show that branch. Badges are off by default. See
+[Anonymous build badges](../operations/multi-tenancy.md#anonymous-build-badges).
+
 ## Next steps
 
 [Operate a run](run-operations.md) covers fleet locks, the failure digest, the summary line, and

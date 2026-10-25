@@ -111,6 +111,7 @@ describe("TenantForm", () => {
       concurrency: "allow",
       cronBackstop: true,
       cronCatchUp: "one",
+      badge: { enabled: false },
     });
   });
 
@@ -132,6 +133,7 @@ describe("TenantForm", () => {
     await user.selectOptions(screen.getByText("Manual").closest("select")!, "automatic");
     await user.selectOptions(screen.getByText("Allow (run side by side)").closest("select")!, "cancelInProgress");
     await user.click(screen.getByLabelText(/Backstop cron scheduler/));
+    await user.click(screen.getByLabelText(/Anonymous build badges/));
     await user.selectOptions(screen.getByText("Fire newest missed occurrence").closest("select")!, "none");
     await user.type(screen.getByPlaceholderText("5m"), "10m");
 
@@ -146,6 +148,7 @@ describe("TenantForm", () => {
       rehydrateDeadline: "45m",
       interruptedRetry: "automatic",
       concurrency: "cancelInProgress",
+      badge: { enabled: true },
       cronBackstop: false,
       cronCatchUp: "none",
       cronGrace: "10m",

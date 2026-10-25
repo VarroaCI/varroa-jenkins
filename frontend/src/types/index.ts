@@ -443,6 +443,8 @@ export interface JenkinsRoleBindingList {
 export interface TenantPipelines {
   /** Named caps on builds of a set of jobs. A tenant pipelines admin may write this field. */
   concurrencyLimits?: TenantConcurrencyLimit[];
+  /** The anonymous build status badge of this tenant's jobs. A tenant pipelines admin may write this field. */
+  badge?: { enabled: boolean };
   /** JenkinsVersionProfile the placement pass resolves a cell against. Required. */
   profile: string;
   /**
@@ -1695,6 +1697,13 @@ export interface BranchScan {
   changedHeads: string[];
   orphanedHeads: string[];
   message?: string;
+}
+
+/** The badge state of one job. The path is set only while the badge is on.
+ * It is the host-root path of the badge door, and it holds the badge token. */
+export interface JobBadge {
+  enabled: boolean;
+  path?: string;
 }
 
 /** The branch and change-request inventory of a multibranch job. The

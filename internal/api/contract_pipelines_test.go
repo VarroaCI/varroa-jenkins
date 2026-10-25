@@ -46,6 +46,13 @@ func init() {
 			WantStatus: http.StatusServiceUnavailable,
 		},
 		contractCase{
+			Name:       "getJobBadge-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/pipelines/payments/jobs/checkout-api/badge",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
 			Name:       "listRuns-recordStoreDisabled",
 			Method:     "GET",
 			Path:       "/api/v1/pipelines/payments/jobs/checkout-api/runs",

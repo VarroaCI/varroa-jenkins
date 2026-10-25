@@ -87,6 +87,10 @@ type tenantPipelinesEntry struct {
 	// Notifications carries spec.pipelines.notifications. Changing it needs
 	// the operator's own write, not the tenant's pipelines:admin grant.
 	Notifications *tenantNotificationsEntry `json:"notifications,omitempty"`
+
+	// Badge carries spec.pipelines.badge. A tenant pipelines admin may write
+	// it, the same as exports.
+	Badge *v1alpha1.TenantBadgeSpec `json:"badge,omitempty"`
 }
 
 // tenantNotificationsEntry is the JSON shape of spec.pipelines.notifications.
@@ -202,6 +206,7 @@ func tenantPipelinesEntryFromSpec(p *v1alpha1.TenantPipelinesSpec) *tenantPipeli
 	}
 	e.Retention = p.Retention
 	e.ConcurrencyLimits = p.ConcurrencyLimits
+	e.Badge = p.Badge
 	return e
 }
 
@@ -253,6 +258,7 @@ func tenantPipelinesSpecFromEntry(e *tenantPipelinesEntry) *v1alpha1.TenantPipel
 	}
 	spec.Retention = e.Retention
 	spec.ConcurrencyLimits = e.ConcurrencyLimits
+	spec.Badge = e.Badge
 	return spec
 }
 
@@ -657,8 +663,9 @@ func (s *Server) handleDeleteTenant(w http.ResponseWriter, r *http.Request, name
 }
 
 // tenantSpecEqualExceptTenantOwned reports whether a and b differ only in
-// spec.pipelines.exports or spec.pipelines.concurrencyLimits. Both specs are
-// copied before those fields are cleared, so neither argument changes.
+// the tenant-owned fields: spec.pipelines.exports, spec.pipelines.concurrencyLimits,
+// and spec.pipelines.badge. Both specs are copied before those fields are
+// cleared, so neither argument changes.
 func tenantSpecEqualExceptTenantOwned(a, b v1alpha1.TenantSpec) bool {
 	strip := func(in v1alpha1.TenantSpec) v1alpha1.TenantSpec {
 		var out v1alpha1.TenantSpec
@@ -666,6 +673,7 @@ func tenantSpecEqualExceptTenantOwned(a, b v1alpha1.TenantSpec) bool {
 		if out.Pipelines != nil {
 			out.Pipelines.Exports = nil
 			out.Pipelines.ConcurrencyLimits = nil
+			out.Pipelines.Badge = nil
 		}
 		return out
 	}

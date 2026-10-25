@@ -405,6 +405,9 @@ the packaged CRDs. Does not own the Go source it packages
   sends files on stdin: the CI docker daemon cannot see the runner's `/tmp`.
   Run one test with `bash`, for example
   `bash charts/varroa/tests/test-bff-local-issuer-netpol.sh`.
+- **The build badge door needs one nginx block, no Ingress change.** `frontend/nginx.conf`'s
+  `location /badges/` block proxies to the BFF (`VARROA_API_HOST:8080`) with no upgrade headers.
+  The rendered Ingress sends `/` to the frontend, so no Ingress path is added.
 - **The agent WebSocket door needs one nginx block, no Ingress change.**
   `frontend/nginx.conf`'s `location /runners/` block proxies to the BFF
   (`VARROA_API_HOST:8080`) and forwards the WebSocket upgrade: `Upgrade`,

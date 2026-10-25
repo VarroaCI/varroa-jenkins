@@ -967,6 +967,46 @@ func TestUpdateTenant_TenantAdminMayChangeConcurrencyLimits(t *testing.T) {
 	}
 }
 
+// TestUpdateTenant_TenantAdminMayToggleBadge asserts that a pipelines admin
+// turns the anonymous badge on, and that the value is stored.
+func TestUpdateTenant_TenantAdminMayToggleBadge(t *testing.T) {
+	srv, store, ctx := tenantPipelinesTenantTestServer(t, "tenant-admin", "pipelines-admin")
+	crdstore.MustSeed(store, &v1alpha1.Tenant{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec: v1alpha1.TenantSpec{
+			Members:    []string{"alice"},
+			Namespaces: []string{"ns1"},
+			Pipelines:  &v1alpha1.TenantPipelinesSpec{Profile: "lts", AgentNamespace: "ns1"},
+		},
+	})
+
+	body := `{
+		"name": "payments",
+		"members": ["alice"],
+		"namespaces": ["ns1"],
+		"pipelines": {
+			"profile": "lts",
+			"agentNamespace": "ns1",
+			"badge": {"enabled": true}
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(body)))
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	srv.HandleTenantDispatch(w, req)
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("PUT status = %d, want 200; body=%s", w.Result().StatusCode, w.Body.String())
+	}
+
+	stored, err := crdstore.Get[v1alpha1.Tenant](context.Background(), store, "payments", "")
+	if err != nil {
+		t.Fatalf("get stored tenant: %v", err)
+	}
+	if stored.Spec.Pipelines == nil || stored.Spec.Pipelines.Badge == nil || !stored.Spec.Pipelines.Badge.Enabled {
+		t.Fatalf("stored badge = %+v, want enabled", stored.Spec.Pipelines)
+	}
+}
+
 func i32(v int32) *int32 { return &v }
 
 // TestTenantHandlers_PipelinesSlotCountsRoundTrip asserts that the slot counts
