@@ -38,6 +38,7 @@ func registerGetCellUsageTool(mcpServer *server.MCPServer, deps *api.Dependencie
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("The cell's namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("The cell's name")),
 		mcp.WithString("cluster", mcp.Description("Cluster to read (default: the local cluster)")),
+		withUIView("get_cell_usage"),
 	)
 	addTool(mcpServer, kindRead, getCellUsageTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -66,6 +67,11 @@ func registerGetCellUsageTool(mcpServer *server.MCPServer, deps *api.Dependencie
 		if serr != nil {
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
-		return resultJSON(usage)
+		path := ""
+		if usage.Cluster != "" {
+			path = api.DashboardControllerPath(usage.Cluster, usage.Namespace, usage.Name) + "?tab=cell"
+		}
+		res, rerr := resultJSON(usage)
+		return withViewMeta(res, rerr, map[string]any{"dashboardLink": dashboardLink(deps, path)})
 	})
 }

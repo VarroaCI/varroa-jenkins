@@ -22,6 +22,7 @@ func NewServer(deps *api.Dependencies) *server.MCPServer {
 
 	registerAllTools(mcpServer, deps)
 	registerGuideResource(mcpServer)
+	registerUIResources(mcpServer)
 	return mcpServer
 }
 

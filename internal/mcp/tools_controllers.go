@@ -134,6 +134,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Controller namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Controller name")),
 		mcp.WithString("cluster", mcp.Description("Cluster (default: local cluster)")),
+		withUIView("get_controller"),
 	)
 	addTool(mcpServer, kindRead, getC, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := getArgs(req)
@@ -158,7 +159,12 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("controller not found: %v", err)), nil
 		}
-		return resultJSON(cr)
+		res, rerr := resultJSON(cr)
+		return withViewMeta(res, rerr, map[string]any{
+			"dashboardLink": dashboardLink(deps, api.DashboardControllerPath(cluster, ns, name)),
+			"attention":     api.ControllerAttention(cr),
+			"kind":          api.ControllerKind(cr),
+		})
 	})
 
 	createC := mcp.NewTool("create_controller",

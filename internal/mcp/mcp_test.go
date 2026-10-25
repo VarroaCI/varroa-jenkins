@@ -66,6 +66,7 @@ type toolResult struct {
 	Content           []contentItem   `json:"content"`
 	StructuredContent json.RawMessage `json:"structuredContent"`
 	IsError           bool            `json:"isError"`
+	Meta              map[string]any  `json:"_meta"`
 }
 
 type contentItem struct {

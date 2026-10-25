@@ -628,9 +628,13 @@ federation, activity persistence, and SSE fanout.
   applyFailed > miteUnreachable` (`MiteConnected=False/StreamLost`); a `Hibernated`/`Stopped` controller reports none, because its
   runtime conditions and `LastApplyResult` are stale until it wakes. Adding a
   kind means extending `buildAttentionJSON`, the `ControllerAttention` enum in
-  `api/openapi/components/schemas.yaml`, and `ATTENTION_LABEL` in the frontend
-  together. `reconcileBlocked` stays on the detail DTO alongside it — the detail
+  `api/openapi/components/schemas.yaml`, `ATTENTION_LABEL` in the frontend, and
+  the `LABEL` map in `internal/mcp/ui/get_controller.html`, together. `reconcileBlocked` stays on the detail DTO alongside it — the detail
   banner still consumes it.
+- `mcp_views.go` holds the exported wrappers the MCP Apps views read: the
+  attention projection, the controller kind, and the dashboard path helpers.
+  It adds no logic. The path helpers escape a segment with `url.PathEscape`,
+  as the search links do. The run path takes the resolved tenant segment.
 - `FleetPluginInventory` (`fleetplugins_inventory.go`) is the reader seam for T2.2's
   fleet plugin inventory surface: it reads the classified per-controller inventory
   from T2.1's `invc/` read model via `Transport.PluginClassification`. The BFF never

@@ -17,6 +17,8 @@ Both ways use one tool surface, one grant check, and one audit trail. MCP does
 not provide a shell or unrestricted Kubernetes access. See
 [Identity and auditing](identity.md) and [Tool reference](tools.md).
 
+Four read tools also return a card for a host that supports MCP Apps. The text result is the same. See [Tool behavior](tools.md#mcp-apps-views).
+
 ## Start
 
 1. Connect an MCP client, or turn on the assistant.
