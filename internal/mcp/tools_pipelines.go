@@ -389,6 +389,7 @@ func registerGetRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	getRunTool := mcp.NewTool("get_run",
 		mcp.WithDescription("Get one run's detail: status, timing, params, the repository URL, the trigger source, test counts, stages, the newest refused cancel or input answer, the upstream run that started it (upstream), and the first page of runs it started (downstream). A refused trigger reads result TRIGGER_FAILED with triggerReasonCode and triggerError. A run you may not read appears as its tenant alone."),
 		mcp.WithString("run", mcp.Required(), mcp.Description("Run id (UUIDv7)")),
+		withUIView("get_run"),
 	)
 	addTool(mcpServer, kindRead, getRunTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		claims, toolErr := requirePipelineCaller(ctx, deps)
@@ -403,7 +404,12 @@ func registerGetRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		if serr != nil {
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
-		return resultJSON(detail)
+		link := ""
+		if ref, rerr := api.TenantRefFromRow("", "", "", detail.Tenant); rerr == nil && ref.TenantName != "" && detail.JobPath != "" {
+			link = dashboardLink(deps, api.DashboardRunPath(ref.TenantName, detail.JobPath, detail.RunID))
+		}
+		res, rerr := resultJSON(detail)
+		return withViewMeta(res, rerr, map[string]any{"dashboardLink": link})
 	})
 }
 
@@ -517,6 +523,7 @@ func registerListFleetLocksTool(mcpServer *server.MCPServer, deps *api.Dependenc
 			"holds or waits on it."),
 		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant, or the controller name for a single-controller tenant")),
 		withListOutput(fleetLockListOutputSchema),
+		withUIView("list_fleet_locks"),
 	)
 	addTool(mcpServer, kindRead, listFleetLocksTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		claims, toolErr := requirePipelineCaller(ctx, deps)
@@ -531,7 +538,12 @@ func registerListFleetLocksTool(mcpServer *server.MCPServer, deps *api.Dependenc
 		if serr != nil {
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
-		return resultJSON(map[string]any{"items": items, "count": len(items)})
+		link := ""
+		if ref, rerr := api.TenantRefFromRow("", "", "", tenant); rerr == nil && ref.TenantName != "" {
+			link = dashboardLink(deps, api.DashboardTenantPath(ref.TenantName))
+		}
+		res, rerr := resultJSON(map[string]any{"items": items, "count": len(items)})
+		return withViewMeta(res, rerr, map[string]any{"dashboardLink": link})
 	})
 }
 

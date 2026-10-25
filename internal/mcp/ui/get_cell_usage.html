@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varroa get_cell_usage</title>
+<style>
+/* shell:begin */
+:root{--bg:#ffffff;--fg:#1b1f24;--muted:#5b6470;--line:#d8dde3;--chip:#eef1f4;--ok:#1a7f37;--warn:#9a6700;--bad:#cf222e;--info:#0969da;}
+@media (prefers-color-scheme: dark){:root{--bg:#16191d;--fg:#e6e9ed;--muted:#9aa4af;--line:#2e343b;--chip:#232830;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--info:#58a6ff;}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{padding:12px 14px;min-width:280px;max-width:800px}
+h1{font-size:15px;margin:0 0 6px;font-weight:600;word-break:break-all}
+.sub{color:var(--muted);margin:0 0 10px}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;background:var(--chip);font-weight:600;font-size:12px;margin-right:6px}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.info{color:var(--info)}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:3px 12px;margin:8px 0}
+dt{color:var(--muted)}dd{margin:0;word-break:break-word}
+table{border-collapse:collapse;width:100%;margin:8px 0}
+th,td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.empty,.wait{color:var(--muted)}
+.err{color:var(--bad)}
+button.open{margin-top:10px;padding:5px 12px;border:1px solid var(--line);border-radius:6px;background:var(--chip);color:var(--fg);font:inherit;cursor:pointer}
+/* shell:end */
+</style>
+</head>
+<body>
+<div id="root"><p class="wait">get_cell_usage: Waiting for the result.</p></div>
+<script>
+var TOOL = "get_cell_usage";
+/* shell:begin */
+var nextId = 1;
+var pending = {};
+function post(msg) { window.parent.postMessage(msg, "*"); }
+function request(method, params) {
+  var id = nextId++;
+  post({ jsonrpc: "2.0", id: id, method: method, params: params || {} });
+  return new Promise(function (resolve, reject) { pending[id] = { resolve: resolve, reject: reject }; });
+}
+function notify(method, params) { post({ jsonrpc: "2.0", method: method, params: params || {} }); }
+function el(tag, cls, text) {
+  var n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined && text !== null) n.textContent = String(text);
+  return n;
+}
+function present(v) { return v !== undefined && v !== null && v !== ""; }
+function fmtTime(iso) { if (!present(iso)) return ""; var d = new Date(iso); if (isNaN(d) || d.getFullYear() < 1970) return ""; return d.toLocaleString(); }
+function fmtMs(ms) {
+  if (!present(ms)) return "";
+  var s = Math.round(ms / 1000);
+  if (s < 60) return s + " s";
+  var m = Math.floor(s / 60); s = s % 60;
+  if (m < 60) return m + " min " + s + " s";
+  return Math.floor(m / 60) + " h " + (m % 60) + " min";
+}
+function tone(v) {
+  var t = String(v || "").toUpperCase();
+  if (t === "SUCCESS" || t === "CONNECTED" || t === "HELD" || t === "TRUE" || t === "HEALTHY") return "ok";
+  if (t === "FAILURE" || t === "FAILED" || t === "TRIGGER_FAILED" || t === "INTERRUPTED") return "bad";
+  if (t === "ABORTED" || t === "UNSTABLE" || t === "WAITING" || t === "RELEASING" || t === "HIBERNATED" || t === "STOPPED") return "warn";
+  return "info";
+}
+function pill(text, cls) { return el("span", "pill " + (cls || tone(text)), text); }
+/* dlist renders [label, value] pairs and hides a pair whose value is absent. */
+function dlist(pairs) {
+  var dl = el("dl");
+  pairs.forEach(function (p) {
+    if (!present(p[1])) return;
+    dl.appendChild(el("dt", "", p[0]));
+    var dd = el("dd");
+    if (p[1] instanceof Node) dd.appendChild(p[1]); else dd.textContent = String(p[1]);
+    dl.appendChild(dd);
+  });
+  return dl;
+}
+/* table renders rows; cols is [{h: header, k: function(row) -> value, n: numeric}]. */
+function table(cols, rows) {
+  var t = el("table"), hr = el("tr");
+  cols.forEach(function (c) { hr.appendChild(el("th", c.n ? "n" : "", c.h)); });
+  t.appendChild(hr);
+  rows.forEach(function (r) {
+    var tr = el("tr");
+    cols.forEach(function (c) {
+      var v = c.k(r);
+      var td = el("td", c.n ? "n" : "");
+      if (v instanceof Node) td.appendChild(v); else if (present(v)) td.textContent = String(v);
+      tr.appendChild(td);
+    });
+    t.appendChild(tr);
+  });
+  return t;
+}
+function fitFrame() {
+  var d = document.documentElement;
+  notify("ui/notifications/size-changed", { width: d.scrollWidth, height: d.scrollHeight });
+}
+function openButton(link) {
+  if (!present(link)) return null;
+  var b = el("button", "open", "Open in dashboard");
+  b.type = "button";
+  b.addEventListener("click", function () { request("ui/open-link", { url: link }).catch(function () {}); });
+  return b;
+}
+function renderResult(result) {
+  var root = document.getElementById("root");
+  root.textContent = "";
+  if (result.isError) {
+    var msg = "The tool returned an error.";
+    (result.content || []).some(function (c) { if (c && c.type === "text") { msg = c.text; return true; } return false; });
+    root.appendChild(el("p", "err", msg));
+    fitFrame();
+    return;
+  }
+  var sc = result.structuredContent;
+  if (!sc) {
+    try { sc = JSON.parse(((result.content || [])[0] || {}).text); } catch (e) { sc = null; }
+  }
+  var meta = result._meta || {};
+  if (!sc) { root.appendChild(el("p", "empty", "The result carries no data.")); fitFrame(); return; }
+  renderCard(root, sc, meta);
+  var b = openButton(meta.dashboardLink);
+  if (b) root.appendChild(b);
+  fitFrame();
+}
+window.addEventListener("message", function (ev) {
+  if (ev.source !== window.parent) return;
+  var m = ev.data;
+  if (!m || m.jsonrpc !== "2.0") return;
+  if (m.id !== undefined && m.method === undefined) {
+    var p = pending[m.id];
+    if (p) { delete pending[m.id]; if (m.error) p.reject(m.error); else p.resolve(m.result); }
+    return;
+  }
+  if (m.method === "ui/notifications/tool-result") { renderResult(m.params || {}); return; }
+  if (m.method === "ui/resource-teardown") { if (m.id !== undefined) post({ jsonrpc: "2.0", id: m.id, result: {} }); return; }
+  if (m.id !== undefined) post({ jsonrpc: "2.0", id: m.id, error: { code: -32601, message: "Method not found" } });
+});
+request("ui/initialize", {
+  protocolVersion: "2026-01-26",
+  appInfo: { name: "varroa", version: "0.0.0-dev" },
+  appCapabilities: {}
+}).then(function () {
+  notify("ui/notifications/initialized", {});
+}, function () {
+  var root = document.getElementById("root");
+  root.textContent = "";
+  root.appendChild(el("p", "err", "The host refused the view."));
+});
+/* shell:end */
+
+function renderCard(root, sc, meta) {
+  var col = function (h, key, n) { return { h: h, n: n, k: function (r) { return r[key]; } }; };
+  root.appendChild(el("h1", "", sc.namespace + "/" + sc.name));
+  root.appendChild(dlist([
+    ["Cluster", sc.cluster],
+    ["Pool", sc.cellPool],
+    ["Profile", sc.profile],
+    ["Jenkins", sc.jenkinsVersion],
+    ["Health", sc.jenkinsHealth ? pill(sc.jenkinsHealth) : ""],
+    ["Queue", sc.queueLength],
+    ["Free slots", sc.freeSlots + " of " + sc.maxTenants]
+  ]));
+  root.appendChild(table([
+    col("Running now", "runningNow", true),
+    col("Runs 24 h", "runsLast24h", true),
+    col("Failed 24 h", "failedLast24h", true),
+    col("Jobs", "jobs", true)
+  ], [sc.totals || {}]));
+  var tenants = sc.tenants || [];
+  if (!tenants.length) {
+    root.appendChild(el("p", "empty", "No tenants on this cell."));
+    return;
+  }
+  root.appendChild(table([
+    col("Tenant", "tenant", false),
+    col("Role", "role", false),
+    col("Running now", "runningNow", true),
+    col("Runs 24 h", "runsLast24h", true),
+    col("Failed 24 h", "failedLast24h", true),
+    col("Jobs", "jobs", true),
+    col("Generation", "placementGeneration", true)
+  ], tenants));
+}
+</script>
+</body>
+</html>

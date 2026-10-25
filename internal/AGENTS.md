@@ -317,6 +317,13 @@ reading each package's entry point):
   unlike the four pipeline tools; a nil authorizer denies it outright, which
   makes it stricter than `list_controllers`/`get_controller`/
   `get_controller_logs`, which skip the check in that state.
+  `ui.go` owns the MCP Apps surface. `uiViewTools` is the one list of tools
+  that advertise a view. Each listed tool has one `ui/<tool>.html`, and every
+  view document shares the shell between the `shell:begin` and `shell:end`
+  markers. A view reads only `structuredContent` and `_meta`, and it makes no
+  network call. `withViewMeta` wraps `resultJSON` and never replaces it. An
+  error result carries no `_meta`. The views name no host vendor in code.
+  `internal/api/mcp_views.go` holds exported wrappers only.
 - **`preflight/`** — provisioning preflight `Check`s (pass/warn/fail) run
   before/alongside `handleProvisioning`, consuming `internal/tenancy` for
   namespace-state checks.

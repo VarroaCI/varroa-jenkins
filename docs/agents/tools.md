@@ -134,6 +134,17 @@ read grant on the run's own tenant and job path. Answering a run input checks
 the write grant on the run's own tenant and job path. A caller who may not
 read a run gets a not-found error, not a forbidden error.
 
+### MCP Apps views
+
+Four read tools also advertise a view for a host that supports MCP Apps. The host renders a read-only card from the result. The text result does not change. The result `_meta` carries an "Open in dashboard" link, and it is absent when the server has no dashboard address.
+
+| Tool | Card | Link opens |
+|---|---|---|
+| `get_run` | Run summary | Build page |
+| `get_cell_usage` | Cell load | Controller page, Cell tab |
+| `get_controller` | Controller status | Controller page |
+| `list_fleet_locks` | Fleet locks | Tenant home |
+
 ## Open a pull request
 
 `open_pull_request` creates one pull request from a new branch. It

@@ -146,6 +146,12 @@ with a copy button and a link to the API keys page. It shows the three blocks
 above, with your dashboard address in place of `<dashboard-host>`. The card
 never shows or holds a key.
 
+## Hosts that render views
+
+A host that supports MCP Apps renders the views of four read tools as cards.
+
+Claude Desktop and claude.ai render the views. Claude Code shows the text result only.
+
 ## Operator guide
 
 The server sends the [operator guide](guide.md) in its `initialize` instructions. It also serves the guide as the resource `varroa://guide`.
