@@ -148,6 +148,7 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
   watermark. `run`/`builds` register as new top-level
   commands (`registerRootCommand`); the run form extends the existing
   `logs` command in place via `findCommand(root, "logs")`.
+- **`lint jenkinsfile` (`lint.go`)** — `varroactl lint jenkinsfile --tenant <tenant> [--file Jenkinsfile]` calls `POST /pipelines/{tenant}/lint` through the generated `LintJenkinsfileWithResponse`. Exits non-zero on any error or refusal. It has no `--allow-unavailable` flag.
 - **`lint marker` (`lint.go`)** — `varroactl lint marker --tenant <tenant>
   [--marker .varroa/pipeline.yaml]` posts the marker file to `POST
   /pipelines/{tenant}/markers/validate` directly (that path has no generated

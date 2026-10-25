@@ -5,6 +5,9 @@
 // (POST /pipelines/{tenant}/markers/validate) has no generated client method
 // yet, so this file posts the request directly, the same way activity.go
 // does for a path the generated client does not cover.
+//
+// `lint jenkinsfile` lints a declarative Jenkinsfile on the tenant's cell.
+// It calls the generated client method LintJenkinsfileWithResponse.
 package main
 
 import (
@@ -15,9 +18,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/varroaci/varroa-jenkins/pkg/client"
 )
 
 // defaultMarkerPath is design pipeline-marker-file's fixed marker
@@ -53,6 +59,106 @@ list holds any finding.`,
 	markerCmd.Flags().String("tenant", "", "tenant the marker belongs to (required)")
 	markerCmd.Flags().String("marker", defaultMarkerPath, "path to the marker file")
 	lintCmd.AddCommand(markerCmd)
+
+	jenkinsfileCmd := &cobra.Command{
+		Use:   "jenkinsfile",
+		Short: "Lint a declarative Jenkinsfile on a tenant's cell",
+		Long: `Lint a declarative Jenkinsfile.
+
+Reads the file and posts it to the tenant's lint endpoint, which runs the
+Jenkins declarative linter on the tenant's cell and the Varroa cell rules.
+The lint writes no state and never wakes a hibernated cell.
+
+Exits zero when the file is valid. Exits non-zero when the linter reports
+any error, or when the server refuses the request.`,
+		RunE: runLintJenkinsfile,
+	}
+	jenkinsfileCmd.Flags().String("tenant", "", "tenant the Jenkinsfile belongs to (required)")
+	jenkinsfileCmd.Flags().String("file", defaultJenkinsfilePath, "path to the Jenkinsfile")
+	lintCmd.AddCommand(jenkinsfileCmd)
+}
+
+// defaultJenkinsfilePath is `lint jenkinsfile`'s --file default.
+const defaultJenkinsfilePath = "Jenkinsfile"
+
+// errJenkinsfileInvalid is returned when the lint reports any error, so
+// `run` exits non-zero after the findings have already printed.
+var errJenkinsfileInvalid = errors.New("jenkinsfile failed lint")
+
+func runLintJenkinsfile(cmd *cobra.Command, args []string) error {
+	tenant, _ := cmd.Flags().GetString("tenant")
+	if tenant == "" {
+		return usagef("--tenant is required")
+	}
+	path, _ := cmd.Flags().GetString("file")
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read jenkinsfile %q: %w", path, err)
+	}
+
+	c, err := apiClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	body := client.LintJenkinsfileJSONRequestBody{Jenkinsfile: string(raw)}
+	resp, err := c.LintJenkinsfileWithResponse(cmd.Context(), tenant, body)
+	if err != nil {
+		return err
+	}
+	if resp.HTTPResponse.StatusCode >= 400 || resp.JSON200 == nil {
+		return errFromResponse(resp.Body, resp.StatusCode())
+	}
+
+	if err := printJenkinsfileLint(cmd, resp.JSON200.Errors); err != nil {
+		return err
+	}
+	if !resp.JSON200.Valid {
+		return errJenkinsfileInvalid
+	}
+	return nil
+}
+
+// printJenkinsfileLint honours the shared -o {table,wide,json,yaml,name}
+// contract. Table columns are SOURCE, LINE, COLUMN, and MESSAGE.
+func printJenkinsfileLint(cmd *cobra.Command, findings []client.ComponentsSchemasJenkinsfileLintError) error {
+	o, _ := cmd.Flags().GetString("output")
+	nh, _ := cmd.Flags().GetBool("no-headers")
+	switch o {
+	case "json":
+		return printJSON(os.Stdout, findings)
+	case "yaml":
+		return printYAML(os.Stdout, findings)
+	case "name":
+		for _, f := range findings {
+			_, _ = fmt.Fprintln(os.Stdout, lintLocation(f.Line, f.Column))
+		}
+		return nil
+	default: // "table", "wide": no extra columns.
+		rows := make([][]string, len(findings))
+		for i, f := range findings {
+			rows[i] = []string{string(f.Source), lintNumber(f.Line), lintNumber(f.Column), f.Message}
+		}
+		printTable(os.Stdout, []string{"SOURCE", "LINE", "COLUMN", "MESSAGE"}, rows, nh)
+		return nil
+	}
+}
+
+// lintNumber renders a line or column, or "-" when the linter gave none.
+func lintNumber(n *int) string {
+	if n == nil {
+		return "-"
+	}
+	return strconv.Itoa(*n)
+}
+
+// lintLocation renders a finding's line:column for the name output.
+func lintLocation(line, column *int) string {
+	if line == nil || column == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%d:%d", *line, *column)
 }
 
 // markerValidateFinding mirrors internal/api's markerValidateFindingJSON.

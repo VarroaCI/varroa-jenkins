@@ -419,6 +419,12 @@ const (
 	Pattern ComponentsSchemasJenkinsScopeType = "Pattern"
 )
 
+// Defines values for ComponentsSchemasJenkinsfileLintErrorSource.
+const (
+	ComponentsSchemasJenkinsfileLintErrorSourceJenkins ComponentsSchemasJenkinsfileLintErrorSource = "jenkins"
+	ComponentsSchemasJenkinsfileLintErrorSourceVarroa  ComponentsSchemasJenkinsfileLintErrorSource = "varroa"
+)
+
 // Defines values for ComponentsSchemasJobDeclaredByForge.
 const (
 	ComponentsSchemasJobDeclaredByForgeGitea  ComponentsSchemasJobDeclaredByForge = "gitea"
@@ -581,10 +587,10 @@ const (
 
 // Defines values for ComponentsSchemasRBACGroupBindingRole.
 const (
-	ComponentsSchemasRBACGroupBindingRoleAdmin     ComponentsSchemasRBACGroupBindingRole = "admin"
-	ComponentsSchemasRBACGroupBindingRoleDeveloper ComponentsSchemasRBACGroupBindingRole = "developer"
-	ComponentsSchemasRBACGroupBindingRoleOperator  ComponentsSchemasRBACGroupBindingRole = "operator"
-	ComponentsSchemasRBACGroupBindingRoleViewer    ComponentsSchemasRBACGroupBindingRole = "viewer"
+	Admin     ComponentsSchemasRBACGroupBindingRole = "admin"
+	Developer ComponentsSchemasRBACGroupBindingRole = "developer"
+	Operator  ComponentsSchemasRBACGroupBindingRole = "operator"
+	Viewer    ComponentsSchemasRBACGroupBindingRole = "viewer"
 )
 
 // Defines values for ComponentsSchemasRunActionResponseState.
@@ -3015,6 +3021,36 @@ type ComponentsSchemasJenkinsVersionProfile struct {
 	Spec                 map[string]interface{}  `json:"spec"`
 	Status               *map[string]interface{} `json:"status,omitempty"`
 	AdditionalProperties map[string]interface{}  `json:"-"`
+}
+
+// ComponentsSchemasJenkinsfileLintError One finding of a Jenkinsfile lint.
+type ComponentsSchemasJenkinsfileLintError struct {
+	Column  *int   `json:"column,omitempty"`
+	Line    *int   `json:"line,omitempty"`
+	Message string `json:"message"`
+
+	// Rule The Varroa rule id. Present when source is varroa.
+	Rule *string `json:"rule,omitempty"`
+
+	// Source jenkins is the declarative linter. varroa is a cell script rule.
+	Source ComponentsSchemasJenkinsfileLintErrorSource `json:"source"`
+}
+
+// ComponentsSchemasJenkinsfileLintErrorSource jenkins is the declarative linter. varroa is a cell script rule.
+type ComponentsSchemasJenkinsfileLintErrorSource string
+
+// ComponentsSchemasJenkinsfileLintRequest POST /pipelines/{tenant}/lint.
+type ComponentsSchemasJenkinsfileLintRequest struct {
+	// Jenkinsfile The Jenkinsfile text, at most 256 KiB.
+	Jenkinsfile string `json:"jenkinsfile"`
+}
+
+// ComponentsSchemasJenkinsfileLintResponse valid is true when errors is empty. cell and namespace name the cell that linted the text.
+type ComponentsSchemasJenkinsfileLintResponse struct {
+	Cell      string                                  `json:"cell"`
+	Errors    []ComponentsSchemasJenkinsfileLintError `json:"errors"`
+	Namespace string                                  `json:"namespace"`
+	Valid     bool                                    `json:"valid"`
 }
 
 // ComponentsSchemasJobBadge GET /pipelines/{tenant}/jobs/{job}/badge. The path is set only while the badge is on.
@@ -5693,6 +5729,9 @@ type ComponentsParametersTenantQuery = string
 // ComponentsResponsesApproveConflict Refusal of an approval. changes is present when the pending change is not the one the caller approved.
 type ComponentsResponsesApproveConflict = ComponentsSchemasApproveConflict
 
+// ComponentsResponsesBadGateway defines model for components_responses_BadGateway.
+type ComponentsResponsesBadGateway = ComponentsSchemasError
+
 // ComponentsResponsesBadRequest defines model for components_responses_BadRequest.
 type ComponentsResponsesBadRequest = ComponentsSchemasError
 
@@ -5716,6 +5755,9 @@ type ComponentsResponsesNotFound = ComponentsSchemasError
 
 // ComponentsResponsesNotImplemented defines model for components_responses_NotImplemented.
 type ComponentsResponsesNotImplemented = ComponentsSchemasError
+
+// ComponentsResponsesPayloadTooLarge defines model for components_responses_PayloadTooLarge.
+type ComponentsResponsesPayloadTooLarge = ComponentsSchemasError
 
 // ComponentsResponsesServiceUnavailable defines model for components_responses_ServiceUnavailable.
 type ComponentsResponsesServiceUnavailable = ComponentsSchemasError
@@ -6236,6 +6278,9 @@ type CreateRunJSONRequestBody = ComponentsSchemasCreateRunRequest
 
 // ScanMultibranchJSONRequestBody defines body for ScanMultibranch for application/json ContentType.
 type ScanMultibranchJSONRequestBody = ComponentsSchemasScanMultibranchRequest
+
+// LintJenkinsfileJSONRequestBody defines body for LintJenkinsfile for application/json ContentType.
+type LintJenkinsfileJSONRequestBody = ComponentsSchemasJenkinsfileLintRequest
 
 // ValidatePipelineMarkerJSONRequestBody defines body for ValidatePipelineMarker for application/json ContentType.
 type ValidatePipelineMarkerJSONRequestBody = ComponentsSchemasPipelineMarkerValidateRequest
@@ -7299,6 +7344,11 @@ type ClientInterface interface {
 
 	// ListJobTestCaseHistory request
 	ListJobTestCaseHistory(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// LintJenkinsfileWithBody request with any body
+	LintJenkinsfileWithBody(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	LintJenkinsfile(ctx context.Context, tenant ComponentsParametersTenant, body LintJenkinsfileJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListTenantFleetLocks request
 	ListTenantFleetLocks(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -9697,6 +9747,30 @@ func (c *Client) ScanMultibranch(ctx context.Context, tenant ComponentsParameter
 
 func (c *Client) ListJobTestCaseHistory(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListJobTestCaseHistoryRequest(c.Server, tenant, job, pCase, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) LintJenkinsfileWithBody(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewLintJenkinsfileRequestWithBody(c.Server, tenant, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) LintJenkinsfile(ctx context.Context, tenant ComponentsParametersTenant, body LintJenkinsfileJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewLintJenkinsfileRequest(c.Server, tenant, body)
 	if err != nil {
 		return nil, err
 	}
@@ -17510,6 +17584,53 @@ func NewListJobTestCaseHistoryRequest(server string, tenant ComponentsParameters
 	return req, nil
 }
 
+// NewLintJenkinsfileRequest calls the generic LintJenkinsfile builder with application/json body
+func NewLintJenkinsfileRequest(server string, tenant ComponentsParametersTenant, body LintJenkinsfileJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewLintJenkinsfileRequestWithBody(server, tenant, "application/json", bodyReader)
+}
+
+// NewLintJenkinsfileRequestWithBody generates requests for LintJenkinsfile with any type of body
+func NewLintJenkinsfileRequestWithBody(server string, tenant ComponentsParametersTenant, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "tenant", runtime.ParamLocationPath, tenant)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/lint", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListTenantFleetLocksRequest generates requests for ListTenantFleetLocks
 func NewListTenantFleetLocksRequest(server string, tenant ComponentsParametersTenant) (*http.Request, error) {
 	var err error
@@ -20356,6 +20477,11 @@ type ClientWithResponsesInterface interface {
 
 	// ListJobTestCaseHistoryWithResponse request
 	ListJobTestCaseHistoryWithResponse(ctx context.Context, tenant ComponentsParametersTenant, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*ListJobTestCaseHistoryResponse, error)
+
+	// LintJenkinsfileWithBodyWithResponse request with any body
+	LintJenkinsfileWithBodyWithResponse(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*LintJenkinsfileResponse, error)
+
+	LintJenkinsfileWithResponse(ctx context.Context, tenant ComponentsParametersTenant, body LintJenkinsfileJSONRequestBody, reqEditors ...RequestEditorFn) (*LintJenkinsfileResponse, error)
 
 	// ListTenantFleetLocksWithResponse request
 	ListTenantFleetLocksWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*ListTenantFleetLocksResponse, error)
@@ -24124,6 +24250,35 @@ func (r ListJobTestCaseHistoryResponse) StatusCode() int {
 	return 0
 }
 
+type LintJenkinsfileResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasJenkinsfileLintResponse
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
+	JSON413      *ComponentsResponsesPayloadTooLarge
+	JSON502      *ComponentsResponsesBadGateway
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r LintJenkinsfileResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r LintJenkinsfileResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListTenantFleetLocksResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -27235,6 +27390,23 @@ func (c *ClientWithResponses) ListJobTestCaseHistoryWithResponse(ctx context.Con
 		return nil, err
 	}
 	return ParseListJobTestCaseHistoryResponse(rsp)
+}
+
+// LintJenkinsfileWithBodyWithResponse request with arbitrary body returning *LintJenkinsfileResponse
+func (c *ClientWithResponses) LintJenkinsfileWithBodyWithResponse(ctx context.Context, tenant ComponentsParametersTenant, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*LintJenkinsfileResponse, error) {
+	rsp, err := c.LintJenkinsfileWithBody(ctx, tenant, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseLintJenkinsfileResponse(rsp)
+}
+
+func (c *ClientWithResponses) LintJenkinsfileWithResponse(ctx context.Context, tenant ComponentsParametersTenant, body LintJenkinsfileJSONRequestBody, reqEditors ...RequestEditorFn) (*LintJenkinsfileResponse, error) {
+	rsp, err := c.LintJenkinsfile(ctx, tenant, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseLintJenkinsfileResponse(rsp)
 }
 
 // ListTenantFleetLocksWithResponse request returning *ListTenantFleetLocksResponse
@@ -34580,6 +34752,81 @@ func ParseListJobTestCaseHistoryResponse(rsp *http.Response) (*ListJobTestCaseHi
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseLintJenkinsfileResponse parses an HTTP response from a LintJenkinsfileWithResponse call
+func ParseLintJenkinsfileResponse(rsp *http.Response) (*LintJenkinsfileResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &LintJenkinsfileResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasJenkinsfileLintResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest ComponentsResponsesPayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest ComponentsResponsesBadGateway
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest ComponentsResponsesServiceUnavailable

@@ -360,6 +360,8 @@ paths:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1locks'
   /api/v1/pipelines/{tenant}/markers/validate:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1markers~1validate'
+  /api/v1/pipelines/{tenant}/lint:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1lint'
   /api/v1/pipelines/{tenant}/cell:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}~1cell'
   /api/v1/pipelines/{tenant}/propose:

@@ -98,6 +98,9 @@ varroactl builds tenant-a/checkout-api
 # Check a pipeline template marker before it is committed.
 varroactl lint marker --tenant tenant-a --marker .varroa/pipeline.yaml
 
+# Lint a declarative Jenkinsfile on the tenant's cell before it is committed.
+varroactl lint jenkinsfile --tenant tenant-a --file Jenkinsfile
+
 # List the fleet locks, then force-release a releasing lock that no live pod holds.
 varroactl locks list --tenant tenant-a -o wide
 varroactl locks release tenant-a/deploy-prod --run <run id> --reason "<why>"
@@ -108,6 +111,8 @@ Use [Controller lifecycle operations](operations/lifecycle.md) for state changes
 `run` splits `<tenant>/<job>` on the first slash. `<job>` may omit or repeat the tenant's folder segment; both forms reach the same job. It percent-encodes the job path, so slashes reach the server intact. `--param` is repeatable and takes `key=value`. A repeated key is a usage error. `run` mints one client token per invocation, so a retried request runs one build. It prints the run identifier on success. Add `--follow` to wait for the run to appear and stream its log until the run ends. The command exits non-zero when the run's result is not a success.
 
 `lint marker` reads a [pipeline template](config/pipeline-templates.md) marker file, resolves it against the named tenant's delivered templates, and prints each finding's severity, path, and message. `--marker` defaults to `.varroa/pipeline.yaml`. The command exits zero when the marker is valid and non-zero otherwise, so a pre-commit hook or a pipeline step can gate on it.
+
+`lint jenkinsfile` reads a Jenkinsfile and sends it to the tenant's cell. The cell runs the Jenkins declarative linter, and a cell-hosted tenant also runs the Varroa cell rules. It prints each error's source, line, column, and message. `--file` defaults to `Jenkinsfile`. The lint writes nothing and never wakes a hibernated cell, so a hibernated or stopped cell answers a refusal. The command exits non-zero when the file has any error or the server refuses the request.
 
 ## Work across clusters
 

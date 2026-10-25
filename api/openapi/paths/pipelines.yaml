@@ -367,6 +367,49 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
+/api/v1/pipelines/{tenant}/lint:
+  post:
+    operationId: lintJenkinsfile
+    tags: [Pipelines]
+    summary: Lints a Jenkinsfile on the tenant's cell.
+    description: >
+      Resolves {tenant} onto its slot-0 cell on the core cluster and sends
+      the Jenkinsfile text to the cell's declarative linter. The route
+      writes no state and publishes no command. It never wakes a cell: a
+      hibernated or stopped cell answers 409. A cell-hosted tenant also
+      runs the Varroa cell script rules, which report with source varroa.
+      The linter checks declarative syntax only. A lint failure is data in
+      a 200 answer, not a transport error.
+    parameters:
+      - $ref: '../components/parameters.yaml#/tenant'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/JenkinsfileLintRequest'
+    responses:
+      "200":
+        description: The lint result. valid is true when errors is empty.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JenkinsfileLintResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+      "413":
+        $ref: '../components/responses.yaml#/PayloadTooLarge'
+      "502":
+        $ref: '../components/responses.yaml#/BadGateway'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
 /api/v1/pipelines/{tenant}/cell:
   get:
     operationId: getTenantCell

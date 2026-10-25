@@ -24,6 +24,8 @@ If the cell has a `gitEgress` policy, list the forge address there.
    **Propose**.
 3. Read each file in full. Then select **Approve** or **Deny**.
 
+Before the session opens the pull request, it lints the proposed Jenkinsfile on the tenant's cell. It fixes the errors it finds and lints again, at most three times. If errors remain, the pull request body lists them. The lint is advisory: it does not stop the pull request.
+
 ## Merge and add the job
 
 Merge the pull request on the forge. See

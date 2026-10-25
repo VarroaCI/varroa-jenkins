@@ -214,6 +214,16 @@
         },
         "description": "Conflict — no pending restart, no pending plugin roll, the pending change is not the one the caller approved, or the pending plugin roll changed after it was read."
       },
+      "components_responses_BadGateway": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/components_schemas_Error"
+            }
+          }
+        },
+        "description": "The upstream service answered with an error or an unreadable reply."
+      },
       "components_responses_BadRequest": {
         "content": {
           "application/json": {
@@ -293,6 +303,16 @@
           }
         },
         "description": "Not implemented."
+      },
+      "components_responses_PayloadTooLarge": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/components_schemas_Error"
+            }
+          }
+        },
+        "description": "The request body or a field exceeds its size limit."
       },
       "components_responses_ServiceUnavailable": {
         "content": {
@@ -11071,6 +11091,83 @@
           "kind",
           "metadata",
           "spec"
+        ],
+        "type": "object"
+      },
+      "components_schemas_JenkinsfileLintError": {
+        "additionalProperties": false,
+        "description": "One finding of a Jenkinsfile lint.",
+        "properties": {
+          "column": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "rule": {
+            "description": "The Varroa rule id. Present when source is varroa.",
+            "type": "string"
+          },
+          "source": {
+            "description": "jenkins is the declarative linter. varroa is a cell script rule.",
+            "enum": [
+              "jenkins",
+              "varroa"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "message"
+        ],
+        "type": "object"
+      },
+      "components_schemas_JenkinsfileLintRequest": {
+        "additionalProperties": false,
+        "description": "POST /pipelines/{tenant}/lint.",
+        "properties": {
+          "jenkinsfile": {
+            "description": "The Jenkinsfile text, at most 256 KiB.",
+            "maxLength": 262144,
+            "type": "string"
+          }
+        },
+        "required": [
+          "jenkinsfile"
+        ],
+        "type": "object"
+      },
+      "components_schemas_JenkinsfileLintResponse": {
+        "additionalProperties": false,
+        "description": "valid is true when errors is empty. cell and namespace name the cell that linted the text.\n",
+        "properties": {
+          "cell": {
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_JenkinsfileLintError"
+            },
+            "type": "array"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid",
+          "cell",
+          "namespace",
+          "errors"
         ],
         "type": "object"
       },
@@ -24550,6 +24647,64 @@
           }
         },
         "summary": "Lists the recent outcomes of one test case of a job, across every tenant of the tenant.",
+        "tags": [
+          "Pipelines"
+        ]
+      }
+    },
+    "/api/v1/pipelines/{tenant}/lint": {
+      "post": {
+        "description": "Resolves {tenant} onto its slot-0 cell on the core cluster and sends the Jenkinsfile text to the cell's declarative linter. The route writes no state and publishes no command. It never wakes a cell: a hibernated or stopped cell answers 409. A cell-hosted tenant also runs the Varroa cell script rules, which report with source varroa. The linter checks declarative syntax only. A lint failure is data in a 200 answer, not a transport error.\n",
+        "operationId": "lintJenkinsfile",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/components_parameters_tenant"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/components_schemas_JenkinsfileLintRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_JenkinsfileLintResponse"
+                }
+              }
+            },
+            "description": "The lint result. valid is true when errors is empty."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/components_responses_PayloadTooLarge"
+          },
+          "502": {
+            "$ref": "#/components/responses/components_responses_BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
+          }
+        },
+        "summary": "Lints a Jenkinsfile on the tenant's cell.",
         "tags": [
           "Pipelines"
         ]
