@@ -81,4 +81,32 @@ public class VarroaUserCauseTest {
         assertEquals("timer", VarroaUserCause.actorFromCauses(
                 List.of(new TimerTrigger.TimerTriggerCause())));
     }
+
+    @Test
+    public void descriptionReplacesTheDefaultShortDescription() {
+        assertEquals("Started by a pull request comment of alice on acme/app#7",
+                new VarroaUserCause("alice", "Started by a pull request comment of alice on acme/app#7")
+                        .getShortDescription());
+    }
+
+    @Test
+    public void emptyOrNullDescriptionKeepsTheDefault() {
+        assertEquals("Started by alice through Varroa",
+                new VarroaUserCause("alice", "").getShortDescription());
+        assertEquals("Started by alice through Varroa",
+                new VarroaUserCause("alice", null).getShortDescription());
+    }
+
+    @Test
+    public void descriptionTakesPartInEquality() {
+        assertNotEquals(new VarroaUserCause("alice", "one"), new VarroaUserCause("alice", "two"));
+        assertEquals(new VarroaUserCause("alice", "one"), new VarroaUserCause("alice", "one"));
+        assertNotEquals(new VarroaUserCause("alice"), new VarroaUserCause("alice", "one"));
+    }
+
+    @Test
+    public void nullDescriptionEqualsNoDescription() {
+        assertEquals(new VarroaUserCause("alice"), new VarroaUserCause("alice", null));
+        assertEquals(new VarroaUserCause("alice").hashCode(), new VarroaUserCause("alice", null).hashCode());
+    }
 }

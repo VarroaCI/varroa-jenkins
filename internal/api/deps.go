@@ -128,6 +128,9 @@ type Dependencies struct {
 	// ForgeRelay sends forge checks, reads, pull requests, and issues to the
 	// operator of a cluster. Nil turns the forge-backed routes and tools off.
 	ForgeRelay ForgeRelay
+	// ForgePermission reads the repository permission of a forge user for
+	// the tenant door's comment check. Nil refuses every comment trigger.
+	ForgePermission ForgePermissionChecker
 	// WebhookEnqueuer queues a signed tenant webhook through the recorder.
 	WebhookEnqueuer WebhookEnqueuer
 	// CoreCluster names the core cluster, which answers every forge request.

@@ -696,6 +696,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   clause, since `GrantResult`'s shape stays fixed to the `FenceResult`
   fields `ledger_fence_placement.go`'s direct type conversion depends
   on); `dispatchCrossTenant` records both on every call.
+- **Re-run lookups** (`reader_job_branches.go`) — `Reader.ChangeRequestJobs` answers the job
+  paths whose live change-request head has a pull-request URL (case-insensitive, orphaned heads
+  skipped). `Reader.RevisionJobs` answers the job paths whose live branch head holds a full 40-hex
+  commit; any other revision is refused in Go. Both read `job_branch_projects` and cap at 16
+  paths. The BFF door uses them for `check_suite` and `issue_comment`.
 - **Job inventory readiness** (`reader_job_inventory.go`) — `Reader.JobInventory`
   answers a tenant's live inventory from the active member cells only; a standby never counts.
   A kind is known only when every active member holds a `job_schedule_cells` watermark for it

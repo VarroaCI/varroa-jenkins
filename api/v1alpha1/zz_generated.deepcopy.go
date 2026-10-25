@@ -933,6 +933,11 @@ func (in *TenantPipelinesSpec) DeepCopyInto(out *TenantPipelinesSpec) {
 		*out = new(TenantBadgeSpec)
 		**out = **in
 	}
+	if in.Triggers != nil {
+		in, out := &in.Triggers, &out.Triggers
+		*out = new(TenantTriggersSpec)
+		(*in).DeepCopyInto(*out)
+	}
 }
 
 // DeepCopy creates a deep copy of TenantPipelinesSpec.
@@ -941,6 +946,26 @@ func (in *TenantPipelinesSpec) DeepCopy() *TenantPipelinesSpec {
 		return nil
 	}
 	out := new(TenantPipelinesSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TenantTriggersSpec.
+func (in *TenantTriggersSpec) DeepCopyInto(out *TenantTriggersSpec) {
+	*out = *in
+	if in.ChecksRerun != nil {
+		in, out := &in.ChecksRerun, &out.ChecksRerun
+		*out = new(bool)
+		**out = **in
+	}
+}
+
+// DeepCopy creates a deep copy of TenantTriggersSpec.
+func (in *TenantTriggersSpec) DeepCopy() *TenantTriggersSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(TenantTriggersSpec)
 	in.DeepCopyInto(out)
 	return out
 }

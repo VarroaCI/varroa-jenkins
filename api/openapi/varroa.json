@@ -16233,6 +16233,9 @@
             "maximum": 8,
             "minimum": 0,
             "type": "integer"
+          },
+          "triggers": {
+            "$ref": "#/components/schemas/components_schemas_TenantTriggers"
           }
         },
         "required": [
@@ -16411,6 +16414,22 @@
         "required": [
           "name"
         ],
+        "type": "object"
+      },
+      "components_schemas_TenantTriggers": {
+        "additionalProperties": false,
+        "description": "Forge events that start a run of a pipelines tenant. A pull-request comment starts a run when it matches commentPattern. A GitHub check re-run request starts a run when checksRerun is on.",
+        "properties": {
+          "checksRerun": {
+            "description": "Lets a GitHub check re-run request start a run. Defaults to true.",
+            "type": "boolean"
+          },
+          "commentPattern": {
+            "description": "RE2 pattern for a new pull-request comment. The trimmed comment body must match it. Empty means off.",
+            "maxLength": 256,
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "components_schemas_TenantWebhook": {

@@ -59,6 +59,7 @@ type forgeOps interface {
 	Read(ctx context.Context, req forgeapi.ReadRequest) forgeapi.ReadReply
 	Issue(ctx context.Context, req forgeapi.IssueRequest, releaseNamespace string) forgeapi.IssueReply
 	PullRequest(ctx context.Context, req forgeapi.PullRequestRequest) forgeapi.PullRequestReply
+	Permission(ctx context.Context, req forgeapi.PermissionRequest) forgeapi.PermissionReply
 }
 
 // shardEnterer registers work on a held ring shard. It returns false when the
@@ -100,6 +101,24 @@ func handleForgeRead(ctx context.Context, logger *slog.Logger, ops forgeOps, ent
 	rctx, cancel := context.WithTimeout(wctx, forgeRequestTimeout)
 	defer cancel()
 	return encodeForgeReply(ops.Read(rctx, req))
+}
+
+// handleForgePermission answers one operator.<cluster>.forge.permission
+// request. The ownership rule is the same as handleForgeCheck.
+func handleForgePermission(ctx context.Context, logger *slog.Logger, ops forgeOps, enter shardEnterer, data []byte) []byte {
+	var req forgeapi.PermissionRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		logger.Warn("forge permission decode failed", "error", err)
+		return encodeForgeReply(forgeapi.PermissionReply{Status: invalidForgeStatus()})
+	}
+	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Tenant))
+	if !ok {
+		return nil
+	}
+	defer leave()
+	rctx, cancel := context.WithTimeout(wctx, forgeRequestTimeout)
+	defer cancel()
+	return encodeForgeReply(ops.Permission(rctx, req))
 }
 
 // handleForgeIssue answers one operator.<cluster>.forge.issue request. The

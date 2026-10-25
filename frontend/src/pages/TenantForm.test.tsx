@@ -359,6 +359,35 @@ describe("TenantForm", () => {
     });
   });
 
+  it("keeps pipelines.triggers on save", async () => {
+    const user = userEvent.setup();
+    mockParams = { name: "payments" };
+    mockGetTenant.mockResolvedValue({
+      name: "payments",
+      members: ["alice"],
+      namespaces: ["ns1"],
+      roleRef: "developer",
+      pipelines: {
+        profile: "lts",
+        agentNamespace: "ns1",
+        triggers: { commentPattern: "^/retest$", checksRerun: false },
+      },
+    });
+
+    render(<TenantForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Update")).toBeInTheDocument();
+    });
+    await user.click(screen.getByText("Update"));
+
+    await waitFor(() => {
+      expect(mockUpdateTenant).toHaveBeenCalled();
+    });
+    const body = mockUpdateTenant.mock.calls[0][1];
+    expect(body.pipelines.triggers).toEqual({ commentPattern: "^/retest$", checksRerun: false });
+  });
+
   it("loads existing exports of both kinds on the edit view", async () => {
     mockParams = { name: "payments" };
     mockGetTenant.mockResolvedValue({

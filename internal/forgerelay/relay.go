@@ -42,6 +42,14 @@ func (r Relay) PullRequest(ctx context.Context, cluster string, req forgeapi.Pul
 	return reply, err
 }
 
+// Permission asks the operator of the cluster for the repository permission
+// of one forge user.
+func (r Relay) Permission(ctx context.Context, cluster string, req forgeapi.PermissionRequest) (forgeapi.PermissionReply, error) {
+	var reply forgeapi.PermissionReply
+	err := r.call(ctx, cluster, forgeapi.VerbPermission, forgeapi.RequestTimeout, req, &reply)
+	return reply, err
+}
+
 // requestDeadline returns the time when this requester stops waiting for a
 // reply. It is now plus timeout, or the caller's deadline when that is
 // earlier.

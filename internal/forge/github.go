@@ -128,6 +128,23 @@ func (g *githubClient) CreateIssue(ctx context.Context, r Repo, title, bodyText 
 	return Issue{Number: out.Number, URL: out.HTMLURL}, nil
 }
 
+// CollaboratorPermission returns the repository permission of login. A user
+// with no access answers none. GitHub reports maintain as write, so an
+// answer of write covers maintain too.
+func (g *githubClient) CollaboratorPermission(ctx context.Context, r Repo, login string) (string, error) {
+	var out struct {
+		Permission string `json:"permission"`
+	}
+	err := g.getJSON(ctx, repoPath(r)+"/collaborators/"+url.PathEscape(login)+"/permission", nil, &out)
+	if errors.Is(err, ErrNotFound) {
+		return "none", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return out.Permission, nil
+}
+
 // DeleteBranch deletes a branch.
 func (g *githubClient) DeleteBranch(ctx context.Context, r Repo, branch string) error {
 	return g.sendJSON(ctx, http.MethodDelete, repoPath(r)+"/git/refs/heads/"+escapePath(branch), nil, nil)

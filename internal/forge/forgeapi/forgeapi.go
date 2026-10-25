@@ -13,6 +13,9 @@ const (
 	// VerbIssue opens an issue for a Tenant agent. The operator shard that owns
 	// the Tenant answers it.
 	VerbIssue = "issue"
+	// VerbPermission reads the repository permission of a forge user. The
+	// operator shard that owns the Tenant answers it.
+	VerbPermission = "permission"
 )
 
 // ProposalBranch is the branch that a pipeline proposal writes.
@@ -89,6 +92,20 @@ type IssueReply struct {
 	Status
 	Number int    `json:"number,omitempty"`
 	URL    string `json:"url,omitempty"`
+}
+
+// PermissionRequest asks for the repository permission of a forge user.
+type PermissionRequest struct {
+	Tenant string `json:"tenant"`
+	Repo   string `json:"repo"`
+	Login  string `json:"login"`
+}
+
+// PermissionReply reports the repository permission of the user. It is one of
+// none, read, triage, write, maintain, or admin. It is empty when OK is false.
+type PermissionReply struct {
+	Status
+	Permission string `json:"permission,omitempty"`
 }
 
 // CheckRequest asks whether a repository can take a proposal.

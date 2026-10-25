@@ -170,6 +170,31 @@ public class VarroaRunTriggerActionTest {
     }
 
     @Test
+    public void trigger_withCause_setsCauseDescription() throws Exception {
+        j.jenkins.setNumExecutors(0);
+        FreeStyleProject p = j.createFreeStyleProject("trigger-described-cause");
+
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"runId\":\"run-cause-2\",\"intentKey\":\"manual:run-cause-2\""
+                    + ",\"jobPath\":\"" + p.getFullName() + "\",\"actor\":\"github:alice\""
+                    + ",\"cause\":\"Started by a GitHub check re-run request of alice\"}");
+            StaplerResponse2 rsp = responseCapturing(new StringWriter());
+
+            action.doTrigger(req, rsp);
+
+            verify(rsp).setStatus(202);
+        }
+
+        Queue.Item[] items = Queue.getInstance().getItems();
+        assertEquals(1, items.length);
+        List<VarroaUserCause> causes = varroaCausesOf(items[0]);
+        assertEquals(1, causes.size());
+        assertEquals("github:alice", causes.get(0).getUserId());
+        assertEquals("Started by a GitHub check re-run request of alice", causes.get(0).getShortDescription());
+    }
+
+    @Test
     public void anEmptyActorAttachesNoVarroaCause() throws Exception {
         j.jenkins.setNumExecutors(0);
         FreeStyleProject p = j.createFreeStyleProject("trigger-no-cause");

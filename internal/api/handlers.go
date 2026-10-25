@@ -62,6 +62,10 @@ type Server struct {
 	// means BuildJenkinsServiceURL, the production formula; a test
 	// substitutes an httptest server's URL.
 	runnerDoorServiceURL func(*v1alpha1.Controller) string
+
+	// rerunSpawn runs the work of one accepted re-run event. Nil means a
+	// goroutine. A test substitutes a function that runs the work inline.
+	rerunSpawn func(func())
 }
 
 // NewServer creates a new API server with the given dependencies.

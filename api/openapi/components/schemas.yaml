@@ -406,6 +406,8 @@ TenantPipelines:
       $ref: '#/TenantNotifications'
     badge:
       $ref: '#/TenantBadge'
+    triggers:
+      $ref: '#/TenantTriggers'
     retention:
       $ref: '#/TenantPipelinesRetention'
     concurrencyLimits:
@@ -440,6 +442,25 @@ TenantNotifications:
   properties:
     webhook:
       $ref: '#/TenantWebhook'
+  additionalProperties: false
+
+TenantTriggers:
+  type: object
+  description: >-
+    Forge events that start a run of a pipelines tenant. A pull-request
+    comment starts a run when it matches commentPattern. A GitHub check
+    re-run request starts a run when checksRerun is on.
+  properties:
+    commentPattern:
+      type: string
+      maxLength: 256
+      description: >-
+        RE2 pattern for a new pull-request comment. The trimmed comment body
+        must match it. Empty means off.
+    checksRerun:
+      type: boolean
+      description: >-
+        Lets a GitHub check re-run request start a run. Defaults to true.
   additionalProperties: false
 
 TenantWebhook:

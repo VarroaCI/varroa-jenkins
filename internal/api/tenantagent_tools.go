@@ -51,6 +51,12 @@ type ForgeRelay interface {
 	Issue(ctx context.Context, cluster string, req forgeapi.IssueRequest) (forgeapi.IssueReply, error)
 }
 
+// ForgePermissionChecker reads the repository permission of one forge user
+// through the operator of a cluster.
+type ForgePermissionChecker interface {
+	Permission(ctx context.Context, cluster string, req forgeapi.PermissionRequest) (forgeapi.PermissionReply, error)
+}
+
 // WebhookEnqueuer asks the recorder to queue one signed tenant webhook.
 type WebhookEnqueuer interface {
 	Enqueue(ctx context.Context, req recordstore.TenantAgentWebhookRequest) (recordstore.TenantAgentWebhookResponse, error)

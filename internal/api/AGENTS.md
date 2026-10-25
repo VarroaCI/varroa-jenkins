@@ -363,6 +363,14 @@ federation, activity persistence, and SSE fanout.
   door reads the record store only. It never calls Jenkins. `handleGetJobBadge` answers the
   job page's `{enabled, path}` state. `renderBadgeSVG` writes no external reference, so the
   SVG holds no `href`.
+- The door consumes three GitHub re-run events itself (`handlers_tenant_rerun.go`):
+  `issue_comment`, `check_run`, and `check_suite`. `handleTenantHibernationQueue` answers `202`
+  after the signature check (Step 5b) and never buffers or replays them. `handleRerunEvent` applies
+  `Tenant.spec.pipelines.triggers`. A comment needs a writer: an association pre-filter, then
+  `ForgePermission` (the operator `forge.permission` verb) must answer `write` or `admin`. Any
+  error refuses. `triggerDoorRun` sends `TRIGGER_BUILD` to `homeRef`, with actor `github:<login>`
+  and a cause. The work runs in `rerunSpawn` (nil means a goroutine) under a 60-second bound.
+  A refusal logs at `Info` and never carries the payload.
 - The agent WebSocket door (`handlers_runner_door.go`, design `add-external-runners`
   D7/D8): `HandleRunnerDoor` serves `/runners/{token}/{login,jnlpJars/agent.jar,wsagents/}`
   at the host root, outside `/api/v1` and outside auth — the URL's token is the only

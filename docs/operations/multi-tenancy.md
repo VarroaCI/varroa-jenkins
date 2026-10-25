@@ -213,3 +213,26 @@ it, clear the token. The next reconcile tick mints a new one, and the old URLs a
 kubectl patch tenant payments --subresource=status --type=json \
   -p '[{"op":"remove","path":"/status/pipelines/badgeToken"}]'
 ```
+
+## Start a run from a pull-request comment or a check re-run
+
+A pipelines tenant can start a run from a forge event. A pipelines administrator of the tenant
+sets the rules in `triggers`:
+
+```yaml
+spec:
+  pipelines:
+    triggers:
+      commentPattern: "^/retest$"
+      checksRerun: true
+```
+
+- `commentPattern` is an RE2 pattern of at most 256 characters. A new pull-request comment that
+  matches it starts a run of the pull-request job. The pattern is matched against the trimmed
+  comment body. An empty pattern turns comment triggers off. The default is off.
+- `checksRerun` lets a GitHub check re-run request start a run. The default is on.
+
+A run that a comment starts names the commenter as its actor. The run shows the comment as its
+cause. Only a writer of the repository starts a run. The
+[webhook page](webhooks.md#re-run-from-github) lists the checks that the door applies.
+One event starts at most eight jobs.

@@ -156,6 +156,46 @@ The card does not show the token.
 The baseline lock pins `generic-webhook-trigger` and `github-checks`. An air-gapped install must
 pre-seed both plugins in the update center. See [Update center](update-center.md).
 
+## Re-run from GitHub
+
+The door consumes three GitHub events itself. It answers `202` after the signature check. It
+never buffers these events, and it never sends them to Jenkins:
+
+- `issue_comment` starts a run from a pull-request comment.
+- `check_run` starts a run when a user selects **Re-run** on a check.
+- `check_suite` starts runs when a user selects **Re-run all checks**.
+
+The tenant sets the rules. See
+[Start a run from a pull-request comment or a check re-run](multi-tenancy.md#start-a-run-from-a-pull-request-comment-or-a-check-re-run).
+
+A comment starts a run only when all of these hold:
+
+- The comment is new. An edit starts nothing.
+- The comment is on a pull request, not on an issue.
+- The trimmed comment body matches `commentPattern`.
+- The author association is `OWNER`, `MEMBER`, or `COLLABORATOR`.
+- The forge reports `write` or `admin` permission for the commenter on the repository.
+
+The permission read uses a tenant credential that can read the repository. Use a username and
+password credential or a secret-text credential. Its `varroa.dev/allowed-hosts` annotation must
+name the forge host. A tenant that holds only a `githubApp` credential refuses every comment.
+
+A check re-run reaches the door only when the GitHub App that created the check sends it. See
+[Re-run a check](commit-status.md#re-run-a-check).
+
+This delivery sends a comment that matches the pattern `^/retest$`:
+
+```bash
+curl -i -X POST \
+  -H "X-GitHub-Event: issue_comment" \
+  -H "X-Hub-Signature-256: sha256=$(openssl dgst -sha256 -hmac "$SECRET" -hex comment.json | cut -d' ' -f2)" \
+  --data-binary @comment.json \
+  "https://<host>/hibernation/<token>/tenants/payments/queue/github-webhook/"
+```
+
+Here `comment.json` holds an `issue_comment` payload with `action` set to `created`. Expect
+`202 Accepted`, then a run of the pull-request job in the `payments` folder.
+
 ## Buffering
 
 A delivery buffers for up to one hour, so a tenant that moves cells in that hour still

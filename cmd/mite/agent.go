@@ -1794,6 +1794,7 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				JobPath:    payload.JobPath,
 				Parameters: payload.Parameters,
 				Actor:      payload.Actor,
+				Cause:      payload.Cause,
 			})
 			httpStatus = triggerStatus
 			if triggerErr != nil {

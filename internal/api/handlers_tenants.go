@@ -91,6 +91,10 @@ type tenantPipelinesEntry struct {
 	// Badge carries spec.pipelines.badge. A tenant pipelines admin may write
 	// it, the same as exports.
 	Badge *v1alpha1.TenantBadgeSpec `json:"badge,omitempty"`
+
+	// Triggers carries spec.pipelines.triggers. A tenant pipelines admin may
+	// write it, the same as exports.
+	Triggers *v1alpha1.TenantTriggersSpec `json:"triggers,omitempty"`
 }
 
 // tenantNotificationsEntry is the JSON shape of spec.pipelines.notifications.
@@ -207,6 +211,7 @@ func tenantPipelinesEntryFromSpec(p *v1alpha1.TenantPipelinesSpec) *tenantPipeli
 	e.Retention = p.Retention
 	e.ConcurrencyLimits = p.ConcurrencyLimits
 	e.Badge = p.Badge
+	e.Triggers = p.Triggers
 	return e
 }
 
@@ -259,6 +264,7 @@ func tenantPipelinesSpecFromEntry(e *tenantPipelinesEntry) *v1alpha1.TenantPipel
 	spec.Retention = e.Retention
 	spec.ConcurrencyLimits = e.ConcurrencyLimits
 	spec.Badge = e.Badge
+	spec.Triggers = e.Triggers
 	return spec
 }
 
@@ -299,6 +305,14 @@ func validateTenantPipelines(p *tenantPipelinesEntry, namespaces []string) strin
 	}
 	if msg := validateConcurrencyLimits(p.ConcurrencyLimits); msg != "" {
 		return msg
+	}
+	if t := p.Triggers; t != nil {
+		if len(t.CommentPattern) > 256 {
+			return "pipelines.triggers.commentPattern is too long"
+		}
+		if _, err := regexp.Compile(t.CommentPattern); err != nil {
+			return "pipelines.triggers.commentPattern is invalid"
+		}
 	}
 	if r := p.Retention; r != nil {
 		if _, err := recordstore.ParseRetention(r.Runs); r.Runs != "" && err != nil {
@@ -630,7 +644,7 @@ func (s *Server) handleUpdateTenant(w http.ResponseWriter, r *http.Request, name
 			return
 		}
 		if !tenantSpecEqualExceptTenantOwned(stored.Spec, tenant.Spec) {
-			s.writeJSONError(w, http.StatusForbidden, "a tenant pipelines admin may change only exports and concurrency limits")
+			s.writeJSONError(w, http.StatusForbidden, "a tenant pipelines admin may change only exports, concurrency limits, badge, and triggers")
 			return
 		}
 	}
@@ -664,7 +678,7 @@ func (s *Server) handleDeleteTenant(w http.ResponseWriter, r *http.Request, name
 
 // tenantSpecEqualExceptTenantOwned reports whether a and b differ only in
 // the tenant-owned fields: spec.pipelines.exports, spec.pipelines.concurrencyLimits,
-// and spec.pipelines.badge. Both specs are copied before those fields are
+// spec.pipelines.badge, and spec.pipelines.triggers. Both specs are copied before those fields are
 // cleared, so neither argument changes.
 func tenantSpecEqualExceptTenantOwned(a, b v1alpha1.TenantSpec) bool {
 	strip := func(in v1alpha1.TenantSpec) v1alpha1.TenantSpec {
@@ -674,6 +688,7 @@ func tenantSpecEqualExceptTenantOwned(a, b v1alpha1.TenantSpec) bool {
 			out.Pipelines.Exports = nil
 			out.Pipelines.ConcurrencyLimits = nil
 			out.Pipelines.Badge = nil
+			out.Pipelines.Triggers = nil
 		}
 		return out
 	}

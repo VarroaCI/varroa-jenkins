@@ -763,6 +763,7 @@ func main() {
 				// the recorder's webhook responder over the bus. The core
 				// cluster answers every forge request.
 				apiDeps.ForgeRelay = forgerelay.Relay{Conn: busConn}
+				apiDeps.ForgePermission = forgerelay.Relay{Conn: busConn}
 				apiDeps.WebhookEnqueuer = api.NewBusWebhookEnqueuer(busConn)
 				apiDeps.CoreCluster = cluster
 				// The key file is mounted only when agentRunner is on. The

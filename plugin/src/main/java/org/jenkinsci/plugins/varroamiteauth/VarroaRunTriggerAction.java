@@ -174,6 +174,9 @@ public class VarroaRunTriggerAction implements RootAction {
             // The body supplies the actor, so the route normalizes it once.
             // The intent action and the Varroa cause then carry one value.
             String actor = VarroaUserCause.normalizeActor(body.optString("actor", ""));
+            // The cause names the forge event that asked for the run. An
+            // empty value keeps the default Varroa cause text.
+            String cause = body.optString("cause", "");
             JSONObject parameters = body.optJSONObject("parameters");
 
             // Look the item up untyped first: Jenkins.getItemByFullName(path, Job.class)
@@ -199,7 +202,7 @@ public class VarroaRunTriggerAction implements RootAction {
                 // The Varroa cause names the actor itself. A UserIdCause
                 // answers "anonymous" on a headless cell, which holds no
                 // Jenkins User record for the actor.
-                actions.add(new CauseAction(new VarroaUserCause(actor)));
+                actions.add(new CauseAction(new VarroaUserCause(actor, cause)));
             }
 
             // A redelivered command can carry the run id of a build that

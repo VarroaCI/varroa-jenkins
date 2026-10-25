@@ -1098,6 +1098,7 @@ type TriggerBuildRequest struct {
 	JobPath    string            `json:"jobPath"`
 	Parameters map[string]string `json:"parameters,omitempty"`
 	Actor      string            `json:"actor,omitempty"`
+	Cause      string            `json:"cause,omitempty"`
 }
 
 // TriggerBuild schedules a build on the local Jenkins through the Varroa
