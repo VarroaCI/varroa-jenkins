@@ -71,40 +71,6 @@ func doPipelinesRequest(t *testing.T, handler func(http.ResponseWriter, *http.Re
 	return rec
 }
 
-// TestComputeHealth asserts design D8's weather glyph rules over the
-// job's RecentResults window rather than its whole result history.
-func TestComputeHealth(t *testing.T) {
-	cases := []struct {
-		name   string
-		recent []string
-		want   string
-	}{
-		{"never run", nil, "unknown"},
-		{"all passed is clear", []string{"SUCCESS", "SUCCESS", "SUCCESS", "SUCCESS", "SUCCESS"}, "clear"},
-		{"one failure is cloudy", []string{"SUCCESS", "FAILURE"}, "cloudy"},
-		{"two failures is cloudy", []string{"FAILURE", "SUCCESS", "FAILURE"}, "cloudy"},
-		{"three failures is rain", []string{"FAILURE", "FAILURE", "FAILURE"}, "rain"},
-		{
-			// The job's fuller history holds three older failures, but
-			// the reader already trims RecentResults to the newest
-			// five finished runs, so those failures never reach this
-			// function: it sees only the recent success and reports
-			// clear.
-			"one recent success after three old failures reports clear",
-			[]string{"SUCCESS"},
-			"clear",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := computeHealth(recordstore.JobSummary{RecentResults: tc.recent})
-			if got != tc.want {
-				t.Fatalf("computeHealth(%v) = %q, want %q", tc.recent, got, tc.want)
-			}
-		})
-	}
-}
-
 // TestCauseSummary asserts causeSummary reads the plain string the
 // gateway writes, and falls back to the older object and array shapes.
 func TestCauseSummary(t *testing.T) {
@@ -171,7 +137,7 @@ func TestHandleListPipelines_UnionsCatalogAndRecords_TruncatedFlag(t *testing.T)
 		Tenant: "test-ns/ctrl-a", JobPath: "acme/app-a", Status: "COMPLETED", CreatedAt: base,
 	}
 	reader.jobSummaries["core/test-ns/ctrl-a"] = []recordstore.JobSummary{
-		{JobPath: "acme/app-a", RecentResults: []string{"SUCCESS"}, LastRun: &lastRun},
+		{JobPath: "acme/app-a", RecentRuns: []recordstore.HealthRun{{Result: "SUCCESS"}}, LastRun: &lastRun},
 	}
 	// 60 QUEUED runs so the running-now page for this tenant is full.
 	for i := 0; i < 60; i++ {
@@ -207,8 +173,8 @@ func TestHandleListPipelines_UnionsCatalogAndRecords_TruncatedFlag(t *testing.T)
 	if b.LastBuild != nil {
 		t.Fatalf("never-run job acme/app-b carries a lastBuild: %+v", b)
 	}
-	if b.Health != "unknown" {
-		t.Fatalf("never-run job health = %q, want unknown", b.Health)
+	if b.Health.Bucket != "unknown" || b.Health.Score != nil {
+		t.Fatalf("never-run job health = %+v, want unknown with no score", b.Health)
 	}
 	if !resp.Truncated {
 		t.Fatalf("expected truncated=true with 60 queued runs on one tenant")

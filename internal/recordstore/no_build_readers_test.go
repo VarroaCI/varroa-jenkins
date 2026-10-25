@@ -267,8 +267,8 @@ func TestJobSummaryExcludesAcceptedOnly(t *testing.T) {
 			if s.LastRun != nil {
 				t.Fatal("an accepted-only row must be no last run")
 			}
-			if len(s.RecentResults) != 0 {
-				t.Fatalf("recent results = %v, want none", s.RecentResults)
+			if len(s.RecentRuns) != 0 {
+				t.Fatalf("recent runs = %v, want none", s.RecentRuns)
 			}
 			if len(s.DurationTrendMs) != 0 {
 				t.Fatalf("duration trend = %v, want none", s.DurationTrendMs)

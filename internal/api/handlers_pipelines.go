@@ -75,8 +75,8 @@ type runningRunJSON struct {
 }
 
 type pipelineSummaryJSON struct {
-	JobPath string `json:"jobPath"`
-	Health  string `json:"health"`
+	JobPath string        `json:"jobPath"`
+	Health  JobHealthJSON `json:"health"`
 	// Kind is "pipeline", "multibranch", "organizationFolder", "branch", or
 	// "unknown". A declared item sets it. Otherwise the inventory and the
 	// run history set it. It is set at assembly, never on the row, because
@@ -160,14 +160,14 @@ type pipelineJobDetailJSON struct {
 	Kind string `json:"kind"`
 	// Pending is true when the tenant's complete inventory lacks this
 	// declared job. It is set at assembly, like Kind.
-	Pending         bool                    `json:"pending"`
-	Health          string                  `json:"health"`
-	TenantFolder    string                  `json:"tenantFolder"`
-	Tenant          string                  `json:"tenant"`
-	LastBuild       *runSummaryJSON         `json:"lastBuild,omitempty"`
-	DurationTrendMs []int64                 `json:"durationTrendMs,omitempty"`
-	Definition      *pipelineDefinitionJSON `json:"definition,omitempty"`
-	Triggers        *pipelineTriggersJSON   `json:"triggers,omitempty"`
+	Pending      bool                    `json:"pending"`
+	Health       JobHealthJSON           `json:"health"`
+	Trend        []JobTrendPointJSON     `json:"trend"`
+	TenantFolder string                  `json:"tenantFolder"`
+	Tenant       string                  `json:"tenant"`
+	LastBuild    *runSummaryJSON         `json:"lastBuild,omitempty"`
+	Definition   *pipelineDefinitionJSON `json:"definition,omitempty"`
+	Triggers     *pipelineTriggersJSON   `json:"triggers,omitempty"`
 	// Waiting lists the queued runs of this job that a concurrency cap
 	// holds. It is absent when none waits, or when the read failed.
 	Waiting      []runWaitEntry            `json:"waiting,omitempty"`
@@ -401,35 +401,10 @@ func latestChangeMessage(raw json.RawMessage) string {
 	return entries[len(entries)-1].Message
 }
 
-// computeHealth implements design D8's weather glyph: clear when every
-// one of the job's last five finished runs passed, cloudy when one or
-// two failed, and rain when three or more failed. unknown when the job
-// has no finished run yet, whether it has never run or every run so
-// far is still queued or running.
-func computeHealth(js recordstore.JobSummary) string {
-	if len(js.RecentResults) == 0 {
-		return "unknown"
-	}
-	var failed int
-	for _, result := range js.RecentResults {
-		if result != "SUCCESS" {
-			failed++
-		}
-	}
-	switch {
-	case failed == 0:
-		return "clear"
-	case failed <= 2:
-		return "cloudy"
-	default:
-		return "rain"
-	}
-}
-
 // buildPipelineSummary converts one job's record-store summary into the
 // Pipelines table row.
 func buildPipelineSummary(js recordstore.JobSummary) pipelineSummaryJSON {
-	out := pipelineSummaryJSON{JobPath: js.JobPath, Health: computeHealth(js), DurationTrendMs: js.DurationTrendMs}
+	out := pipelineSummaryJSON{JobPath: js.JobPath, Health: computeJobHealth(js.RecentRuns), DurationTrendMs: js.DurationTrendMs}
 	if js.LastRun != nil {
 		rs := buildRunSummary(*js.LastRun)
 		out.LastBuild = &rs
@@ -568,7 +543,7 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if _, ok := jobs[dj.Path]; !ok {
-				jobs[dj.Path] = pipelineSummaryJSON{JobPath: dj.Path, Health: "unknown"}
+				jobs[dj.Path] = pipelineSummaryJSON{JobPath: dj.Path, Health: computeJobHealth(nil)}
 			}
 			// A record summary writes no kind. A declared item sets the
 			// kind when none is set, and a declared kind replaces a stored
@@ -630,7 +605,7 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 			if _, ok := jobs[p]; ok || !l.allowed(p) {
 				continue
 			}
-			jobs[p] = pipelineSummaryJSON{JobPath: p, Health: "unknown"}
+			jobs[p] = pipelineSummaryJSON{JobPath: p, Health: computeJobHealth(nil)}
 		}
 	}
 
@@ -717,7 +692,13 @@ func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	detail := pipelineJobDetailJSON{JobPath: jobPath, Health: computeHealth(summary), TenantFolder: ref.Folder, Tenant: ref.Tenant, DurationTrendMs: summary.DurationTrendMs}
+	detail := pipelineJobDetailJSON{
+		JobPath:      jobPath,
+		Health:       computeJobHealth(summary.RecentRuns),
+		Trend:        buildJobTrend(summary.RecentRuns),
+		TenantFolder: ref.Folder,
+		Tenant:       ref.Tenant,
+	}
 	if summary.LastRun != nil {
 		rs := buildRunSummary(*summary.LastRun)
 		detail.LastBuild = &rs

@@ -190,7 +190,7 @@ func TestHandleListPipelines_RecordOnlyJobReportsUnknownKind(t *testing.T) {
 	authz := pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a")
 	reader := newFakeRecordReader()
 	reader.jobSummaries["core/test-ns/ctrl-a"] = []recordstore.JobSummary{
-		{JobPath: "acme/undeclared", RecentResults: []string{"SUCCESS"}},
+		{JobPath: "acme/undeclared", RecentRuns: []recordstore.HealthRun{{Result: "SUCCESS"}}},
 	}
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
@@ -208,7 +208,7 @@ func TestHandleListPipelines_RecordRowDoesNotClearDeclaredKind(t *testing.T) {
 	authz := pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a")
 	reader := newFakeRecordReader()
 	reader.jobSummaries["core/test-ns/ctrl-a"] = []recordstore.JobSummary{
-		{JobPath: "acme/checkout-api", RecentResults: []string{"SUCCESS"}},
+		{JobPath: "acme/checkout-api", RecentRuns: []recordstore.HealthRun{{Result: "SUCCESS"}}},
 	}
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
@@ -352,8 +352,8 @@ func TestHandleListPipelines_NarrowedCallerReadsOnlyItsOwnJobs(t *testing.T) {
 	authz := narrowedPaymentsAuthorizer("release/*")
 	reader := newFakeRecordReader()
 	reader.jobSummaries["core/payments"] = []recordstore.JobSummary{
-		{JobPath: "payments/release/eu", RecentResults: []string{"SUCCESS"}},
-		{JobPath: "payments/build/nightly", RecentResults: []string{"SUCCESS"}},
+		{JobPath: "payments/release/eu", RecentRuns: []recordstore.HealthRun{{Result: "SUCCESS"}}},
+		{JobPath: "payments/build/nightly", RecentRuns: []recordstore.HealthRun{{Result: "SUCCESS"}}},
 	}
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
@@ -442,7 +442,7 @@ func TestHandleListPipelines_NarrowedCallerStillReadsTheTenantPage(t *testing.T)
 	authz := narrowedPaymentsAuthorizer("release/*")
 	reader := newFakeRecordReader()
 	reader.jobSummaries["core/payments"] = []recordstore.JobSummary{
-		{JobPath: "payments/build/nightly", RecentResults: []string{"SUCCESS"}},
+		{JobPath: "payments/build/nightly", RecentRuns: []recordstore.HealthRun{{Result: "SUCCESS"}}},
 	}
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
@@ -460,7 +460,7 @@ func TestHandleListPipelines_HeldTenantListsNoDeclaredJobs(t *testing.T) {
 	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantUnknownKeyItems}
 	reader := newFakeRecordReader()
 	reader.jobSummaries["core/payments"] = []recordstore.JobSummary{
-		{JobPath: "payments/release/eu", RecentResults: []string{"SUCCESS"}},
+		{JobPath: "payments/release/eu", RecentRuns: []recordstore.HealthRun{{Result: "SUCCESS"}}},
 	}
 	srv := pipelinesTestServer(client, resolverAuthorizer("payments"), reader, nil)
 

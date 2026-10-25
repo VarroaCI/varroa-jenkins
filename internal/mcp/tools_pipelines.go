@@ -15,9 +15,10 @@ import (
 )
 
 // =============================================================================
-// Pipeline tools (13): run_pipeline, list_runs, get_run, get_run_log,
-// list_job_branches, list_fleet_locks, release_fleet_lock, proceed_run_input,
-// abort_run_input, replay_run, restart_run, scan_multibranch, get_tenant_cell
+// Pipeline tools (14): run_pipeline, list_runs, get_run, get_run_log,
+// list_job_branches, get_job_health, list_fleet_locks, release_fleet_lock,
+// proceed_run_input, abort_run_input, replay_run, restart_run,
+// scan_multibranch, get_tenant_cell
 //
 // Design D1a: these tools call the same internal services the
 // pipelines HTTP handlers call (internal/api's RunPipeline, ListRuns,
@@ -46,6 +47,7 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 	registerGetRunTool(mcpServer, deps)
 	registerGetRunLogTool(mcpServer, deps)
 	registerListJobBranchesTool(mcpServer, deps)
+	registerGetJobHealthTool(mcpServer, deps)
 	registerListFleetLocksTool(mcpServer, deps)
 	registerReleaseFleetLockTool(mcpServer, deps)
 	registerProceedRunInputTool(mcpServer, deps)
@@ -436,6 +438,34 @@ func registerListJobBranchesTool(mcpServer *server.MCPServer, deps *api.Dependen
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
 		return resultJSON(list)
+	})
+}
+
+// registerGetJobHealthTool registers get_job_health: the health and the
+// run trend of one job. It calls the same service the job detail reads,
+// so the two answers match.
+func registerGetJobHealthTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	getJobHealthTool := mcp.NewTool("get_job_health",
+		mcp.WithDescription("Get one job's health and its run trend. Health counts the job's last ten finished build runs: SUCCESS passes; FAILURE, UNSTABLE, and ABORTED fail; INTERRUPTED and NOT_BUILT do not count. The trend lists those runs newest first, with duration and suite counters when the run recorded them."),
+		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant name")),
+		mcp.WithString("job", mcp.Required(), mcp.Description("Job path, as the job page names it")),
+	)
+	addTool(mcpServer, kindRead, getJobHealthTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		claims, toolErr := requirePipelineCaller(ctx, deps)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		args := getArgs(req)
+		tenant := strArg(args, "tenant")
+		job := strArg(args, "job")
+		if tenant == "" || job == "" {
+			return mcp.NewToolResultError("tenant and job are required"), nil
+		}
+		result, serr := api.NewServer(deps).JobHealth(ctx, claims, tenant, job)
+		if serr != nil {
+			return mcp.NewToolResultError(serr.Error()), nil
+		}
+		return resultJSON(result)
 	})
 }
 

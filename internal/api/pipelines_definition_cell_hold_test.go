@@ -208,7 +208,7 @@ func TestListPipelines_PlacedTenantLintHoldDeclaresNoJob(t *testing.T) {
 	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantLintFindingItems}
 	reader := newFakeRecordReader()
 	reader.jobSummaries["core/payments"] = []recordstore.JobSummary{
-		{JobPath: "payments/job", RecentResults: []string{"SUCCESS"}},
+		{JobPath: "payments/job", RecentRuns: []recordstore.HealthRun{{Result: "SUCCESS"}}},
 	}
 	srv := pipelinesTestServer(client, resolverAuthorizer("payments"), reader, nil)
 
@@ -304,7 +304,7 @@ func TestListPipelines_PlacedTenantCellHoldDeclaresNoJob(t *testing.T) {
 	client.controllers["cell-1"].Status.Cell = itemsHeldOn("payments")
 	reader := newFakeRecordReader()
 	reader.jobSummaries["core/payments"] = []recordstore.JobSummary{
-		{JobPath: "payments/job", RecentResults: []string{"SUCCESS"}},
+		{JobPath: "payments/job", RecentRuns: []recordstore.HealthRun{{Result: "SUCCESS"}}},
 	}
 	srv := pipelinesTestServer(client, resolverAuthorizer("payments"), reader, nil)
 

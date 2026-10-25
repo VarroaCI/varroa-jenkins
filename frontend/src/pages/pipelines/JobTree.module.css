@@ -95,15 +95,6 @@
   border: 0;
 }
 
-.healthCell {
-  display: flex;
-  align-items: center;
-}
-
-.healthClear { color: var(--ok-text); }
-.healthCloudy { color: var(--warn-text); }
-.healthRain { color: var(--bad-text); }
-
 .durationCell {
   display: flex;
   align-items: center;

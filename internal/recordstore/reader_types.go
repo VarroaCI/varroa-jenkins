@@ -230,10 +230,23 @@ type Intent struct {
 // JobSummary.LastRun and DurationTrendMs draw from.
 const jobSummaryTrendSize = 10
 
-// jobHealthRecentResultsSize is how many of a job's most recent
-// finished runs JobSummary.RecentResults draws from. Design D8 computes
-// the pipelines table's health glyph from exactly this many runs.
-const jobHealthRecentResultsSize = 5
+// JobHealthWindow is how many of a job's most recent finished build
+// runs JobSummary.RecentRuns holds. The API computes a job's health
+// from exactly this window.
+const JobHealthWindow = 10
+
+// HealthRun is one finished build run of a job, as the health window
+// and the job trend read it. A nil pointer field means the run did not
+// record that value.
+type HealthRun struct {
+	RunID        string
+	BuildNumber  *int64
+	Result       string
+	DurationMs   *int64
+	TestsTotal   *int32
+	TestsFailed  *int32
+	TestsSkipped *int32
+}
 
 // JobSummary is one job's run-history summary, derived only from record
 // data: no job definition, no trigger state, and no job that has never
@@ -241,9 +254,9 @@ const jobHealthRecentResultsSize = 5
 // newest run regardless of status. DurationTrendMs holds the most
 // recent runs' duration_ms, newest first, for at most
 // jobSummaryTrendSize runs, skipping a run with no duration yet.
-// RecentResults holds the job's most recent jobHealthRecentResultsSize
-// finished runs' results, newest first; a run with no result yet
-// (QUEUED or RUNNING) is not finished and never appears here.
+// RecentRuns holds the job's most recent JobHealthWindow finished
+// build runs, newest first; a run with no result yet (QUEUED or
+// RUNNING) is not finished and never appears here.
 // MedianQueueWaitMs is nil when the tenant's job has no run in the
 // window with both queued_at and started_at set. ListJobSummaries
 // alone sets it; GetJobSummary leaves it nil, because the job detail
@@ -252,7 +265,7 @@ type JobSummary struct {
 	JobPath           string
 	LastRun           *Run
 	DurationTrendMs   []int64
-	RecentResults     []string
+	RecentRuns        []HealthRun
 	MedianQueueWaitMs *int64
 }
 

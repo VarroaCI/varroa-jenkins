@@ -52,6 +52,7 @@ var classes = map[string]DataClass{
 	"list_jenkins_controllers":     ClassMetadata,
 	"list_runs":                    ClassMetadata,
 	"list_job_branches":            ClassMetadata,
+	"get_job_health":               ClassMetadata,
 	"list_fleet_locks":             ClassMetadata,
 	"list_cell_pools":              ClassMetadata,
 	"get_cell_pool":                ClassMetadata,

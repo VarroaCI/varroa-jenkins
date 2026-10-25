@@ -208,7 +208,7 @@ describe("TenantHome", () => {
 
   it("renders a never-run job with an empty last build and no health glyph", async () => {
     mockListPipelines.mockResolvedValue({
-      items: [{ jobPath: "payments/checkout-api/main", health: "unknown" }],
+      items: [{ jobPath: "payments/checkout-api/main", health: { bucket: "unknown", window: 10, counted: 0, passed: 0 } }],
       runningNow: [],
       truncated: false,
     });
@@ -220,13 +220,13 @@ describe("TenantHome", () => {
 
   it("names the health state for a screen reader", async () => {
     mockListPipelines.mockResolvedValue({
-      items: [{ jobPath: "payments/checkout-api/main", health: "rain" }],
+      items: [{ jobPath: "payments/checkout-api/main", health: { bucket: "rainy", window: 10, counted: 3, passed: 0 } }],
       runningNow: [],
       truncated: false,
     });
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("img", { name: /Rain/ })).toBeInTheDocument();
+      expect(screen.getByRole("img", { name: /Rainy/ })).toBeInTheDocument();
     });
   });
 

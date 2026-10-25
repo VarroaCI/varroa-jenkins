@@ -99,7 +99,8 @@ const jobDetail = (overrides: Record<string, unknown> = {}) => ({
   jobPath: "payments/checkout-api/main",
   tenantFolder: "",
   tenant: "acme",
-  health: "clear",
+  health: { bucket: "sunny", window: 10, counted: 10, passed: 10, score: 100 },
+  trend: [],
   last30Days: null,
   dependencies: { upstream: [], downstream: [] },
   pending: false,
@@ -113,6 +114,19 @@ describe("PipelinePage", () => {
     mockListRuns.mockResolvedValue({ items: [] });
     mockCreateRun.mockReset();
     vi.mocked(usePermissions).mockReturnValue({ data: undefined } as unknown as ReturnType<typeof usePermissions>);
+  });
+
+  it("shows the Health card with the job's trend", async () => {
+    mockGetPipelineJob.mockResolvedValue(
+      jobDetail({
+        kind: "pipeline",
+        health: { bucket: "sunny", window: 10, counted: 1, passed: 1, score: 100 },
+        trend: [{ runId: "run-1", buildNumber: 1, result: "SUCCESS", durationMs: 60000 }],
+      }),
+    );
+    renderPage();
+    await screen.findByText("Health");
+    expect(screen.getByText(/1 of 1 builds passed/)).toBeInTheDocument();
   });
 
   it("lists waiting runs", async () => {

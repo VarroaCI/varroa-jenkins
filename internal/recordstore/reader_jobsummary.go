@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -56,7 +57,7 @@ func (r *pgReader) GetJobSummary(ctx context.Context, cluster, tenant, jobPath s
 	return JobSummary{JobPath: jobPath}, nil
 }
 
-// jobSummaries computes RecentResults, LastRun, and DurationTrendMs for
+// jobSummaries computes RecentRuns, LastRun, and DurationTrendMs for
 // every job under cluster and tenant in three grouped queries, so the
 // query count stays fixed no matter how many jobs a tenant has. A
 // non-empty jobPath narrows every query to that one job. All three
@@ -84,7 +85,7 @@ func (r *pgReader) jobSummaries(ctx context.Context, cluster, tenant, jobPath st
 		return JobSummary{JobPath: path}
 	}
 
-	if err := addJobRecentResults(ctx, tx, args, jobFilter, summaries, getOrCreate); err != nil {
+	if err := addJobRecentRuns(ctx, tx, args, jobFilter, summaries, getOrCreate); err != nil {
 		return nil, err
 	}
 	if err := addJobLastRuns(ctx, tx, args, jobFilter, summaries, getOrCreate); err != nil {
@@ -99,30 +100,32 @@ func (r *pgReader) jobSummaries(ctx context.Context, cluster, tenant, jobPath st
 	return summaries, nil
 }
 
-// addJobRecentResults fills RecentResults with each job's newest
-// jobHealthRecentResultsSize finished runs' results, newest first. The
-// lateral subquery runs once per distinct job_path, so the query count
-// stays fixed no matter how many runs a job has, and a run with no
-// result yet (QUEUED or RUNNING) never enters it.
+// addJobRecentRuns fills RecentRuns with each job's newest
+// JobHealthWindow finished build runs, newest first. The lateral
+// subquery runs once per distinct job_path, so the query count stays
+// fixed no matter how many runs a job has, and a run with no result
+// yet (QUEUED or RUNNING) never enters it.
 //
 // A row that records no build can still pass the result-is-not-null
 // filter — a TRIGGER_FAILED row always does — so the lateral subquery
 // needs its own exclusion. Without it a mixed job shows a false fail
 // dot.
-func addJobRecentResults(
+func addJobRecentRuns(
 	ctx context.Context, db rowQuerier, args []any, jobFilter string, summaries map[string]JobSummary, getOrCreate func(string) JobSummary,
 ) error {
-	recentArgs := append(append([]any{}, args...), jobHealthRecentResultsSize)
+	recentArgs := append(append([]any{}, args...), JobHealthWindow)
 	sizeParam := len(recentArgs)
 	rows, err := db.Query(ctx, fmt.Sprintf(`
-		SELECT jobs.job_path, recent.result
+		SELECT jobs.job_path, recent.run_id, recent.build_number, recent.result, recent.duration_ms,
+		       recent.tests_total, recent.tests_failed, recent.tests_skipped
 		FROM (
 			SELECT DISTINCT job_path
 			FROM varroa.runs
 			WHERE cluster = $1 AND tenant = $2 %[1]s
 		) jobs
 		CROSS JOIN LATERAL (
-			SELECT result, created_at, run_id
+			SELECT run_id, build_number, result, duration_ms, tests_total, tests_failed, tests_skipped,
+			       created_at
 			FROM varroa.runs r
 			WHERE r.cluster = $1 AND r.tenant = $2 AND r.job_path = jobs.job_path AND r.result IS NOT NULL
 			  AND `+recordsBuildRunSQL+`
@@ -132,21 +135,25 @@ func addJobRecentResults(
 		ORDER BY jobs.job_path, recent.created_at DESC, recent.run_id DESC
 	`, jobFilter, sizeParam), recentArgs...)
 	if err != nil {
-		return fmt.Errorf("list job recent results: %w", err)
+		return fmt.Errorf("list job recent runs: %w", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var path, result string
-		if err := rows.Scan(&path, &result); err != nil {
-			return fmt.Errorf("scan job recent result: %w", err)
+		var path string
+		var runID uuid.UUID
+		var run HealthRun
+		if err := rows.Scan(&path, &runID, &run.BuildNumber, &run.Result, &run.DurationMs,
+			&run.TestsTotal, &run.TestsFailed, &run.TestsSkipped); err != nil {
+			return fmt.Errorf("scan job recent run: %w", err)
 		}
+		run.RunID = runID.String()
 		s := getOrCreate(path)
-		s.RecentResults = append(s.RecentResults, result)
+		s.RecentRuns = append(s.RecentRuns, run)
 		summaries[path] = s
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("list job recent results: %w", err)
+		return fmt.Errorf("list job recent runs: %w", err)
 	}
 	return nil
 }

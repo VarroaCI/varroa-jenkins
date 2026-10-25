@@ -478,7 +478,7 @@ export function createPipelineSummary(
 ): PipelineSummary {
   return {
     jobPath: "payments/app-a",
-    health: "unknown",
+    health: { bucket: "unknown", window: 10, counted: 0, passed: 0 },
     kind: "pipeline",
     pending: false,
     ...overrides,

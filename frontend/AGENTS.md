@@ -236,7 +236,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   lock under the tenant's own prefix that another tenant's run holds publishes
   its `lock` notification on the holder's subject, which the tenant stream does
   not carry), `PipelinePage.tsx` (`/pipelines/:tenant/:job`, one job's
-  health, definition, and run list, and hosts `RunDrawer.tsx`'s parameter form; a `wait` stream frame of its own job refetches the job read, which feeds the Waiting card, and the runs table),
+  health (the `JobHealthCard.tsx` Health card, which draws the result strip, the duration chart, and the test chart from `job.trend`), definition, and run list, and hosts `RunDrawer.tsx`'s parameter form; a `wait` stream frame of its own job refetches the job read, which feeds the Waiting card, and the runs table),
   `BuildPage.tsx` (`/pipelines/:tenant/:job/:run`, one run's detail; owns both
   `useEventStream` calls, the tenant run stream and the run log stream; renders
   the run's `summary` as a header row, renders its failure `digest` in a
@@ -317,8 +317,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   (`buildJobTree`, `defaultOpenPaths`, `visibleRows`); it imports no React, so
   every tree rule is tested with no render. `JobTree.tsx` renders one `<tr>`
   per visible node inside `TenantHome.tsx`'s own `<tbody>`, keeping the six
-  frozen columns; it also owns `formatDuration`, the health glyph, and the
-  sparkline, which `TenantHome.tsx` imports back for its Running now tiles. A
+  frozen columns; it also owns `formatDuration` and the sparkline. The health glyph lives in `HealthGlyph.tsx`, which the tree and the Health card share, which `TenantHome.tsx` imports back for its Running now tiles. A
   folded node's descendant rows are **not rendered at all** — never hidden
   with a style, so the accessibility tree matches the page. Indentation rides
   `--depth`, declared in `JobTree.module.css` and set per row by an inline

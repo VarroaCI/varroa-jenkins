@@ -3354,21 +3354,8 @@
           "dependencies": {
             "$ref": "#/components/schemas/components_schemas_PipelineDependencies"
           },
-          "durationTrendMs": {
-            "items": {
-              "format": "int64",
-              "type": "integer"
-            },
-            "type": "array"
-          },
           "health": {
-            "enum": [
-              "clear",
-              "cloudy",
-              "rain",
-              "unknown"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/components_schemas_JobHealth"
           },
           "jobPath": {
             "type": "string"
@@ -3422,6 +3409,13 @@
             "description": "The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.\n",
             "type": "string"
           },
+          "trend": {
+            "description": "The job's finished build runs in the health window, newest first. Empty when the job has no finished run.\n",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_JobTrendPoint"
+            },
+            "type": "array"
+          },
           "triggers": {
             "$ref": "#/components/schemas/components_schemas_PipelineTriggers"
           },
@@ -3439,6 +3433,7 @@
           "kind",
           "pending",
           "health",
+          "trend",
           "last30Days",
           "tenantFolder",
           "tenant",
@@ -3538,14 +3533,7 @@
             "type": "array"
           },
           "health": {
-            "description": "The weather glyph, computed from the last five runs: clear when all passed, cloudy when one or two failed, rain when three or more failed, unknown for a job that has never run.\n",
-            "enum": [
-              "clear",
-              "cloudy",
-              "rain",
-              "unknown"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/components_schemas_JobHealth"
           },
           "jobPath": {
             "type": "string"
@@ -11239,6 +11227,95 @@
         ],
         "type": "object"
       },
+      "components_schemas_JobHealth": {
+        "description": "One job's health over its last JobHealthWindow finished build runs. SUCCESS passes. FAILURE, UNSTABLE, and ABORTED fail. INTERRUPTED and NOT_BUILT do not count.\n",
+        "properties": {
+          "bucket": {
+            "description": "The weather bucket of the score: above 80 sunny, above 60 partlyCloudy, above 40 cloudy, above 20 rainy, and anything lower stormy. unknown when no run counts.\n",
+            "enum": [
+              "sunny",
+              "partlyCloudy",
+              "cloudy",
+              "rainy",
+              "stormy",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "counted": {
+            "description": "The number of runs in the window that count.",
+            "type": "integer"
+          },
+          "passed": {
+            "description": "The number of counted runs that passed.",
+            "type": "integer"
+          },
+          "score": {
+            "description": "The percentage of counted runs that passed, rounded down. Absent when no run counts.",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "window": {
+            "description": "The number of recent finished build runs the health reads.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bucket",
+          "window",
+          "counted",
+          "passed"
+        ],
+        "type": "object"
+      },
+      "components_schemas_JobTrendPoint": {
+        "description": "One finished build run of a job's trend. Points are newest first.",
+        "properties": {
+          "buildNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "durationMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "result": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "tests": {
+            "$ref": "#/components/schemas/components_schemas_JobTrendTests"
+          }
+        },
+        "required": [
+          "runId",
+          "result"
+        ],
+        "type": "object"
+      },
+      "components_schemas_JobTrendTests": {
+        "description": "One run's suite counters. Passed is the total minus the failed and skipped counters, never below zero.\n",
+        "properties": {
+          "failed": {
+            "type": "integer"
+          },
+          "passed": {
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "passed",
+          "failed",
+          "skipped"
+        ],
+        "type": "object"
+      },
       "components_schemas_KeyMeta": {
         "additionalProperties": false,
         "description": "Non-secret metadata for an API key.",
@@ -11946,21 +12023,8 @@
           "dependencies": {
             "$ref": "#/components/schemas/components_schemas_PipelineDependencies"
           },
-          "durationTrendMs": {
-            "items": {
-              "format": "int64",
-              "type": "integer"
-            },
-            "type": "array"
-          },
           "health": {
-            "enum": [
-              "clear",
-              "cloudy",
-              "rain",
-              "unknown"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/components_schemas_JobHealth"
           },
           "jobPath": {
             "type": "string"
@@ -12014,6 +12078,13 @@
             "description": "The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.\n",
             "type": "string"
           },
+          "trend": {
+            "description": "The job's finished build runs in the health window, newest first. Empty when the job has no finished run.\n",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_JobTrendPoint"
+            },
+            "type": "array"
+          },
           "triggers": {
             "$ref": "#/components/schemas/components_schemas_PipelineTriggers"
           },
@@ -12031,6 +12102,7 @@
           "kind",
           "pending",
           "health",
+          "trend",
           "last30Days",
           "tenantFolder",
           "tenant",
@@ -12303,14 +12375,7 @@
             "type": "array"
           },
           "health": {
-            "description": "The weather glyph, computed from the last five runs: clear when all passed, cloudy when one or two failed, rain when three or more failed, unknown for a job that has never run.\n",
-            "enum": [
-              "clear",
-              "cloudy",
-              "rain",
-              "unknown"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/components_schemas_JobHealth"
           },
           "jobPath": {
             "type": "string"
