@@ -176,6 +176,9 @@ type BusHandler struct {
 	// suppresses the next attempt. Zero means
 	// defaultJobScheduleStreamMissingTTL; tests shrink it.
 	scheduleStreamMissingTTL time.Duration
+	// scheduleNow is the clock of the job.schedules and job.branches
+	// negative caches. Nil means time.Now; tests step it.
+	scheduleNow func() time.Time
 	// branchRetained holds, per connection ("ns/name"), the multibranch
 	// inventory set that has not yet published as a job.branches
 	// envelope. It shares scheduleMu and the job-schedule TTL.

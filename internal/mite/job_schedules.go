@@ -58,6 +58,14 @@ func (h *BusHandler) jobScheduleStreamMissingTTL() time.Duration {
 	return defaultJobScheduleStreamMissingTTL
 }
 
+// scheduleClock returns the negative-cache clock, or time.Now when unset.
+func (h *BusHandler) scheduleClock() time.Time {
+	if h.scheduleNow != nil {
+		return h.scheduleNow()
+	}
+	return time.Now()
+}
+
 // handleJobSchedules is OnSnapshot's post-strip hook for the job-schedule
 // set. When the snapshot carried a set, it replaces any retained set for
 // this connection — a later snapshot's set always wins over an earlier
@@ -100,7 +108,7 @@ func (h *BusHandler) jobScheduleStreamMissing(key string) bool {
 	h.scheduleMu.Lock()
 	defer h.scheduleMu.Unlock()
 	until, ok := h.scheduleStreamMissingUntil[key]
-	return ok && time.Now().Before(until)
+	return ok && h.scheduleClock().Before(until)
 }
 
 // armJobScheduleStreamMissing arms key's negative cache after a failed
@@ -110,7 +118,7 @@ func (h *BusHandler) armJobScheduleStreamMissing(key string) {
 	if h.scheduleStreamMissingUntil == nil {
 		h.scheduleStreamMissingUntil = make(map[string]time.Time)
 	}
-	h.scheduleStreamMissingUntil[key] = time.Now().Add(h.jobScheduleStreamMissingTTL())
+	h.scheduleStreamMissingUntil[key] = h.scheduleClock().Add(h.jobScheduleStreamMissingTTL())
 	h.scheduleMu.Unlock()
 }
 

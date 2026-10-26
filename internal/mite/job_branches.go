@@ -119,7 +119,7 @@ func (h *BusHandler) jobBranchStreamMissing(key string) bool {
 	h.scheduleMu.Lock()
 	defer h.scheduleMu.Unlock()
 	until, ok := h.branchStreamMissingUntil[key]
-	return ok && time.Now().Before(until)
+	return ok && h.scheduleClock().Before(until)
 }
 
 // armJobBranchStreamMissing arms key's negative cache after a failed
@@ -129,7 +129,7 @@ func (h *BusHandler) armJobBranchStreamMissing(key string) {
 	if h.branchStreamMissingUntil == nil {
 		h.branchStreamMissingUntil = make(map[string]time.Time)
 	}
-	h.branchStreamMissingUntil[key] = time.Now().Add(h.jobScheduleStreamMissingTTL())
+	h.branchStreamMissingUntil[key] = h.scheduleClock().Add(h.jobScheduleStreamMissingTTL())
 	h.scheduleMu.Unlock()
 }
 

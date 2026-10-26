@@ -386,7 +386,21 @@ func TestOnSnapshot_JobSchedule_RetainedSetPublishesOnLaterTick(t *testing.T) {
 func TestOnSnapshot_JobSchedule_StreamMissingNegativeCache(t *testing.T) {
 	pub := &fakePublisher{syncFailLeft: 1000, syncErr: errStreamMissingForTest}
 	h, _ := newJobScheduleTestHandler(t, pub, nil)
-	h.scheduleStreamMissingTTL = 30 * time.Millisecond
+
+	// The negative cache reads a stepped clock, so the test never
+	// depends on how long the runner takes between snapshots.
+	var clockMu sync.Mutex
+	now := time.Unix(1_700_000_000, 0)
+	h.scheduleNow = func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return now
+	}
+	advance := func(d time.Duration) {
+		clockMu.Lock()
+		now = now.Add(d)
+		clockMu.Unlock()
+	}
 
 	snap := &mitev1.StateSnapshot{JobSchedules: oneRowSet()}
 	h.OnSnapshot("ctrl1", "ns1", snap)
@@ -394,6 +408,8 @@ func TestOnSnapshot_JobSchedule_StreamMissingNegativeCache(t *testing.T) {
 
 	// Several ticks inside the negative-cache window make no further
 	// attempt.
+	ttl := h.jobScheduleStreamMissingTTL()
+	advance(ttl / 2)
 	for i := 0; i < 5; i++ {
 		h.OnSnapshot("ctrl1", "ns1", &mitev1.StateSnapshot{})
 	}
@@ -401,7 +417,7 @@ func TestOnSnapshot_JobSchedule_StreamMissingNegativeCache(t *testing.T) {
 		t.Fatalf("syncCalls = %d, want 1 while the negative cache is armed", got)
 	}
 
-	time.Sleep(60 * time.Millisecond)
+	advance(ttl)
 	h.OnSnapshot("ctrl1", "ns1", &mitev1.StateSnapshot{})
 	waitFor(t, func() bool { return pub.syncCalls == 2 }, 5*time.Second, "no retry after the negative cache expired")
 }
