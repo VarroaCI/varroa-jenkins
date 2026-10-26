@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.7.0...v0.8.0) (2026-10-26)
+
+
+### Features
+
+* **api:** start a run from a pull-request comment or a check re-run ([04b3180](https://github.com/VarroaCI/varroa-jenkins/commit/04b31807ed105aded41defd140e4537abb46f940))
+* **pipelines:** serve an anonymous build badge per job ([efd1b11](https://github.com/VarroaCI/varroa-jenkins/commit/efd1b112c8cba9086b6ce78f2b94f547dd4561ce))
+* **pipelines:** show job health and run trends ([f14e00e](https://github.com/VarroaCI/varroa-jenkins/commit/f14e00e200aefcd1be038a2e5932f3ea3a4a5cce))
+
+
+### Bug Fixes
+
+* **plugin-lock:** report jenkins-plugin-cli security warnings ([a8f8b88](https://github.com/VarroaCI/varroa-jenkins/commit/a8f8b8819ed5df631353f3e1148912f418926901))
+
 ## [0.7.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.6.0...v0.7.0) (2026-10-25)
 
 
