@@ -17,6 +17,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -1132,7 +1133,7 @@ func TestComposeBundle_PinPreflightAllClear(t *testing.T) {
 		},
 		Status: v1alpha1.CatalogItemStatus{
 			Valid:   true,
-			Content: "plugins:\n  - artifactId: git\n    version: 5.10.1\n",
+			Content: "plugins:\n  - artifactId: git\n    version: " + baselinePluginVersion(t, "git") + "\n",
 		},
 	}
 	composer := bundle.NewComposer(fc, nil, t.TempDir(), "")
@@ -1201,4 +1202,18 @@ func TestComposeBundle_GitSecretRefAnnotationsErrorFailsClosed(t *testing.T) {
 	if !found {
 		t.Errorf("expected host-scoping error in preview errors (fail closed), got: %v", compResp.Preview.Errors)
 	}
+}
+
+// baselinePluginVersion returns the embedded baseline pin of one plugin, so a
+// test that needs a clear preflight follows every lock refresh.
+func baselinePluginVersion(t *testing.T, artifactID string) string {
+	t.Helper()
+	set, _ := pluginlock.Resolve("")
+	for _, e := range set {
+		if e.ArtifactID == artifactID {
+			return e.Version
+		}
+	}
+	t.Fatalf("baseline has no pin for %q", artifactID)
+	return ""
 }

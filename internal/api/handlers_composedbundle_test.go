@@ -517,7 +517,7 @@ func TestPreviewComposedBundle_PinPreflightWithoutSeparateRequest(t *testing.T) 
 
 func TestPreviewComposedBundle_PinPreflightAllClear(t *testing.T) {
 	client := newBundleTestClient()
-	client.addItem(pluginItem("clean-plugin-item", "plugins:\n  - artifactId: git\n    version: 5.10.1\n"))
+	client.addItem(pluginItem("clean-plugin-item", "plugins:\n  - artifactId: git\n    version: "+baselinePluginVersion(t, "git")+"\n"))
 	srv := newBundleParityServer(client, "varroa-system")
 
 	spec := v1alpha1.ComposedBundleSpec{
@@ -739,4 +739,18 @@ func TestValidateComposedBundle_PathSegmentRoute_NoTemplateIsEmptyArray(t *testi
 	if resp.PipelineTemplates == nil || len(resp.PipelineTemplates) != 0 {
 		t.Errorf("pipelineTemplates = %#v, want a non-nil empty array", resp.PipelineTemplates)
 	}
+}
+
+// baselinePluginVersion returns the embedded baseline pin of one plugin, so a
+// test that needs a clear preflight follows every lock refresh.
+func baselinePluginVersion(t *testing.T, artifactID string) string {
+	t.Helper()
+	set, _ := pluginlock.Resolve("")
+	for _, e := range set {
+		if e.ArtifactID == artifactID {
+			return e.Version
+		}
+	}
+	t.Fatalf("baseline has no pin for %q", artifactID)
+	return ""
 }
