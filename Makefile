@@ -1,4 +1,4 @@
-.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-generated-test check-comments check-outbound check-terminology outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
+.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-generated-test check-plugin-advisories-test check-comments check-outbound check-terminology outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
 
 GIT_SHA=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -155,6 +155,9 @@ challenge-bundle-check: challenge-bundle
 
 check-generated-test:
 	bash hack/check-generated_test.sh
+
+check-plugin-advisories-test:
+	bash hack/lib-plugin-advisories_test.sh
 
 publish-challenge-bundle: challenge-bundle
 	@test -n "$$VARROA_CONTROLLERS_REPO" || { echo "VARROA_CONTROLLERS_REPO must point at a CasC bundle repo checkout" >&2; exit 1; }

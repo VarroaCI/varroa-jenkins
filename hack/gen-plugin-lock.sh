@@ -29,6 +29,7 @@
 # Usage:
 #   hack/gen-plugin-lock.sh                 full regeneration (needs docker + net)
 #   hack/gen-plugin-lock.sh --validate-only validate the manifest only, no docker
+#   PLUGIN_LOCK_ADVISORY_REPORT=<file>      also write the security-advisory Markdown report to <file>
 #
 # Core seed plugins are the plugins Varroa pins (CORE_PLUGINS below is the full list):
 #   configuration-as-code, role-strategy, instance-identity, kubernetes,
@@ -53,6 +54,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=hack/lib-plugin-advisories.sh
+. "${REPO_ROOT}/hack/lib-plugin-advisories.sh"
 OUTFILE="${REPO_ROOT}/internal/controller/pluginlock/lock.yaml"
 MANIFEST="${REPO_ROOT}/hack/version-profiles.yaml"
 SEED_DIR="${REPO_ROOT}/internal/controller/pluginlock/seed"
@@ -203,7 +206,9 @@ fi
 TMP_OUTFILE="$(mktemp "${OUTFILE}.XXXXXX")"
 # Captures jenkins-plugin-cli's stderr so a failed resolve can be diagnosed.
 ERRLOG="$(mktemp)"
-trap 'rm -f "$TMP_OUTFILE" "$ERRLOG"' EXIT
+# Holds the per-profile advisory stderr files and the report sections.
+ADV_DIR="$(mktemp -d)"
+trap 'rm -f "$TMP_OUTFILE" "$ERRLOG"; rm -rf "$ADV_DIR"' EXIT
 
 # --- Bootstrap closure root ----------------------------------------------
 # varroa-mite-auth is baked into the image and copied into every Jenkins pod, so
@@ -315,6 +320,8 @@ while IFS='|' read -r version channel recommended eol resolveVersion; do
     # every plugin, producing an empty-plugin-set regression PR (#270). So we validate the
     # SHAPE of the result — well-formed `name:version` lines plus every core seed present —
     # and retry a few times before giving up (#188 — do NOT switch to --available-updates).
+    # --view-security-warnings adds a Security warnings section to stderr; stdout stays
+    # name:version lines, so the parse below is unchanged.
     #
     # The seed list is passed as `--plugins` ARGUMENTS, deliberately NOT as a
     # bind-mounted `--plugin-file`. A mounted file inherits the host uid/mode it
@@ -334,7 +341,7 @@ while IFS='|' read -r version channel recommended eol resolveVersion; do
         docker run --rm \
             "jenkins/jenkins:${resolveVersion}-alpine-jdk21" \
             sh -c "
-                jenkins-plugin-cli --plugins $CORE_PLUGINS --list --no-download --output txt || true
+                jenkins-plugin-cli --plugins $CORE_PLUGINS --list --no-download --view-security-warnings --output txt || true
             " 2>"$ERRLOG" | grep -v '^#' | sort > "$OUTPUT" || true
 
         # Count strictly well-formed `name:version` lines (exactly one colon, no
@@ -357,12 +364,43 @@ while IFS='|' read -r version channel recommended eol resolveVersion; do
             echo "--- resolve stdout (last 20 lines) ---" >&2
             tail -20 "$OUTPUT" >&2 || true
             echo "-------------------------------------------------" >&2
+            advisories_log "$version" "failed resolve" "$ERRLOG"
             rm -f "$OUTPUT"
             exit 1
         fi
         echo "  WARN: resolve for ${version} produced ${valid} valid lines (need >= ${core_count}; missing seeds: ${missing:-none}); retrying (${attempts}/${max_attempts})..." >&2
         sleep 5
     done
+
+    # Advisory check. It reads the committed lock, which stays unchanged until the
+    # final mv, and it never exits the script. A failed check only reports "not known".
+    cp "$ERRLOG" "$ADV_DIR/new-${version}.err"
+    advisories_log "$version" "resolved set" "$ADV_DIR/new-${version}.err"
+    old_arg=""
+    old_pins=""
+    if [ -f "$OUTFILE" ]; then
+        old_pins="$(yq eval ".sets[\"${version}\"].plugins[] | .artifactId + \":\" + .version" "$OUTFILE" 2>/dev/null | tr '\n' ' ' || true)"
+    fi
+    if [ -n "$old_pins" ]; then
+        old_arg="$ADV_DIR/old-${version}.err"
+        for attempt in 1 2 3; do
+            # The pins go as arguments, never as a bind-mounted --plugin-file (see above).
+            docker run --rm "jenkins/jenkins:${resolveVersion}-alpine-jdk21" \
+                sh -c "jenkins-plugin-cli --plugins $old_pins --list --no-download --view-security-warnings || true" \
+                >/dev/null 2>"$old_arg" || true
+            if advisories_complete "$old_arg"; then
+                break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+                sleep 5
+            fi
+        done
+        advisories_log "$version" "committed lock" "$old_arg"
+    else
+        echo "  Security warnings for ${version} (committed lock): not checked (no committed set)" >&2
+    fi
+    advisories_profile_section "$version" "$old_arg" "$ADV_DIR/new-${version}.err" >> "$ADV_DIR/sections.md"
+    advisories_extract "$ADV_DIR/new-${version}.err" >> "$ADV_DIR/remaining-all.txt"
 
     # lock.yaml set keyed by `version` (not resolveVersion).
     echo "  ${version}:" >> "$TMP_OUTFILE"
@@ -405,3 +443,26 @@ done <<<"$PROFILE_TSV"
 chmod 644 "$TMP_OUTFILE"
 mv "$TMP_OUTFILE" "$OUTFILE"
 echo "  Wrote $OUTFILE" >&2
+
+# Advisory report for the workflow PR body. Written only when the caller sets
+# PLUGIN_LOCK_ADVISORY_REPORT. A sandbox advisory adds a marker line; it never fails the run.
+if [ -n "${PLUGIN_LOCK_ADVISORY_REPORT:-}" ]; then
+    sandbox=0
+    while IFS= read -r line; do
+        if advisory_is_sandbox "$line"; then
+            sandbox=1
+        fi
+    done < "$ADV_DIR/remaining-all.txt"
+    {
+        if [ "$sandbox" = 1 ]; then
+            echo '<!-- plugin-advisory: sandbox -->'
+            echo
+            echo '> **Warning:** a remaining advisory names a sandbox plugin. A cell runs several tenants in one JVM, so a sandbox bypass crosses tenants. Review this PR before other work.'
+            echo
+        fi
+        echo '## Security advisories'
+        echo
+        cat "$ADV_DIR/sections.md"
+    } > "$PLUGIN_LOCK_ADVISORY_REPORT"
+    echo "  Wrote advisory report $PLUGIN_LOCK_ADVISORY_REPORT" >&2
+fi
