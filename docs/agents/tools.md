@@ -64,7 +64,8 @@ a `scanId` and the state `requested`. A job that is neither answers an error. Re
 and result `TRIGGER_FAILED`; `get_run` shows the `triggerReasonCode` and `triggerError`.
 The `list_runs` tool takes `limit` with the same default of 50 and the same
 maximum of 200 as `list_activity`. The `get_run` tool returns one run's
-detail, with the run's `upstream` link and the first page of its `downstream` links. The `get_run_log` tool returns a bounded tail of the run's console
+detail, with the run's `upstream` link and the first page of its `downstream` links. It also carries
+`quality`, the run's coverage and warnings summaries. The `get_run_log` tool returns a bounded tail of the run's console
 log, never a stream; `tailLines` defaults to 100 and clamps between 1 and
 500. An agent that needs live output calls `get_run_log` again. The
 `list_fleet_locks` tool takes `tenant` and answers the locks that tenant's
@@ -81,7 +82,8 @@ The `get_job_health` tool takes `tenant` and `job`. It returns the job's `health
 same object the job page shows, and its `trend`, the job's finished runs newest first. Health counts
 the last ten finished runs: SUCCESS passes, and FAILURE, UNSTABLE, and ABORTED fail. INTERRUPTED and
 NOT_BUILT do not count. The `trend` carries each run's duration and suite counters when it recorded
-them. The tool gives the same answer as the job detail.
+them. The tool gives the same answer as the job detail. Its `qualityTrend` lists one coverage or
+warnings series per report, over the same runs as `trend`.
 
 The `get_tenant_cell` tool takes `tenant` and returns the cell that hosts the tenant's tenant. It carries the Tenant's tenant warning when one holds. It gives the same answer as `GET /api/v1/pipelines/{tenant}/cell`.
 
@@ -142,7 +144,8 @@ read a run gets a not-found error, not a forbidden error.
 
 ### MCP Apps views
 
-Four read tools also advertise a view for a host that supports MCP Apps. The host renders a read-only card from the result. The text result does not change. The result `_meta` carries an "Open in dashboard" link, and it is absent when the server has no dashboard address.
+Four read tools also advertise a view for a host that supports MCP Apps. The host renders a read-only card from the result. The text result does not change. The result `_meta` carries an "Open in dashboard" link, and it is absent when the server has no dashboard address. The run card shows one quality
+line when the run carries `quality`.
 
 | Tool | Card | Link opens |
 |---|---|---|

@@ -89,3 +89,49 @@ func TestGetJobHealthToolRefusesWithoutJobRead(t *testing.T) {
 		t.Errorf("error text = %q, want %q", got, "job not found")
 	}
 }
+
+// TestGetJobHealthToolCarriesQualityTrend asserts that get_job_health
+// carries the quality trend over the health window.
+func TestGetJobHealthToolCarriesQualityTrend(t *testing.T) {
+	reader := newFakePipelineReader()
+	reader.summaries["team-a/app-a"] = recordstore.JobSummary{
+		JobPath: "team-a/app-a",
+		RecentRuns: []recordstore.HealthRun{
+			{RunID: "run-7", Result: "SUCCESS"},
+		},
+	}
+	reader.quality["run-7"] = recordstore.RunQuality{Coverage: []recordstore.RunCoverage{{
+		RunID: "run-7", ReportID: "jacoco", Name: "Coverage",
+		Line: &recordstore.CoverageCounter{Covered: 900, Total: 1000},
+	}}}
+	deps := &api.Dependencies{
+		RecordStore:    reader,
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", TenantName: "team-a", Folder: "team-a"}}},
+		Authorizer:     pipelinesTestAuthorizer("read"),
+	}
+
+	tr := callPipelineTool(t, deps, "get_job_health", map[string]interface{}{"tenant": "team-a", "job": "team-a/app-a"})
+	if tr.IsError {
+		t.Fatalf("get_job_health returned error: %v", tr.Content)
+	}
+	var payload struct {
+		QualityTrend *struct {
+			Coverage []struct {
+				ID     string `json:"id"`
+				Points []struct {
+					RunID       string   `json:"runId"`
+					LinePercent *float64 `json:"linePercent"`
+				} `json:"points"`
+			} `json:"coverage"`
+		} `json:"qualityTrend"`
+	}
+	if err := json.Unmarshal(tr.StructuredContent, &payload); err != nil {
+		t.Fatalf("unmarshal structuredContent: %v", err)
+	}
+	if payload.QualityTrend == nil || len(payload.QualityTrend.Coverage) != 1 ||
+		payload.QualityTrend.Coverage[0].ID != "jacoco" || len(payload.QualityTrend.Coverage[0].Points) != 1 ||
+		payload.QualityTrend.Coverage[0].Points[0].LinePercent == nil ||
+		*payload.QualityTrend.Coverage[0].Points[0].LinePercent != 90 {
+		t.Fatalf("qualityTrend = %+v, want one jacoco point at 90", payload.QualityTrend)
+	}
+}

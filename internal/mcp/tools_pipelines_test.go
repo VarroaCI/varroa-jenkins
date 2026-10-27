@@ -17,6 +17,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/agent"
+	"github.com/varroaci/varroa-jenkins/internal/agent/datashare"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
@@ -55,6 +57,8 @@ type fakePipelineReader struct {
 
 	// summaries is keyed by job path, for GetJobSummary.
 	summaries map[string]recordstore.JobSummary
+	// quality is keyed by run id, for RunQuality and JobQualityTrend.
+	quality map[string]recordstore.RunQuality
 }
 
 // GetJobSummary answers the seeded summary of one job path. A job with no
@@ -93,6 +97,7 @@ func newFakePipelineReader() *fakePipelineReader {
 		testCases:     map[string][]recordstore.TestCase{},
 		downstream:    map[string][]recordstore.Run{},
 		summaries:     map[string]recordstore.JobSummary{},
+		quality:       map[string]recordstore.RunQuality{},
 	}
 }
 
@@ -100,6 +105,22 @@ func newFakePipelineReader() *fakePipelineReader {
 // page. The MCP tests seed few runs, so no cursor is needed.
 func (f *fakePipelineReader) ListDownstreamRuns(_ context.Context, q recordstore.DownstreamRunQuery) (recordstore.RunPage, error) {
 	return recordstore.RunPage{Runs: append([]recordstore.Run{}, f.downstream[q.UpstreamRunID]...)}, nil
+}
+
+// RunQuality answers the quality rows seeded for one run.
+func (f *fakePipelineReader) RunQuality(_ context.Context, runID string) (recordstore.RunQuality, error) {
+	return f.quality[runID], nil
+}
+
+// JobQualityTrend merges the seeded quality rows of the listed runs.
+func (f *fakePipelineReader) JobQualityTrend(_ context.Context, _, _, _ string, runIDs []string) (recordstore.RunQuality, error) {
+	var out recordstore.RunQuality
+	for _, id := range runIDs {
+		q := f.quality[id]
+		out.Coverage = append(out.Coverage, q.Coverage...)
+		out.Warnings = append(out.Warnings, q.Warnings...)
+	}
+	return out, nil
 }
 
 func (f *fakePipelineReader) GetRun(_ context.Context, runID string) (recordstore.Run, []recordstore.Stage, error) {
@@ -1016,5 +1037,84 @@ func TestGetRunParityWithHTTPInputs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("inputs = %#v from get_run, want %#v from the HTTP response", got, want)
+	}
+}
+
+// TestGetRunToolCarriesQuality asserts that get_run carries the run's
+// quality summary with the coverage percent.
+func TestGetRunToolCarriesQuality(t *testing.T) {
+	reader := newFakePipelineReader()
+	reader.runs["run-q"] = recordstore.Run{
+		RunID: "run-q", Tenant: "team-a", JobPath: "team-a/build", Status: "COMPLETED",
+	}
+	reader.quality["run-q"] = recordstore.RunQuality{Coverage: []recordstore.RunCoverage{{
+		RunID: "run-q", ReportID: "jacoco", Name: "Coverage",
+		Line: &recordstore.CoverageCounter{Covered: 812, Total: 1000},
+	}}}
+	deps := &api.Dependencies{
+		Authorizer:  pipelinesTestAuthorizer("read"),
+		RecordStore: reader,
+	}
+
+	tr := callPipelineTool(t, deps, "get_run", map[string]interface{}{"run": "run-q"})
+	if tr.IsError {
+		t.Fatalf("get_run returned error: %v", tr.Content)
+	}
+	var detail struct {
+		Quality *struct {
+			Coverage []struct {
+				ID   string `json:"id"`
+				Line *struct {
+					Percent *float64 `json:"percent"`
+				} `json:"line"`
+			} `json:"coverage"`
+		} `json:"quality"`
+	}
+	if err := json.Unmarshal(tr.StructuredContent, &detail); err != nil {
+		t.Fatalf("unmarshal structuredContent: %v", err)
+	}
+	if detail.Quality == nil || len(detail.Quality.Coverage) != 1 || detail.Quality.Coverage[0].ID != "jacoco" ||
+		detail.Quality.Coverage[0].Line == nil || detail.Quality.Coverage[0].Line.Percent == nil ||
+		*detail.Quality.Coverage[0].Line.Percent != 81.2 {
+		t.Fatalf("quality = %+v, want the jacoco line at 81.2", detail.Quality)
+	}
+}
+
+// TestGetRunQualityKeptAtMetadataLevel asserts that the metadata data level
+// keeps the quality summary of get_run and drops the log tail.
+func TestGetRunQualityKeptAtMetadataLevel(t *testing.T) {
+	reader := newFakePipelineReader()
+	reader.runs["run-q"] = recordstore.Run{
+		RunID: "run-q", Tenant: "team-a", JobPath: "team-a/build", Status: "COMPLETED",
+	}
+	reader.quality["run-q"] = recordstore.RunQuality{Coverage: []recordstore.RunCoverage{{
+		RunID: "run-q", ReportID: "jacoco", Name: "Coverage",
+		Line: &recordstore.CoverageCounter{Covered: 812, Total: 1000},
+	}}}
+	deps := &api.Dependencies{
+		Authorizer:  pipelinesTestAuthorizer("read"),
+		RecordStore: reader,
+	}
+
+	tr := callPipelineTool(t, deps, "get_run", map[string]interface{}{"run": "run-q"})
+	if tr.IsError || len(tr.Content) == 0 {
+		t.Fatalf("get_run returned error: %v", tr.Content)
+	}
+	filtered := datashare.Filter("get_run", agent.DataMetadata, tr.Content[0].Text)
+	var body struct {
+		Quality *struct {
+			Coverage []struct {
+				Line *struct {
+					Percent *float64 `json:"percent"`
+				} `json:"line"`
+			} `json:"coverage"`
+		} `json:"quality"`
+	}
+	if err := json.Unmarshal([]byte(filtered), &body); err != nil {
+		t.Fatalf("unmarshal filtered run: %v", err)
+	}
+	if body.Quality == nil || len(body.Quality.Coverage) != 1 || body.Quality.Coverage[0].Line == nil ||
+		body.Quality.Coverage[0].Line.Percent == nil || *body.Quality.Coverage[0].Line.Percent != 81.2 {
+		t.Fatalf("filtered quality = %+v, want the jacoco line at 81.2", body.Quality)
 	}
 }

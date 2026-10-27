@@ -5128,6 +5128,8 @@ PipelineJobDetail:
   description: GET /pipelines/{tenant}/jobs/{job}.
   required: [jobPath, kind, pending, health, trend, last30Days, tenantFolder, tenant, dependencies]
   properties:
+    qualityTrend:
+      $ref: '#/QualityTrend'
     jobPath:
       type: string
     kind:
@@ -5734,6 +5736,8 @@ RunDetail:
   description: GET /runs/{run}.
   required: [runId, jobPath, status, tenantFolder, tenant]
   properties:
+    quality:
+      $ref: '#/RunQuality'
     runId:
       type: string
     jobPath:
@@ -7866,3 +7870,166 @@ TenantAgentUnattendedResult:
     unattendedGranted:
       type: array
       items: {type: string}
+
+QualityCounter:
+  type: object
+  description: One covered and total count of a coverage report.
+  required: [covered, total]
+  properties:
+    covered: {type: integer, format: int32, minimum: 0}
+    total: {type: integer, format: int32, minimum: 0}
+    percent:
+      type: number
+      format: double
+      description: >
+        Covered count times 100 over total, rounded to one decimal. Absent
+        when total is zero.
+  additionalProperties: false
+
+CoverageDelta:
+  type: object
+  description: >
+    A coverage report compared with the same report of the newest earlier
+    run of the same job. Each points field is a percentage-point difference
+    and is absent when either run lacks that counter.
+  required: [baseRunId]
+  properties:
+    baseRunId: {type: string}
+    baseBuildNumber: {type: integer, format: int64}
+    linePoints: {type: number, format: double}
+    branchPoints: {type: number, format: double}
+  additionalProperties: false
+
+CoverageReport:
+  type: object
+  description: One coverage report of a run.
+  required: [id, name]
+  properties:
+    id: {type: string}
+    name: {type: string}
+    line: {$ref: '#/QualityCounter'}
+    branch: {$ref: '#/QualityCounter'}
+    modifiedLines: {$ref: '#/QualityCounter'}
+    metrics:
+      type: object
+      description: The named counters of the report, keyed by metric name.
+      additionalProperties: {$ref: '#/QualityCounter'}
+    gateStatus: {type: string}
+    delta: {$ref: '#/CoverageDelta'}
+  additionalProperties: false
+
+WarningsDelta:
+  type: object
+  description: >
+    A warnings report compared with the same report of the newest earlier
+    run of the same job. Total is the difference of the two totals.
+  required: [baseRunId, total]
+  properties:
+    baseRunId: {type: string}
+    baseBuildNumber: {type: integer, format: int64}
+    total: {type: integer, format: int32}
+  additionalProperties: false
+
+WarningsReport:
+  type: object
+  description: One warnings report of a run.
+  required: [id, name, total, error, high, normal, low]
+  properties:
+    id: {type: string}
+    name: {type: string}
+    total: {type: integer, format: int32, minimum: 0}
+    error: {type: integer, format: int32, minimum: 0}
+    high: {type: integer, format: int32, minimum: 0}
+    normal: {type: integer, format: int32, minimum: 0}
+    low: {type: integer, format: int32, minimum: 0}
+    new:
+      type: integer
+      format: int32
+      description: Absent when the plugin found no reference build.
+    fixed:
+      type: integer
+      format: int32
+      description: Absent when the plugin found no reference build.
+    gateStatus: {type: string}
+    delta: {$ref: '#/WarningsDelta'}
+  additionalProperties: false
+
+RunQuality:
+  type: object
+  description: >
+    A run's quality summaries. Each list is ordered by report id. A report
+    carries a delta against the newest earlier run of the same job with
+    the same report id.
+  properties:
+    coverage:
+      type: array
+      maxItems: 20
+      items: {$ref: '#/CoverageReport'}
+    warnings:
+      type: array
+      maxItems: 20
+      items: {$ref: '#/WarningsReport'}
+  additionalProperties: false
+
+CoverageTrendPoint:
+  type: object
+  description: One run of a coverage trend series.
+  required: [runId]
+  properties:
+    runId: {type: string}
+    buildNumber: {type: integer, format: int64}
+    linePercent: {type: number, format: double}
+    branchPercent: {type: number, format: double}
+  additionalProperties: false
+
+CoverageTrendSeries:
+  type: object
+  description: The trend of one coverage report over the health window. Points are newest first.
+  required: [id, name, points]
+  properties:
+    id: {type: string}
+    name: {type: string}
+    points:
+      type: array
+      items: {$ref: '#/CoverageTrendPoint'}
+  additionalProperties: false
+
+WarningsTrendPoint:
+  type: object
+  description: One run of a warnings trend series.
+  required: [runId, total]
+  properties:
+    runId: {type: string}
+    buildNumber: {type: integer, format: int64}
+    total: {type: integer, format: int32}
+    new:
+      type: integer
+      format: int32
+      description: Absent when the plugin found no reference build for that run.
+  additionalProperties: false
+
+WarningsTrendSeries:
+  type: object
+  description: The trend of one warnings report over the health window. Points are newest first.
+  required: [id, name, points]
+  properties:
+    id: {type: string}
+    name: {type: string}
+    points:
+      type: array
+      items: {$ref: '#/WarningsTrendPoint'}
+  additionalProperties: false
+
+QualityTrend:
+  type: object
+  description: >
+    The quality trend of a job over the same runs as its health window.
+    Absent when no run of the window holds a quality row.
+  properties:
+    coverage:
+      type: array
+      items: {$ref: '#/CoverageTrendSeries'}
+    warnings:
+      type: array
+      items: {$ref: '#/WarningsTrendSeries'}
+  additionalProperties: false

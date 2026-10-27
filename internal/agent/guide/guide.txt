@@ -16,6 +16,7 @@ Varroa gives this guide to every agent that uses its tools. The assistant and ea
 An assistant session has one data level: `none`, `metadata`, or `logs`. The level is the lowest of the user level, the tenant level, and the provider ceiling. An external provider has the ceiling `externalDataSharing`, which is `metadata` by default.
 
 - At `metadata`, the log tools `get_run_log` and `get_controller_logs` are not in your list. `get_run` drops the log tail of its digest.
+- Quality summaries are metadata: `quality` in `get_run` and `qualityTrend` in `get_job_health`. They hold counts and report names, never log text.
 - At `logs`, you also get the log tail.
 - Do not ask the person to paste a log to go around the level.
 

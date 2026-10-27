@@ -225,6 +225,18 @@ only, not the report file. A run with no report has no row. A zero count is a re
 and fixed counts are present only when the warnings plugin found a reference build. `retention.runs`
 controls these rows, and a tenant retention window deletes them with the run.
 
+`GET /runs/{run}` and the `get_run` tool carry `quality`. It lists the run's coverage reports and
+warnings reports in report id order. The BFF computes `percent` as covered count times 100 over the
+total, rounded to one decimal. `percent` is absent when the total is zero.
+
+Each report carries `delta` against the newest earlier run of the same job with the same report id.
+`linePoints` and `branchPoints` are percentage-point differences. A report with no earlier run has
+no `delta`. The Varroa delta can differ from the plugin delta, because the plugin compares with a
+Jenkins reference build. `new` and `fixed` come from the plugin only.
+
+The job detail and `get_job_health` carry `qualityTrend` over the same runs as `trend`. A run with no
+row for a report has no point in that series.
+
 ## Job schedules
 
 The `job_schedules` table holds the fleet's cron inventory: one row per job trigger, plus one

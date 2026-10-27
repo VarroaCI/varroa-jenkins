@@ -84,6 +84,16 @@ type Reader interface {
 	// runs, newest first, capped at q.Limit.
 	ListTestCaseHistory(ctx context.Context, q TestCaseHistoryQuery) ([]TestCaseOutcome, error)
 
+	// RunQuality answers the coverage and warnings rows of one run, each
+	// list ordered by report id. Each row carries its base: the newest
+	// earlier row of the same cluster, tenant, job path, and report id. A
+	// run with no row answers two empty lists.
+	RunQuality(ctx context.Context, runID string) (RunQuality, error)
+	// JobQualityTrend answers the coverage and warnings rows of the listed
+	// runs of one job. No row carries a base. A run with no row has no row
+	// in the answer.
+	JobQualityTrend(ctx context.Context, cluster, tenant, jobPath string, runIDs []string) (RunQuality, error)
+
 	GetIntentByKey(ctx context.Context, intentKey string) (Intent, bool, error)
 	NextBuildNumber(ctx context.Context, cluster, tenant, jobPath string) (int64, error)
 	SchemaVersion(ctx context.Context) (int64, error)

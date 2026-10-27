@@ -421,7 +421,7 @@ func registerListRunsTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 
 func registerGetRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	getRunTool := mcp.NewTool("get_run",
-		mcp.WithDescription("Get one run's detail: status, timing, params, the repository URL, the trigger source, test counts, stages, the newest refused cancel or input answer, the upstream run that started it (upstream), and the first page of runs it started (downstream). A refused trigger reads result TRIGGER_FAILED with triggerReasonCode and triggerError. A run you may not read appears as its tenant alone."),
+		mcp.WithDescription("Get one run's detail: status, timing, params, the repository URL, the trigger source, test counts, stages, the newest refused cancel or input answer, the upstream run that started it (upstream), and the first page of runs it started (downstream). A refused trigger reads result TRIGGER_FAILED with triggerReasonCode and triggerError. A run you may not read appears as its tenant alone. It carries quality, the coverage and warnings summaries of the run, with a delta against the previous run of the same job and report, when the run recorded one."),
 		mcp.WithString("run", mcp.Required(), mcp.Description("Run id (UUIDv7)")),
 		withUIView("get_run"),
 	)
@@ -478,7 +478,7 @@ func registerListJobBranchesTool(mcpServer *server.MCPServer, deps *api.Dependen
 // so the two answers match.
 func registerGetJobHealthTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	getJobHealthTool := mcp.NewTool("get_job_health",
-		mcp.WithDescription("Get one job's health and its run trend. Health counts the job's last ten finished build runs: SUCCESS passes; FAILURE, UNSTABLE, and ABORTED fail; INTERRUPTED and NOT_BUILT do not count. The trend lists those runs newest first, with duration and suite counters when the run recorded them."),
+		mcp.WithDescription("Get one job's health and its run trend. Health counts the job's last ten finished build runs: SUCCESS passes; FAILURE, UNSTABLE, and ABORTED fail; INTERRUPTED and NOT_BUILT do not count. The trend lists those runs newest first, with duration and suite counters when the run recorded them. qualityTrend lists one coverage or warnings series per report over the same runs, when a run recorded one."),
 		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant name")),
 		mcp.WithString("job", mcp.Required(), mcp.Description("Job path, as the job page names it")),
 	)
