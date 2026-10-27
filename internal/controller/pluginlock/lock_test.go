@@ -109,6 +109,8 @@ func TestParsedLock_SeedMembership(t *testing.T) {
 				"ws-cleanup":                 false,
 				"ssh-agent":                  false,
 				"timestamper":                false,
+				"coverage":                   false,
+				"warnings-ng":                false,
 			}
 			for _, id := range s.Core {
 				if _, exists := seed[id]; !exists {

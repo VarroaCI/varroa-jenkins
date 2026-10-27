@@ -3,6 +3,7 @@ package pluginlock
 import (
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -138,6 +139,41 @@ func TestSeeds_PluginsMatchLock(t *testing.T) {
 			}
 			if !reflect.DeepEqual(seed.Plugins, set.Plugins) {
 				t.Errorf("plugins differ between seed and lock set %q", sp.Version)
+			}
+		})
+	}
+}
+
+// TestSeeds_HoldQualityPlugins checks that each seed carries the core and
+// plugin pins that run quality reports need on a cell. A seed without them
+// would lose the recordCoverage and recordIssues steps.
+func TestSeeds_HoldQualityPlugins(t *testing.T) {
+	for _, sp := range Seeds() {
+		sp := sp
+		t.Run(sp.Version, func(t *testing.T) {
+			var seed struct {
+				Core    []string      `yaml:"core"`
+				Plugins []PluginEntry `yaml:"plugins"`
+			}
+			if err := yaml.Unmarshal([]byte(sp.Plugins), &seed); err != nil {
+				t.Fatalf("failed to parse seed plugins.yaml: %v", err)
+			}
+			for _, id := range []string{"coverage", "warnings-ng"} {
+				if !slices.Contains(seed.Core, id) {
+					t.Errorf("core list has no %q", id)
+				}
+			}
+			for _, id := range []string{"coverage", "warnings-ng", "forensics-api", "data-tables-api", "analysis-model-api"} {
+				found := false
+				for _, p := range seed.Plugins {
+					if p.ArtifactID == id && p.Version != "" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("plugins list has no pinned entry for %q", id)
+				}
 			}
 		})
 	}

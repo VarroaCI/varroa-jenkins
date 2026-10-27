@@ -40,7 +40,8 @@
 #   email-ext (notifications), gitea (Gitea and Forgejo SCM sources), generic-webhook-trigger
 #   (tenant webhook door, generic and GitLab deliveries), github-checks (GitHub checks),
 #   skip-notifications-trait (GitHub source commit status off), pipeline-utility-steps,
-#   ws-cleanup, ssh-agent and timestamper (common Jenkinsfile steps on a cell)
+#   ws-cleanup, ssh-agent and timestamper (common Jenkinsfile steps on a cell),
+#   coverage and warnings-ng (recordCoverage and recordIssues on a cell)
 # The two pipeline-family seeds (workflow-aggregator, workflow-cps-global-lib)
 # pull in and pin the full pipeline plugin stack so the operator overrides
 # stale bundle-supplied pipeline versions.
@@ -60,7 +61,7 @@ OUTFILE="${REPO_ROOT}/internal/controller/pluginlock/lock.yaml"
 MANIFEST="${REPO_ROOT}/hack/version-profiles.yaml"
 SEED_DIR="${REPO_ROOT}/internal/controller/pluginlock/seed"
 
-CORE_PLUGINS="configuration-as-code role-strategy instance-identity kubernetes workflow-aggregator workflow-cps-global-lib mcp-server job-dsl docker-workflow github-branch-source git nodejs jdk-tool maven-plugin config-file-provider artifact-manager-s3 basic-branch-build-strategies ssh-slaves pipeline-graph-analysis pipeline-githubnotify-step slack email-ext gitea generic-webhook-trigger github-checks skip-notifications-trait pipeline-utility-steps ws-cleanup ssh-agent timestamper"
+CORE_PLUGINS="configuration-as-code role-strategy instance-identity kubernetes workflow-aggregator workflow-cps-global-lib mcp-server job-dsl docker-workflow github-branch-source git nodejs jdk-tool maven-plugin config-file-provider artifact-manager-s3 basic-branch-build-strategies ssh-slaves pipeline-graph-analysis pipeline-githubnotify-step slack email-ext gitea generic-webhook-trigger github-checks skip-notifications-trait pipeline-utility-steps ws-cleanup ssh-agent timestamper coverage warnings-ng"
 
 # --- yq v4 prerequisite ---------------------------------------------------
 if ! command -v yq >/dev/null 2>&1; then
