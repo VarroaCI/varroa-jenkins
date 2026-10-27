@@ -6,39 +6,66 @@ import (
 	"time"
 )
 
-// deleteExpiredChildRows deletes run_stages, run_tests, and run_test_cases
-// rows older than cutoff, in bounded batches. It returns how many rows it
+// childRowCounts holds how many expired child rows one retention round
 // deleted from each table.
-func deleteExpiredChildRows(ctx context.Context, db maintDB, cutoff time.Time) (
-	stagesDeleted, testsDeleted, casesDeleted int, err error) {
-	stagesDeleted, err = deleteBatched(ctx, db, `
+type childRowCounts struct {
+	Stages, Tests, Cases, Coverage, Warnings int
+}
+
+// deleteExpiredChildRows deletes run_stages, run_tests, run_test_cases,
+// run_coverage, and run_warnings rows older than cutoff, in bounded
+// batches. It returns how many rows it deleted from each table. On an
+// error it returns the counts it reached before the error.
+func deleteExpiredChildRows(ctx context.Context, db maintDB, cutoff time.Time) (childRowCounts, error) {
+	var counts childRowCounts
+	var err error
+
+	counts.Stages, err = deleteBatched(ctx, db, `
 		DELETE FROM varroa.run_stages WHERE (run_id, stage_id) IN (
 			SELECT run_id, stage_id FROM varroa.run_stages WHERE created_at < $1 LIMIT $2
 		)
 	`, cutoff)
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("delete expired run_stages: %w", err)
+		return counts, fmt.Errorf("delete expired run_stages: %w", err)
 	}
 
-	testsDeleted, err = deleteBatched(ctx, db, `
+	counts.Tests, err = deleteBatched(ctx, db, `
 		DELETE FROM varroa.run_tests WHERE (run_id, suite) IN (
 			SELECT run_id, suite FROM varroa.run_tests WHERE created_at < $1 LIMIT $2
 		)
 	`, cutoff)
 	if err != nil {
-		return stagesDeleted, 0, 0, fmt.Errorf("delete expired run_tests: %w", err)
+		return counts, fmt.Errorf("delete expired run_tests: %w", err)
 	}
 
-	casesDeleted, err = deleteBatched(ctx, db, `
+	counts.Cases, err = deleteBatched(ctx, db, `
 		DELETE FROM varroa.run_test_cases WHERE (run_id, suite, class_name, name) IN (
 			SELECT run_id, suite, class_name, name
 			FROM varroa.run_test_cases WHERE created_at < $1 LIMIT $2
 		)
 	`, cutoff)
 	if err != nil {
-		return stagesDeleted, testsDeleted, 0, fmt.Errorf("delete expired run_test_cases: %w", err)
+		return counts, fmt.Errorf("delete expired run_test_cases: %w", err)
 	}
-	return stagesDeleted, testsDeleted, casesDeleted, nil
+
+	counts.Coverage, err = deleteBatched(ctx, db, `
+		DELETE FROM varroa.run_coverage WHERE (run_id, report_id) IN (
+			SELECT run_id, report_id FROM varroa.run_coverage WHERE created_at < $1 LIMIT $2
+		)
+	`, cutoff)
+	if err != nil {
+		return counts, fmt.Errorf("delete expired run_coverage: %w", err)
+	}
+
+	counts.Warnings, err = deleteBatched(ctx, db, `
+		DELETE FROM varroa.run_warnings WHERE (run_id, report_id) IN (
+			SELECT run_id, report_id FROM varroa.run_warnings WHERE created_at < $1 LIMIT $2
+		)
+	`, cutoff)
+	if err != nil {
+		return counts, fmt.Errorf("delete expired run_warnings: %w", err)
+	}
+	return counts, nil
 }
 
 // deleteBatched runs stmt, a "DELETE ... WHERE key IN (SELECT key FROM

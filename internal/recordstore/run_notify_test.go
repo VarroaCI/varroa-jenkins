@@ -253,6 +253,7 @@ func TestNotificationForMapsEveryKind(t *testing.T) {
 		{KindRunLog, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunChanges, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunTests, map[string]any{"build_number": 7}, "run", "", "", 0, true},
+		{KindRunQuality, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunState, map[string]any{"build_number": 7}, "", "", "", 0, false},
 		{KindRunResumeFailed, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		// A zero ApplyResult is a skipped refusal notice, which publishes

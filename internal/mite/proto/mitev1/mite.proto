@@ -588,6 +588,45 @@ message ChangeRequestInfo {
   string url = 5;
 }
 
+// BuildCoverageCounter holds the covered and total count of one metric.
+message BuildCoverageCounter {
+  // @required
+  string metric = 1;
+  // @required
+  int32 covered = 2;
+  // @required
+  int32 total = 3;
+}
+
+// BuildCoverageReport holds the summary of one coverage report of a run.
+message BuildCoverageReport {
+  // @required
+  string id = 1;
+  string name = 2;
+  BuildCoverageCounter line = 3;
+  BuildCoverageCounter branch = 4;
+  BuildCoverageCounter modified_lines = 5;
+  repeated BuildCoverageCounter metrics = 6;
+  string gate_status = 7;
+}
+
+// BuildWarningsReport holds the summary of one warnings report of a run.
+message BuildWarningsReport {
+  // @required
+  string id = 1;
+  string name = 2;
+  // @required
+  int32 total = 3;
+  int32 error = 4;
+  int32 high = 5;
+  int32 normal = 6;
+  int32 low = 7;
+  bool has_reference = 8;
+  int32 new_total = 9;
+  int32 fixed_total = 10;
+  string gate_status = 11;
+}
+
 message BuildEvent {
   // @required
   string phase = 1;
@@ -663,6 +702,9 @@ message BuildEvent {
   string scm_forge = 58;
   // test_suites holds one counter row per test suite, at most 500, the most failed suites first. Only COMPLETED carries it.
   repeated BuildTestSuite test_suites = 59;
+  // Only a COMPLETED event carries fields 60 and 61.
+  repeated BuildCoverageReport coverage_reports = 60;
+  repeated BuildWarningsReport warnings_reports = 61;
 }
 
 message ClaimRequest {

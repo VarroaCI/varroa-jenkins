@@ -62,66 +62,86 @@ type BuildChange struct {
 	AffectedPathCount int    `json:"affected_path_count,omitempty"`
 }
 
+// BuildCoverageCounter holds the covered and total count of one metric.
+type BuildCoverageCounter struct {
+	Metric  string `json:"metric"`
+	Covered int    `json:"covered"`
+	Total   int    `json:"total"`
+}
+
+// BuildCoverageReport holds the summary of one coverage report of a run.
+type BuildCoverageReport struct {
+	Id            string                  `json:"id"`
+	Name          string                  `json:"name,omitempty"`
+	Line          *BuildCoverageCounter   `json:"line,omitempty"`
+	Branch        *BuildCoverageCounter   `json:"branch,omitempty"`
+	ModifiedLines *BuildCoverageCounter   `json:"modified_lines,omitempty"`
+	Metrics       []*BuildCoverageCounter `json:"metrics,omitempty"`
+	GateStatus    string                  `json:"gate_status,omitempty"`
+}
+
 type BuildEvent struct {
-	Phase                   string              `json:"phase"`
-	Seq                     int64               `json:"seq"`
-	EmittedAtMillis         int64               `json:"emitted_at_millis"`
-	RunId                   string              `json:"run_id,omitempty"`
-	IntentKey               string              `json:"intent_key,omitempty"`
-	JobPath                 string              `json:"job_path"`
-	JobDisplayName          string              `json:"job_display_name,omitempty"`
-	BuildNumber             int64               `json:"build_number"`
-	BuildDisplayName        string              `json:"build_display_name,omitempty"`
-	URL                     string              `json:"url,omitempty"`
-	Result                  string              `json:"result,omitempty"`
-	Actor                   string              `json:"actor,omitempty"`
-	CauseTypes              []string            `json:"cause_types,omitempty"`
-	CauseDescription        string              `json:"cause_description,omitempty"`
-	UpstreamJobPath         string              `json:"upstream_job_path,omitempty"`
-	UpstreamBuildNumber     int64               `json:"upstream_build_number,omitempty"`
-	QueuedAtMillis          int64               `json:"queued_at_millis,omitempty"`
-	StartedAtMillis         int64               `json:"started_at_millis,omitempty"`
-	CompletedAtMillis       int64               `json:"completed_at_millis,omitempty"`
-	DurationMillis          int64               `json:"duration_millis,omitempty"`
-	QueueWaitMillis         int64               `json:"queue_wait_millis,omitempty"`
-	EstimatedDurationMillis int64               `json:"estimated_duration_millis,omitempty"`
-	Parameters              map[string]string   `json:"parameters,omitempty"`
-	MaskedParameterNames    []string            `json:"masked_parameter_names,omitempty"`
-	ScmUrl                  string              `json:"scm_url,omitempty"`
-	ScmHead                 string              `json:"scm_head,omitempty"`
-	ScmRevision             string              `json:"scm_revision,omitempty"`
-	Changes                 []*BuildChange      `json:"changes,omitempty"`
-	ChangeCount             int                 `json:"change_count,omitempty"`
-	TestTotal               int                 `json:"test_total,omitempty"`
-	TestPassed              int                 `json:"test_passed,omitempty"`
-	TestFailed              int                 `json:"test_failed,omitempty"`
-	TestSkipped             int                 `json:"test_skipped,omitempty"`
-	Stages                  []*BuildStage       `json:"stages,omitempty"`
-	Branch                  string              `json:"branch,omitempty"`
-	Artifacts               []*BuildArtifact    `json:"artifacts,omitempty"`
-	LogSummary              *LogSummary         `json:"log_summary,omitempty"`
-	TemplateName            string              `json:"template_name,omitempty"`
-	TemplateVersion         string              `json:"template_version,omitempty"`
-	MarkerPath              string              `json:"marker_path,omitempty"`
-	MarkerRevision          string              `json:"marker_revision,omitempty"`
-	DeliveryId              string              `json:"delivery_id,omitempty"`
-	Libraries               []*BuildLibrary     `json:"libraries,omitempty"`
-	DefinitionPath          string              `json:"definition_path,omitempty"`
-	PodTemplates            []*BuildPodTemplate `json:"pod_templates,omitempty"`
-	Summary                 string              `json:"summary,omitempty"`
-	Inputs                  []*BuildInput       `json:"inputs,omitempty"`
-	TestReport              *BuildTestReport    `json:"test_report,omitempty"`
-	TestCases               []*BuildTestCase    `json:"test_cases,omitempty"`
-	ReplayOf                string              `json:"replay_of,omitempty"`
-	GrantedBuildNumber      int64               `json:"granted_build_number,omitempty"`
-	RestartOf               string              `json:"restart_of,omitempty"`
-	RestartStage            string              `json:"restart_stage,omitempty"`
-	RestartStages           []string            `json:"restart_stages,omitempty"`
-	RestartRefusal          string              `json:"restart_refusal,omitempty"`
-	ChangeRequest           *ChangeRequestInfo  `json:"change_request,omitempty"`
-	RejectedSignature       string              `json:"rejected_signature,omitempty"`
-	ScmForge                string              `json:"scm_forge,omitempty"`
-	TestSuites              []*BuildTestSuite   `json:"test_suites,omitempty"`
+	Phase                   string                 `json:"phase"`
+	Seq                     int64                  `json:"seq"`
+	EmittedAtMillis         int64                  `json:"emitted_at_millis"`
+	RunId                   string                 `json:"run_id,omitempty"`
+	IntentKey               string                 `json:"intent_key,omitempty"`
+	JobPath                 string                 `json:"job_path"`
+	JobDisplayName          string                 `json:"job_display_name,omitempty"`
+	BuildNumber             int64                  `json:"build_number"`
+	BuildDisplayName        string                 `json:"build_display_name,omitempty"`
+	URL                     string                 `json:"url,omitempty"`
+	Result                  string                 `json:"result,omitempty"`
+	Actor                   string                 `json:"actor,omitempty"`
+	CauseTypes              []string               `json:"cause_types,omitempty"`
+	CauseDescription        string                 `json:"cause_description,omitempty"`
+	UpstreamJobPath         string                 `json:"upstream_job_path,omitempty"`
+	UpstreamBuildNumber     int64                  `json:"upstream_build_number,omitempty"`
+	QueuedAtMillis          int64                  `json:"queued_at_millis,omitempty"`
+	StartedAtMillis         int64                  `json:"started_at_millis,omitempty"`
+	CompletedAtMillis       int64                  `json:"completed_at_millis,omitempty"`
+	DurationMillis          int64                  `json:"duration_millis,omitempty"`
+	QueueWaitMillis         int64                  `json:"queue_wait_millis,omitempty"`
+	EstimatedDurationMillis int64                  `json:"estimated_duration_millis,omitempty"`
+	Parameters              map[string]string      `json:"parameters,omitempty"`
+	MaskedParameterNames    []string               `json:"masked_parameter_names,omitempty"`
+	ScmUrl                  string                 `json:"scm_url,omitempty"`
+	ScmHead                 string                 `json:"scm_head,omitempty"`
+	ScmRevision             string                 `json:"scm_revision,omitempty"`
+	Changes                 []*BuildChange         `json:"changes,omitempty"`
+	ChangeCount             int                    `json:"change_count,omitempty"`
+	TestTotal               int                    `json:"test_total,omitempty"`
+	TestPassed              int                    `json:"test_passed,omitempty"`
+	TestFailed              int                    `json:"test_failed,omitempty"`
+	TestSkipped             int                    `json:"test_skipped,omitempty"`
+	Stages                  []*BuildStage          `json:"stages,omitempty"`
+	Branch                  string                 `json:"branch,omitempty"`
+	Artifacts               []*BuildArtifact       `json:"artifacts,omitempty"`
+	LogSummary              *LogSummary            `json:"log_summary,omitempty"`
+	TemplateName            string                 `json:"template_name,omitempty"`
+	TemplateVersion         string                 `json:"template_version,omitempty"`
+	MarkerPath              string                 `json:"marker_path,omitempty"`
+	MarkerRevision          string                 `json:"marker_revision,omitempty"`
+	DeliveryId              string                 `json:"delivery_id,omitempty"`
+	Libraries               []*BuildLibrary        `json:"libraries,omitempty"`
+	DefinitionPath          string                 `json:"definition_path,omitempty"`
+	PodTemplates            []*BuildPodTemplate    `json:"pod_templates,omitempty"`
+	Summary                 string                 `json:"summary,omitempty"`
+	Inputs                  []*BuildInput          `json:"inputs,omitempty"`
+	TestReport              *BuildTestReport       `json:"test_report,omitempty"`
+	TestCases               []*BuildTestCase       `json:"test_cases,omitempty"`
+	ReplayOf                string                 `json:"replay_of,omitempty"`
+	GrantedBuildNumber      int64                  `json:"granted_build_number,omitempty"`
+	RestartOf               string                 `json:"restart_of,omitempty"`
+	RestartStage            string                 `json:"restart_stage,omitempty"`
+	RestartStages           []string               `json:"restart_stages,omitempty"`
+	RestartRefusal          string                 `json:"restart_refusal,omitempty"`
+	ChangeRequest           *ChangeRequestInfo     `json:"change_request,omitempty"`
+	RejectedSignature       string                 `json:"rejected_signature,omitempty"`
+	ScmForge                string                 `json:"scm_forge,omitempty"`
+	TestSuites              []*BuildTestSuite      `json:"test_suites,omitempty"`
+	CoverageReports         []*BuildCoverageReport `json:"coverage_reports,omitempty"`
+	WarningsReports         []*BuildWarningsReport `json:"warnings_reports,omitempty"`
 }
 
 type BuildInput struct {
@@ -195,6 +215,21 @@ type BuildTestSuite struct {
 	Failed     int    `json:"failed"`
 	Skipped    int    `json:"skipped"`
 	DurationMs int64  `json:"duration_ms,omitempty"`
+}
+
+// BuildWarningsReport holds the summary of one warnings report of a run.
+type BuildWarningsReport struct {
+	Id           string `json:"id"`
+	Name         string `json:"name,omitempty"`
+	Total        int    `json:"total"`
+	Error        int    `json:"error,omitempty"`
+	High         int    `json:"high,omitempty"`
+	Normal       int    `json:"normal,omitempty"`
+	Low          int    `json:"low,omitempty"`
+	HasReference bool   `json:"has_reference,omitempty"`
+	NewTotal     int    `json:"new_total,omitempty"`
+	FixedTotal   int    `json:"fixed_total,omitempty"`
+	GateStatus   string `json:"gate_status,omitempty"`
 }
 
 type CancelBuildPayload struct {

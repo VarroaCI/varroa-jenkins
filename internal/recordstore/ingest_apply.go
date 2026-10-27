@@ -565,6 +565,8 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 		return res, nil
 	case KindRunTests:
 		return dispatchResult{}, applyRunTests(ctx, tx, intent, env)
+	case KindRunQuality:
+		return dispatchResult{}, applyRunQuality(ctx, tx, intent, env)
 	case KindRunArtifacts:
 		return dispatchResult{}, applyRunArtifacts(ctx, tx, intent, env)
 	case KindRunChanges:

@@ -18,7 +18,7 @@ type columnSpec struct {
 	nullable bool
 }
 
-// expectedColumns mirrors the eighteen record-store tables and the four
+// expectedColumns mirrors the twenty-one record-store tables and the four
 // agent tables, column for column: migration 00001's seven, plus migration 00002's "activity",
 // migration 00003's "job_schedules" and "job_schedule_cells", migration
 // 00005's "tenant_placements", migration 00006's "fleet_locks", and
@@ -152,6 +152,40 @@ var expectedColumns = map[string][]columnSpec{
 		{"digest", "text", true},
 		{"content_type", "text", true},
 		{"blob_key", "text", false},
+	},
+	"run_coverage": {
+		{"run_id", "uuid", false},
+		{"report_id", "text", false},
+		{"cluster", "text", false},
+		{"tenant", "text", false},
+		{"job_path", "text", false},
+		{"name", "text", false},
+		{"line_covered", "integer", true},
+		{"line_total", "integer", true},
+		{"branch_covered", "integer", true},
+		{"branch_total", "integer", true},
+		{"modified_line_covered", "integer", true},
+		{"modified_line_total", "integer", true},
+		{"metrics", "jsonb", false},
+		{"gate_status", "text", true},
+		{"created_at", "timestamp with time zone", false},
+	},
+	"run_warnings": {
+		{"run_id", "uuid", false},
+		{"report_id", "text", false},
+		{"cluster", "text", false},
+		{"tenant", "text", false},
+		{"job_path", "text", false},
+		{"name", "text", false},
+		{"total", "integer", false},
+		{"error", "integer", false},
+		{"high", "integer", false},
+		{"normal", "integer", false},
+		{"low", "integer", false},
+		{"new_total", "integer", true},
+		{"fixed_total", "integer", true},
+		{"gate_status", "text", true},
+		{"created_at", "timestamp with time zone", false},
 	},
 	"log_chunks": {
 		{"object_key", "text", false},
@@ -384,7 +418,7 @@ var expectedColumns = map[string][]columnSpec{
 }
 
 // TestSchemaMatchesDesign runs every migration and compares the resulting
-// schema against the eighteen record-store tables and the four agent
+// schema against the twenty-one record-store tables and the four agent
 // tables, column for column.
 func TestSchemaMatchesDesign(t *testing.T) {
 	t.Parallel()
@@ -555,7 +589,8 @@ func TestNonPartitionedTables(t *testing.T) {
 	for _, table := range []string{
 		"job_numbers", "run_intents", "run_stages", "run_tests",
 		"run_artifacts", "job_schedules", "job_schedule_cells", "tenant_placements",
-		"fleet_locks", "run_test_cases", "webhook_deliveries", "run_waits", "upstream_origins",
+		"fleet_locks", "run_test_cases", "run_coverage", "run_warnings",
+		"webhook_deliveries", "run_waits", "upstream_origins",
 		"run_notes", "agent_sessions", "agent_session_events", "agent_approvals", "agent_settings",
 		"tenant_agent_spend",
 	} {
@@ -591,6 +626,8 @@ func TestIndexesExist(t *testing.T) {
 		"job_branch_projects": {"job_branch_projects_cell_idx"},
 		"fleet_locks":         {"fleet_locks_one_holder", "fleet_locks_cluster_owner_tenant"},
 		"run_test_cases":      {"run_test_cases_history_idx", "run_test_cases_created_at_idx"},
+		"run_coverage":        {"run_coverage_job_idx", "run_coverage_created_at_idx"},
+		"run_warnings":        {"run_warnings_job_idx", "run_warnings_created_at_idx"},
 		"agent_sessions":      {"agent_sessions_principal_started_idx", "agent_sessions_tenant_started_idx", "agent_sessions_lease_idx"},
 		"agent_approvals":     {"agent_approvals_session_idx", "agent_approvals_pending_idx", "agent_approvals_target_idx"},
 		"run_notes":           {"run_notes_run_idx", "run_notes_job_idx", "run_notes_run_created_idx", "run_notes_session_idx"},

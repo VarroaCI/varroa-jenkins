@@ -49,16 +49,16 @@ func TestIngestEnvelopeFieldNames(t *testing.T) {
 }
 
 // TestIngestEnvelopeEveryKindDecodes decodes a minimal envelope for each
-// of the fifteen kinds and asserts IsKnownKind agrees.
+// of the sixteen kinds and asserts IsKnownKind agrees.
 func TestIngestEnvelopeEveryKindDecodes(t *testing.T) {
 	kinds := []string{
 		KindRunStarted, KindRunStage, KindRunCompleted, KindRunTests,
-		KindRunArtifacts, KindRunChanges, KindRunLog, KindRunHeartbeat,
-		KindRunSource, KindRunInput, KindRunTriggerFailed, KindRunTriggerAccepted,
-		KindRunResumeFailed, KindRunState, KindJobSchedules,
+		KindRunQuality, KindRunArtifacts, KindRunChanges, KindRunLog,
+		KindRunHeartbeat, KindRunSource, KindRunInput, KindRunTriggerFailed,
+		KindRunTriggerAccepted, KindRunResumeFailed, KindRunState, KindJobSchedules,
 	}
-	if len(kinds) != 15 {
-		t.Fatalf("expected exactly fifteen kinds, got %d", len(kinds))
+	if len(kinds) != 16 {
+		t.Fatalf("expected exactly sixteen kinds, got %d", len(kinds))
 	}
 	for _, kind := range kinds {
 		t.Run(kind, func(t *testing.T) {

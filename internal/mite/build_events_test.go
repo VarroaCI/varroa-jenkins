@@ -512,6 +512,7 @@ func TestReplayOf_OmittedFromEveryOtherPhase(t *testing.T) {
 		"run.changes":   changesPayload(evt),
 		"run.input":     inputsPayload(evt),
 		"run.tests":     testsPayload(evt),
+		"run.quality":   qualityPayload(evt),
 		"run.completed": completedPayload(evt),
 	}
 	for kind, p := range payloads {
@@ -1576,5 +1577,149 @@ func TestShrinkToBudget_RemovesTheSuitesKeyWhenEverySuiteDrops(t *testing.T) {
 	}
 	if _, present := env.Payload["suites"]; present {
 		t.Fatalf("suites = %+v, want the key absent once every suite drops", env.Payload["suites"])
+	}
+}
+
+// --- run.quality: coverage and warnings summaries ---
+
+func TestBuildPayloadGroup_CompletedOrderWithQuality(t *testing.T) {
+	evt := &mitev1.BuildEvent{
+		Phase:           phaseCompleted,
+		RunId:           "run-1",
+		TestTotal:       3,
+		CoverageReports: []*mitev1.BuildCoverageReport{{Id: "jacoco"}},
+		WarningsReports: []*mitev1.BuildWarningsReport{{Id: "checkstyle", Total: 1}},
+		Artifacts:       []*mitev1.BuildArtifact{{Path: "a.txt", BlobKey: "artifacts/c/n/cell/a.txt"}},
+		Result:          "SUCCESS",
+	}
+	h := newBuildEventTestHandler(nil)
+	kps, err := h.buildPayloadGroup(evt)
+	if err != nil {
+		t.Fatalf("buildPayloadGroup: %v", err)
+	}
+	kinds := make([]string, 0, len(kps))
+	for _, kp := range kps {
+		kinds = append(kinds, kp.kind)
+	}
+	want := []string{kindRunTests, kindRunQuality, kindRunArtifacts, kindRunLog, kindRunCompleted}
+	if fmt.Sprint(kinds) != fmt.Sprint(want) {
+		t.Fatalf("kind order = %v, want %v", kinds, want)
+	}
+}
+
+func TestBuildPayloadGroup_PublishesQualityForWarningsAlone(t *testing.T) {
+	evt := &mitev1.BuildEvent{
+		Phase:           phaseCompleted,
+		RunId:           "run-1",
+		WarningsReports: []*mitev1.BuildWarningsReport{{Id: "checkstyle", Total: 0}},
+		Result:          "SUCCESS",
+	}
+	h := newBuildEventTestHandler(nil)
+	kps, err := h.buildPayloadGroup(evt)
+	if err != nil {
+		t.Fatalf("buildPayloadGroup: %v", err)
+	}
+	if len(kps) != 3 || kps[0].kind != kindRunQuality || kps[1].kind != kindRunLog || kps[2].kind != kindRunCompleted {
+		t.Fatalf("kps = %+v, want run.quality, run.log, run.completed", kps)
+	}
+	cov, ok := kps[0].payload["coverage"].([]coverageReportEntry)
+	if !ok || cov == nil || len(cov) != 0 {
+		t.Fatalf("coverage = %#v, want an empty non-nil slice", kps[0].payload["coverage"])
+	}
+}
+
+func TestQualityPayload_ReferenceRule(t *testing.T) {
+	without := warningsEntries([]*mitev1.BuildWarningsReport{{Id: "w", NewTotal: 5, FixedTotal: 6}})
+	if without[0].NewTotal != nil || without[0].FixedTotal != nil {
+		t.Fatalf("new/fixed set without a reference: %+v", without[0])
+	}
+	with := warningsEntries([]*mitev1.BuildWarningsReport{{Id: "w", HasReference: true}})
+	if with[0].NewTotal == nil || with[0].FixedTotal == nil || *with[0].NewTotal != 0 || *with[0].FixedTotal != 0 {
+		t.Fatalf("zero new/fixed with a reference = %+v, want pointers to 0", with[0])
+	}
+}
+
+func TestQualityPayload_MapsCoverageCounters(t *testing.T) {
+	evt := &mitev1.BuildEvent{
+		Phase: phaseCompleted,
+		CoverageReports: []*mitev1.BuildCoverageReport{{
+			Id:            "jacoco",
+			Name:          "Coverage",
+			Line:          &mitev1.BuildCoverageCounter{Metric: "LINE", Covered: 0, Total: 0},
+			Branch:        &mitev1.BuildCoverageCounter{Metric: "BRANCH", Covered: 1, Total: 2},
+			ModifiedLines: &mitev1.BuildCoverageCounter{Metric: "MODIFIED", Covered: 3, Total: 4},
+			Metrics: []*mitev1.BuildCoverageCounter{
+				{Metric: "INSTRUCTION", Covered: 9, Total: 11},
+				{Metric: "METHOD", Covered: 2, Total: 2},
+			},
+		}, {
+			Id: "cobertura",
+		}},
+	}
+	p := qualityPayload(evt)
+	cov := p["coverage"].([]coverageReportEntry)
+	if len(cov) != 2 {
+		t.Fatalf("coverage len = %d, want 2", len(cov))
+	}
+	first := cov[0]
+	if first.Line == nil || first.Line.Metric != "" {
+		t.Fatalf("line = %+v, want a counter with no metric name", first.Line)
+	}
+	if first.Branch == nil || first.Branch.Covered != 1 || first.Branch.Total != 2 {
+		t.Fatalf("branch = %+v", first.Branch)
+	}
+	if first.ModifiedLines == nil || first.ModifiedLines.Total != 4 {
+		t.Fatalf("modified_lines = %+v", first.ModifiedLines)
+	}
+	if len(first.Metrics) != 2 || first.Metrics[0].Metric != "INSTRUCTION" || first.Metrics[1].Metric != "METHOD" {
+		t.Fatalf("metrics = %+v, want INSTRUCTION then METHOD", first.Metrics)
+	}
+	if first.GateStatus != "" {
+		t.Fatalf("gate_status = %q, want empty when not sent", first.GateStatus)
+	}
+	if cov[1].Line != nil || cov[1].Branch != nil || cov[1].ModifiedLines != nil {
+		t.Fatalf("second report counters = %+v, want nil", cov[1])
+	}
+	raw, err := json.Marshal(cov[0].Line)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"covered":0`) {
+		t.Fatalf("zero covered dropped from JSON: %s", raw)
+	}
+}
+
+func TestQualityPayload_ClampsBounds(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	var reports []*mitev1.BuildCoverageReport
+	reports = append(reports, nil)
+	for i := 0; i < 25; i++ {
+		r := &mitev1.BuildCoverageReport{Id: fmt.Sprintf("r%d", i)}
+		if i == 0 {
+			r.Id = long
+			r.Name = long
+			for j := 0; j < 20; j++ {
+				r.Metrics = append(r.Metrics, &mitev1.BuildCoverageCounter{Metric: long, Total: j})
+			}
+		}
+		reports = append(reports, r)
+	}
+	cov := coverageEntries(reports)
+	if len(cov) != qualityReportLimit {
+		t.Fatalf("coverage len = %d, want %d", len(cov), qualityReportLimit)
+	}
+	if len([]rune(cov[0].ID)) != qualityTextLimit || len([]rune(cov[0].Name)) != qualityTextLimit {
+		t.Fatalf("id/name runes = %d/%d, want %d", len([]rune(cov[0].ID)), len([]rune(cov[0].Name)), qualityTextLimit)
+	}
+	if len(cov[0].Metrics) != qualityMetricLimit {
+		t.Fatalf("metrics len = %d, want %d", len(cov[0].Metrics), qualityMetricLimit)
+	}
+	if len([]rune(cov[0].Metrics[0].Metric)) != qualityTextLimit {
+		t.Fatalf("metric runes = %d, want %d", len([]rune(cov[0].Metrics[0].Metric)), qualityTextLimit)
+	}
+
+	warn := warningsEntries([]*mitev1.BuildWarningsReport{nil, {Id: long}})
+	if len(warn) != 1 || len([]rune(warn[0].ID)) != qualityTextLimit {
+		t.Fatalf("warnings = %+v, want one entry with a clamped id", warn)
 	}
 }
