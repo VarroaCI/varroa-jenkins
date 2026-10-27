@@ -53,6 +53,7 @@ import { PendingInputCard } from "./PendingInputCard";
 import { ReplayDrawer } from "./ReplayDrawer";
 import { RestartDrawer } from "./RestartDrawer";
 import { RunLinksCard } from "./RunLinksCard";
+import { QualityCard } from "./QualityCard";
 import { NotesCard } from "./NotesCard";
 import { useAssistant } from "../../components/assistant/AssistantProvider";
 import { TargetApprovalsCard } from "../../components/assistant/TargetApprovalsCard";
@@ -894,6 +895,8 @@ export default function BuildPage() {
           onSelectStage={(stageId) => logViewerRef.current?.scrollToStage(stageId)}
         />
       </Card>
+
+      {tenant && job && <QualityCard quality={run.quality} tenant={tenant} jobPath={job} />}
 
       <Tabs
         tabs={tabs}

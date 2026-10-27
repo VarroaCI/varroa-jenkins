@@ -18,6 +18,7 @@ import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { RunDrawer } from "./RunDrawer";
 import { MultibranchCard } from "./MultibranchCard";
 import { JobHealthCard } from "./JobHealthCard";
+import { QualityTrendCard } from "./QualityTrendCard";
 import { JobBadgeCard } from "./JobBadgeCard";
 import { forgeFileHref, forgeTreeHref } from "./forgeLink";
 import { RevisionLink } from "./RevisionLink";
@@ -389,6 +390,7 @@ export default function PipelinePage() {
         {jobDetail.kind !== "multibranch" && jobDetail.kind !== "organizationFolder" && (
           <JobHealthCard tenant={tenant ?? ""} jobPath={jobDetail.jobPath} health={jobDetail.health} trend={jobDetail.trend} />
         )}
+        <QualityTrendCard tenant={tenant ?? ""} jobPath={jobDetail.jobPath} qualityTrend={jobDetail.qualityTrend} window={jobDetail.trend} />
         <Card title="Defined by">
           <dl className={styles.kv}>
             {definition?.jenkinsfileRepo && (

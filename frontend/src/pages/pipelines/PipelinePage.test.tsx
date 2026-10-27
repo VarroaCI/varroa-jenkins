@@ -131,6 +131,35 @@ describe("PipelinePage", () => {
     expect(screen.getByText(/1 of 1 builds passed/)).toBeInTheDocument();
   });
 
+  it("shows the Quality trend card when the job read carries qualityTrend", async () => {
+    mockGetPipelineJob.mockResolvedValue(
+      jobDetail({
+        kind: "pipeline",
+        trend: [{ runId: "run-1", buildNumber: 1, result: "SUCCESS" }],
+        qualityTrend: {
+          coverage: [
+            { id: "jacoco", name: "jacoco", points: [{ runId: "run-1", buildNumber: 1, linePercent: 80 }] },
+          ],
+        },
+      }),
+    );
+    renderPage();
+    expect(await screen.findByText("Quality trend")).toBeInTheDocument();
+  });
+
+  it("shows no Quality trend card without qualityTrend", async () => {
+    mockGetPipelineJob.mockResolvedValue(
+      jobDetail({
+        kind: "pipeline",
+        health: { bucket: "sunny", window: 10, counted: 1, passed: 1, score: 100 },
+        trend: [{ runId: "run-1", buildNumber: 1, result: "SUCCESS" }],
+      }),
+    );
+    renderPage();
+    await screen.findByText("Health");
+    expect(screen.queryByText("Quality trend")).toBeNull();
+  });
+
   it("lists waiting runs", async () => {
     mockGetPipelineJob.mockResolvedValue(
       jobDetail({
