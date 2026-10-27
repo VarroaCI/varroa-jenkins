@@ -364,6 +364,31 @@ describe("BuildPage — test cases and the test report", () => {
   });
 });
 
+describe("BuildPage — quality summary", () => {
+  it("shows the Quality card below the Pipeline card without opening a tab", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({
+        quality: {
+          coverage: [{ id: "jacoco", name: "jacoco", line: { covered: 812, total: 1000, percent: 81.2 } }],
+        },
+      }),
+    );
+    renderPage();
+    await screen.findByText(/Build #42/);
+    const pipeline = screen.getByText("Pipeline");
+    const quality = screen.getByText("Quality");
+    expect(pipeline.compareDocumentPosition(quality) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("81.2%")).toBeInTheDocument();
+  });
+
+  it("shows no Quality card when the run has no quality", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderPage();
+    await screen.findByText(/Build #42/);
+    expect(screen.queryByText("Quality")).toBeNull();
+  });
+});
+
 describe("BuildPage — record and recovery states", () => {
   it("renders the forbidden state", async () => {
     mockGetRun.mockRejectedValue(new ApiError(403, "forbidden"));

@@ -1667,6 +1667,105 @@ export interface JobTrendPoint {
   tests?: JobTrendTests;
 }
 
+/** One covered and total count of a coverage report. The API sets percent;
+ * it is absent when total is zero. The dashboard never computes it. */
+export interface QualityCounter {
+  covered: number;
+  total: number;
+  percent?: number;
+}
+
+/** A coverage report compared with the newest earlier run of the same job
+ * that has the same report. Each points value is a percentage-point
+ * difference and is absent when either run lacks that counter. */
+export interface CoverageDelta {
+  baseRunId: string;
+  baseBuildNumber?: number;
+  linePoints?: number;
+  branchPoints?: number;
+}
+
+/** One coverage report of a run. */
+export interface CoverageReport {
+  id: string;
+  name: string;
+  line?: QualityCounter;
+  branch?: QualityCounter;
+  modifiedLines?: QualityCounter;
+  metrics?: Record<string, QualityCounter>;
+  gateStatus?: string;
+  /** Absent when no earlier run of the job has the same report. */
+  delta?: CoverageDelta;
+}
+
+/** A warnings report compared with the newest earlier run of the same job
+ * that has the same report. total is the difference of the two totals. */
+export interface WarningsDelta {
+  baseRunId: string;
+  baseBuildNumber?: number;
+  total: number;
+}
+
+/** One warnings report of a run. */
+export interface WarningsReport {
+  id: string;
+  name: string;
+  total: number;
+  error: number;
+  high: number;
+  normal: number;
+  low: number;
+  /** Absent when the plugin found no reference build. */
+  new?: number;
+  /** Absent when the plugin found no reference build. */
+  fixed?: number;
+  gateStatus?: string;
+  delta?: WarningsDelta;
+}
+
+/** The quality summaries of a run. Each list is in report id order. */
+export interface RunQuality {
+  coverage?: CoverageReport[];
+  warnings?: WarningsReport[];
+}
+
+/** One run of a coverage trend series. */
+export interface CoverageTrendPoint {
+  runId: string;
+  buildNumber?: number;
+  linePercent?: number;
+  branchPercent?: number;
+}
+
+/** The trend of one coverage report. Points are newest first. */
+export interface CoverageTrendSeries {
+  id: string;
+  name: string;
+  points: CoverageTrendPoint[];
+}
+
+/** One run of a warnings trend series. */
+export interface WarningsTrendPoint {
+  runId: string;
+  buildNumber?: number;
+  total: number;
+  /** Absent when the plugin found no reference build for that run. */
+  new?: number;
+}
+
+/** The trend of one warnings report. Points are newest first. */
+export interface WarningsTrendSeries {
+  id: string;
+  name: string;
+  points: WarningsTrendPoint[];
+}
+
+/** The quality trend of a job over the runs of its health window. */
+export interface QualityTrend {
+  coverage?: CoverageTrendSeries[];
+  warnings?: WarningsTrendSeries[];
+}
+
 /** TriggerSource names the kind of cause that started a run. */
 export type TriggerSource = "user" | "webhook" | "cron" | "upstream" | "replay" | "restart" | "scm" | "other";
 
@@ -2002,6 +2101,8 @@ export interface PipelineJobDetail {
   health: JobHealth;
   /** The job's finished build runs in the health window, newest first. */
   trend: JobTrendPoint[];
+  /** Absent when no run of the health window holds a quality row. */
+  qualityTrend?: QualityTrend;
   lastBuild?: RunSummary;
   definition?: PipelineDefinition;
   triggers?: PipelineTriggers;
@@ -2135,6 +2236,8 @@ export interface RunDetail {
   /** The run's failed and skipped test cases, in the reader's order.
    * Absent when the run holds no case row. */
   cases?: RunTestCase[];
+  /** The run's coverage and warnings summaries. Absent when the run holds no quality row. */
+  quality?: RunQuality;
   /** The run that started this run. Absent when no run started it. */
   upstream?: RunLink;
   /** The first page of the runs this run started, newest first. Absent

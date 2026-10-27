@@ -236,7 +236,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   lock under the tenant's own prefix that another tenant's run holds publishes
   its `lock` notification on the holder's subject, which the tenant stream does
   not carry), `PipelinePage.tsx` (`/pipelines/:tenant/:job`, one job's
-  health (the `JobHealthCard.tsx` Health card, which draws the result strip, the duration chart, and the test chart from `job.trend`), definition, and run list, and hosts `RunDrawer.tsx`'s parameter form; a `wait` stream frame of its own job refetches the job read, which feeds the Waiting card, and the runs table),
+  health (the `JobHealthCard.tsx` Health card, which draws the result strip, the duration chart, and the test chart from `job.trend`), the `QualityTrendCard.tsx` **Quality trend** card beside it (`QualityTrendCard.module.css`, one inline SVG line chart per coverage series and one bar chart per warnings series over the health window, each point a link to its run), definition, and run list, and hosts `RunDrawer.tsx`'s parameter form; a `wait` stream frame of its own job refetches the job read, which feeds the Waiting card, and the runs table),
   `BuildPage.tsx` (`/pipelines/:tenant/:job/:run`, one run's detail; owns both
   `useEventStream` calls, the tenant run stream and the run log stream; renders
   the run's `summary` as a header row, renders its failure `digest` in a
@@ -246,7 +246,9 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   and its **Show more** button pages `listRunDownstream`. It renders nothing when no link exists;
   renders a pending input step in `PendingInputCard.tsx`, which has its own
   `PendingInputCard.module.css`, in a `Pending input` card between the
-  `Digest` card and the `Pipeline` card; its `Tests` tab shows the report
+  `Digest` card and the `Pipeline` card; the `QualityCard.tsx` **Quality** card
+  (`QualityCard.module.css`) sits directly below the `Pipeline` card, outside the tabs, and
+  renders the run's `run.quality` coverage and warnings tables, with each change linked to its base run; its `Tests` tab shows the report
   line, then the case table, grouped under a suite header row each time the
   suite changes, in the response order (`testCaseGroups.ts`; the Class column
   shows only when a suite holds two or more classes), then the suite table),

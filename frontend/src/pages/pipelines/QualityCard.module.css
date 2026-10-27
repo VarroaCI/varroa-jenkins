@@ -1,0 +1,51 @@
+.heading {
+  margin: 0.75rem 0 0.35rem;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.heading:first-child {
+  margin-top: 0;
+}
+
+.tableScroll {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.table th {
+  text-align: left;
+  color: var(--text-2);
+  font-weight: 600;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.gatePassed {
+  color: var(--ok-text);
+}
+
+.gateWarning {
+  color: var(--warn-text);
+}
+
+.gateFailed {
+  color: var(--bad-text);
+}
+
+.gateOther {
+  color: var(--text-2);
+}

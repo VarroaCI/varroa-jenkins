@@ -126,6 +126,11 @@ The card also shows three charts over the same runs, oldest on the left:
 - **Tests** is one stacked bar for each run that recorded suite counters: passed, failed, and
   skipped. The chart appears only when at least one run recorded them.
 
+A job whose builds publish coverage or warnings also shows a **Quality trend** card beside the
+Health card. It uses the same runs, oldest on the left. Each coverage report has a line chart of
+the line percent, and of the branch percent when present. Each warnings report has a bar chart of
+the warning total. Each point links to its build page. A run without the report leaves a gap.
+
 A multibranch job or an organization folder holds no runs of its own, so it has no Health card.
 Each branch job has its own health.
 
@@ -217,6 +222,13 @@ report from the **Tests** tab.
 
 The **Tests** tab shows the totals, the failed and skipped cases (at most 500), and a suite table.
 The **Class** column shows only when a suite holds more than one class.
+
+The build page shows a **Quality** card below the Pipeline card with the coverage and warnings
+reports of the build. A coverage row shows the line, branch, and modified-line percentages. A
+warnings row shows the total and the count for each severity. It shows the new and fixed counts
+only when Jenkins found a reference build. Each row shows its gate status and its change since the
+newest earlier build of the job with the same report. The change links to that build. The card is
+absent when the build published no report.
 
 ## Run a job with parameters
 
