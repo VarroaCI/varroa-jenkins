@@ -45,11 +45,16 @@ type fakeRecordReader struct {
 	// pages this slice the way the real reader's SQL query does.
 	runsByTenant map[string][]recordstore.Run
 	// runs is keyed by run id, for GetRun/ListArtifacts/ListTests.
-	runs      map[string]recordstore.Run
-	stages    map[string][]recordstore.Stage
-	artifacts map[string][]recordstore.Artifact
-	tests     map[string][]recordstore.TestSuite
-	intents   map[string]recordstore.Intent
+	// quality is keyed by run id, for RunQuality and JobQualityTrend.
+	quality    map[string]recordstore.RunQuality
+	qualityErr error
+	// trendCalls records the run ids each JobQualityTrend call received.
+	trendCalls [][]string
+	runs       map[string]recordstore.Run
+	stages     map[string][]recordstore.Stage
+	artifacts  map[string][]recordstore.Artifact
+	tests      map[string][]recordstore.TestSuite
+	intents    map[string]recordstore.Intent
 
 	// windowStats is keyed by "<cluster>/<tenant>/<jobPath>", for
 	// JobWindowStats.
@@ -613,4 +618,29 @@ func (f *fakeRecordReader) JobInventory(_ context.Context, cluster, tenant strin
 		return recordstore.JobInventory{}, f.jobInventoryErr
 	}
 	return f.jobInventory[f.tenantKey(cluster, tenant)], nil
+}
+
+// RunQuality answers the quality rows seeded for one run, or an error when
+// qualityErr is set.
+func (f *fakeRecordReader) RunQuality(_ context.Context, runID string) (recordstore.RunQuality, error) {
+	if f.qualityErr != nil {
+		return recordstore.RunQuality{}, f.qualityErr
+	}
+	return f.quality[runID], nil
+}
+
+// JobQualityTrend records the run ids it is asked for and merges the
+// seeded rows of each one.
+func (f *fakeRecordReader) JobQualityTrend(_ context.Context, _, _, _ string, runIDs []string) (recordstore.RunQuality, error) {
+	f.trendCalls = append(f.trendCalls, append([]string(nil), runIDs...))
+	if f.qualityErr != nil {
+		return recordstore.RunQuality{}, f.qualityErr
+	}
+	var out recordstore.RunQuality
+	for _, id := range runIDs {
+		q := f.quality[id]
+		out.Coverage = append(out.Coverage, q.Coverage...)
+		out.Warnings = append(out.Warnings, q.Warnings...)
+	}
+	return out, nil
 }

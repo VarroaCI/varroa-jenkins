@@ -192,3 +192,16 @@ func TestCheckUsesRunThenTenant(t *testing.T) {
 		t.Fatal("resolver error was swallowed")
 	}
 }
+
+// TestFilterKeepsQuality asserts that the metadata level drops the log
+// tail of get_run and keeps the quality summary.
+func TestFilterKeepsQuality(t *testing.T) {
+	in := `{"digest":{"logTail":"x"},"quality":{"coverage":[{"id":"jacoco"}]}}`
+	out := Filter("get_run", agent.DataMetadata, in)
+	if strings.Contains(out, "logTail") {
+		t.Fatalf("filtered run still carries logTail: %s", out)
+	}
+	if !strings.Contains(out, `"quality"`) || !strings.Contains(out, `"jacoco"`) {
+		t.Fatalf("filtered run lost quality: %s", out)
+	}
+}

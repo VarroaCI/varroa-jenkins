@@ -41,11 +41,13 @@ type JobTrendPointJSON struct {
 }
 
 // JobHealthResult is the job health read that the get_job_health MCP tool
-// returns. Its health and trend match the job detail's fields.
+// returns. Its health, trend, and qualityTrend match the job detail's fields.
+// QualityTrend is absent when no run of the health window holds a quality row.
 type JobHealthResult struct {
-	JobPath string              `json:"jobPath"`
-	Health  JobHealthJSON       `json:"health"`
-	Trend   []JobTrendPointJSON `json:"trend"`
+	JobPath      string              `json:"jobPath"`
+	Health       JobHealthJSON       `json:"health"`
+	Trend        []JobTrendPointJSON `json:"trend"`
+	QualityTrend *QualityTrendJSON   `json:"qualityTrend,omitempty"`
 }
 
 // healthBucketOf maps a pass score to its weather bucket: above 80 is
@@ -146,8 +148,9 @@ func (s *Server) JobHealth(ctx context.Context, claims *auth.Claims, tenant, job
 		return JobHealthResult{}, s.readerServiceError(err, "get job summary")
 	}
 	return JobHealthResult{
-		JobPath: jobPath,
-		Health:  computeJobHealth(summary.RecentRuns),
-		Trend:   buildJobTrend(summary.RecentRuns),
+		JobPath:      jobPath,
+		Health:       computeJobHealth(summary.RecentRuns),
+		Trend:        buildJobTrend(summary.RecentRuns),
+		QualityTrend: s.jobQualityTrend(ctx, ref.Cluster, ref.Tenant, jobPath, summary.RecentRuns),
 	}, nil
 }

@@ -114,6 +114,7 @@ type RunDetail struct {
 	Inputs            []runInputJSON           `json:"inputs,omitempty"`
 	TestReport        *runTestReportDetailJSON `json:"testReport,omitempty"`
 	Cases             []runTestCaseJSON        `json:"cases,omitempty"`
+	Quality           *RunQualityJSON          `json:"quality,omitempty"`
 	ReplayOf          string                   `json:"replayOf,omitempty"`
 	RestartOf         string                   `json:"restartOf,omitempty"`
 	RestartStage      string                   `json:"restartStage,omitempty"`
@@ -306,6 +307,8 @@ func (s *Server) GetRun(ctx context.Context, claims *auth.Claims, runID string) 
 	} else if len(cases) > 0 {
 		detail.Cases = buildRunTestCases(cases)
 	}
+	// A failed quality read leaves the field out. The run read still answers.
+	detail.Quality = s.runQualityJSON(ctx, run.RunID)
 	detail.Digest = computeRunDigest(ctx, s.deps.BlobStore, run, stages, runTestCaseRead{cases: cases, err: casesErr})
 	detail.Upstream = s.upstreamRunLink(claims, run)
 	// A failed downstream read leaves the list out. The run read still answers.

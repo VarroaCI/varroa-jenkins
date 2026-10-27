@@ -160,9 +160,11 @@ type pipelineJobDetailJSON struct {
 	Kind string `json:"kind"`
 	// Pending is true when the tenant's complete inventory lacks this
 	// declared job. It is set at assembly, like Kind.
-	Pending      bool                    `json:"pending"`
-	Health       JobHealthJSON           `json:"health"`
-	Trend        []JobTrendPointJSON     `json:"trend"`
+	Pending bool                `json:"pending"`
+	Health  JobHealthJSON       `json:"health"`
+	Trend   []JobTrendPointJSON `json:"trend"`
+	// QualityTrend is absent when no run of the health window holds a quality row.
+	QualityTrend *QualityTrendJSON       `json:"qualityTrend,omitempty"`
 	TenantFolder string                  `json:"tenantFolder"`
 	Tenant       string                  `json:"tenant"`
 	LastBuild    *runSummaryJSON         `json:"lastBuild,omitempty"`
@@ -699,6 +701,7 @@ func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 		TenantFolder: ref.Folder,
 		Tenant:       ref.Tenant,
 	}
+	detail.QualityTrend = s.jobQualityTrend(ctx, ref.Cluster, ref.Tenant, jobPath, summary.RecentRuns)
 	if summary.LastRun != nil {
 		rs := buildRunSummary(*summary.LastRun)
 		detail.LastBuild = &rs

@@ -504,7 +504,10 @@ federation, activity persistence, and SSE fanout.
   a refusal without `controllers:read` on the cell. The stored `trigger_http_status` reaches no
   response field. `runDetailJSON` (`handlers_runs.go`) and `RunDetail`
   (`pipelines_service.go`) must carry the same JSON tags, because
-  `convertJSON` matches them by tag.
+  `convertJSON` matches them by tag. Both carry `quality`. `run_quality.go` maps
+  the rows and computes every percent and delta. A failed quality read logs a
+  warning and leaves the field out. `qualityTrend` (job detail and
+  `JobHealthResult`) reads the run ids of `summary.RecentRuns`.
   The run detail and the run summary carry `scmUrl`, `scmForge`, and `triggerSource`, read from `runs.payload`
   by `runOriginOf` (`run_origin.go`). `scmUrl` and `scmForge` come from one event: the `run.source` pair
   when its URL is set, else the `run.started` pair. `scmForge` answers only `github`, `gitlab`, or `gitea`.

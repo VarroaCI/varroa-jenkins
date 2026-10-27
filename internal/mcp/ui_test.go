@@ -458,3 +458,15 @@ func TestViewMetaStaysOutOfText(t *testing.T) {
 		}
 	}
 }
+
+// TestGetRunViewRendersQualityLine asserts that the run card reads the
+// quality summary through its one quality line.
+func TestGetRunViewRendersQualityLine(t *testing.T) {
+	src, err := uiFS.ReadFile("ui/get_run.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `["Quality", qualityLine(sc.quality)]`) {
+		t.Fatal("get_run view does not render the quality line")
+	}
+}

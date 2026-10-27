@@ -130,6 +130,8 @@ type runDetailJSON struct {
 	// cases array, which is always present.
 	TestReport *runTestReportDetailJSON `json:"testReport,omitempty"`
 	Cases      []runTestCaseJSON        `json:"cases,omitempty"`
+	// Quality is absent when the run holds no quality row.
+	Quality *RunQualityJSON `json:"quality,omitempty"`
 	// ReplayOf names the run a replayed build copied its script from. It
 	// is absent for a build that is not a replay.
 	ReplayOf string `json:"replayOf,omitempty"`

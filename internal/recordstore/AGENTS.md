@@ -1528,6 +1528,13 @@ of the fleet's audit activity, once a controller becomes disposable.
   read joins `runs` on its own primary key, answers one class and name of
   one job newest first, and computes no rate. The caller bounds its limit.
 
+  `RunQuality` and `JobQualityTrend` (`reader_quality.go`) read `run_coverage`
+  and `run_warnings`. `RunQuality` joins each row to the newest earlier row of
+  the same cluster, tenant, job path, and report id, with `LEFT JOIN LATERAL`
+  over `*_job_idx`, and joins `runs` on its primary key for the base build
+  number. `JobQualityTrend` reads by `run_id = ANY(...)` under the primary key
+  and keeps the scope as filters. It carries no base.
+
   **`ReleaseGoneInstanceAgents`** (`instance_agents.go`) runs in the backstop
   round after the sweep. It publishes one `release_instance_agents` action for
   each `tenant_placements.dead_instances` entry that carries a pod-read

@@ -152,6 +152,24 @@ request("ui/initialize", {
 });
 /* shell:end */
 
+function signedNum(v) { return (v > 0 ? "+" : "") + v; }
+function qualityLine(q) {
+  if (!q) return "";
+  var parts = [];
+  (q.coverage || []).forEach(function (c) {
+    if (!c.line || !present(c.line.percent)) return;
+    var s = (c.name || c.id) + ": line " + c.line.percent + "%";
+    if (c.delta && present(c.delta.linePoints)) s += " (" + signedNum(c.delta.linePoints) + ")";
+    parts.push(s);
+  });
+  (q.warnings || []).forEach(function (w) {
+    var s = (w.name || w.id) + ": " + w.total + " warnings";
+    if (w.delta) s += " (" + signedNum(w.delta.total) + ")";
+    parts.push(s);
+  });
+  return parts.join(", ");
+}
+
 function renderCard(root, sc, meta) {
   var title = sc.jobPath || "Run";
   if (present(sc.buildNumber)) title += " #" + sc.buildNumber;
@@ -174,6 +192,7 @@ function renderCard(root, sc, meta) {
     ["Started", fmtTime(sc.startedAt)],
     ["Duration", fmtMs(sc.durationMs)],
     ["Tests", tests],
+    ["Quality", qualityLine(sc.quality)],
     ["Trigger error", triggerErr],
     ["Upstream", upText],
     ["Upstream run", up && up.runId],

@@ -367,3 +367,69 @@ type RunWait struct {
 	Running int32
 	Since   time.Time
 }
+
+// CoverageCounter is one covered and total count of a coverage report.
+type CoverageCounter struct {
+	Covered int32
+	Total   int32
+}
+
+// RunCoverage is one coverage report of one run. A nil counter means the
+// report did not send that counter. Metrics holds the named counters of
+// the report, keyed by metric name. Base is the previous run's row of the
+// same report, and it is set only by RunQuality.
+type RunCoverage struct {
+	RunID         string
+	ReportID      string
+	Name          string
+	Line          *CoverageCounter
+	Branch        *CoverageCounter
+	ModifiedLines *CoverageCounter
+	Metrics       map[string]CoverageCounter
+	GateStatus    *string
+	Base          *CoverageBase
+}
+
+// CoverageBase is the newest earlier run of the same job that holds a row
+// of the same coverage report. BuildNumber is nil when that run holds no
+// runs row.
+type CoverageBase struct {
+	RunID       string
+	BuildNumber *int64
+	Line        *CoverageCounter
+	Branch      *CoverageCounter
+}
+
+// RunWarnings is one warnings report of one run. NewTotal and FixedTotal
+// are nil when the plugin found no reference build. Base is the previous
+// run's row of the same report, and it is set only by RunQuality.
+type RunWarnings struct {
+	RunID      string
+	ReportID   string
+	Name       string
+	Total      int32
+	Error      int32
+	High       int32
+	Normal     int32
+	Low        int32
+	NewTotal   *int32
+	FixedTotal *int32
+	GateStatus *string
+	Base       *WarningsBase
+}
+
+// WarningsBase is the newest earlier run of the same job that holds a row
+// of the same warnings report. BuildNumber is nil when that run holds no
+// runs row.
+type WarningsBase struct {
+	RunID       string
+	BuildNumber *int64
+	Total       int32
+}
+
+// RunQuality holds the quality rows of one run, or of a window of runs.
+// Each list is ordered by report id.
+type RunQuality struct {
+	Coverage []RunCoverage
+	Warnings []RunWarnings
+}

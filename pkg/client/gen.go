@@ -2602,6 +2602,50 @@ type ComponentsSchemasControllerSummary struct {
 // ComponentsSchemasControllerSummaryKind Mirrors v1alpha1.IsCell. Always present, so a client never reads the kind from an absent field.
 type ComponentsSchemasControllerSummaryKind string
 
+// ComponentsSchemasCoverageDelta A coverage report compared with the same report of the newest earlier run of the same job. Each points field is a percentage-point difference and is absent when either run lacks that counter.
+type ComponentsSchemasCoverageDelta struct {
+	BaseBuildNumber *int64   `json:"baseBuildNumber,omitempty"`
+	BaseRunId       string   `json:"baseRunId"`
+	BranchPoints    *float64 `json:"branchPoints,omitempty"`
+	LinePoints      *float64 `json:"linePoints,omitempty"`
+}
+
+// ComponentsSchemasCoverageReport One coverage report of a run.
+type ComponentsSchemasCoverageReport struct {
+	// Branch One covered and total count of a coverage report.
+	Branch *ComponentsSchemasQualityCounter `json:"branch,omitempty"`
+
+	// Delta A coverage report compared with the same report of the newest earlier run of the same job. Each points field is a percentage-point difference and is absent when either run lacks that counter.
+	Delta      *ComponentsSchemasCoverageDelta `json:"delta,omitempty"`
+	GateStatus *string                         `json:"gateStatus,omitempty"`
+	Id         string                          `json:"id"`
+
+	// Line One covered and total count of a coverage report.
+	Line *ComponentsSchemasQualityCounter `json:"line,omitempty"`
+
+	// Metrics The named counters of the report, keyed by metric name.
+	Metrics *map[string]ComponentsSchemasQualityCounter `json:"metrics,omitempty"`
+
+	// ModifiedLines One covered and total count of a coverage report.
+	ModifiedLines *ComponentsSchemasQualityCounter `json:"modifiedLines,omitempty"`
+	Name          string                           `json:"name"`
+}
+
+// ComponentsSchemasCoverageTrendPoint One run of a coverage trend series.
+type ComponentsSchemasCoverageTrendPoint struct {
+	BranchPercent *float64 `json:"branchPercent,omitempty"`
+	BuildNumber   *int64   `json:"buildNumber,omitempty"`
+	LinePercent   *float64 `json:"linePercent,omitempty"`
+	RunId         string   `json:"runId"`
+}
+
+// ComponentsSchemasCoverageTrendSeries The trend of one coverage report over the health window. Points are newest first.
+type ComponentsSchemasCoverageTrendSeries struct {
+	Id     string                                `json:"id"`
+	Name   string                                `json:"name"`
+	Points []ComponentsSchemasCoverageTrendPoint `json:"points"`
+}
+
 // ComponentsSchemasCreateBroodRequest Request body to create or preview a brood operation.
 type ComponentsSchemasCreateBroodRequest struct {
 	// Clusters Target clusters, or ["all"] for all known clusters. Defaults to the local cluster.
@@ -3498,6 +3542,9 @@ type ComponentsSchemasPipelineJobDetail struct {
 	// Pending True when every tenant that declares this job reports a complete job list that lacks it. False when a declaring tenant has an unknown inventory, when a declaring tenant holds the job, when the job has a run, and when no tenant declares the job.
 	Pending bool `json:"pending"`
 
+	// QualityTrend The quality trend of a job over the same runs as its health window. Absent when no run of the window holds a quality row.
+	QualityTrend *ComponentsSchemasQualityTrend `json:"qualityTrend,omitempty"`
+
 	// Template Absent for a job with no catalog template (a Jenkinsfile job).
 	Template *ComponentsSchemasPipelineTemplateInfo `json:"template,omitempty"`
 
@@ -3988,6 +4035,21 @@ type ComponentsSchemasProvisioningDefaultsStatus struct {
 	Conditions *[]ComponentsSchemasProvisioningDefaultsCondition `json:"conditions,omitempty"`
 }
 
+// ComponentsSchemasQualityCounter One covered and total count of a coverage report.
+type ComponentsSchemasQualityCounter struct {
+	Covered int32 `json:"covered"`
+
+	// Percent Covered count times 100 over total, rounded to one decimal. Absent when total is zero.
+	Percent *float64 `json:"percent,omitempty"`
+	Total   int32    `json:"total"`
+}
+
+// ComponentsSchemasQualityTrend The quality trend of a job over the same runs as its health window. Absent when no run of the window holds a quality row.
+type ComponentsSchemasQualityTrend struct {
+	Coverage *[]ComponentsSchemasCoverageTrendSeries `json:"coverage,omitempty"`
+	Warnings *[]ComponentsSchemasWarningsTrendSeries `json:"warnings,omitempty"`
+}
+
 // ComponentsSchemasRBACGroupBinding A single OIDC group-to-role binding.
 type ComponentsSchemasRBACGroupBinding struct {
 	// Name The OIDC group claim value.
@@ -4184,7 +4246,10 @@ type ComponentsSchemasRunDetail struct {
 	// LogFinalized LogSummary.finalized, read from the run's payload column.
 	LogFinalized *bool              `json:"logFinalized,omitempty"`
 	Params       *map[string]string `json:"params,omitempty"`
-	QueuedAt     *time.Time         `json:"queuedAt,omitempty"`
+
+	// Quality A run's quality summaries. Each list is ordered by report id. A report carries a delta against the newest earlier run of the same job with the same report id.
+	Quality  *ComponentsSchemasRunQuality `json:"quality,omitempty"`
+	QueuedAt *time.Time                   `json:"queuedAt,omitempty"`
 
 	// RejectedSignature Set only when result is FAILURE and the script sandbox refused a signature.
 	RejectedSignature *string `json:"rejectedSignature,omitempty"`
@@ -4397,6 +4462,12 @@ type ComponentsSchemasRunNoteErrorCode string
 // ComponentsSchemasRunNoteList defines model for components_schemas_RunNoteList.
 type ComponentsSchemasRunNoteList struct {
 	Items []ComponentsSchemasRunNote `json:"items"`
+}
+
+// ComponentsSchemasRunQuality A run's quality summaries. Each list is ordered by report id. A report carries a delta against the newest earlier run of the same job with the same report id.
+type ComponentsSchemasRunQuality struct {
+	Coverage *[]ComponentsSchemasCoverageReport `json:"coverage,omitempty"`
+	Warnings *[]ComponentsSchemasWarningsReport `json:"warnings,omitempty"`
 }
 
 // ComponentsSchemasRunRestart GET /runs/{run}/restart. Whether a completed declarative run restarts from a stage. The stages list is always present, and it is empty when the run does not restart.
@@ -5694,6 +5765,50 @@ type ComponentsSchemasWarningItem struct {
 	Message  string `json:"message"`
 	Path     string `json:"path"`
 	Resource string `json:"resource"`
+}
+
+// ComponentsSchemasWarningsDelta A warnings report compared with the same report of the newest earlier run of the same job. Total is the difference of the two totals.
+type ComponentsSchemasWarningsDelta struct {
+	BaseBuildNumber *int64 `json:"baseBuildNumber,omitempty"`
+	BaseRunId       string `json:"baseRunId"`
+	Total           int32  `json:"total"`
+}
+
+// ComponentsSchemasWarningsReport One warnings report of a run.
+type ComponentsSchemasWarningsReport struct {
+	// Delta A warnings report compared with the same report of the newest earlier run of the same job. Total is the difference of the two totals.
+	Delta *ComponentsSchemasWarningsDelta `json:"delta,omitempty"`
+	Error int32                           `json:"error"`
+
+	// Fixed Absent when the plugin found no reference build.
+	Fixed      *int32  `json:"fixed,omitempty"`
+	GateStatus *string `json:"gateStatus,omitempty"`
+	High       int32   `json:"high"`
+	Id         string  `json:"id"`
+	Low        int32   `json:"low"`
+	Name       string  `json:"name"`
+
+	// New Absent when the plugin found no reference build.
+	New    *int32 `json:"new,omitempty"`
+	Normal int32  `json:"normal"`
+	Total  int32  `json:"total"`
+}
+
+// ComponentsSchemasWarningsTrendPoint One run of a warnings trend series.
+type ComponentsSchemasWarningsTrendPoint struct {
+	BuildNumber *int64 `json:"buildNumber,omitempty"`
+
+	// New Absent when the plugin found no reference build for that run.
+	New   *int32 `json:"new,omitempty"`
+	RunId string `json:"runId"`
+	Total int32  `json:"total"`
+}
+
+// ComponentsSchemasWarningsTrendSeries The trend of one warnings report over the health window. Points are newest first.
+type ComponentsSchemasWarningsTrendSeries struct {
+	Id     string                                `json:"id"`
+	Name   string                                `json:"name"`
+	Points []ComponentsSchemasWarningsTrendPoint `json:"points"`
 }
 
 // ComponentsParametersArtifactPath defines model for components_parameters_artifactPath.

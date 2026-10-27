@@ -2499,6 +2499,8 @@ components:
           description: |
             True when every tenant that declares this job reports a complete job list that lacks it. False when a declaring tenant has an unknown inventory, when a declaring tenant holds the job, when the job has a run, and when no tenant declares the job.
           type: boolean
+        qualityTrend:
+          $ref: '#/components/schemas/components_schemas_QualityTrend'
         template:
           allOf:
           - $ref: '#/components/schemas/components_schemas_PipelineTemplateInfo'
@@ -3184,6 +3186,8 @@ components:
           additionalProperties:
             type: string
           type: object
+        quality:
+          $ref: '#/components/schemas/components_schemas_RunQuality'
         queuedAt:
           format: date-time
           type: string
@@ -7526,6 +7530,88 @@ components:
       - kind
       - createdAt
       type: object
+    components_schemas_CoverageDelta:
+      additionalProperties: false
+      description: |
+        A coverage report compared with the same report of the newest earlier run of the same job. Each points field is a percentage-point difference and is absent when either run lacks that counter.
+      properties:
+        baseBuildNumber:
+          format: int64
+          type: integer
+        baseRunId:
+          type: string
+        branchPoints:
+          format: double
+          type: number
+        linePoints:
+          format: double
+          type: number
+      required:
+      - baseRunId
+      type: object
+    components_schemas_CoverageReport:
+      additionalProperties: false
+      description: One coverage report of a run.
+      properties:
+        branch:
+          $ref: '#/components/schemas/components_schemas_QualityCounter'
+        delta:
+          $ref: '#/components/schemas/components_schemas_CoverageDelta'
+        gateStatus:
+          type: string
+        id:
+          type: string
+        line:
+          $ref: '#/components/schemas/components_schemas_QualityCounter'
+        metrics:
+          additionalProperties:
+            $ref: '#/components/schemas/components_schemas_QualityCounter'
+          description: The named counters of the report, keyed by metric name.
+          type: object
+        modifiedLines:
+          $ref: '#/components/schemas/components_schemas_QualityCounter'
+        name:
+          type: string
+      required:
+      - id
+      - name
+      type: object
+    components_schemas_CoverageTrendPoint:
+      additionalProperties: false
+      description: One run of a coverage trend series.
+      properties:
+        branchPercent:
+          format: double
+          type: number
+        buildNumber:
+          format: int64
+          type: integer
+        linePercent:
+          format: double
+          type: number
+        runId:
+          type: string
+      required:
+      - runId
+      type: object
+    components_schemas_CoverageTrendSeries:
+      additionalProperties: false
+      description: The trend of one coverage report over the health window. Points
+        are newest first.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        points:
+          items:
+            $ref: '#/components/schemas/components_schemas_CoverageTrendPoint'
+          type: array
+      required:
+      - id
+      - name
+      - points
+      type: object
     components_schemas_CreateBroodRequest:
       additionalProperties: false
       description: Request body to create or preview a brood operation.
@@ -9120,6 +9206,8 @@ components:
           description: |
             True when every tenant that declares this job reports a complete job list that lacks it. False when a declaring tenant has an unknown inventory, when a declaring tenant holds the job, when the job has a run, and when no tenant declares the job.
           type: boolean
+        qualityTrend:
+          $ref: '#/components/schemas/components_schemas_QualityTrend'
         template:
           allOf:
           - $ref: '#/components/schemas/components_schemas_PipelineTemplateInfo'
@@ -10013,6 +10101,41 @@ components:
             $ref: '#/components/schemas/components_schemas_ProvisioningDefaultsCondition'
           type: array
       type: object
+    components_schemas_QualityCounter:
+      additionalProperties: false
+      description: One covered and total count of a coverage report.
+      properties:
+        covered:
+          format: int32
+          minimum: 0
+          type: integer
+        percent:
+          description: |
+            Covered count times 100 over total, rounded to one decimal. Absent when total is zero.
+          format: double
+          type: number
+        total:
+          format: int32
+          minimum: 0
+          type: integer
+      required:
+      - covered
+      - total
+      type: object
+    components_schemas_QualityTrend:
+      additionalProperties: false
+      description: |
+        The quality trend of a job over the same runs as its health window. Absent when no run of the window holds a quality row.
+      properties:
+        coverage:
+          items:
+            $ref: '#/components/schemas/components_schemas_CoverageTrendSeries'
+          type: array
+        warnings:
+          items:
+            $ref: '#/components/schemas/components_schemas_WarningsTrendSeries'
+          type: array
+      type: object
     components_schemas_RBACGroupBinding:
       additionalProperties: false
       description: A single OIDC group-to-role binding.
@@ -10352,6 +10475,8 @@ components:
           additionalProperties:
             type: string
           type: object
+        quality:
+          $ref: '#/components/schemas/components_schemas_RunQuality'
         queuedAt:
           format: date-time
           type: string
@@ -10731,6 +10856,22 @@ components:
           type: array
       required:
       - items
+      type: object
+    components_schemas_RunQuality:
+      additionalProperties: false
+      description: |
+        A run's quality summaries. Each list is ordered by report id. A report carries a delta against the newest earlier run of the same job with the same report id.
+      properties:
+        coverage:
+          items:
+            $ref: '#/components/schemas/components_schemas_CoverageReport'
+          maxItems: 20
+          type: array
+        warnings:
+          items:
+            $ref: '#/components/schemas/components_schemas_WarningsReport'
+          maxItems: 20
+          type: array
       type: object
     components_schemas_RunRestart:
       additionalProperties: false
@@ -13065,6 +13206,110 @@ components:
       - resource
       - path
       - message
+      type: object
+    components_schemas_WarningsDelta:
+      additionalProperties: false
+      description: |
+        A warnings report compared with the same report of the newest earlier run of the same job. Total is the difference of the two totals.
+      properties:
+        baseBuildNumber:
+          format: int64
+          type: integer
+        baseRunId:
+          type: string
+        total:
+          format: int32
+          type: integer
+      required:
+      - baseRunId
+      - total
+      type: object
+    components_schemas_WarningsReport:
+      additionalProperties: false
+      description: One warnings report of a run.
+      properties:
+        delta:
+          $ref: '#/components/schemas/components_schemas_WarningsDelta'
+        error:
+          format: int32
+          minimum: 0
+          type: integer
+        fixed:
+          description: Absent when the plugin found no reference build.
+          format: int32
+          type: integer
+        gateStatus:
+          type: string
+        high:
+          format: int32
+          minimum: 0
+          type: integer
+        id:
+          type: string
+        low:
+          format: int32
+          minimum: 0
+          type: integer
+        name:
+          type: string
+        new:
+          description: Absent when the plugin found no reference build.
+          format: int32
+          type: integer
+        normal:
+          format: int32
+          minimum: 0
+          type: integer
+        total:
+          format: int32
+          minimum: 0
+          type: integer
+      required:
+      - id
+      - name
+      - total
+      - error
+      - high
+      - normal
+      - low
+      type: object
+    components_schemas_WarningsTrendPoint:
+      additionalProperties: false
+      description: One run of a warnings trend series.
+      properties:
+        buildNumber:
+          format: int64
+          type: integer
+        new:
+          description: Absent when the plugin found no reference build for that run.
+          format: int32
+          type: integer
+        runId:
+          type: string
+        total:
+          format: int32
+          type: integer
+      required:
+      - runId
+      - total
+      type: object
+    components_schemas_WarningsTrendSeries:
+      additionalProperties: false
+      description: The trend of one warnings report over the health window. Points
+        are newest first.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        points:
+          items:
+            $ref: '#/components/schemas/components_schemas_WarningsTrendPoint'
+          type: array
+      required:
+      - id
+      - name
+      - points
       type: object
   securitySchemes:
     bearerAuth:
