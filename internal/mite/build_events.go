@@ -33,6 +33,10 @@ const (
 	kindRunStage     = "run.stage"
 	kindRunCompleted = "run.completed"
 	kindRunTests     = "run.tests"
+	// kindRunQuality records the coverage and warnings summaries of a
+	// completed run. The literal value must match internal/recordstore's
+	// KindRunQuality.
+	kindRunQuality   = "run.quality"
 	kindRunArtifacts = "run.artifacts"
 	kindRunChanges   = "run.changes"
 	kindRunLog       = "run.log"
@@ -245,6 +249,53 @@ type testSuiteEntry struct {
 	DurationMs int64  `json:"duration_ms,omitempty"`
 }
 
+// Bounds a run.quality envelope keeps. The gateway clamps every list and
+// every text field before it publishes, so a plugin cannot push an
+// oversized payload.
+const (
+	qualityReportLimit = 20
+	qualityMetricLimit = 16
+	qualityTextLimit   = 128
+)
+
+// coverageCounterEntry is one counter of a run.quality envelope's coverage
+// entry. The key names match the ones internal/recordstore's
+// RunCoverageCounterPayload decodes.
+type coverageCounterEntry struct {
+	Metric  string `json:"metric,omitempty"`
+	Covered int    `json:"covered"`
+	Total   int    `json:"total"`
+}
+
+// coverageReportEntry is one entry of a run.quality envelope's
+// payload["coverage"] array. The key names match the ones
+// internal/recordstore's RunCoveragePayload decodes.
+type coverageReportEntry struct {
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name,omitempty"`
+	Line          *coverageCounterEntry  `json:"line,omitempty"`
+	Branch        *coverageCounterEntry  `json:"branch,omitempty"`
+	ModifiedLines *coverageCounterEntry  `json:"modified_lines,omitempty"`
+	Metrics       []coverageCounterEntry `json:"metrics,omitempty"`
+	GateStatus    string                 `json:"gate_status,omitempty"`
+}
+
+// warningsReportEntry is one entry of a run.quality envelope's
+// payload["warnings"] array. The key names match the ones
+// internal/recordstore's RunWarningsPayload decodes.
+type warningsReportEntry struct {
+	ID         string `json:"id"`
+	Name       string `json:"name,omitempty"`
+	Total      int    `json:"total"`
+	Error      int    `json:"error"`
+	High       int    `json:"high"`
+	Normal     int    `json:"normal"`
+	Low        int    `json:"low"`
+	NewTotal   *int   `json:"new_total,omitempty"`
+	FixedTotal *int   `json:"fixed_total,omitempty"`
+	GateStatus string `json:"gate_status,omitempty"`
+}
+
 // inputEntry is one entry of a run.input envelope's payload["inputs"]
 // array. The key names match the ones the runs.inputs column holds.
 type inputEntry struct {
@@ -279,6 +330,17 @@ type kindPayload struct {
 // Unix epoch.
 func millisToTime(ms int64) time.Time {
 	return time.UnixMilli(ms).UTC()
+}
+
+// truncateQualityText cuts a run.quality text field to at most
+// qualityTextLimit runes, so a cut never splits a multi-byte UTF-8
+// character.
+func truncateQualityText(s string) string {
+	r := []rune(s)
+	if len(r) <= qualityTextLimit {
+		return s
+	}
+	return string(r[:qualityTextLimit])
 }
 
 // truncateError cuts an error text to at most errorTruncateChars runes, so
@@ -639,6 +701,98 @@ func testSuiteEntries(in []*mitev1.BuildTestSuite) []testSuiteEntry {
 	return out
 }
 
+// coverageCounter maps one counter. A nil counter maps to nil, so the
+// key is absent. The metric name is set only for an entry of the metrics
+// list.
+func coverageCounter(c *mitev1.BuildCoverageCounter, withMetric bool) *coverageCounterEntry {
+	if c == nil {
+		return nil
+	}
+	e := &coverageCounterEntry{Covered: c.Covered, Total: c.Total}
+	if withMetric {
+		e.Metric = truncateQualityText(c.Metric)
+	}
+	return e
+}
+
+// coverageEntries maps the coverage reports of a COMPLETED event. It skips
+// a nil element, keeps at most qualityReportLimit reports, and keeps at
+// most qualityMetricLimit metrics per report. It never returns nil, so the
+// recorder reads the key as present.
+func coverageEntries(in []*mitev1.BuildCoverageReport) []coverageReportEntry {
+	out := make([]coverageReportEntry, 0, len(in))
+	for _, r := range in {
+		if r == nil {
+			continue
+		}
+		if len(out) == qualityReportLimit {
+			break
+		}
+		e := coverageReportEntry{
+			ID:            truncateQualityText(r.Id),
+			Name:          truncateQualityText(r.Name),
+			Line:          coverageCounter(r.Line, false),
+			Branch:        coverageCounter(r.Branch, false),
+			ModifiedLines: coverageCounter(r.ModifiedLines, false),
+			GateStatus:    truncateQualityText(r.GateStatus),
+		}
+		for _, m := range r.Metrics {
+			if m == nil {
+				continue
+			}
+			if len(e.Metrics) == qualityMetricLimit {
+				break
+			}
+			e.Metrics = append(e.Metrics, *coverageCounter(m, true))
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// warningsEntries maps the warnings reports of a COMPLETED event. It skips
+// a nil element and keeps at most qualityReportLimit reports. The new and
+// fixed counts are set only when the plugin found a reference build. The
+// has_reference flag itself is not forwarded.
+func warningsEntries(in []*mitev1.BuildWarningsReport) []warningsReportEntry {
+	out := make([]warningsReportEntry, 0, len(in))
+	for _, r := range in {
+		if r == nil {
+			continue
+		}
+		if len(out) == qualityReportLimit {
+			break
+		}
+		e := warningsReportEntry{
+			ID:         truncateQualityText(r.Id),
+			Name:       truncateQualityText(r.Name),
+			Total:      r.Total,
+			Error:      r.Error,
+			High:       r.High,
+			Normal:     r.Normal,
+			Low:        r.Low,
+			GateStatus: truncateQualityText(r.GateStatus),
+		}
+		if r.HasReference {
+			newTotal, fixedTotal := r.NewTotal, r.FixedTotal
+			e.NewTotal = &newTotal
+			e.FixedTotal = &fixedTotal
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// qualityPayload maps the coverage and warnings reports of a COMPLETED
+// event onto a run.quality payload. Both keys are always present, even
+// when one list is empty, because a completed run carries its whole set.
+func qualityPayload(evt *mitev1.BuildEvent) map[string]interface{} {
+	return map[string]interface{}{
+		"coverage": coverageEntries(evt.CoverageReports),
+		"warnings": warningsEntries(evt.WarningsReports),
+	}
+}
+
 // inputEntries maps the event's pending inputs onto payload entries. It
 // skips a nil element, and an absent list answers an empty slice. The
 // slice is never nil, because the recorder reads the key's presence.
@@ -795,8 +949,9 @@ func (h *BusHandler) logSummaryPayload(evt *mitev1.BuildEvent) map[string]interf
 // buildPayloadGroup maps one non-heartbeat BuildEvent onto the ordered
 // list of kinds and payloads design.md D9 states. The caller handles
 // HEARTBEAT separately, because a heartbeat is droppable and every other
-// phase is not. run.artifacts (one envelope per BuildArtifact) and
-// run.log publish immediately before run.completed, per design.md A0.
+// phase is not. run.tests, then run.quality, publish before run.artifacts
+// (one envelope per BuildArtifact) and run.log. run.log and run.completed
+// come last, per design.md A0.
 func (h *BusHandler) buildPayloadGroup(evt *mitev1.BuildEvent) ([]kindPayload, error) {
 	switch evt.Phase {
 	case phaseStarted:
@@ -828,7 +983,7 @@ func (h *BusHandler) buildPayloadGroup(evt *mitev1.BuildEvent) ([]kindPayload, e
 		return []kindPayload{{kindRunInput, inputsPayload(evt)}}, nil
 
 	case phaseCompleted:
-		out := make([]kindPayload, 0, len(evt.Stages)+len(evt.Artifacts)+4)
+		out := make([]kindPayload, 0, len(evt.Stages)+len(evt.Artifacts)+5)
 		for _, st := range evt.Stages {
 			if st == nil {
 				continue
@@ -842,6 +997,11 @@ func (h *BusHandler) buildPayloadGroup(evt *mitev1.BuildEvent) ([]kindPayload, e
 		// own: a report whose case count is zero still reaches the store.
 		if evt.TestTotal > 0 || len(evt.TestCases) > 0 || len(evt.TestSuites) > 0 || evt.TestReport != nil {
 			out = append(out, kindPayload{kindRunTests, testsPayload(evt)})
+		}
+		// A coverage or warnings report publishes run.quality after
+		// run.tests. Both reports arrive on the COMPLETED event only.
+		if len(evt.CoverageReports) > 0 || len(evt.WarningsReports) > 0 {
+			out = append(out, kindPayload{kindRunQuality, qualityPayload(evt)})
 		}
 		for _, art := range evt.Artifacts {
 			if art == nil {

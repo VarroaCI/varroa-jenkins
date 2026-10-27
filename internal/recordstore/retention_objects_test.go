@@ -305,6 +305,18 @@ func TestMaintenanceRoundAppliesRetentionAcrossFourMonths(t *testing.T) {
 			t.Fatalf("seed run_test_cases for %s: %v", m.suffix, err)
 		}
 		if _, err := db.Exec(`
+			INSERT INTO varroa.run_coverage (run_id, report_id, created_at)
+			VALUES ($1, 'jacoco', $2)
+		`, runID, m.runAt); err != nil {
+			t.Fatalf("seed run_coverage for %s: %v", m.suffix, err)
+		}
+		if _, err := db.Exec(`
+			INSERT INTO varroa.run_warnings (run_id, report_id, total, created_at)
+			VALUES ($1, 'checkstyle', 0, $2)
+		`, runID, m.runAt); err != nil {
+			t.Fatalf("seed run_warnings for %s: %v", m.suffix, err)
+		}
+		if _, err := db.Exec(`
 			INSERT INTO varroa.run_artifacts (run_id, path, created_at, size_bytes, blob_key)
 			VALUES ($1, 'build.log', $2, 10, $3)
 		`, runID, m.runAt, "artifacts/"+m.suffix+"/build.log"); err != nil {
@@ -369,7 +381,7 @@ func TestMaintenanceRoundAppliesRetentionAcrossFourMonths(t *testing.T) {
 		}
 	}
 
-	var stagesRemaining, testsRemaining, casesRemaining int
+	var stagesRemaining, testsRemaining, casesRemaining, coverageRemaining, warningsRemaining int
 	if err := db.QueryRow(`SELECT count(*) FROM varroa.run_stages`).Scan(&stagesRemaining); err != nil {
 		t.Fatalf("count run_stages: %v", err)
 	}
@@ -379,9 +391,15 @@ func TestMaintenanceRoundAppliesRetentionAcrossFourMonths(t *testing.T) {
 	if err := db.QueryRow(`SELECT count(*) FROM varroa.run_test_cases`).Scan(&casesRemaining); err != nil {
 		t.Fatalf("count run_test_cases: %v", err)
 	}
-	if stagesRemaining != 2 || testsRemaining != 2 || casesRemaining != 2 {
-		t.Fatalf("run_stages=%d run_tests=%d run_test_cases=%d remaining, want 2 each (March and April only)",
-			stagesRemaining, testsRemaining, casesRemaining)
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.run_coverage`).Scan(&coverageRemaining); err != nil {
+		t.Fatalf("count run_coverage: %v", err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.run_warnings`).Scan(&warningsRemaining); err != nil {
+		t.Fatalf("count run_warnings: %v", err)
+	}
+	if stagesRemaining != 2 || testsRemaining != 2 || casesRemaining != 2 || coverageRemaining != 2 || warningsRemaining != 2 {
+		t.Fatalf("run_stages=%d run_tests=%d run_test_cases=%d run_coverage=%d run_warnings=%d remaining, want 2 each (March and April only)",
+			stagesRemaining, testsRemaining, casesRemaining, coverageRemaining, warningsRemaining)
 	}
 	for _, suffix := range []string{"202403", "202404"} {
 		var count int

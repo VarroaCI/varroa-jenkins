@@ -74,6 +74,8 @@ func seedRunChildren(t *testing.T, pool *pgxpool.Pool, runID uuid.UUID, createdA
 		 VALUES ($1, 'unit', 'pkg.Class', 'test_one', 'FAILED', $2)`,
 		`INSERT INTO varroa.run_artifacts (run_id, path, created_at, size_bytes, blob_key)
 		 VALUES ($1, 'out.txt', $2, 1, $3)`,
+		`INSERT INTO varroa.run_coverage (run_id, report_id, created_at) VALUES ($1, 'jacoco', $2)`,
+		`INSERT INTO varroa.run_warnings (run_id, report_id, total, created_at) VALUES ($1, 'checkstyle', 0, $2)`,
 	}
 	for _, stmt := range stmts {
 		args := []any{runID, createdAt}
@@ -164,7 +166,7 @@ func TestDeleteTenantExpiredRunsPurgesRunAndChildren(t *testing.T) {
 	if runExists(t, pool, runID) {
 		t.Fatalf("expired run row still present")
 	}
-	for _, table := range []string{"run_stages", "run_tests", "run_test_cases", "run_artifacts"} {
+	for _, table := range []string{"run_stages", "run_tests", "run_test_cases", "run_coverage", "run_warnings", "run_artifacts"} {
 		if n := countRows(t, pool, table, runID); n != 0 {
 			t.Fatalf("%s rows = %d, want 0", table, n)
 		}

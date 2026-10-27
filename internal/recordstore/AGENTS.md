@@ -245,6 +245,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   `00016_runs_inputs.sql` adds the nullable `runs.inputs`, the pending input
   steps a `run.input` event reports. It carries no default and no index, and
   an empty set stores NULL, so no reader tells NULL from an empty array.
+  `00042_run_quality.sql` adds `run_coverage` and `run_warnings`, one row per
+  coverage or warnings report of a completed run. Each row holds summary
+  numbers, copies its scope from the intent, and takes `created_at` from the
+  run. Neither table has a foreign key to `runs` or partitioning.
   `00017_run_test_cases.sql` adds the build-record table `run_test_cases`,
   one row per reported failed or skipped case, keyed
   `(run_id, suite, class_name, name)`. It carries `cluster`, `tenant`, and
@@ -288,8 +292,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   the recorder needs no separate deploy artifact. Monthly partition
   names on `runs`, `log_chunks`, and `activity` follow
   `<table>_p<YYYYMM>`; the retention round that adds later partitions
-  must use the same pattern. The schema holds exactly seventeen tables, no
-  more and no fewer.
+  must use the same pattern. The schema holds exactly twenty-one record
+  tables, no more and no fewer, beside the four agent tables.
 - **Migration runner** (`migrate.go`) — `RunMigrations` creates schema
   `varroa`, applies pending migrations under a Postgres advisory lock on a
   one-connection pool, then calls `EnsureGrants`. Two callers racing
@@ -831,7 +835,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   its protobuf `BuildEvent` onto its field names. `Ingester.Apply`
   (`ingest_apply.go`) writes one envelope inside one transaction, dispatching
   by `Kind` to one `ingest_<kind>.go` file per D4's write table. Each write
-  is a natural-key upsert. The kind set holds sixteen values; `run.state` is
+  is a natural-key upsert. The kind set holds eighteen values; `run.state` is
   the mesh's own kind and writes no typed column, only `payload.mesh`.
   `run.command_refused` (`ingest_command_refused.go`) takes the early
   route beside `run.resume_failed`. `applyCommandRefused` merges one
@@ -854,6 +858,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   the payload's `cases` and `test_report` in the same transaction. A `cases` key replaces the run's
   whole `run_test_cases` set: a delete, then one `unnest` insert of the
   cases `dedupeCases` keeps. An absent `cases` key changes no case row.
+  `applyRunQuality` (`ingest_quality.go`) takes a `run.quality` payload. A
+  present `coverage` or `warnings` key replaces the run's rows of that table
+  in one transaction. An absent key keeps them, and an empty list clears
+  them. Each row copies its scope and `created_at` from the intent. The
+  reports pass `dedupeCoverage` and `dedupeWarnings`, which drop an empty id
+  and keep the first of each id. The write never touches `runs`.
   `test_report.blob_key` reaches `runs.test_report_key` only when it is
   not empty, and the size and the case count merge into `runs.payload`
   under `test_report`. The merge wraps `runs.payload` in `COALESCE`,
@@ -1044,8 +1054,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   (`Delete` plus `DeletePrefix`), a narrow interface over `blob.Store`, and
   call `blob.LogKey`/`blob.LogIndexKey` for the two fixed log keys.
   `deleteExpiredChildRows` (`retention_childrows.go`) deletes `run_stages`,
-  `run_tests`, and `run_test_cases` rows past the `retention.runs` cutoff,
-  in bounded batches.
+  `run_tests`, `run_test_cases`, `run_coverage`, and `run_warnings` rows past
+  the `retention.runs` cutoff, in bounded batches. It returns a
+  `childRowCounts` struct.
   `deleteTenantExpiredRuns` (`retention_tenant.go`) runs before the runs
   partition drop. It reads each tenant's `retention` key from
   `tenant_placements.policy` (`retention_tenant_policy.go`,
@@ -1053,7 +1064,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   window, at most 1000 runs per job and 10000 per round. It deletes blobs
   first, then the child rows and the run in one transaction. It never
   touches `run_intents` or `job_numbers`. A job rule replaces the tenant
-  window. The store-wide `retention.runs` caps both.
+  window. The store-wide `retention.runs` caps both. The purge of a run
+  (`purgeRunBatch`) deletes its `run_coverage` and `run_warnings` rows in
+  the same transaction as its child rows.
   `deleteExpiredRunState` is the mesh's hourly backstop: it removes the
   run-state objects of every run terminal for more than an hour, except
   the kept build.xml, over its own bounded query, because the log step

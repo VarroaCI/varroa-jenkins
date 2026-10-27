@@ -217,6 +217,14 @@ first. `{case}` is a `caseKey` value from the tests read, encoded for one path s
 The read answers 50 rows, and `limit` accepts at most 200. It covers the `retention.runs`
 window.
 
+## Coverage and warnings summaries
+
+The completion event carries at most 20 coverage reports and 20 warnings reports. The recorder
+stores one `run_coverage` row or one `run_warnings` row per report. The rows hold summary numbers
+only, not the report file. A run with no report has no row. A zero count is a real value. The new
+and fixed counts are present only when the warnings plugin found a reference build. `retention.runs`
+controls these rows, and a tenant retention window deletes them with the run.
+
 ## Job schedules
 
 The `job_schedules` table holds the fleet's cron inventory: one row per job trigger, plus one

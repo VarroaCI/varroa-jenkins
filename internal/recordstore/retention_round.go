@@ -160,7 +160,7 @@ func runMaintenanceSteps(ctx context.Context, db maintTxDB, cfg MaintenanceConfi
 	}
 
 	runsCutoff := now.Add(-cfg.RunRetention)
-	if _, _, _, err := deleteExpiredChildRows(ctx, db, runsCutoff); err != nil {
+	if _, err := deleteExpiredChildRows(ctx, db, runsCutoff); err != nil {
 		return fmt.Errorf("delete expired child rows: %w", err)
 	}
 

@@ -20,6 +20,9 @@ const (
 	KindRunStage     = "run.stage"
 	KindRunCompleted = "run.completed"
 	KindRunTests     = "run.tests"
+	// KindRunQuality records the coverage and warnings summaries of a
+	// completed run. The gateway publishes it after run.tests.
+	KindRunQuality   = "run.quality"
 	KindRunArtifacts = "run.artifacts"
 	KindRunChanges   = "run.changes"
 	KindRunLog       = "run.log"
@@ -70,6 +73,7 @@ var ingestKinds = map[string]bool{
 	KindRunStage:           true,
 	KindRunCompleted:       true,
 	KindRunTests:           true,
+	KindRunQuality:         true,
 	KindRunArtifacts:       true,
 	KindRunChanges:         true,
 	KindRunLog:             true,
@@ -290,6 +294,52 @@ type RunTestReportPayload struct {
 	BlobKey   string `json:"blob_key"`
 	SizeBytes int64  `json:"size_bytes"`
 	CaseCount int32  `json:"case_count"`
+}
+
+// RunQualityPayload is the payload of a run.quality envelope, mapped onto
+// run_coverage and run_warnings. A nil list means the key is absent, and
+// the write then changes no row of that table. An empty non-nil list clears
+// the run's rows of that table.
+type RunQualityPayload struct {
+	Coverage []RunCoveragePayload `json:"coverage"`
+	Warnings []RunWarningsPayload `json:"warnings"`
+}
+
+// RunCoverageCounterPayload is one covered and total count of a coverage
+// report. Metric names the counter inside the metrics list and is empty for
+// the line, branch, and modified-lines counters.
+type RunCoverageCounterPayload struct {
+	Metric  string `json:"metric,omitempty"`
+	Covered int    `json:"covered"`
+	Total   int    `json:"total"`
+}
+
+// RunCoveragePayload is one entry of a run.quality payload's coverage list.
+// A nil counter is absent, and its columns store NULL.
+type RunCoveragePayload struct {
+	ID            string                      `json:"id"`
+	Name          string                      `json:"name,omitempty"`
+	Line          *RunCoverageCounterPayload  `json:"line,omitempty"`
+	Branch        *RunCoverageCounterPayload  `json:"branch,omitempty"`
+	ModifiedLines *RunCoverageCounterPayload  `json:"modified_lines,omitempty"`
+	Metrics       []RunCoverageCounterPayload `json:"metrics,omitempty"`
+	GateStatus    string                      `json:"gate_status,omitempty"`
+}
+
+// RunWarningsPayload is one entry of a run.quality payload's warnings list.
+// NewTotal and FixedTotal are set only when the plugin found a reference
+// build.
+type RunWarningsPayload struct {
+	ID         string `json:"id"`
+	Name       string `json:"name,omitempty"`
+	Total      int    `json:"total"`
+	Error      int    `json:"error"`
+	High       int    `json:"high"`
+	Normal     int    `json:"normal"`
+	Low        int    `json:"low"`
+	NewTotal   *int   `json:"new_total,omitempty"`
+	FixedTotal *int   `json:"fixed_total,omitempty"`
+	GateStatus string `json:"gate_status,omitempty"`
 }
 
 // RunArtifactsPayload is the payload of a run.artifacts envelope, mapped

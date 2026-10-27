@@ -236,6 +236,8 @@ func purgeRunBatch(ctx context.Context, db maintTxDB, store ObjectDeleter, runID
 		`DELETE FROM varroa.run_stages WHERE run_id = ANY($1::uuid[])`,
 		`DELETE FROM varroa.run_tests WHERE run_id = ANY($1::uuid[])`,
 		`DELETE FROM varroa.run_test_cases WHERE run_id = ANY($1::uuid[])`,
+		`DELETE FROM varroa.run_coverage WHERE run_id = ANY($1::uuid[])`,
+		`DELETE FROM varroa.run_warnings WHERE run_id = ANY($1::uuid[])`,
 		`DELETE FROM varroa.run_artifacts WHERE run_id = ANY($1::uuid[])`,
 	} {
 		if _, err := tx.Exec(ctx, stmt, locked); err != nil {
