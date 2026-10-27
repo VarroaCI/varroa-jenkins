@@ -223,10 +223,14 @@ A cell installs these plugins. A Jenkinsfile can call their steps with no bundle
 | `ws-cleanup` | `cleanWs` |
 | `ssh-agent` | `sshagent` |
 | `timestamper` | `timestamps`, and the `timestamps()` option |
+| `coverage` | `recordCoverage` |
+| `warnings-ng` | `recordIssues`, `scanForIssues`, `publishIssues` |
 
 The `sshagent` step runs the `ssh-agent` program in the current container. The image of the `<tenant>-default` template has it. A container from your own pod template must also have it. A runner host must have it on its `PATH`.
 
 The `timestamps()` option writes the time at the start of each log line. The build log shows this text as Jenkins writes it. The log viewer's **Timestamps** button shows the time that Varroa received the line.
+
+The coverage and warnings pages of a build stay on the cell. A cell restart loses them.
 
 ## Patterns a cell does not run
 

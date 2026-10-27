@@ -2,6 +2,8 @@ package controller
 
 import (
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -99,5 +101,27 @@ func TestManagedPluginLines_CellKeepsUtilityPins(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("managedPluginLines() = %v, want %v", got, want)
+	}
+}
+
+// TestManagedPluginLines_KeepsQualityPins checks that the run quality pins
+// reach both cells and classic controllers for each shipped core set.
+func TestManagedPluginLines_KeepsQualityPins(t *testing.T) {
+	cases := map[string]*v1alpha1.Controller{
+		"cell":    {Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}}},
+		"classic": {},
+	}
+	for name, cr := range cases {
+		for _, v := range []string{"2.555", "2.570"} {
+			t.Run(name+"/"+v, func(t *testing.T) {
+				set, _ := pluginlock.Resolve(v)
+				lines := managedPluginLines(cr, nil, set)
+				for _, prefix := range []string{"coverage:", "warnings-ng:", "forensics-api:", "data-tables-api:", "analysis-model-api:"} {
+					if !slices.ContainsFunc(lines, func(l string) bool { return strings.HasPrefix(l, prefix) }) {
+						t.Errorf("managedPluginLines() has no line starting %q", prefix)
+					}
+				}
+			})
+		}
 	}
 }

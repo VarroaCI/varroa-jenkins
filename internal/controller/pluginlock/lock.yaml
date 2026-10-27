@@ -32,7 +32,11 @@ sets:
       - ws-cleanup
       - ssh-agent
       - timestamper
+      - coverage
+      - warnings-ng
     plugins:
+      - artifactId: analysis-model-api
+        version: "14.18.0-1028.v9c938eeda_ef2"
       - artifactId: antisamy-markup-formatter
         version: "173.v680e3a_b_69ff3"
       - artifactId: apache-httpcomponents-client-4-api
@@ -83,10 +87,14 @@ sets:
         version: "1013.v73c323e52b_1f"
       - artifactId: configuration-as-code
         version: "2136.veb_3a_554550b_f"
+      - artifactId: coverage
+        version: "3.3497.v3fee733ca_b_35"
       - artifactId: credentials-binding
         version: "728.v902a_273b_8947"
       - artifactId: credentials
         version: "1514.vb_01eb_014e7d4"
+      - artifactId: data-tables-api
+        version: "2.3.8-1570.v1cb_1cd2a_0fb_c"
       - artifactId: display-url-api
         version: "2.217.va_6b_de84cc74b_"
       - artifactId: docker-commons
@@ -103,6 +111,8 @@ sets:
         version: "2038.v7b_8817a_499d9"
       - artifactId: font-awesome-api
         version: "7.3.1-1013.v0835a_879ec6d"
+      - artifactId: forensics-api
+        version: "4.1923.v445c56df9b_2e"
       - artifactId: generic-webhook-trigger
         version: "2.4.3"
       - artifactId: git-client
@@ -257,6 +267,8 @@ sets:
         version: "2.284.v1974ea_324382"
       - artifactId: variant
         version: "70.va_d9f17f859e0"
+      - artifactId: warnings-ng
+        version: "13.10333.v259db_dd5b_b_02"
       - artifactId: woodstox-core-api
         version: "7.3.0-16.v017f30ed004c"
       - artifactId: workflow-aggregator
@@ -459,7 +471,11 @@ sets:
       - ws-cleanup
       - ssh-agent
       - timestamper
+      - coverage
+      - warnings-ng
     plugins:
+      - artifactId: analysis-model-api
+        version: "14.18.0-1028.v9c938eeda_ef2"
       - artifactId: antisamy-markup-formatter
         version: "173.v680e3a_b_69ff3"
       - artifactId: apache-httpcomponents-client-4-api
@@ -512,10 +528,14 @@ sets:
         version: "1013.v73c323e52b_1f"
       - artifactId: configuration-as-code
         version: "2136.veb_3a_554550b_f"
+      - artifactId: coverage
+        version: "3.3497.v3fee733ca_b_35"
       - artifactId: credentials-binding
         version: "728.v902a_273b_8947"
       - artifactId: credentials
         version: "1514.vb_01eb_014e7d4"
+      - artifactId: data-tables-api
+        version: "2.3.8-1570.v1cb_1cd2a_0fb_c"
       - artifactId: display-url-api
         version: "2.217.va_6b_de84cc74b_"
       - artifactId: docker-commons
@@ -532,6 +552,8 @@ sets:
         version: "2038.v7b_8817a_499d9"
       - artifactId: font-awesome-api
         version: "7.3.1-1013.v0835a_879ec6d"
+      - artifactId: forensics-api
+        version: "4.1923.v445c56df9b_2e"
       - artifactId: generic-webhook-trigger
         version: "2.4.3"
       - artifactId: git-client
@@ -686,6 +708,8 @@ sets:
         version: "2.284.v1974ea_324382"
       - artifactId: variant
         version: "70.va_d9f17f859e0"
+      - artifactId: warnings-ng
+        version: "13.10333.v259db_dd5b_b_02"
       - artifactId: woodstox-core-api
         version: "7.3.0-16.v017f30ed004c"
       - artifactId: workflow-aggregator
