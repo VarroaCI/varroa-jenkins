@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<report name="varroa-fixture">
+  <sessioninfo id="fixture" start="1700000000000" dump="1700000001000"/>
+  <package name="com/example">
+    <class name="com/example/Calc" sourcefilename="Calc.java">
+      <method name="add" desc="(II)I" line="3">
+        <counter type="INSTRUCTION" missed="2" covered="8"/>
+        <counter type="BRANCH" missed="1" covered="3"/>
+        <counter type="LINE" missed="1" covered="4"/>
+        <counter type="COMPLEXITY" missed="1" covered="2"/>
+        <counter type="METHOD" missed="0" covered="1"/>
+      </method>
+      <counter type="INSTRUCTION" missed="2" covered="8"/>
+      <counter type="BRANCH" missed="1" covered="3"/>
+      <counter type="LINE" missed="1" covered="4"/>
+      <counter type="COMPLEXITY" missed="1" covered="2"/>
+      <counter type="METHOD" missed="0" covered="1"/>
+      <counter type="CLASS" missed="0" covered="1"/>
+    </class>
+    <sourcefile name="Calc.java">
+      <line nr="3" mi="0" ci="2" mb="0" cb="0"/>
+      <line nr="4" mi="0" ci="2" mb="1" cb="3"/>
+      <line nr="5" mi="0" ci="2" mb="0" cb="0"/>
+      <line nr="6" mi="0" ci="2" mb="0" cb="0"/>
+      <line nr="7" mi="2" ci="0" mb="0" cb="0"/>
+      <counter type="INSTRUCTION" missed="2" covered="8"/>
+      <counter type="BRANCH" missed="1" covered="3"/>
+      <counter type="LINE" missed="1" covered="4"/>
+      <counter type="COMPLEXITY" missed="1" covered="2"/>
+      <counter type="METHOD" missed="0" covered="1"/>
+      <counter type="CLASS" missed="0" covered="1"/>
+    </sourcefile>
+    <counter type="INSTRUCTION" missed="2" covered="8"/>
+    <counter type="BRANCH" missed="1" covered="3"/>
+    <counter type="LINE" missed="1" covered="4"/>
+    <counter type="COMPLEXITY" missed="1" covered="2"/>
+    <counter type="METHOD" missed="0" covered="1"/>
+    <counter type="CLASS" missed="0" covered="1"/>
+  </package>
+  <counter type="INSTRUCTION" missed="2" covered="8"/>
+  <counter type="BRANCH" missed="1" covered="3"/>
+  <counter type="LINE" missed="1" covered="4"/>
+  <counter type="COMPLEXITY" missed="1" covered="2"/>
+  <counter type="METHOD" missed="0" covered="1"/>
+  <counter type="CLASS" missed="0" covered="1"/>
+</report>

@@ -41,7 +41,8 @@ public final class VarroaChangeLogParser extends ChangeLogParser {
 
         Document doc;
         try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            // The JDK parser is required. A Xerces jar on the class path refuses the JAXP access attributes.
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newDefaultInstance();
             factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
             factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
             factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);

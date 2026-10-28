@@ -293,6 +293,27 @@ varroactl lint jenkinsfile --tenant payments --file Jenkinsfile
 
 The lint never starts or wakes a cell. A hibernated or stopped cell answers 409, so start a run to wake the cell, then lint again. A tenant placed on a member cluster also answers 409, because the lint reaches only a cell on the core cluster.
 
+## Publish coverage and warnings
+
+Add the `recordCoverage` and `recordIssues` steps to a job. When the build completes, Varroa keeps a summary of each report. A coverage summary holds the line and branch counts. It also holds the modified-lines counts when the plugin computes them. It holds up to 16 other coverage metrics and the gate status. A warnings summary holds the total, the error, high, normal, and low counts. It also holds the gate status. It holds the new and fixed counts only when the report has a reference build. Varroa keeps at most 20 reports of each kind. It cuts each id and name at 128 characters. Varroa does not keep the report files. A build with no report has no summary.
+
+```groovy
+pipeline {
+  agent { label 'payments-maven' }
+  stages {
+    stage('build') {
+      steps { container('maven') { sh 'mvn -B verify' } }
+      post {
+        always {
+          recordCoverage(tools: [[parser: 'JACOCO', pattern: '**/jacoco.xml']], id: 'jacoco', name: 'Coverage')
+          recordIssues(tools: [checkStyle(pattern: '**/checkstyle-result.xml')])
+        }
+      }
+    }
+  }
+}
+```
+
 ## Next steps
 
 [Operate a run](run-operations.md) covers fleet locks, the failure digest, the summary line, and
