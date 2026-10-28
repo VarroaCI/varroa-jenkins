@@ -829,6 +829,15 @@ public final class VarroaRunRecorder {
                         b.testReport(VarroaTestReport.reportPointer(artifacts, reportSize, testCases.size()));
                     }
                 }
+                // The quality reports come from the run's actions, so a run with no
+                // quality step writes no key. A read failure skips one report.
+                try {
+                    VarroaRunQuality.Reports quality = VarroaRunQuality.read(run.getAllActions());
+                    b.coverageReports(quality.coverage);
+                    b.warningsReports(quality.warnings);
+                } catch (RuntimeException | LinkageError e) {
+                    LOGGER.log(Level.FINE, "VarroaRunRecorder.Runs: failed to read the quality reports", e);
+                }
                 LogSummary logSummary = finishLogStorage(runId);
                 b.logSummary(endedByRestart ? restartLogSummary() : logSummary);
                 applyTemplateFields(b, run);
@@ -1529,6 +1538,17 @@ public final class VarroaRunRecorder {
         }
     }
 
+    /** Calls a public method that takes one argument. Returns null after a failure, which logs at FINE. */
+    static Object invokeOneArg(Object target, String methodName, Class<?> paramType, Object arg) {
+        try {
+            Method method = target.getClass().getMethod(methodName, paramType);
+            return method.invoke(target, arg);
+        } catch (Exception e) {
+            LOGGER.log(Level.FINE, "VarroaRunRecorder: reflective call " + methodName + " failed", e);
+            return null;
+        }
+    }
+
     // --- The source resolver (D2) ---
 
     /**
@@ -1801,6 +1821,17 @@ public final class VarroaRunRecorder {
             }
         }
         return null;
+    }
+
+    /** Returns every action whose exact class name is {@code className}, in order. */
+    static List<Action> findActionsByClassName(List<? extends Action> actions, String className) {
+        List<Action> found = new ArrayList<>();
+        for (Action action : actions) {
+            if (action.getClass().getName().equals(className)) {
+                found.add(action);
+            }
+        }
+        return found;
     }
 
     private static String firstBranchName(Object branches) {

@@ -155,4 +155,56 @@ public class BuildEventJsonTest {
         assertFalse(json.has("test_suites"));
     }
 
+    @Test
+    public void qualityReportsSerializeWithProtoNames() {
+        BuildCoverageCounter line = BuildCoverageCounter.builder().metric("LINE").covered(4).total(5).build();
+        BuildCoverageReport coverage = BuildCoverageReport.builder()
+                .id("jacoco").name("Coverage").line(line).gateStatus("PASSED").build();
+        BuildWarningsReport warnings = BuildWarningsReport.builder()
+                .id("checkstyle").name("CheckStyle Warnings").total(3).error(1).high(0).normal(1).low(1)
+                .hasReference(true).newTotal(2).fixedTotal(1).gateStatus("NOTE").build();
+        JSONObject json = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_COMPLETED)
+                .coverageReports(List.of(coverage))
+                .warningsReports(List.of(warnings))
+                .build()
+                .toJson();
+
+        JSONObject c = json.getJSONArray("coverage_reports").getJSONObject(0);
+        assertEquals("jacoco", c.getString("id"));
+        assertEquals(4, c.getJSONObject("line").getInt("covered"));
+        assertEquals("PASSED", c.getString("gate_status"));
+        JSONObject w = json.getJSONArray("warnings_reports").getJSONObject(0);
+        assertEquals("checkstyle", w.getString("id"));
+        assertEquals(3, w.getInt("total"));
+        assertEquals(2, w.getInt("new_total"));
+        assertEquals(1, w.getInt("fixed_total"));
+        assertEquals("NOTE", w.getString("gate_status"));
+    }
+
+    @Test
+    public void emptyQualityListsWriteNoKey() {
+        JSONObject json = BuildEvent.builder().phase(BuildEvent.PHASE_COMPLETED).build().toJson();
+        assertFalse(json.has("coverage_reports"));
+        assertFalse(json.has("warnings_reports"));
+    }
+
+    @Test
+    public void toBuilderCopiesTheQualityReports() {
+        BuildWarningsReport warnings = BuildWarningsReport.builder().id("checkstyle").name("CS").total(1).build();
+        BuildCoverageReport coverage = BuildCoverageReport.builder().id("jacoco").name("Coverage").build();
+        BuildEvent original = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_COMPLETED)
+                .coverageReports(List.of(coverage))
+                .warningsReports(List.of(warnings))
+                .build();
+
+        BuildEvent copy = original.toBuilder().build();
+
+        assertEquals(1, copy.getCoverageReports().size());
+        assertEquals("jacoco", copy.getCoverageReports().get(0).getId());
+        assertEquals(1, copy.getWarningsReports().size());
+        assertEquals("checkstyle", copy.getWarningsReports().get(0).getId());
+    }
+
 }

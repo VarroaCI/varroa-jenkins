@@ -65,6 +65,11 @@ import java.util.Map;
  * at most 500, the most failed suites first. Only the {@code COMPLETED}
  * event carries it. {@link #toJson()} writes no key for an empty list.
  *
+ * <p>Fields 60 and 61, {@code coverage_reports} and {@code warnings_reports},
+ * hold one summary row per coverage or warnings report of the run, at most
+ * 20 of each kind. Only the {@code COMPLETED} event carries them.
+ * {@link #toJson()} writes no key for an empty list.
+ *
  * <p>Field 56, {@code change_request}, names the change request a
  * multibranch pull-request run builds. Only the {@code STARTED} event
  * carries it. {@link #toJson()} writes no key for a null value or an
@@ -142,6 +147,8 @@ public final class BuildEvent implements PostableEvent {
     private final String restartRefusal;
     private final ChangeRequestInfo changeRequest;
     private final String rejectedSignature;
+    private final List<BuildCoverageReport> coverageReports;
+    private final List<BuildWarningsReport> warningsReports;
 
     private BuildEvent(Builder b) {
         this.phase = orEmpty(b.phase);
@@ -203,6 +210,8 @@ public final class BuildEvent implements PostableEvent {
         this.restartRefusal = orEmpty(b.restartRefusal);
         this.changeRequest = b.changeRequest;
         this.rejectedSignature = orEmpty(b.rejectedSignature);
+        this.coverageReports = List.copyOf(b.coverageReports);
+        this.warningsReports = List.copyOf(b.warningsReports);
     }
 
     private static String orEmpty(String s) {
@@ -453,6 +462,16 @@ public final class BuildEvent implements PostableEvent {
         return rejectedSignature;
     }
 
+    /** Field 60: one summary row per coverage report, at most 20. Empty when none. */
+    public List<BuildCoverageReport> getCoverageReports() {
+        return coverageReports;
+    }
+
+    /** Field 61: one summary row per warnings report, at most 20. Empty when none. */
+    public List<BuildWarningsReport> getWarningsReports() {
+        return warningsReports;
+    }
+
     /** Field 51: the grant the run applied. Zero for a run with no grant. */
     public long getGrantedBuildNumber() {
         return grantedBuildNumber;
@@ -613,6 +632,20 @@ public final class BuildEvent implements PostableEvent {
         if (!rejectedSignature.isEmpty()) {
             o.put("rejected_signature", rejectedSignature);
         }
+        if (!coverageReports.isEmpty()) {
+            JSONArray arr = new JSONArray();
+            for (BuildCoverageReport r : coverageReports) {
+                arr.add(r.toJson());
+            }
+            o.put("coverage_reports", arr);
+        }
+        if (!warningsReports.isEmpty()) {
+            JSONArray arr = new JSONArray();
+            for (BuildWarningsReport r : warningsReports) {
+                arr.add(r.toJson());
+            }
+            o.put("warnings_reports", arr);
+        }
         return o;
     }
 
@@ -689,7 +722,9 @@ public final class BuildEvent implements PostableEvent {
                 .restartStages(restartStages)
                 .restartRefusal(restartRefusal)
                 .changeRequest(changeRequest)
-                .rejectedSignature(rejectedSignature);
+                .rejectedSignature(rejectedSignature)
+                .coverageReports(coverageReports)
+                .warningsReports(warningsReports);
     }
 
     /**
@@ -811,6 +846,8 @@ public final class BuildEvent implements PostableEvent {
         private String restartRefusal;
         private ChangeRequestInfo changeRequest;
         private String rejectedSignature;
+        private List<BuildCoverageReport> coverageReports = new ArrayList<>();
+        private List<BuildWarningsReport> warningsReports = new ArrayList<>();
 
         private Builder() {
         }
@@ -1102,6 +1139,18 @@ public final class BuildEvent implements PostableEvent {
         /** Field 57: the script signature the sandbox refused. */
         public Builder rejectedSignature(String v) {
             this.rejectedSignature = v;
+            return this;
+        }
+
+        /** Field 60: the coverage summary rows. A null list becomes an empty list. */
+        public Builder coverageReports(List<BuildCoverageReport> v) {
+            this.coverageReports = v != null ? new ArrayList<>(v) : new ArrayList<>();
+            return this;
+        }
+
+        /** Field 61: the warnings summary rows. A null list becomes an empty list. */
+        public Builder warningsReports(List<BuildWarningsReport> v) {
+            this.warningsReports = v != null ? new ArrayList<>(v) : new ArrayList<>();
             return this;
         }
 

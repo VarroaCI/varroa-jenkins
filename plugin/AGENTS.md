@@ -343,8 +343,18 @@ the root AGENTS.md greenfield rule.
   `Cause.UpstreamCause` and `FlowExecutionOwner`, and falls back to the system log.
   The five counters are `varroa_plugin_forwarded_{scm,cron,api,other}`, keyed by the
   intent key's scheme, and `varroa_plugin_forward_refused`. `pipeline-build-step`,
-  `pipeline-input-step`, and `junit` are **test-scope** dependencies only: no main-scope
-  class names a type of any of the three.
+  `pipeline-input-step`, `junit`, `coverage`, and `warnings-ng` are **test-scope**
+  dependencies only: no main-scope class names a type of any of the five.
+- **Quality summaries** (fields 60 and 61, `coverage_reports` and `warnings_reports`; the
+  `COMPLETED` event alone): `VarroaRunQuality.java` reads the run's actions by exact class
+  name, `CoverageBuildAction` and `ResultAction`. It calls each getter by reflection, so the
+  plugin has no compile dependency on coverage or warnings-ng. A coverage read loads
+  `Baseline` through the action's class loader. A missing class skips the report. The
+  reader keeps 20 reports of each kind, 16 extra metrics per coverage report, and 128 code
+  points of each id and name. A read failure skips one report at FINE, and the run still
+  completes. The value classes are `BuildCoverageCounter`, `BuildCoverageReport`, and
+  `BuildWarningsReport`. `BuildEvent.toBuilder()` copies both lists. Only `Runs.onCompleted`
+  reads the reports, never the boot reconcile path.
 - **Cross-tenant pipeline API** (the `varroa` global variable; D1, D2, D11, D12):
   `VarroaGlobalVariable.java` loads `varroa.Varroa` by name through the Pipeline shell's
   `loadClass`, the docker-workflow pattern. Both classes are plugin `.groovy` resources, and
@@ -536,6 +546,9 @@ the root AGENTS.md greenfield rule.
   `getAffectedPaths()` always answers empty — the record store carries only
   an affected-path count, never the paths themselves, so the operator never
   has real paths to write into the document.
+  `VarroaChangeLogParser` builds its factory with `DocumentBuilderFactory.newDefaultInstance()`.
+  A Xerces jar from `analysis-model` on the class path refuses the JAXP access attributes
+  that `newInstance()` selects.
 - **Route refusals**: every refusal on `/varroa-run/*` (`VarroaRunTriggerAction`),
   `/varroa-activity/*` (`ActivityEndpoint`), and `/varroa-log/*` (`TailEndpoint`) goes
   through `PlainTextRefusal.refuse(rsp, code, msg)`. It resets an uncommitted response,
@@ -800,7 +813,8 @@ the root AGENTS.md greenfield rule.
   LTS), packaging `hpi`. `hpi-plugin.version` pinned to `3.1814.v77d15159f9b_d` (parent's
   default can't classify Java-21 class-file version 65 — see `pom.xml:20-30`). **Build
   JDK must be 21.** `dependencyManagement` imports `bom-2.555.x` to align JCasC + its
-  test harness with the core baseline.
+  test harness with the core baseline. The BOM is `7237.v5071b_f4589f1`. An older BOM
+  stops the coverage and warnings-ng test plugins from loading.
 
 - `CAPPED` (claim veto): `VarroaClaimQueue` retries it every 10 seconds, never gives up, and never cancels the item. The record store sends it. Change it with `internal/recordstore/ledger_types.go`.
 
@@ -821,7 +835,7 @@ mvn -f plugin/pom.xml -B package   # requires JDK 21; runs unit + JCasC round-tr
 ```
 
 Without a local JDK 21, run the suite in a container from `plugin/`. Do not pass `-o`: the
-local Maven repository does not hold the parent POM. The full suite takes about 12 minutes, so
+local Maven repository does not hold the parent POM. The full suite takes about 27 minutes, so
 run the changed classes first with `-Dtest=<Class>,<Class>`.
 
 ```bash
