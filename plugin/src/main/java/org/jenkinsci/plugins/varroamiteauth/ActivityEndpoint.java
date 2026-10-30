@@ -8,7 +8,6 @@ import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
 import jenkins.branch.MultiBranchProject;
 import jenkins.branch.OrganizationFolder;
 import jenkins.scm.api.SCMHead;
-import jenkins.scm.api.SCMRevision;
 import jenkins.scm.api.mixin.ChangeRequestSCMHead;
 import jenkins.scm.api.mixin.TagSCMHead;
 import hudson.model.Computer;
@@ -566,14 +565,15 @@ public class ActivityEndpoint implements RootAction {
         return row;
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
+    /**
+     * Returns the revision a branch head row carries. It reads the last seen
+     * revision through {@link VarroaRunRecorder#revisionHash}, so a pull
+     * request head answers its head commit. A head with no revision answers
+     * an empty string.
+     */
+    @SuppressWarnings("rawtypes")
     static String revisionOf(BranchProjectFactory factory, Job job) {
-        SCMRevision revision = factory.getLastSeenRevision(job);
-        if (revision == null) {
-            return "";
-        }
-        Object hash = VarroaRunRecorder.invokeNoArg(revision, "getHash");
-        return hash != null ? hash.toString() : "";
+        return VarroaRunRecorder.revisionHash(factory.getLastSeenRevision(job));
     }
 
     // ---- Job-schedule export (D8) ----

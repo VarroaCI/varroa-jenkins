@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { listJobBranches, scanMultibranch } from "../../api/client";
+import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
-import type { BranchScan, JobBranchHead, JobBranchList } from "../../types";
+import type { BranchScan, JobBranchHead, JobBranchList, PipelineItemKind } from "../../types";
 import styles from "./MultibranchCard.module.css";
 
 /** How long a requested scan may stay unreported before the card stops waiting. */
@@ -37,55 +38,57 @@ function RunResult({ tenant, head }: { tenant: string; head: JobBranchHead }) {
   }
   const label = head.lastRun.result ?? head.lastRun.status;
   return (
-    <Link to={runHref(tenant, head.jobPath, head.lastRun.runId)} className={styles.result}>
+    <Link to={runHref(tenant, head.jobPath, head.lastRun.runId)} className={`${styles.headLink} ${styles.result}`}>
       {label}
     </Link>
   );
 }
 
-/** HeadTable lists one kind of head: branches, tags, or change requests. */
+/** HeadTable lists one kind of head: branches, tags, or change requests. The
+ * Revision column appears only when a head carries a revision. */
 function HeadTable({
   tenant,
   heads,
-  empty,
   showChangeRequest,
 }: {
   tenant: string;
   heads: JobBranchHead[];
-  empty: string;
   showChangeRequest: boolean;
 }) {
   if (heads.length === 0) {
-    return <div className={styles.empty}>{empty}</div>;
+    return null;
   }
+  const showRevision = heads.some((h) => h.revision);
   return (
-    <table className={styles.table}>
-      <thead>
-        <tr>
-          <th scope="col">{showChangeRequest ? "Pull request" : "Name"}</th>
-          <th scope="col">Latest run</th>
-          <th scope="col">Revision</th>
-        </tr>
-      </thead>
-      <tbody>
-        {heads.map((head) => (
-          <tr key={head.jobPath}>
-            <td>
-              <Link to={jobHref(tenant, head.jobPath)}>
-                {showChangeRequest && head.changeRequest
-                  ? `#${head.changeRequest.id} ${head.changeRequest.title ?? ""}`.trim()
-                  : head.name}
-              </Link>
-              {head.orphaned && <span className={styles.tag}>orphaned</span>}
-            </td>
-            <td>
-              <RunResult tenant={tenant} head={head} />
-            </td>
-            <td className={styles.mono}>{shortRevision(head.revision)}</td>
+    <div className={styles.tableScroll}>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th scope="col">{showChangeRequest ? "Pull request" : "Name"}</th>
+            <th scope="col">Latest run</th>
+            {showRevision && <th scope="col">Revision</th>}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {heads.map((head) => (
+            <tr key={head.jobPath}>
+              <td>
+                <Link to={jobHref(tenant, head.jobPath)} className={styles.headLink}>
+                  {showChangeRequest && head.changeRequest
+                    ? `#${head.changeRequest.id} ${head.changeRequest.title ?? ""}`.trim()
+                    : head.name}
+                </Link>
+                {head.orphaned && <span className={styles.tag}>orphaned</span>}
+              </td>
+              <td>
+                <RunResult tenant={tenant} head={head} />
+              </td>
+              {showRevision && <td className={styles.mono}>{shortRevision(head.revision)}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -96,22 +99,26 @@ function HeadTable({
  */
 function RepositoryTable({ tenant, repositories }: { tenant: string; repositories: JobBranchHead[] }) {
   return (
-    <table className={styles.table}>
-      <thead>
-        <tr>
-          <th scope="col">Repository</th>
-        </tr>
-      </thead>
-      <tbody>
-        {repositories.map((repository) => (
-          <tr key={repository.jobPath}>
-            <td>
-              <Link to={jobHref(tenant, repository.jobPath)}>{repository.name}</Link>
-            </td>
+    <div className={styles.tableScroll}>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th scope="col">Repository</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {repositories.map((repository) => (
+            <tr key={repository.jobPath}>
+              <td>
+                <Link to={jobHref(tenant, repository.jobPath)} className={styles.headLink}>
+                  {repository.name}
+                </Link>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -178,16 +185,19 @@ function scanPending(lastScan: BranchScan | undefined, scanId: string, startedAt
  * MultibranchCard lists the branches, tags, and pull requests a
  * multibranch job or an organization folder has discovered. The inventory can be up to ten minutes
  * stale, and the card says when the cell last exported it. A caller who
- * may write the job sees a Scan now button. After a scan starts, the card
- * refreshes the inventory every few seconds until the scan reports.
+ * may write the job sees a Scan now button in the card header. After a scan
+ * starts, the card refreshes the inventory every few seconds until the scan
+ * reports.
  */
 export function MultibranchCard({
   tenant,
   jobPath,
+  kind,
   canScan = false,
 }: {
   tenant: string;
   jobPath: string;
+  kind: PipelineItemKind;
   canScan?: boolean;
 }) {
   const queryClient = useQueryClient();
@@ -228,41 +238,72 @@ export function MultibranchCard({
   }
 
   const list = query.data;
-  const observed = list.observedAt
-    ? new Date(list.observedAt).toLocaleString()
-    : null;
+  const observed = list.observedAt ? new Date(list.observedAt).toLocaleString() : null;
   // The result shows the scan this page started, or the last scan the cell
   // reported when this page started none.
   const shownScan =
     list.lastScan && (!scan || list.lastScan.scanId === scan.scanId) ? list.lastScan : undefined;
-  const waiting =
-    scan !== null &&
-    scanPending(list.lastScan, scan.scanId, scan.startedAt, Date.now());
+  const waiting = scan !== null && scanPending(list.lastScan, scan.scanId, scan.startedAt, Date.now());
+
+  const scanAction = canScan ? (
+    <div className={styles.headerActions}>
+      <Button size="sm" onClick={() => start.mutate()} disabled={start.isPending || waiting}>
+        Scan now
+      </Button>
+      {waiting && <span className={styles.meta}>Waiting for the scan to report…</span>}
+      {scanError && <span className={styles.error}>{scanError}</span>}
+    </div>
+  ) : undefined;
+
+  const inventoryLine = (
+    <p className={styles.meta}>
+      {observed ? `Inventory as of ${observed}. It can be up to ten minutes old.` : "The cell has not exported this job yet."}
+      {list.truncated && " The cell capped the list."}
+    </p>
+  );
+
+  const heads = [...list.branches, ...list.tags];
+  const prs = list.changeRequests;
+
+  // The job kind picks the card. An organization folder shows its
+  // repositories, never branches. A multibranch job shows its heads.
+  const body =
+    kind === "organizationFolder" ? (
+      <Card title="Repositories" headerRight={scanAction}>
+        {inventoryLine}
+        {list.repositories.length === 0 ? (
+          <p className={styles.empty}>No repositories discovered.</p>
+        ) : (
+          <RepositoryTable tenant={tenant} repositories={list.repositories} />
+        )}
+      </Card>
+    ) : (
+      <Card title="Branches and pull requests" headerRight={scanAction}>
+        {inventoryLine}
+        {heads.length + prs.length === 0 ? (
+          <p className={styles.empty}>No branches or pull requests discovered.</p>
+        ) : (
+          <>
+            {heads.length > 0 && (
+              <>
+                <h3 className={styles.subhead}>Branches</h3>
+                <HeadTable tenant={tenant} heads={heads} showChangeRequest={false} />
+              </>
+            )}
+            {prs.length > 0 && (
+              <>
+                <h3 className={styles.subhead}>Pull requests</h3>
+                <HeadTable tenant={tenant} heads={prs} showChangeRequest />
+              </>
+            )}
+          </>
+        )}
+      </Card>
+    );
 
   return (
     <div className={styles.stack}>
-      <div className={styles.meta}>
-        {observed ? (
-          <span>Inventory as of {observed}. It can be up to ten minutes old.</span>
-        ) : (
-          <span>The cell has not exported this job yet.</span>
-        )}
-        {list.truncated && <span> The cell capped the list.</span>}
-      </div>
-      {canScan && (
-        <div className={styles.scanBar}>
-          <button
-            type="button"
-            className={styles.scanButton}
-            onClick={() => start.mutate()}
-            disabled={start.isPending || waiting}
-          >
-            Scan now
-          </button>
-          {waiting && <span className={styles.meta}>Waiting for the scan to report…</span>}
-          {scanError && <span className={styles.error}>{scanError}</span>}
-        </div>
-      )}
+      {body}
       {shownScan && (
         <Card title="Last scan">
           <ScanResult scan={shownScan} />
@@ -273,27 +314,6 @@ export function MultibranchCard({
           <div className={styles.meta}>The scan did not report within ten minutes. Refresh the page later.</div>
         </Card>
       )}
-      {list.repositories.length > 0 && (
-        <Card title="Repositories">
-          <RepositoryTable tenant={tenant} repositories={list.repositories} />
-        </Card>
-      )}
-      <Card title="Branches">
-        <HeadTable
-          tenant={tenant}
-          heads={[...list.branches, ...list.tags]}
-          empty="No branches discovered."
-          showChangeRequest={false}
-        />
-      </Card>
-      <Card title="Pull requests">
-        <HeadTable
-          tenant={tenant}
-          heads={list.changeRequests}
-          empty="No pull requests discovered."
-          showChangeRequest
-        />
-      </Card>
     </div>
   );
 }

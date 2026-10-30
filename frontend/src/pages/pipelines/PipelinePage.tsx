@@ -12,12 +12,13 @@ import { Card } from "../../components/Card";
 import { usePermissions, canAccessTenantPipeline } from "../../hooks/usePermissions";
 import { age } from "../../components/activityTimeline.util";
 import { stripTenantFolder } from "./jobPath";
-import { jobTitle } from "./pageTitles";
+import { jobTitle, relativeJob } from "./pageTitles";
+import { FilterBar, FilterSelect, SearchBox, type FilterOption } from "../../components/FilterBar";
 import JobBreadcrumbs from "./JobBreadcrumbs";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { RunDrawer } from "./RunDrawer";
 import { MultibranchCard } from "./MultibranchCard";
-import { JobHealthCard } from "./JobHealthCard";
+import { JobHealthCard, NOT_COUNTED_NOTE } from "./JobHealthCard";
 import { QualityTrendCard } from "./QualityTrendCard";
 import { JobBadgeCard } from "./JobBadgeCard";
 import { forgeFileHref, forgeTreeHref } from "./forgeLink";
@@ -51,6 +52,16 @@ function formatDuration(ms: number | undefined): string {
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
 }
+
+/** RESULT_OPTIONS lists the results a build can carry, for the Result filter. */
+const RESULT_OPTIONS: FilterOption[] = [
+  { value: "SUCCESS", label: "Success" },
+  { value: "FAILURE", label: "Failure" },
+  { value: "UNSTABLE", label: "Unstable" },
+  { value: "ABORTED", label: "Aborted" },
+  { value: "INTERRUPTED", label: "Interrupted" },
+  { value: "NOT_BUILT", label: "Not built" },
+];
 
 const RESULT_CLASS: Record<string, string> = {
   SUCCESS: styles.resultOk,
@@ -255,6 +266,13 @@ export default function PipelinePage() {
       return next;
     });
 
+  const clearFilters = () =>
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      ["branch", "result", "actor", "cause"].forEach((key) => next.delete(key));
+      return next;
+    });
+
   const jobQuery = useQuery({
     queryKey: ["pipelineJob", tenant, job],
     queryFn: () => getPipelineJob(tenant!, job!),
@@ -274,7 +292,13 @@ export default function PipelinePage() {
   const runsQuery = useQuery({
     queryKey: ["pipelineRuns", tenant, job, runsFilter],
     queryFn: () => listRuns(tenant!, job!, runsFilter),
-    enabled: !!tenant && !!job && !jobQuery.error,
+    enabled:
+      !!tenant &&
+      !!job &&
+      !jobQuery.error &&
+      jobQuery.data !== undefined &&
+      jobQuery.data.kind !== "multibranch" &&
+      jobQuery.data.kind !== "organizationFolder",
   });
 
   // The tenant's stream carries every job of that tenant, so the page keeps the
@@ -361,15 +385,24 @@ export default function PipelinePage() {
   // One local keeps the narrowing the row guards establish.
   const definition = jobDetail.definition;
   const declaredBy = definition?.declaredBy;
+  // A multibranch job or an organization folder holds branch jobs, not builds,
+  // so it shows no build stats, no build filters, and no run table.
+  const branchContainer = jobDetail.kind === "multibranch" || jobDetail.kind === "organizationFolder";
+  const leaf = relativeJob(jobDetail.tenantFolder, jobDetail.jobPath).split("/").pop();
+  const anyFilter = !!(branch || result || actor || cause);
+  const showFilters = !branchContainer && (anyFilter || runs.length > 0);
+  // A branch container with no definition and no template has nothing to show
+  // in the Defined by card, so the card is omitted.
+  const showDefinedBy = !(branchContainer && !definition && !jobDetail.template);
 
   return (
     <div className={styles.page}>
       <div className={styles.pageHead}>
-        <div>
-          <div className={styles.pageTitle}>{jobDetail.jobPath}</div>
+        <div className={styles.titleBlock}>
           <JobBreadcrumbs tenant={tenant!} tenantFolder={jobDetail.tenantFolder} jobPath={jobDetail.jobPath} />
+          <h1 className={styles.pageTitle}>{leaf}</h1>
         </div>
-        {canRun && jobDetail.kind !== "multibranch" && jobDetail.kind !== "organizationFolder" && (
+        {canRun && !branchContainer && (
           <button type="button" className={styles.runBtn} onClick={() => setDrawerOpen(true)}>
             Run
           </button>
@@ -385,90 +418,13 @@ export default function PipelinePage() {
       <NotesCard mode="job" tenant={tenant ?? ""} job={job ?? ""} />
 
       <TargetApprovalsCard kind="job" targetRef={`${tenant}/${job}`} viewer={viewer} />
-      <JobBadgeCard tenant={tenant!} jobPath={jobDetail.jobPath} kind={jobDetail.kind} jobLabel={folderRelativeJobPath} />
 
-      <div className={styles.cardGrid}>
+      {!branchContainer && (
+      <section aria-label="Build health" className={styles.row}>
         {jobDetail.kind !== "multibranch" && jobDetail.kind !== "organizationFolder" && (
           <JobHealthCard tenant={tenant ?? ""} jobPath={jobDetail.jobPath} health={jobDetail.health} trend={jobDetail.trend} />
         )}
         <QualityTrendCard tenant={tenant ?? ""} jobPath={jobDetail.jobPath} qualityTrend={jobDetail.qualityTrend} window={jobDetail.trend} />
-        <Card title="Defined by">
-          <dl className={styles.kv}>
-            {definition?.jenkinsfileRepo && (
-              <>
-                <dt>Jenkinsfile</dt>
-                <dd>{renderJenkinsfileRow(definition)}</dd>
-              </>
-            )}
-            {definition?.source === "inline" && (
-              <>
-                <dt>Script</dt>
-                <dd>Inline, declared by the bundle item.</dd>
-              </>
-            )}
-            {jobDetail.template && (
-              <>
-                <dt>Template</dt>
-                <dd>{renderTemplateRow(jobDetail.template)}</dd>
-              </>
-            )}
-            {definition?.profile && (
-              <>
-                <dt>Profile</dt>
-                <dd>{definition.profile}</dd>
-              </>
-            )}
-            {declaredBy && (
-              <>
-                <dt>Bundle</dt>
-                <dd>
-                  <Link to={`/catalog/bundles/${enc(declaredBy.bundle.namespace)}/${enc(declaredBy.bundle.name)}`}>
-                    {declaredBy.bundle.name}
-                  </Link>
-                </dd>
-                <dt>Source input</dt>
-                <dd>{renderSourceInputRow(declaredBy)}</dd>
-              </>
-            )}
-            {!jobDetail.definition && !jobDetail.template && (
-              <dd className={styles.dim}>Not available.</dd>
-            )}
-          </dl>
-        </Card>
-
-        {jobDetail.waiting && jobDetail.waiting.length > 0 && (
-          <Card title="Waiting">
-            <dl className={styles.kv}>
-              {jobDetail.waiting.map((w) => (
-                <div key={w.runId}>
-                  <dt>{w.kind === "cell" ? "Cell cap" : w.limit ?? "Limit"}</dt>
-                  <dd>
-                    {w.running} of {w.max} builds run, waiting since {new Date(w.since).toLocaleTimeString()}.{" "}
-                    <span>Run {w.runId}</span>
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </Card>
-        )}
-
-        <Card title="Triggers">
-          <dl className={styles.kv}>
-            <dt>Push</dt>
-            <dd>{jobDetail.triggers?.push ? "Yes" : "No"}</dd>
-            <dt>Pull request</dt>
-            <dd>{jobDetail.triggers?.pullRequest ? "Yes" : "No"}</dd>
-            <dt>Webhook</dt>
-            <dd>{jobDetail.triggers?.webhook ? "Yes" : "No"}</dd>
-            <dt>Schedule</dt>
-            <dd>{jobDetail.triggers?.schedule ?? <span className={styles.dim}>—</span>}</dd>
-            <dt>Concurrency</dt>
-            <dd>{jobDetail.triggers?.concurrency ?? <span className={styles.dim}>—</span>}</dd>
-            {renderDependencyRow("Upstream", jobDetail.dependencies.upstream)}
-            {renderDependencyRow("Downstream", jobDetail.dependencies.downstream)}
-          </dl>
-        </Card>
-
         {/* last30Days is null when the record store could not answer the
             window query; "Not available" then replaces every row, rather
             than a per-row dash that would read as "zero". */}
@@ -519,47 +475,120 @@ export default function PipelinePage() {
               )}
             </dd>
           </dl>
+          <p className={styles.cardNote}>{NOT_COUNTED_NOTE}</p>
         </Card>
-      </div>
+      </section>
+      )}
 
-      <div className={styles.sectionTitle}>Builds</div>
-      <div className={styles.filterBar}>
-        <input
-          className={styles.filterInput}
-          placeholder="Branch"
-          aria-label="Branch filter"
-          value={branch}
-          onChange={(e) => setFilter("branch", e.target.value)}
-        />
-        <input
-          className={styles.filterInput}
-          placeholder="Result"
-          aria-label="Result filter"
-          value={result}
-          onChange={(e) => setFilter("result", e.target.value)}
-        />
-        <input
-          className={styles.filterInput}
-          placeholder="Actor"
-          aria-label="Actor filter"
-          value={actor}
-          onChange={(e) => setFilter("actor", e.target.value)}
-        />
-        <input
-          className={styles.filterInput}
-          placeholder="Cause"
-          aria-label="Cause filter"
-          value={cause}
-          onChange={(e) => setFilter("cause", e.target.value)}
-        />
-      </div>
+      <section aria-label="Definition" className={styles.row}>
+        {showDefinedBy && (
+        <Card title="Defined by">
+          <dl className={styles.kv}>
+            {definition?.jenkinsfileRepo && (
+              <>
+                <dt>Jenkinsfile</dt>
+                <dd>{renderJenkinsfileRow(definition)}</dd>
+              </>
+            )}
+            {definition?.source === "inline" && (
+              <>
+                <dt>Script</dt>
+                <dd>Inline, declared by the bundle item.</dd>
+              </>
+            )}
+            {jobDetail.template && (
+              <>
+                <dt>Template</dt>
+                <dd>{renderTemplateRow(jobDetail.template)}</dd>
+              </>
+            )}
+            {definition?.profile && (
+              <>
+                <dt>Profile</dt>
+                <dd>{definition.profile}</dd>
+              </>
+            )}
+            {declaredBy && (
+              <>
+                <dt>Bundle</dt>
+                <dd>
+                  <Link to={`/catalog/bundles/${enc(declaredBy.bundle.namespace)}/${enc(declaredBy.bundle.name)}`}>
+                    {declaredBy.bundle.name}
+                  </Link>
+                </dd>
+                <dt>Source input</dt>
+                <dd>{renderSourceInputRow(declaredBy)}</dd>
+              </>
+            )}
+            {!jobDetail.definition && !jobDetail.template && (
+              <dd className={styles.dim}>Not available.</dd>
+            )}
+          </dl>
+        </Card>
+        )}
 
-      {jobDetail.kind === "multibranch" || jobDetail.kind === "organizationFolder" ? (
-        <MultibranchCard tenant={tenant!} jobPath={jobDetail.jobPath} canScan={canRun} />
+        {jobDetail.waiting && jobDetail.waiting.length > 0 && (
+          <Card title="Waiting">
+            <dl className={styles.kv}>
+              {jobDetail.waiting.map((w) => (
+                <div key={w.runId}>
+                  <dt>{w.kind === "cell" ? "Cell cap" : w.limit ?? "Limit"}</dt>
+                  <dd>
+                    {w.running} of {w.max} builds run, waiting since {new Date(w.since).toLocaleTimeString()}.{" "}
+                    <span>Run {w.runId}</span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </Card>
+        )}
+
+        <Card title="Triggers">
+          <dl className={styles.kv}>
+            <dt>Push</dt>
+            <dd>{jobDetail.triggers?.push ? "Yes" : "No"}</dd>
+            <dt>Pull request</dt>
+            <dd>{jobDetail.triggers?.pullRequest ? "Yes" : "No"}</dd>
+            <dt>Webhook</dt>
+            <dd>{jobDetail.triggers?.webhook ? "Yes" : "No"}</dd>
+            <dt>Schedule</dt>
+            <dd>{jobDetail.triggers?.schedule ?? <span className={styles.dim}>—</span>}</dd>
+            <dt>Concurrency</dt>
+            <dd>{jobDetail.triggers?.concurrency ?? <span className={styles.dim}>—</span>}</dd>
+            {renderDependencyRow("Upstream", jobDetail.dependencies.upstream)}
+            {renderDependencyRow("Downstream", jobDetail.dependencies.downstream)}
+          </dl>
+        </Card>
+
+      </section>
+
+      <JobBadgeCard tenant={tenant!} jobPath={jobDetail.jobPath} kind={jobDetail.kind} jobLabel={folderRelativeJobPath} />
+
+      {!branchContainer && <h2 className={styles.sectionTitle}>Builds</h2>}
+      {showFilters && (
+        <FilterBar
+          onClear={clearFilters}
+          clearDisabled={!anyFilter}
+        >
+          <SearchBox id="job-filter-branch" label="Branch" value={branch} onChange={(v) => setFilter("branch", v)} />
+          <FilterSelect
+            id="job-filter-result"
+            label="Result"
+            value={result}
+            options={RESULT_OPTIONS}
+            onChange={(v) => setFilter("result", v)}
+          />
+          <SearchBox id="job-filter-actor" label="Actor" value={actor} onChange={(v) => setFilter("actor", v)} />
+          <SearchBox id="job-filter-cause" label="Cause" value={cause} onChange={(v) => setFilter("cause", v)} />
+        </FilterBar>
+      )}
+
+      {branchContainer ? (
+        <MultibranchCard tenant={tenant!} jobPath={jobDetail.jobPath} kind={jobDetail.kind} canScan={canRun} />
       ) : runsQuery.isLoading ? (
         <div className={styles.loading}>Loading builds…</div>
       ) : runs.length === 0 ? (
-        <div className={styles.empty}>No builds match this filter.</div>
+        <div className={styles.empty}>{anyFilter ? "No builds match this filter." : "This job has no builds yet."}</div>
       ) : (
         <Card>
           <div className={styles.tableScroll}>
@@ -580,11 +609,12 @@ export default function PipelinePage() {
                 {runs.map((run) => (
                   <tr key={run.runId}>
                     <td className={styles.nameCell}>
-                      <Link to={runHref(tenant!, job!, run.runId)}>#{run.buildNumber ?? "—"}</Link>
+                      <Link className={styles.buildLink} to={runHref(tenant!, job!, run.runId)}>
+                        #{run.buildNumber ?? "—"}
+                      </Link>
                     </td>
                     <td>
                       <ResultBadge result={run.result} />
-                      {run.result === "INTERRUPTED" && <div className={styles.interruptedNote}>Interrupted</div>}
                     </td>
                     <td>
                       {run.branch ? (

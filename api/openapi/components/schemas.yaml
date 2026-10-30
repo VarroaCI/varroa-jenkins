@@ -5274,7 +5274,7 @@ PipelineLast30Days:
       type: number
       format: double
       nullable: true
-      description: The share of finished runs whose result is SUCCESS. Null when the window holds no finished run.
+      description: The share of counted finished runs whose result is SUCCESS. An INTERRUPTED or NOT_BUILT run is not counted. Null when the window holds no counted run.
     medianDurationMs:
       type: integer
       format: int64

@@ -1,0 +1,53 @@
+.frame {
+  display: grid;
+  grid-template-columns: 3.5em minmax(0, 1fr);
+  column-gap: 0.35rem;
+  row-gap: 2px;
+}
+
+.axis {
+  position: relative;
+  height: 80px;
+  color: var(--text-2);
+  font-size: 0.6875rem;
+  line-height: 1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.axis > span {
+  position: absolute;
+  right: 0;
+}
+
+.axis > span[data-axis="max"] {
+  top: 0;
+}
+
+.axis > span[data-axis="min"] {
+  bottom: 0;
+}
+
+/* The data band starts PAD (4 of 80 units, 5%) inside the box edges. */
+.inset > span[data-axis="max"] {
+  top: calc(5% - 0.5em);
+}
+
+.inset > span[data-axis="min"] {
+  bottom: calc(5% - 0.5em);
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  height: 80px;
+}
+
+.ends {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: var(--text-2);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}

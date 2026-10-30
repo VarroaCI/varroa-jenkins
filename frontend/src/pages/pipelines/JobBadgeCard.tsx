@@ -33,7 +33,7 @@ export function badgeSnippet(url: string, pageURL: string): string {
 /**
  * JobBadgeCard shows the anonymous build badge of one job. It renders
  * nothing for an organization folder, while it loads, and on a read error.
- * A job whose tenant has the badge off sees a note only.
+ * A job whose tenant has the badge off sees one line of text, with no card.
  */
 export function JobBadgeCard({ tenant, jobPath, kind, jobLabel }: JobBadgeCardProps) {
   const [copied, setCopied] = useState(false);
@@ -53,11 +53,9 @@ export function JobBadgeCard({ tenant, jobPath, kind, jobLabel }: JobBadgeCardPr
   const badge = query.data;
   if (!badge.enabled || !badge.path) {
     return (
-      <Card title="Status badge">
-        <p className={styles.note}>
-          The anonymous badge is off for this tenant. A tenant admin turns it on in the tenant settings.
-        </p>
-      </Card>
+      <p className={styles.offLine}>
+        Status badge: off for this tenant. A tenant admin turns it on in the tenant settings.
+      </p>
     );
   }
 

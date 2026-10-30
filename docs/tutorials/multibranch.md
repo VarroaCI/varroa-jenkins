@@ -6,7 +6,8 @@ discovers the heads and lists them on the job page.
 ## Read the inventory
 
 1. Open the tenant in the dashboard. Click the name of a multibranch job.
-2. The page shows two cards: **Branches** and **Pull requests**.
+2. The page shows one card, **Branches and pull requests**. It has a **Branches** section and a
+   **Pull requests** section. A section appears only when it has a head.
 3. Each row names a head. Click the name to open the head's job page.
 4. The **Latest run** column shows the result of the newest build of the head. Click the
    result to open that build.
@@ -20,15 +21,14 @@ The Run control does not appear on a multibranch job. Run a head from its own jo
 - The cell exports the list. The list can be up to ten minutes old. The page shows the
   time of the last export.
 - A cell that is down or hibernated keeps its last list. The page shows that list.
-- A job with no export yet shows empty cards and the note "The cell has not exported this
-  job yet." This is normal for a new job.
+- A job with no export yet shows "The cell has not exported this job yet." An empty card reads "No branches or pull requests discovered." This is normal.
 - The list is capped. A note says so when the cell omits heads.
 
 ## Scan the branches
 
-Select **Scan now** on the job page to start a scan. An organization folder has the same
-button. It scans the folder's repositories. The button appears only when you may
-write the job.
+Select **Scan now** in the card header on the job page to start a scan. An organization folder
+has the same button, in the **Repositories** card header. It scans the folder's repositories. The
+button appears only when you may write the job.
 
 - The scan runs on the cell that holds the job's home slot.
 - The page checks for the result every five seconds. The checks stop when the result
@@ -47,8 +47,8 @@ The MCP tool `scan_multibranch` starts the same scan. Read its result with
 `list_job_branches`, in the `lastScan` value. The tool and the route accept a multibranch
 job or an organization folder. A job that is neither answers `409`, and no scan starts.
 
-An organization folder's page shows a **Repositories** card. Each repository links to its
-own page, which lists its branches and pull requests.
+An organization folder's page shows a **Repositories** card, and never the branch card. Each repository links to its
+own page, which lists its branches and pull requests. A folder with no repository yet shows "No repositories discovered."
 
 ## Read the inventory from the command line or an agent
 

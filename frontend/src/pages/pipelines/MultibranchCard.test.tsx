@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../../test/render-utils";
-import type { JobBranchList } from "../../types";
+import type { JobBranchList, PipelineItemKind } from "../../types";
 import { MultibranchCard } from "./MultibranchCard";
 
 const mockListJobBranches = vi.fn();
@@ -19,12 +19,12 @@ beforeEach(() => {
   mockScanMultibranch.mockReset();
 });
 
-function renderCard(canScan = false) {
+function renderCard(canScan = false, kind: PipelineItemKind = "multibranch") {
   const client = createTestQueryClient();
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <MultibranchCard tenant="alpha" jobPath="alpha/app" canScan={canScan} />
+        <MultibranchCard tenant="alpha" jobPath="alpha/app" kind={kind} canScan={canScan} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -79,12 +79,29 @@ describe("MultibranchCard", () => {
         { name: "projgen", jobPath: "alpha/repos/projgen", orphaned: false, revision: "" },
       ],
     });
-    renderCard();
+    renderCard(false, "organizationFolder");
 
     const repository = await screen.findByRole("link", { name: "projgen" });
     expect(repository.getAttribute("href")).toBe("/pipelines/alpha/alpha%2Frepos%2Fprojgen");
     expect(screen.getByText("Repositories")).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Latest run" })).toBeNull();
+  });
+
+  it("shows an empty organization folder as a Repositories card with Scan now and no branch card", async () => {
+    mockListJobBranches.mockResolvedValue({
+      jobPath: "alpha/repos",
+      truncated: false,
+      branches: [],
+      changeRequests: [],
+      tags: [],
+      repositories: [],
+    });
+    renderCard(true, "organizationFolder");
+
+    expect(await screen.findByText("No repositories discovered.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scan now" })).toBeInTheDocument();
+    expect(screen.queryByText("Branches and pull requests")).not.toBeInTheDocument();
+    expect(screen.queryByText(/No branches/)).toBeNull();
   });
 
   it("links the latest run result to its build page", async () => {
@@ -109,8 +126,48 @@ describe("MultibranchCard", () => {
     await waitFor(() => {
       expect(screen.getByText("The cell has not exported this job yet.")).toBeInTheDocument();
     });
-    expect(screen.getByText("No branches discovered.")).toBeInTheDocument();
-    expect(screen.getByText("No pull requests discovered.")).toBeInTheDocument();
+    expect(screen.getByText("No branches or pull requests discovered.")).toBeInTheDocument();
+  });
+
+  it("shows no branch empty state when only pull requests exist", async () => {
+    mockListJobBranches.mockResolvedValue({ ...inventory, branches: [], tags: [] });
+    renderCard();
+
+    expect(await screen.findByRole("link", { name: "#7 Fix the build" })).toBeInTheDocument();
+    expect(screen.queryByText(/No branches/)).toBeNull();
+    expect(screen.getByRole("heading", { name: "Pull requests" })).toBeInTheDocument();
+  });
+
+  it("hides the Revision column when no head has a revision", async () => {
+    mockListJobBranches.mockResolvedValue({
+      ...inventory,
+      branches: [{ ...inventory.branches[0], revision: undefined }],
+      changeRequests: [{ ...inventory.changeRequests[0], revision: undefined }],
+    });
+    renderCard();
+
+    await screen.findByRole("link", { name: "main" });
+    expect(screen.queryByRole("columnheader", { name: "Revision" })).toBeNull();
+  });
+
+  it("uses the shared table style inside the scroll wrapper", async () => {
+    mockListJobBranches.mockResolvedValue(inventory);
+    const { container } = renderCard();
+
+    await screen.findByRole("link", { name: "main" });
+    const table = container.querySelector("table");
+    expect(table?.className).toMatch(/table/);
+    expect(table?.parentElement?.className).toMatch(/tableScroll/);
+  });
+
+  it("puts Scan now in the card header", async () => {
+    mockListJobBranches.mockResolvedValue(inventory);
+    renderCard(true);
+
+    const button = await screen.findByRole("button", { name: "Scan now" });
+    const header = button.closest("[class*=headerActions]");
+    expect(header).not.toBeNull();
+    expect(header?.previousElementSibling?.textContent).toContain("Branches and pull requests");
   });
 
   it("shows the inventory age and the staleness note", async () => {

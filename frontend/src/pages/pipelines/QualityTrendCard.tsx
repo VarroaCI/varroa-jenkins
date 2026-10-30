@@ -9,12 +9,8 @@ import type {
   WarningsTrendPoint,
   WarningsTrendSeries,
 } from "../../types";
+import { PLOT_H, PLOT_PAD, PLOT_W, TrendPlot, endLabels } from "./TrendPlot";
 import styles from "./QualityTrendCard.module.css";
-
-// The chart box. The viewBox keeps these units; CSS scales the box to the card.
-const W = 300;
-const H = 80;
-const PAD = 4;
 
 // The coverage axis pads the data by PAD_PCT points on each side. Its span is
 // at least MIN_SPAN points, and its bounds stay in 0..100.
@@ -67,11 +63,11 @@ function coverageRange(points: CoverageTrendPoint[], hasBranch: boolean): { lo: 
 
 // geometry maps a slot index to its x centre, and a value in lo..hi to its y.
 function geometry(n: number, lo = 0, hi = 100) {
-  const slot = W / Math.max(n, 1);
+  const slot = PLOT_W / Math.max(n, 1);
   return {
     slot,
     cx: (i: number) => i * slot + slot / 2,
-    y: (v: number) => PAD + ((hi - v) / (hi - lo)) * (H - 2 * PAD),
+    y: (v: number) => PLOT_PAD + ((hi - v) / (hi - lo)) * (PLOT_H - 2 * PLOT_PAD),
   };
 }
 
@@ -105,7 +101,7 @@ function PointLink({ tenant, jobPath, runId, label, x, width, children }: {
   return (
     <Link className={styles.point} to={runHref(tenant, jobPath, runId)} aria-label={label}>
       <title>{label}</title>
-      <rect className={styles.hit} x={x} y={0} width={width} height={H} />
+      <rect className={styles.hit} x={x} y={0} width={width} height={PLOT_H} />
       {children}
     </Link>
   );
@@ -131,6 +127,9 @@ function CoverageChart({ tenant, jobPath, series, window }: {
   const { slot, cx, y } = geometry(slots.length, lo, hi);
   const lineSegs = segments(slots, cx, y, (p) => p.linePercent);
   const branchSegs = hasBranch ? segments(slots, cx, y, (p) => p.branchPercent) : [];
+  const ends = endLabels(slots, buildName, (p) =>
+    p.linePercent === undefined ? undefined : `${p.linePercent.toFixed(1)}%`,
+  );
   return (
     <>
       <p className={styles.legend}>
@@ -143,47 +142,60 @@ function CoverageChart({ tenant, jobPath, series, window }: {
           </>
         )}
       </p>
-      <div className={styles.plot}>
-        <div className={styles.axis} aria-hidden="true">
-          <span data-axis="max">{hi}%</span>
-          <span data-axis="min">{lo}%</span>
-        </div>
-        <svg
-          className={styles.chart}
-          viewBox={`0 0 ${W} ${H}`}
-          role="group"
-          aria-label={`${series.name} coverage per build, oldest first, scale ${lo}% to ${hi}%`}
-        >
-          {lineSegs.map((pts, k) => (
-            <polyline key={`line-${k}`} data-series="line" className={styles.lineLine} points={pts} fill="none" vectorEffect="non-scaling-stroke" />
-          ))}
-          {branchSegs.map((pts, k) => (
-            <polyline key={`branch-${k}`} data-series="branch" className={styles.lineBranch} points={pts} fill="none" vectorEffect="non-scaling-stroke" />
-          ))}
-          {slots.map((s, i) => {
-            if (!s.point) return null;
-            const p = s.point;
-            return (
-              <PointLink
-                key={s.runId}
-                tenant={tenant}
-                jobPath={jobPath}
-                runId={s.runId}
-                label={coverageLabel(p)}
-                x={i * slot}
-                width={slot}
-              >
-                {p.linePercent !== undefined && (
-                  <circle data-series="line" className={styles.dotLine} cx={cx(i)} cy={y(p.linePercent)} r={2.5} />
-                )}
-                {hasBranch && p.branchPercent !== undefined && (
-                  <circle data-series="branch" className={styles.dotBranch} cx={cx(i)} cy={y(p.branchPercent)} r={2.5} />
-                )}
-              </PointLink>
-            );
-          })}
-        </svg>
-      </div>
+      <TrendPlot
+        top={`${hi}%`}
+        bottom={`${lo}%`}
+        inset
+        first={ends.first}
+        last={ends.last}
+        role="group"
+        ariaLabel={`${series.name} coverage per build, oldest first, scale ${lo}% to ${hi}%`}
+      >
+        {lineSegs.map((pts, k) => (
+          <polyline key={`line-${k}`} data-series="line" className={styles.lineLine} points={pts} fill="none" vectorEffect="non-scaling-stroke" />
+        ))}
+        {branchSegs.map((pts, k) => (
+          <polyline key={`branch-${k}`} data-series="branch" className={styles.lineBranch} points={pts} fill="none" vectorEffect="non-scaling-stroke" />
+        ))}
+        {slots.map((s, i) => {
+          if (!s.point) return null;
+          const p = s.point;
+          return (
+            <PointLink
+              key={s.runId}
+              tenant={tenant}
+              jobPath={jobPath}
+              runId={s.runId}
+              label={coverageLabel(p)}
+              x={i * slot}
+              width={slot}
+            >
+              {p.linePercent !== undefined && (
+                <line
+                  data-series="line"
+                  className={styles.dotLine}
+                  x1={cx(i)}
+                  x2={cx(i)}
+                  y1={y(p.linePercent)}
+                  y2={y(p.linePercent)}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
+              {hasBranch && p.branchPercent !== undefined && (
+                <line
+                  data-series="branch"
+                  className={styles.dotBranch}
+                  x1={cx(i)}
+                  x2={cx(i)}
+                  y1={y(p.branchPercent)}
+                  y2={y(p.branchPercent)}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
+            </PointLink>
+          );
+        })}
+      </TrendPlot>
     </>
   );
 }
@@ -203,17 +215,20 @@ function WarningsChart({ tenant, jobPath, series, window }: {
   const slots = slotsFor(window, series.points);
   const { slot } = geometry(slots.length);
   const max = Math.max(...series.points.map((p) => p.total), 1);
+  const ends = endLabels(slots, buildName, (p) => String(p.total));
   return (
-    <svg
-      className={styles.chart}
-      viewBox={`0 0 ${W} ${H}`}
+    <TrendPlot
+      top={String(max)}
+      bottom="0"
+      first={ends.first}
+      last={ends.last}
       role="group"
-      aria-label={`${series.name} warnings per build, oldest first`}
+      ariaLabel={`${series.name} warnings per build, oldest first`}
     >
       {slots.map((s, i) => {
         if (!s.point) return null;
         const p = s.point;
-        const h = (p.total / max) * H;
+        const h = (p.total / max) * PLOT_H;
         return (
           <PointLink
             key={s.runId}
@@ -224,11 +239,11 @@ function WarningsChart({ tenant, jobPath, series, window }: {
             x={i * slot}
             width={slot}
           >
-            <rect data-series="total" className={styles.bar} x={i * slot + slot * 0.15} y={H - h} width={slot * 0.7} height={h} />
+            <rect data-series="total" className={styles.bar} x={i * slot + slot * 0.15} y={PLOT_H - h} width={slot * 0.7} height={h} />
           </PointLink>
         );
       })}
-    </svg>
+    </TrendPlot>
   );
 }
 

@@ -40,7 +40,10 @@ describe("JobBadgeCard", () => {
     mockGetJobBadge.mockResolvedValue({ enabled: false });
     renderCard();
 
-    expect(await screen.findByText(/The anonymous badge is off for this tenant/)).toBeInTheDocument();
+    expect(
+      await screen.findByText("Status badge: off for this tenant. A tenant admin turns it on in the tenant settings."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Status badge")).not.toBeInTheDocument();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue(/badges\//)).not.toBeInTheDocument();
   });

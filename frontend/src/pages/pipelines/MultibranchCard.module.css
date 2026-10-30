@@ -1,3 +1,6 @@
+.table { composes: dataTable from "../tables.module.css"; }
+.tableScroll { composes: tableScroll from "../tables.module.css"; }
+
 .stack {
   display: flex;
   flex-direction: column;
@@ -17,24 +20,7 @@
 
 .empty {
   padding: 12px 0;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-
-.table th,
-.table td {
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-}
-
-.table th {
-  color: var(--text-2);
-  font-weight: 600;
+  margin: 0;
 }
 
 .tag {
@@ -46,8 +32,28 @@
   font-size: 12px;
 }
 
+.headLink {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.headLink:hover {
+  text-decoration: underline;
+}
+
 .result {
   font-weight: 600;
+}
+
+.subhead {
+  margin: 16px 0 8px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.subhead:first-child {
+  margin-top: 0;
 }
 
 .mono {
@@ -55,33 +61,12 @@
   color: var(--text-2);
 }
 
-@media (max-width: 600px) {
-  .table th:nth-child(3),
-  .table td:nth-child(3) {
-    display: none;
-  }
-}
-
-.scanBar {
+.headerActions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-}
-
-.scanButton {
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.scanButton:disabled {
-  cursor: default;
-  opacity: 0.6;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .scanResult {

@@ -1,5 +1,6 @@
 .summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   margin: 0 0 0.75rem;
@@ -35,10 +36,39 @@
 .resultFailed { background: var(--bad); }
 .resultUncounted { background: var(--idle); opacity: 0.5; }
 
-.chart {
-  display: block;
-  width: 100%;
-  height: 80px;
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.75rem;
+  color: var(--text-2);
+}
+
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.note {
+  margin: 0.35rem 0 0;
+  color: var(--text-2);
+  font-size: 0.75rem;
+}
+
+.window {
+  color: var(--text-2);
+  font-size: 0.75rem;
 }
 
 .durationBar { fill: var(--idle); }
