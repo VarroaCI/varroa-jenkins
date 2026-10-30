@@ -1,0 +1,14 @@
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.tableScroll { composes: tableScroll from "./tables.module.css"; }
+.table { composes: dataTable from "./tables.module.css"; min-width: 560px; }
+.levelTable { composes: dataTable from "./tables.module.css"; }
+.nameCell { composes: nameCell from "./tables.module.css"; }
+.mono { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.formGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 16px; align-items: end; margin-top: 12px; }
+.formGroup { composes: formGroup from "./forms.module.css"; margin-bottom: 0; }
+.formLabel { composes: formLabel from "./forms.module.css"; }
+.formInput { composes: formInput from "./forms.module.css"; }
+.formSelect { composes: formSelect from "./forms.module.css"; }
+.actions { composes: actions from "./forms.module.css"; }
+.note { color: var(--text-2); font-size: 13px; margin: 8px 0 0; }
+.error { color: var(--bad-text); margin: 0; }

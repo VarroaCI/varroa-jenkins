@@ -100,7 +100,8 @@ describe("AssistantAdmin", () => {
     }));
     renderAdmin();
     expect(await screen.findByText("The BFF egress is not pinned.")).toBeTruthy();
-    expect(screen.getByText("Session budget 50000 tokens.")).toBeTruthy();
+    expect(screen.getByText("Session budget")).toBeTruthy();
+    expect(screen.getByText("50000 tokens")).toBeTruthy();
   });
 
   it("states the egress CIDRs and ports when the policy is on", async () => {
