@@ -6,6 +6,7 @@ import hudson.Extension;
 import hudson.model.Run;
 import hudson.model.TaskListener;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.Random;
 import java.util.Set;
@@ -143,7 +144,7 @@ public class VarroaLockStep extends Step {
         // and a waiter does not wait out the lease.
         private final AtomicBoolean holdEnded = new AtomicBoolean(false);
         private boolean releasingWarned;
-        private transient String lastRetryReason = "";
+        private String lastRetryReason = "";
 
         private transient Random random;
 
@@ -428,8 +429,10 @@ public class VarroaLockStep extends Step {
                 if (listener != null) {
                     listener.getLogger().println("varroaLock: " + message);
                 }
-            } catch (Exception ignored) {
-                // Best-effort logging only.
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (IOException | RuntimeException e) {
+                LOGGER.log(Level.FINE, "varroaLock: best-effort log write failed", e);
             }
         }
 
@@ -439,8 +442,10 @@ public class VarroaLockStep extends Step {
                 if (listener != null) {
                     listener.getLogger().println("WARNING: varroaLock: " + message);
                 }
-            } catch (Exception ignored) {
-                // Best-effort logging only.
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (IOException | RuntimeException e) {
+                LOGGER.log(Level.FINE, "varroaLock: best-effort log write failed", e);
             }
         }
 
@@ -494,8 +499,10 @@ public class VarroaLockStep extends Step {
                     if (run != null) {
                         VarroaActiveLocksAction.of(run).pop(ownerTenant, nameArg);
                     }
-                } catch (Exception ignored) {
-                    // Best-effort bookkeeping only.
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (IOException | RuntimeException e) {
+                    LOGGER.log(Level.FINE, "varroaLock: best-effort lock bookkeeping failed", e);
                 }
                 if (failure != null) {
                     context.onFailure(failure);

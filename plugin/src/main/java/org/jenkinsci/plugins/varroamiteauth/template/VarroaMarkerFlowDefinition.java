@@ -17,7 +17,6 @@ import java.io.InputStream;
 import java.lang.reflect.Constructor;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -391,9 +390,7 @@ public class VarroaMarkerFlowDefinition extends FlowDefinition {
     /** Parses a resolved template's {@code spec.parameters} schema YAML into a map. */
     static Map<String, Object> parseSchema(VarroaPipelineTemplateStore.TemplateEntry entry) throws AbortException {
         try {
-            Map<String, Object> schema =
-                    VarroaMarkerValidator.parseMarkerYaml(entry.getParameters().getBytes(StandardCharsets.UTF_8));
-            return schema != null ? schema : Collections.emptyMap();
+            return VarroaMarkerValidator.parseMarkerYaml(entry.getParameters().getBytes(StandardCharsets.UTF_8));
         } catch (VarroaMarkerValidator.MarkerFormatException e) {
             throw new AbortException(
                     "template \"" + entry.getName() + "\" delivers an unreadable schema: " + e.getMessage());
@@ -497,7 +494,6 @@ public class VarroaMarkerFlowDefinition extends FlowDefinition {
             Class<?> branchSpecClass = Class.forName("hudson.plugins.git.BranchSpec", false, loader);
             Class<?> gitScmClass = Class.forName("hudson.plugins.git.GitSCM", false, loader);
             Class<?> browserClass = Class.forName("hudson.plugins.git.browser.GitRepositoryBrowser", false, loader);
-            Class<?> extensionClass = Class.forName("hudson.plugins.git.extensions.GitSCMExtension", false, loader);
 
             Object remoteConfig = userRemoteConfigClass.getConstructor(String.class, String.class, String.class, String.class)
                     .newInstance(scmDefinition.getRemote(), null, null, scmDefinition.getCredentialsId());

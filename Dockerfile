@@ -9,7 +9,7 @@ WORKDIR /build
 COPY plugin/pom.xml .
 RUN mvn dependency:go-offline -B || true
 COPY plugin/src/ src/
-RUN mvn package -DskipTests -B
+RUN mvn verify -DskipTests -B
 
 # Stage 2: Go binaries, built from source
 FROM golang:1.26-alpine AS binaries-source

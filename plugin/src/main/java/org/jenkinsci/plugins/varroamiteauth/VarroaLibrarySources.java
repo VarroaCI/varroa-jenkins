@@ -2,7 +2,6 @@ package org.jenkinsci.plugins.varroamiteauth;
 
 import com.cloudbees.hudson.plugins.folder.AbstractFolder;
 import hudson.model.Action;
-import hudson.model.Item;
 import hudson.model.ItemGroup;
 import hudson.model.Run;
 import jenkins.model.GlobalConfiguration;
@@ -306,14 +305,10 @@ final class VarroaLibrarySources {
 
     private static List<AbstractFolder<?>> ancestorFolders(Run<?, ?> run) {
         List<AbstractFolder<?>> out = new ArrayList<>();
-        Item item = run.getParent();
-        ItemGroup<?> group = item == null ? null : item.getParent();
+        ItemGroup<?> group = run.getParent().getParent();
         while (group instanceof AbstractFolder) {
             out.add((AbstractFolder<?>) group);
-            if (!(group instanceof Item)) {
-                break;
-            }
-            group = ((Item) group).getParent();
+            group = ((AbstractFolder<?>) group).getParent();
         }
         return out;
     }

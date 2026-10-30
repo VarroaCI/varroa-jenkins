@@ -845,3 +845,15 @@ run the changed classes first with `-Dtest=<Class>,<Class>`.
 docker run --rm -u $(id -u):$(id -g) -e HOME=/tmp/mvnhome -v ~/.m2:/tmp/mvnhome/.m2 \
   -v $PWD:/src -w /src maven:3.9-eclipse-temurin-21 mvn -B test
 ```
+
+SpotBugs runs in the `verify` phase through the parent POM. `mvn verify` runs it, and the
+plugin-builder stage of `Dockerfile` runs `mvn verify -DskipTests -B`, so an image build
+fails on a SpotBugs finding. Run the check with this command:
+
+```bash
+docker run --rm -u $(id -u):$(id -g) -e HOME=/tmp/mvnhome -v ~/.m2:/tmp/mvnhome/.m2 \
+  -v $PWD:/src -w /src maven:3.9-eclipse-temurin-21 mvn -B -DskipTests verify
+```
+
+Exclusions live in `plugin/src/spotbugs/excludesFilter.xml`. Each exclusion carries a reason
+comment. A bare `spotbugs:check` goal ignores that file, so do not use it for the final check.

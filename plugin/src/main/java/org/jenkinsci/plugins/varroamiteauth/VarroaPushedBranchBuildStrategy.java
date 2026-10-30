@@ -1,13 +1,13 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
 import hudson.Extension;
-import hudson.model.Item;
 import hudson.model.TaskListener;
 import jenkins.branch.BranchBuildStrategy;
 import jenkins.branch.BranchBuildStrategyDescriptor;
 import jenkins.scm.api.SCMHead;
 import jenkins.scm.api.SCMRevision;
 import jenkins.scm.api.SCMSource;
+import jenkins.scm.api.SCMSourceOwner;
 import jenkins.scm.api.mixin.TagSCMHead;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -49,8 +49,8 @@ public class VarroaPushedBranchBuildStrategy extends BranchBuildStrategy {
     }
 
     private static String ownerKey(SCMSource source, SCMHead head) {
-        Object owner = source.getOwner();
-        String ownerName = owner instanceof Item ? ((Item) owner).getFullName() : String.valueOf(owner);
+        SCMSourceOwner owner = source.getOwner();
+        String ownerName = owner != null ? owner.getFullName() : "null";
         return ownerName + "\u0000" + source.getId() + "\u0000" + head.getName();
     }
 

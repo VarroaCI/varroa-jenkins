@@ -82,7 +82,7 @@ public class VarroaBannerDecorator extends PageDecorator {
             }
             Object addr = prop.getClass().getMethod("getAddress").invoke(prop);
             return addr == null ? "" : (String) addr;
-        } catch (Exception e) {
+        } catch (ReflectiveOperationException | RuntimeException e) {
             return "";
         }
     }

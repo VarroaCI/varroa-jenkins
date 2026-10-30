@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
+import java.nio.file.Files;
 import java.util.Set;
 
 import org.jenkinsci.plugins.workflow.steps.Step;
@@ -140,7 +141,7 @@ public class VarroaArtifactStep extends Step {
         public Void invoke(File f, VirtualChannel channel) throws IOException {
             File parent = f.getParentFile();
             if (parent != null) {
-                parent.mkdirs();
+                Files.createDirectories(parent.toPath());
             }
             try (InputStream in = URI.create(url).toURL().openStream();
                     OutputStream out = new FileOutputStream(f)) {

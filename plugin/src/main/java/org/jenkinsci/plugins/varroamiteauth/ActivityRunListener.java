@@ -2,6 +2,7 @@ package org.jenkinsci.plugins.varroamiteauth;
 
 import hudson.Extension;
 import hudson.model.Cause;
+import hudson.model.Result;
 import hudson.model.Run;
 import hudson.model.TaskListener;
 import hudson.model.listeners.RunListener;
@@ -57,7 +58,8 @@ public class ActivityRunListener extends RunListener<Run<?, ?>> {
             int number = run.getNumber();
             String url = run.getUrl();
             String actor = resolveActor(run);
-            String result = run.getResult() != null ? run.getResult().toString() : "";
+            Result r = run.getResult();
+            String result = r != null ? r.toString() : "";
             String message = "Build #" + number + " of " + path + " completed: " + result;
 
             ActivityEvent event = ActivityEvent.builder()

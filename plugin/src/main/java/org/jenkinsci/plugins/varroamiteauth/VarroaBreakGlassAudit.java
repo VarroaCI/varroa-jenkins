@@ -1,6 +1,7 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -30,8 +31,8 @@ final class VarroaBreakGlassAudit {
 
     private static final String SCRIPT_KEY_SEPARATOR = "\u0000";
 
-    private static final ConcurrentHashMap<String, Long> SESSION_LAST_SEEN = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<String, Long> SCRIPT_LAST_SEEN = new ConcurrentHashMap<>();
+    private static final Map<String, Long> SESSION_LAST_SEEN = new HashMap<>();
+    private static final Map<String, Long> SCRIPT_LAST_SEEN = new HashMap<>();
 
     private static final String[] SENSITIVE_PREFIXES = {
         "/script", "/manage", "/configureSecurity", "/pluginManager",
@@ -107,7 +108,7 @@ final class VarroaBreakGlassAudit {
      * so the monitor sees no contention that matters.
      */
     private static boolean shouldEmit(
-            ConcurrentHashMap<String, Long> map, int cap, String key, long windowMillis, long now) {
+            Map<String, Long> map, int cap, String key, long windowMillis, long now) {
         synchronized (map) {
             Long last = map.get(key);
             if (last != null && now - last < windowMillis) {
@@ -124,15 +125,23 @@ final class VarroaBreakGlassAudit {
     // ---- Testing hooks ----
 
     static void resetForTesting() {
-        SESSION_LAST_SEEN.clear();
-        SCRIPT_LAST_SEEN.clear();
+        synchronized (SESSION_LAST_SEEN) {
+            SESSION_LAST_SEEN.clear();
+        }
+        synchronized (SCRIPT_LAST_SEEN) {
+            SCRIPT_LAST_SEEN.clear();
+        }
     }
 
     static int sessionMapSizeForTesting() {
-        return SESSION_LAST_SEEN.size();
+        synchronized (SESSION_LAST_SEEN) {
+            return SESSION_LAST_SEEN.size();
+        }
     }
 
     static int scriptMapSizeForTesting() {
-        return SCRIPT_LAST_SEEN.size();
+        synchronized (SCRIPT_LAST_SEEN) {
+            return SCRIPT_LAST_SEEN.size();
+        }
     }
 }

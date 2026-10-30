@@ -486,8 +486,9 @@ public class ActivityEndpoint implements RootAction {
             if (computation.getTimestamp() != null) {
                 indexedAt = Instant.ofEpochMilli(computation.getTimestamp().getTimeInMillis()).toString();
             }
-            if (computation.getResult() != null) {
-                indexResult = computation.getResult().toString();
+            Result r = computation.getResult();
+            if (r != null) {
+                indexResult = r.toString();
             }
         }
         JSONObject row = new JSONObject();
