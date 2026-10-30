@@ -224,3 +224,26 @@
   font-size: 12.5px;
   color: var(--warn-text);
 }
+
+.notReady {
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  margin: 12px 0 0;
+  font-size: 12.5px;
+}
+
+.poolNotReady {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+
+.warnValue {
+  color: var(--warn-text);
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--text-2);
+}
