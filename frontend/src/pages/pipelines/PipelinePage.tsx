@@ -561,56 +561,58 @@ export default function PipelinePage() {
         <div className={styles.empty}>No builds match this filter.</div>
       ) : (
         <Card>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Build</th>
-                <th>Result</th>
-                <th>Branch</th>
-                <th>Commit</th>
-                <th>Cause</th>
-                <th>Duration</th>
-                <th>Queue</th>
-                <th>When</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((run) => (
-                <tr key={run.runId}>
-                  <td className={styles.nameCell}>
-                    <Link to={runHref(tenant!, job!, run.runId)}>#{run.buildNumber ?? "—"}</Link>
-                  </td>
-                  <td>
-                    <ResultBadge result={run.result} />
-                    {run.result === "INTERRUPTED" && <div className={styles.interruptedNote}>Interrupted</div>}
-                  </td>
-                  <td>
-                    {run.branch ? (
-                      <Link to={`/pipelines/${enc(tenant!)}/${enc(job!)}?branch=${enc(run.branch)}`}>{run.branch}</Link>
-                    ) : (
-                      <span className={styles.dim}>—</span>
-                    )}
-                    {run.changeRequest && <PrChip changeRequest={run.changeRequest} />}
-                  </td>
-                  <td>
-                    {run.scmRevision ? (
-                      <RevisionLink revision={run.scmRevision} repoUrl={run.scmUrl} forge={run.scmForge} length={7} />
-                    ) : (
-                      <span className={styles.dim}>—</span>
-                    )}
-                  </td>
-                  <td title={run.triggerSource ? `Triggered by ${TRIGGER_LABEL[run.triggerSource]}` : undefined}>
-                    {run.cause ?? <span className={styles.dim}>—</span>}
-                  </td>
-                  <td>{formatDuration(run.durationMs)}</td>
-                  <td>{formatDuration(queueWaitMs(run))}</td>
-                  <td>
-                    {run.endedAt ? age(run.endedAt) : run.startedAt ? age(run.startedAt) : <span className={styles.dim}>—</span>}
-                  </td>
+          <div className={styles.tableScroll}>
+            <table className={styles.buildsTable}>
+              <thead>
+                <tr>
+                  <th>Build</th>
+                  <th>Result</th>
+                  <th>Branch</th>
+                  <th>Commit</th>
+                  <th>Cause</th>
+                  <th>Duration</th>
+                  <th>Queue</th>
+                  <th>When</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {runs.map((run) => (
+                  <tr key={run.runId}>
+                    <td className={styles.nameCell}>
+                      <Link to={runHref(tenant!, job!, run.runId)}>#{run.buildNumber ?? "—"}</Link>
+                    </td>
+                    <td>
+                      <ResultBadge result={run.result} />
+                      {run.result === "INTERRUPTED" && <div className={styles.interruptedNote}>Interrupted</div>}
+                    </td>
+                    <td>
+                      {run.branch ? (
+                        <Link to={`/pipelines/${enc(tenant!)}/${enc(job!)}?branch=${enc(run.branch)}`}>{run.branch}</Link>
+                      ) : (
+                        <span className={styles.dim}>—</span>
+                      )}
+                      {run.changeRequest && <PrChip changeRequest={run.changeRequest} />}
+                    </td>
+                    <td>
+                      {run.scmRevision ? (
+                        <RevisionLink revision={run.scmRevision} repoUrl={run.scmUrl} forge={run.scmForge} length={7} />
+                      ) : (
+                        <span className={styles.dim}>—</span>
+                      )}
+                    </td>
+                    <td title={run.triggerSource ? `Triggered by ${TRIGGER_LABEL[run.triggerSource]}` : undefined}>
+                      {run.cause ?? <span className={styles.dim}>—</span>}
+                    </td>
+                    <td>{formatDuration(run.durationMs)}</td>
+                    <td>{formatDuration(queueWaitMs(run))}</td>
+                    <td>
+                      {run.endedAt ? age(run.endedAt) : run.startedAt ? age(run.startedAt) : <span className={styles.dim}>—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
 

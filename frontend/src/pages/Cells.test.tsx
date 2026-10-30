@@ -598,3 +598,12 @@ describe("Pools on more than one cluster", () => {
     expect(within(coreBlock).getByRole("link", { name: "plain-cell" })).toBeInTheDocument();
   });
 });
+
+describe("Wide table scroll wrapper", () => {
+  it("wraps each pool table in the scroll wrapper", () => {
+    renderPage();
+    const tables = document.querySelectorAll("table");
+    expect(tables.length).toBeGreaterThan(0);
+    tables.forEach((t) => expect(t.parentElement?.className).toMatch(/tableScroll/));
+  });
+});

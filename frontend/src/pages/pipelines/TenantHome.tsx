@@ -460,7 +460,7 @@ export default function TenantHome() {
       ) : (
         <Card>
           <div className={styles.tableScroll}>
-            <table className={styles.table}>
+            <table className={styles.jobsTable}>
               <thead>
                 <tr>
                   <th>Pipeline</th>

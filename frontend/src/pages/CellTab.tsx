@@ -135,40 +135,42 @@ function TopologyPanel({
       {tenants.length === 0 ? (
         <p className={styles.empty}>This cell holds no tenant. It is a free cell of its pool.</p>
       ) : (
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Tenant</th>
-              <th>Folder</th>
-              <th>Role</th>
-              <th>Placement</th>
-              <th>Agent namespace</th>
-              <th>Placement generation</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tenants.map((tenant) => {
-              const row = usageByTenant.get(tenant);
-              const canOpen = canAccessTenantPipeline(permissions, tenant, "read");
-              return (
-                <tr key={tenant}>
-                  <td>
-                    {canOpen ? (
-                      <Link to={`/pipelines/${encodeURIComponent(tenant)}`}>{tenant}</Link>
-                    ) : (
-                      tenant
-                    )}
-                  </td>
-                  <td className={styles.mono}>{tenant}</td>
-                  <td>{row?.role || DASH}</td>
-                  <td>{applied.has(tenant) ? "placed" : "rehydrating"}</td>
-                  <td className={styles.mono}>{row?.agentNamespace || DASH}</td>
-                  <td>{row?.placementGeneration ?? DASH}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className={styles.tableScroll}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Tenant</th>
+                <th>Folder</th>
+                <th>Role</th>
+                <th>Placement</th>
+                <th>Agent namespace</th>
+                <th>Placement generation</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tenants.map((tenant) => {
+                const row = usageByTenant.get(tenant);
+                const canOpen = canAccessTenantPipeline(permissions, tenant, "read");
+                return (
+                  <tr key={tenant}>
+                    <td>
+                      {canOpen ? (
+                        <Link to={`/pipelines/${encodeURIComponent(tenant)}`}>{tenant}</Link>
+                      ) : (
+                        tenant
+                      )}
+                    </td>
+                    <td className={styles.mono}>{tenant}</td>
+                    <td>{row?.role || DASH}</td>
+                    <td>{applied.has(tenant) ? "placed" : "rehydrating"}</td>
+                    <td className={styles.mono}>{row?.agentNamespace || DASH}</td>
+                    <td>{row?.placementGeneration ?? DASH}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </Card>
   );
@@ -337,35 +339,37 @@ function CapacityPanel({
       {!usage || usage.tenants.length === 0 ? (
         <p className={styles.empty}>No tenant has run a build in the window.</p>
       ) : (
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Tenant</th>
-              <th>Running now</th>
-              <th>Runs 24 h</th>
-              <th>Failures 24 h</th>
-              <th>Jobs</th>
-            </tr>
-          </thead>
-          <tbody>
-            {usage.tenants.map((t) => (
-              <tr key={t.tenant}>
-                <td>{t.tenant}</td>
-                <td>{t.runningNow}</td>
-                <td>{t.runsLast24h}</td>
-                <td>{t.failedLast24h}</td>
-                <td>{t.jobs}</td>
+        <div className={styles.tableScroll}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Tenant</th>
+                <th>Running now</th>
+                <th>Runs 24 h</th>
+                <th>Failures 24 h</th>
+                <th>Jobs</th>
               </tr>
-            ))}
-            <tr className={styles.totalRow}>
-              <td>Total</td>
-              <td>{usage.totals.runningNow}</td>
-              <td>{usage.totals.runsLast24h}</td>
-              <td>{usage.totals.failedLast24h}</td>
-              <td>{usage.totals.jobs}</td>
-            </tr>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {usage.tenants.map((t) => (
+                <tr key={t.tenant}>
+                  <td>{t.tenant}</td>
+                  <td>{t.runningNow}</td>
+                  <td>{t.runsLast24h}</td>
+                  <td>{t.failedLast24h}</td>
+                  <td>{t.jobs}</td>
+                </tr>
+              ))}
+              <tr className={styles.totalRow}>
+                <td>Total</td>
+                <td>{usage.totals.runningNow}</td>
+                <td>{usage.totals.runsLast24h}</td>
+                <td>{usage.totals.failedLast24h}</td>
+                <td>{usage.totals.jobs}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       )}
     </Card>
   );
@@ -415,26 +419,28 @@ function PermissionsPanel({
                 No member role exists on this tenant.
               </p>
             ) : (
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Role</th>
-                    <th>Folder pattern</th>
-                    <th>Subjects</th>
-                    <th>Permissions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entry.memberRoles.map((r) => (
-                    <tr key={r.name}>
-                      <td className={styles.mono}>{r.name}</td>
-                      <td className={styles.mono}>{r.pattern}</td>
-                      <td>{r.subjects.map((s) => `${s.kind}:${s.name}`).join(", ") || DASH}</td>
-                      <td className={styles.mono}>{r.permissions.join(", ")}</td>
+              <div className={styles.tableScroll}>
+                <table className={styles.wideTable}>
+                  <thead>
+                    <tr>
+                      <th>Role</th>
+                      <th>Folder pattern</th>
+                      <th>Subjects</th>
+                      <th>Permissions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {entry.memberRoles.map((r) => (
+                      <tr key={r.name}>
+                        <td className={styles.mono}>{r.name}</td>
+                        <td className={styles.mono}>{r.pattern}</td>
+                        <td>{r.subjects.map((s) => `${s.kind}:${s.name}`).join(", ") || DASH}</td>
+                        <td className={styles.mono}>{r.permissions.join(", ")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
             <p className={styles.note}>
               Scans, runs, replays, restarts, and input answers check the member role.
@@ -444,32 +450,34 @@ function PermissionsPanel({
                 No binding and no Tenant membership reaches this tenant. Nobody may build on it.
               </p>
             ) : (
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Source</th>
-                    <th>Binding</th>
-                    <th>Role</th>
-                    <th>Subjects</th>
-                    <th>Verbs</th>
-                    <th>Jobs</th>
-                    <th>From</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entry.grants.map((g, i) => (
-                    <tr key={`${g.binding ?? "tenant"}-${i}`}>
-                      <td>{g.source}</td>
-                      <td className={styles.mono}>{g.binding || DASH}</td>
-                      <td>{g.roleRef}</td>
-                      <td>{g.subjects.map((s) => `${s.kind}:${s.name}`).join(", ") || DASH}</td>
-                      <td>{g.verbs.join(", ") || DASH}</td>
-                      <td className={styles.mono}>{g.jobs ? g.jobs.join(", ") : "every job"}</td>
-                      <td className={styles.mono}>{g.federatedFrom?.join(", ") || DASH}</td>
+              <div className={styles.tableScroll}>
+                <table className={styles.wideTable}>
+                  <thead>
+                    <tr>
+                      <th>Source</th>
+                      <th>Binding</th>
+                      <th>Role</th>
+                      <th>Subjects</th>
+                      <th>Verbs</th>
+                      <th>Jobs</th>
+                      <th>From</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {entry.grants.map((g, i) => (
+                      <tr key={`${g.binding ?? "tenant"}-${i}`}>
+                        <td>{g.source}</td>
+                        <td className={styles.mono}>{g.binding || DASH}</td>
+                        <td className={styles.nowrap}>{g.roleRef}</td>
+                        <td>{g.subjects.map((s) => `${s.kind}:${s.name}`).join(", ") || DASH}</td>
+                        <td className={styles.nowrap}>{g.verbs.join(", ") || DASH}</td>
+                        <td className={styles.mono}>{g.jobs ? g.jobs.join(", ") : "every job"}</td>
+                        <td className={styles.mono}>{g.federatedFrom?.join(", ") || DASH}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
             {entry.grants.some((g) => g.source === "federatedBinding") && (
               <p className={styles.note}>

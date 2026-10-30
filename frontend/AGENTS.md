@@ -142,6 +142,9 @@ TypeScript consumer of it.
   `src/pages/`; a component like `SectionPage` that needs that pattern
   gets its own `SectionPage.module.css` rather than importing a page's.
 - **Lists inside a Card fit the Admin & access content width (706 px at a 1280 px viewport).** Wrap a `.dataTable` in an element that composes `tableScroll` from `src/pages/tables.module.css`. A CSS-grid list row uses `minmax(0, …)` tracks and a fixed-width actions track, so the header and every row align. A single-value `select` keeps the text-input height; only `select[multiple]` gets a taller box.
+  - The wrapper draws an edge shadow cue. Under 760 px it is the only scroll box for a wrapped table.
+  - A table with many columns sets a `min-width` on its own class, so cells do not wrap at every space.
+  - Under 640 px, `DeliveryPipeline` stacks its nodes.
 
 ## Work Guidance
 

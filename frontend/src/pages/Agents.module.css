@@ -10,8 +10,11 @@
   font-size: 1.25rem;
 }
 
+.tableScroll { composes: tableScroll from "./tables.module.css"; }
+
 .table {
   width: 100%;
+  min-width: 680px;
   border-collapse: collapse;
 }
 

@@ -2,6 +2,7 @@
 .nameCell { composes: nameCell from "../tables.module.css"; }
 
 .tableScroll { composes: tableScroll from "../tables.module.css"; }
+.jobsTable { composes: table; min-width: 760px; }
 
 .page {
   animation: fade 0.3s ease;

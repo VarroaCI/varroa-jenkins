@@ -171,7 +171,7 @@ export default function SettingsVersionsTab() {
       </p>
       <ClusterSelector value={selectedCluster} onChange={setSelectedCluster} />
       <div className={styles.profileTableWrap}>
-        <table className={styles.table}>
+        <table className={styles.wideTable}>
           <thead>
             <tr>
               <th>Version</th><th>Channel</th><th>Plugins</th><th>Plugin set</th><th>JCasC</th><th>Materialized</th>
@@ -276,7 +276,7 @@ export default function SettingsVersionsTab() {
         )
       ) : (
         <div className={styles.candidateTableWrap}>
-          <table className={styles.table}>
+          <table className={styles.wideTable}>
             <thead>
               <tr>
                 <th>Target profile / line</th>

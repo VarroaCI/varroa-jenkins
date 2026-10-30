@@ -201,3 +201,14 @@ describe("SettingsUsersTab", () => {
     expect(screen.getByRole("table").parentElement?.className).toMatch(/tableWrap/);
   });
 });
+
+describe("SettingsUsersTab user name", () => {
+  it("puts the full user name in a title", async () => {
+    mockUseAuth.mockReturnValue({ authMode: "local" });
+    m(client.listUsers).mockResolvedValue([
+      { name: "alice-with-a-long-oidc-hash-7f3a9c", email: "alice@example.com", displayName: "Alice", groups: [], managedBy: "local" },
+    ]);
+    renderTab();
+    expect(await screen.findByTitle("alice-with-a-long-oidc-hash-7f3a9c")).toBeInTheDocument();
+  });
+});

@@ -198,7 +198,7 @@ export default function SettingsUpdateCenterTab() {
                 </div>
                 {result.closure.length > 0 && (
                   <div className={styles.profileTableWrap}>
-                    <table className={styles.table}>
+                    <table className={styles.wideTable}>
                       <thead>
                         <tr>
                           <th>Dependency</th><th>Minimum</th><th>Status</th><th>Resolved</th><th>Source</th>
@@ -245,7 +245,7 @@ export default function SettingsUpdateCenterTab() {
                 {rejection.unresolved.length > 0 && (
                   <>
                     <div className={styles.profileTableWrap}>
-                      <table className={styles.table}>
+                      <table className={styles.wideTable}>
                         <thead>
                           <tr>
                             <th>Dependency</th><th>Minimum</th><th>Reason</th>

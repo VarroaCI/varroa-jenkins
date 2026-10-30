@@ -203,7 +203,8 @@
   overflow-wrap: break-word;
 }
 
-.tableScroll { composes: tableScroll from "../tables.module.css"; }
+/* These wrappers sit on the page canvas, not in a Card. */
+.tableScroll { composes: tableScroll from "../tables.module.css"; --scroll-cover: var(--bg); }
 
 /* A suite header row names the cases below it. */
 .groupRow th {
