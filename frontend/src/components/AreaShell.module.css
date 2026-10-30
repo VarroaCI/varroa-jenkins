@@ -75,3 +75,47 @@
   padding: 24px;
   overflow-y: auto;
 }
+
+@media (max-width: 639.98px) {
+  .shell {
+    flex-direction: column;
+  }
+
+  .subNav {
+    width: auto;
+    position: relative;
+    flex-direction: row;
+    gap: 3px;
+    padding: 0;
+    border-right: none;
+    box-shadow: inset 0 -1px 0 var(--border);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .navItem {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 10px 12px;
+  }
+
+  /* The strip clips overflow, so the focus ring must sit inside the item. */
+  .navItem:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--text);
+  }
+
+  .active::before {
+    left: 8px;
+    right: 8px;
+    top: auto;
+    bottom: 0;
+    width: auto;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+  }
+
+  .content {
+    padding: 16px 0 0;
+    overflow-y: visible;
+  }
+}
