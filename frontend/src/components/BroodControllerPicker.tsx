@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -29,6 +29,24 @@ const KINDS = [
 // KindCell renders the controller's kind. A cell row also names its pool
 // and states its fill as a ratio of reported values. A stateful controller
 // holds no pool and no tenant, so its row carries the label alone.
+/** Drops the scheme and puts a break chance after each dot, so a narrow
+ *  column wraps the host between labels and never inside one. */
+function EndpointLabel({ url }: { url: string }) {
+  const host = url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/\/$/, "");
+  const parts = host.split(".");
+  return (
+    <>
+      {parts.map((part, i) => (
+        <Fragment key={i}>
+          {part}
+          {i < parts.length - 1 && <>.<wbr /></>}
+        </Fragment>
+      ))}
+      {" ↗"}
+    </>
+  );
+}
+
 function KindCell({ c }: { c: ControllerListItem }) {
   if (c.kind !== "cell") {
     return (
@@ -399,11 +417,12 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
             <a
               className={styles.ext}
               href={c.endpoint}
+              title={c.endpoint}
               onClick={(e) => e.stopPropagation()}
               target="_blank"
               rel="noreferrer"
             >
-              {c.endpoint} ↗
+              <EndpointLabel url={c.endpoint} />
             </a>
           ) : (
             <span className={styles.monoMuted}>—</span>

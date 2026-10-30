@@ -65,6 +65,12 @@ TypeScript consumer of it.
   `ManagedJenkins .execBar i`) correctly stay on `--accent` — non-text only
   needs 3:1, which it clears at 3.88:1. New accent-on-text surfaces must be
   measured across all four variants × both themes before landing.
+  Dark redefines `--accent` and `--accent-strong` per variant as text-safe
+  values. `styleIntegrity.test.ts` measures dark `--accent` and
+  `--accent-strong`, and light `--accent-strong`, on every surface. Light
+  `--accent` stays a non-text colour.
+- **Bare textareas** take the theme tokens from the `:where(textarea)` base
+  rule in `styles/global.css`. A module class overrides it.
 - **Spec Editor curated form** (`components/specform/`): the Form tab edits
   `ingressSpec` and `miteSpec`. `podOverrides` and `resourceOverlay` stay
   YAML tiers. A non-conflict save failure shows `ApiError.serverMessage` in a

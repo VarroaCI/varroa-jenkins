@@ -37,6 +37,22 @@ button {
   color: inherit;
 }
 
+/* A textarea with no class of its own takes the theme tokens.
+   :where() keeps zero specificity, so a module class always wins. */
+:where(textarea) {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+}
+
+:where(textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 ::selection {
   background: var(--accent-soft);
 }

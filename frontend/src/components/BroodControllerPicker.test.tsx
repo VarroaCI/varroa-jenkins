@@ -106,6 +106,21 @@ describe("BroodControllerPicker", () => {
       expect(screen.getByText("ctrl-b")).toBeInTheDocument();
       expect(screen.getAllByText("Provisioning").length).toBeGreaterThanOrEqual(1);
     });
+
+    it("renders the endpoint host without the scheme and breaks only after a dot", () => {
+      mockUseControllers.mockReturnValue({
+        data: [ctrlFixture("ctrl-a")],
+        isLoading: false,
+        error: null,
+      });
+      const { container } = renderPicker();
+
+      const link = container.querySelector('a[href="https://ctrl-a.example.com"]');
+      expect(link).not.toBeNull();
+      expect(link?.getAttribute("title")).toBe("https://ctrl-a.example.com");
+      expect(link?.textContent).toBe("ctrl-a.example.com ↗");
+      expect(link?.querySelectorAll("wbr").length).toBe(2);
+    });
   });
 
   describe("Version column (#242)", () => {
