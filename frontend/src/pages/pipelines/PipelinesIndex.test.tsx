@@ -1,15 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Routes, Route, useParams } from "react-router-dom";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Routes, Route, useParams, useLocation } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../../test/render-utils";
+import { ToastProvider } from "../../components/Toast";
+import { ApiError } from "../../hooks/useApi";
+import type { FleetRunPage, FleetRunRow, PipelinesOverview, PipelinesOverviewTenant } from "../../types";
 import PipelinesIndex from "./PipelinesIndex";
 
 const mockGetMyPermissions = vi.fn();
-const mockListPipelineTenants = vi.fn();
+const mockGetPipelinesOverview = vi.fn();
+const mockListFleetRuns = vi.fn();
 vi.mock("../../api/client", () => ({
   getMyPermissions: (...args: unknown[]) => mockGetMyPermissions(...args),
-  listPipelineTenants: (...args: unknown[]) => mockListPipelineTenants(...args),
+  getPipelinesOverview: (...args: unknown[]) => mockGetPipelinesOverview(...args),
+  listFleetRuns: (...args: unknown[]) => mockListFleetRuns(...args),
+  rerunRun: vi.fn(),
+  cancelRun: vi.fn(),
+  fleetRunStreamUrl: () => "/api/v1/pipelines/runs/stream",
+}));
+vi.mock("../../hooks/useEventStream", () => ({
+  useEventStream: () => ({ lastEvent: null, readyState: "closed", error: null }),
+}));
+const mockAssistant = { available: false };
+vi.mock("../../components/assistant/AssistantProvider", () => ({
+  useAssistant: () => mockAssistant,
+}));
+vi.mock("./ProposePipelineCard", () => ({
+  default: ({ tenant }: { tenant: string }) => <div>propose for {tenant}</div>,
 }));
 
 function TenantPage() {
@@ -17,155 +36,190 @@ function TenantPage() {
   return <div>tenant page: {tenant}</div>;
 }
 
+function LocationProbe() {
+  const location = useLocation();
+  return <div>at {location.pathname}</div>;
+}
+
 function renderPage() {
   const queryClient = createTestQueryClient();
   return render(
     <MemoryRouter initialEntries={["/pipelines"]}>
       <QueryClientProvider client={queryClient}>
-        <Routes>
-          <Route path="/pipelines" element={<PipelinesIndex />} />
-          <Route path="/pipelines/:tenant" element={<TenantPage />} />
-        </Routes>
+        <ToastProvider>
+          <Routes>
+            <Route
+              path="/pipelines"
+              element={
+                <>
+                  <PipelinesIndex />
+                  <LocationProbe />
+                </>
+              }
+            />
+            <Route path="/pipelines/:tenant" element={<TenantPage />} />
+          </Routes>
+        </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   );
 }
 
-const noGrants = { global: {}, scopes: [], tenants: [] };
+function tenantRow(name: string, over: Partial<PipelinesOverviewTenant> = {}): PipelinesOverviewTenant {
+  return {
+    name,
+    clusters: ["core"],
+    placement: "placed",
+    runs24h: 1,
+    failed24h: 0,
+    running: 0,
+    waitingInput: 0,
+    locksHeld: 0,
+    recent: [],
+    ...over,
+  };
+}
+
+function overview(tenants: PipelinesOverviewTenant[], over: Partial<PipelinesOverview> = {}): PipelinesOverview {
+  return {
+    windowStart: "2026-10-29T12:00:00Z",
+    localCluster: "core",
+    clusters: 2,
+    canReadFleetLocks: false,
+    totals: {
+      runs24h: 12,
+      runsPrior24h: 9,
+      passed: 3,
+      failed: 1,
+      interrupted: 0,
+      finished: 4,
+      running: 1,
+      queued: 0,
+      passRate: 0.75,
+      medianDurationMs: 60000,
+      p90DurationMs: 120000,
+    },
+    attention: { failed24h: 0, waitingInput: 0, awaitingCell: 0, locksHeld: 0 },
+    tenants,
+    ...over,
+  };
+}
+
+function run(over: Partial<FleetRunRow> = {}): FleetRunRow {
+  return {
+    runId: "r1",
+    status: "COMPLETED",
+    result: "SUCCESS",
+    cluster: "core",
+    tenant: "pay",
+    jobPath: "pay/api",
+    buildNumber: 3,
+    actor: "nate",
+    branch: "main",
+    title: "Fix the parser",
+    trigger: { kind: "push", label: "Push" },
+    pendingInput: false,
+    canWrite: false,
+    createdAt: new Date().toISOString(),
+    ...over,
+  };
+}
+
+function page(items: FleetRunRow[]): FleetRunPage {
+  return { items };
+}
+
+const readAll = {
+  global: {},
+  scopes: [],
+  tenants: [
+    { tenant: "pay", jobs: [], capabilities: { pipelines: { read: true } } },
+    { tenant: "ops", jobs: [], capabilities: { pipelines: { read: true } } },
+  ],
+};
 
 describe("PipelinesIndex", () => {
   beforeEach(() => {
     mockGetMyPermissions.mockReset();
-    mockListPipelineTenants.mockReset();
+    mockGetPipelinesOverview.mockReset();
+    mockListFleetRuns.mockReset();
+    mockAssistant.available = false;
+    mockGetMyPermissions.mockResolvedValue(readAll);
+    mockListFleetRuns.mockResolvedValue(page([run()]));
   });
 
-  it("sets the document title to Pipelines while the tenant list loads", () => {
-    mockGetMyPermissions.mockResolvedValue(noGrants);
-    mockListPipelineTenants.mockReturnValue(new Promise(() => {}));
+  it("sets the document title to Pipelines while the overview loads", () => {
+    mockGetPipelinesOverview.mockReturnValue(new Promise(() => {}));
     renderPage();
     expect(document.title).toBe("Pipelines");
+    expect(screen.getByText("Loading pipelines…")).toBeInTheDocument();
   });
 
-  it("redirects to the single Tenant the caller may open", async () => {
+  it("renders the strip, counters, rail, and feed for two tenants", async () => {
+    mockGetPipelinesOverview.mockResolvedValue(overview([tenantRow("ops"), tenantRow("pay")]));
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "Pipelines" })).toBeInTheDocument();
+    expect(screen.getByText("2 tenants you can read · 2 clusters · runs from every tenant, newest first")).toBeInTheDocument();
+    expect(screen.getByText("Nothing needs attention.")).toBeInTheDocument();
+    expect(screen.getByText("Pass rate")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^pay/ })).toBeInTheDocument();
+    expect(await screen.findByText("Fix the parser")).toBeInTheDocument();
+  });
+
+  it("does not redirect for one tenant and selects it in the rail", async () => {
+    mockGetPipelinesOverview.mockResolvedValue(overview([tenantRow("acme")]));
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "Pipelines" })).toBeInTheDocument();
+    expect(screen.queryByText("tenant page: acme")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^acme/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("at /pipelines")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockListFleetRuns).toHaveBeenCalledWith(expect.objectContaining({ tenant: ["acme"] }));
+    });
+  });
+
+  it("shows No pipelines access with no tenant", async () => {
+    mockGetPipelinesOverview.mockResolvedValue(overview([]));
+    renderPage();
+    expect(await screen.findByText("No pipelines access")).toBeInTheDocument();
+  });
+
+  it("a feed error keeps the rail and counters", async () => {
+    mockGetPipelinesOverview.mockResolvedValue(overview([tenantRow("ops"), tenantRow("pay")]));
+    mockListFleetRuns.mockRejectedValue(new Error("boom"));
+    renderPage();
+    expect(await screen.findByText("Unable to load runs")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^pay/ })).toBeInTheDocument();
+    expect(screen.getByText("Pass rate")).toBeInTheDocument();
+  });
+
+  it("New pipeline opens the panel for a writable tenant", async () => {
+    const user = userEvent.setup();
+    mockAssistant.available = true;
     mockGetMyPermissions.mockResolvedValue({
       global: {},
       scopes: [],
-      tenants: [{ tenant: "acme", jobs: [], capabilities: { pipelines: { read: true } } }],
+      tenants: [{ tenant: "acme", jobs: [], capabilities: { pipelines: { read: true, write: true } } }],
     });
-    mockListPipelineTenants.mockResolvedValue({
-      items: [{ name: "acme", cluster: "core", placed: true, cell: "cell-a", cellNamespace: "cells" }],
-      recordStore: true,
-    });
+    mockGetPipelinesOverview.mockResolvedValue(overview([tenantRow("acme")]));
     renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("tenant page: acme")).toBeInTheDocument();
-    });
+    await user.click(await screen.findByRole("button", { name: "New pipeline" }));
+    expect(await screen.findByText("propose for acme")).toBeInTheDocument();
   });
 
-  it("does not link a grant name that GET /pipelines does not answer", async () => {
-    mockGetMyPermissions.mockResolvedValue({
-      global: {},
-      scopes: [],
-      tenants: [
-        { tenant: "acme", jobs: [], capabilities: { pipelines: { read: true } } },
-        { tenant: "beta", jobs: [], capabilities: { pipelines: { read: true } } },
-        { tenant: "mt-tenant", jobs: [], capabilities: { pipelines: { read: true } } },
-      ],
-    });
-    mockListPipelineTenants.mockResolvedValue({
-      items: [
-        { name: "acme", cluster: "core", placed: false },
-        { name: "beta", cluster: "core", placed: false },
-      ],
-      recordStore: true,
-    });
+  it("explains a disabled record store on 503", async () => {
+    mockGetPipelinesOverview.mockRejectedValue(new ApiError(503, "record store is off"));
     renderPage();
-    await waitFor(() => {
-      expect(screen.getByRole("link", { name: /acme/ })).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: /beta/ })).toBeInTheDocument();
-    });
-    expect(screen.queryByText("mt-tenant")).toBeNull();
+    expect(await screen.findByText("Pipeline data is off")).toBeInTheDocument();
   });
 
-  it("lists a Tenant that a member cluster holds", async () => {
-    mockGetMyPermissions.mockResolvedValue({
-      global: {},
-      scopes: [],
-      tenants: [{ tenant: "acme", jobs: [], capabilities: { pipelines: { read: true } } }],
-    });
-    mockListPipelineTenants.mockResolvedValue({
-      items: [
-        { name: "acme", cluster: "core", placed: true, cell: "cell-a", cellNamespace: "cells" },
-        { name: "member-a", cluster: "member-c", placed: true, cell: "cell-m", cellNamespace: "cells" },
-      ],
-      recordStore: true,
-    });
+  it("shows an error with Retry when the overview fails", async () => {
+    mockGetPipelinesOverview.mockRejectedValue(new Error("boom"));
     renderPage();
-    await waitFor(() => {
-      expect(screen.getByRole("link", { name: /acme/ })).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: /member-a/ })).toHaveAttribute("href", "/pipelines/member-a");
-    });
-  });
-
-  it("lists every row for a viewer with no tenant grants", async () => {
-    mockGetMyPermissions.mockResolvedValue({
-      global: { pipelines: { read: true } },
-      scopes: [],
-      tenants: [],
-    });
-    mockListPipelineTenants.mockResolvedValue({
-      items: [
-        { name: "north", cluster: "core", placed: false },
-        { name: "shop", cluster: "member-a", placed: true, cell: "cell-a", cellNamespace: "cells" },
-        { name: "shop", cluster: "member-b", placed: true, cell: "cell-b", cellNamespace: "cells" },
-        { name: "south", cluster: "member-c", placed: true, cell: "cell-s", cellNamespace: "cells" },
-      ],
-      recordStore: true,
-    });
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByRole("link", { name: /north/ })).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: /south/ })).toBeInTheDocument();
-    });
-    expect(screen.getAllByRole("link", { name: /shop/ })).toHaveLength(1);
-  });
-
-  it("redirects to a single member-placed Tenant", async () => {
-    mockGetMyPermissions.mockResolvedValue(noGrants);
-    mockListPipelineTenants.mockResolvedValue({
-      items: [{ name: "member-a", cluster: "member-c", placed: true, cell: "cell-m", cellNamespace: "cells" }],
-      recordStore: true,
-    });
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("tenant page: member-a")).toBeInTheDocument();
-    });
-  });
-
-  it("shows a recovery state when no Tenant grants pipelines access", async () => {
-    mockGetMyPermissions.mockResolvedValue(noGrants);
-    mockListPipelineTenants.mockResolvedValue({ items: [], recordStore: true });
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("No pipelines access")).toBeInTheDocument();
-    });
-  });
-
-  it("shows an error state with Retry when listPipelineTenants fails", async () => {
-    mockGetMyPermissions.mockResolvedValue({
-      global: { pipelines: { read: true } },
-      scopes: [],
-      tenants: [{ tenant: "acme", jobs: [], capabilities: { pipelines: { read: true } } }],
-    });
-    mockListPipelineTenants.mockRejectedValue(new Error("boom"));
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("Unable to load tenants")).toBeInTheDocument();
-    });
-    expect(screen.queryByRole("link", { name: /acme/ })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
-    await waitFor(() => {
-      expect(mockListPipelineTenants).toHaveBeenCalledTimes(2);
-    });
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    mockGetPipelinesOverview.mockResolvedValue(overview([tenantRow("ops")]));
+    await userEvent.setup().click(retry);
+    expect(await screen.findByRole("heading", { name: "Pipelines" })).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "Tenants" })).getByRole("button", { name: /^ops/ })).toBeInTheDocument();
   });
 });

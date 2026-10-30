@@ -1,6 +1,6 @@
 .page {
+  min-width: 0;
   animation: fade 0.3s ease;
-  max-width: 640px;
 }
 
 @keyframes fade {
@@ -8,20 +8,31 @@
   to   { opacity: 1; transform: none; }
 }
 
-.pageHead {
-  margin-bottom: 1.25rem;
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  min-width: 0;
 }
 
-.pageTitle {
+.headText {
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  color: var(--text);
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--text);
 }
 
-.pageDesc {
+.desc {
   margin: 0.25rem 0 0;
   color: var(--text-2);
   font-size: 0.875rem;
+  overflow-wrap: break-word;
 }
 
 .loading {
@@ -30,41 +41,25 @@
   text-align: center;
 }
 
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+  min-width: 0;
 }
 
-.list li + li {
-  border-top: 1px solid var(--border);
+.rail,
+.feed {
+  min-width: 0;
 }
 
-.item {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.75rem 0.25rem;
-  color: var(--text);
-  text-decoration: none;
-}
+@media (max-width: 639.98px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-.item:hover {
-  color: var(--accent);
-}
-
-.itemIcon {
-  color: var(--text-2);
-  flex-shrink: 0;
-}
-
-.itemLabel {
-  flex: 1;
-  font-weight: 600;
-  font-size: 0.9375rem;
-}
-
-.itemChevron {
-  color: var(--text-2);
-  flex-shrink: 0;
+  .head {
+    flex-direction: column;
+  }
 }
