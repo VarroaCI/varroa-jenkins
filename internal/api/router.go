@@ -119,6 +119,9 @@ func NewRouter(deps *Dependencies) http.Handler {
 	// Pipelines: the landing-page tenant list, tenant-scoped job listing,
 	// job detail, run list/create, and one test case's history.
 	mux.HandleFunc("GET /pipelines", srv.handleListPipelineTenants)
+	mux.HandleFunc("GET /pipelines/runs", srv.handleListFleetRuns)
+	mux.HandleFunc("GET /pipelines/overview", srv.handlePipelinesOverview)
+	mux.HandleFunc("GET /pipelines/runs/stream", srv.handleFleetRunStream)
 	mux.HandleFunc("GET /pipelines/{tenant}", srv.handleListPipelines)
 	mux.HandleFunc("GET /pipelines/{tenant}/jobs/{job}", srv.handleGetPipelineJob)
 	mux.HandleFunc("GET /pipelines/{tenant}/jobs/{job}/branches", srv.handleListJobBranches)

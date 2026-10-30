@@ -2741,6 +2741,218 @@
         ],
         "type": "object"
       },
+      "FleetRunPage": {
+        "additionalProperties": false,
+        "description": "One page of the fleet run feed. Items is never null. NextCursor is absent on the last page.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_FleetRunRow"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "FleetRunRow": {
+        "additionalProperties": false,
+        "description": "One run of the fleet run feed. It extends RunSummary with the tenant, the title, and the trigger.",
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "buildNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "canWrite": {
+            "description": "True when the caller may write the run's job.",
+            "type": "boolean"
+          },
+          "cause": {
+            "type": "string"
+          },
+          "changeRequest": {
+            "$ref": "#/components/schemas/components_schemas_ChangeRequest"
+          },
+          "cluster": {
+            "description": "The cluster that holds the run.",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "durationMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "endedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "interruptedReason": {
+            "description": "The reason of an INTERRUPTED run, such as cell-lost.",
+            "type": "string"
+          },
+          "jobPath": {
+            "type": "string"
+          },
+          "pendingInput": {
+            "description": "True while a RUNNING run waits for an input answer.",
+            "type": "boolean"
+          },
+          "queueWaitMs": {
+            "description": "Milliseconds from queue to start. Absent until the run starts.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "queuedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "scmForge": {
+            "description": "The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.\n",
+            "enum": [
+              "github",
+              "gitlab",
+              "gitea"
+            ],
+            "type": "string"
+          },
+          "scmRevision": {
+            "type": "string"
+          },
+          "scmUrl": {
+            "description": "Repository URL of the run, from the SCM source. Absent when Jenkins reports none.",
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant": {
+            "description": "The rail and URL name of the tenant. A controller tenant reads namespace/controller.",
+            "type": "string"
+          },
+          "title": {
+            "description": "The first line of the newest commit message, else the job path.",
+            "type": "string"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/components_schemas_FleetRunTrigger"
+          },
+          "triggerSource": {
+            "description": "Kind of cause that started the run. Absent when Jenkins reports no cause list.\n",
+            "enum": [
+              "user",
+              "webhook",
+              "cron",
+              "upstream",
+              "replay",
+              "restart",
+              "scm",
+              "other"
+            ],
+            "type": "string",
+            "x-enum-varnames": [
+              "User",
+              "Webhook",
+              "Cron",
+              "Upstream",
+              "Replay",
+              "Restart",
+              "Scm",
+              "Other"
+            ]
+          },
+          "upstream": {
+            "$ref": "#/components/schemas/components_schemas_FleetRunUpstream"
+          }
+        },
+        "required": [
+          "runId",
+          "status",
+          "cluster",
+          "tenant",
+          "title",
+          "trigger",
+          "pendingInput",
+          "canWrite",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "FleetRunTrigger": {
+        "additionalProperties": false,
+        "description": "The trigger class of a fleet run, with the label the UI shows.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "pullRequest",
+              "push",
+              "cron",
+              "manual",
+              "upstream",
+              "webhook",
+              "replay",
+              "restart",
+              "other"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label"
+        ],
+        "type": "object"
+      },
+      "FleetRunUpstream": {
+        "additionalProperties": false,
+        "description": "The run that started a fleet run. Job is the tenant-qualified job path.",
+        "properties": {
+          "buildNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "job": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant",
+          "job"
+        ],
+        "type": "object"
+      },
       "FreshnessJSON": {
         "additionalProperties": false,
         "description": "Observability freshness information.",
@@ -3615,6 +3827,204 @@
         },
         "type": "object"
       },
+      "PipelinesOverview": {
+        "additionalProperties": false,
+        "description": "The body of GET /pipelines/overview. Tenants is in attention order.",
+        "properties": {
+          "attention": {
+            "$ref": "#/components/schemas/components_schemas_PipelinesOverviewAttention"
+          },
+          "canReadFleetLocks": {
+            "type": "boolean"
+          },
+          "clusters": {
+            "description": "The count of distinct clusters over every rail row.",
+            "type": "integer"
+          },
+          "localCluster": {
+            "type": "string"
+          },
+          "tenants": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_PipelinesOverviewTenant"
+            },
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/components_schemas_PipelinesOverviewTotals"
+          },
+          "windowStart": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "windowStart",
+          "localCluster",
+          "clusters",
+          "canReadFleetLocks",
+          "totals",
+          "attention",
+          "tenants"
+        ],
+        "type": "object"
+      },
+      "PipelinesOverviewAttention": {
+        "additionalProperties": false,
+        "description": "The counts that need a look now.",
+        "properties": {
+          "awaitingCell": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failed24h": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "locksHeld": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "waitingInput": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "failed24h",
+          "waitingInput",
+          "awaitingCell",
+          "locksHeld"
+        ],
+        "type": "object"
+      },
+      "PipelinesOverviewTenant": {
+        "additionalProperties": false,
+        "description": "One rail row of the overview. Placement is placed when any row of the name is placed.",
+        "properties": {
+          "clusters": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "failed24h": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "locksHeld": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "placement": {
+            "enum": [
+              "placed",
+              "awaitingCell",
+              "controllers"
+            ],
+            "type": "string"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_RecentRunResult"
+            },
+            "type": "array"
+          },
+          "running": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runs24h": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "waitingInput": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "clusters",
+          "placement",
+          "runs24h",
+          "failed24h",
+          "running",
+          "waitingInput",
+          "locksHeld",
+          "recent"
+        ],
+        "type": "object"
+      },
+      "PipelinesOverviewTotals": {
+        "additionalProperties": false,
+        "description": "The counts of the overview window, the 24 hours before the reference time (UTC).",
+        "properties": {
+          "failed": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "finished": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "interrupted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "medianDurationMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "medianQueueWaitMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "p90DurationMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "passRate": {
+            "description": "Passed divided by finished. Absent when no run has finished.",
+            "type": "number"
+          },
+          "passed": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "queued": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "running": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runs24h": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runsPrior24h": {
+            "description": "The runs of the 24 hours before the window.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs24h",
+          "runsPrior24h",
+          "passed",
+          "failed",
+          "interrupted",
+          "finished",
+          "running",
+          "queued"
+        ],
+        "type": "object"
+      },
       "PluginAdvisory": {
         "additionalProperties": false,
         "description": "A non-classification finding (e.g. dependencyMinimumUnsatisfied).",
@@ -3985,6 +4395,27 @@
         "required": [
           "jobName",
           "buildNumber",
+          "status"
+        ],
+        "type": "object"
+      },
+      "RecentRunResult": {
+        "additionalProperties": false,
+        "description": "One recent run of a rail tenant.",
+        "properties": {
+          "result": {
+            "description": "The result of the run. Absent while the run has none.",
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
           "status"
         ],
         "type": "object"
@@ -10853,6 +11284,218 @@
         ],
         "type": "object"
       },
+      "components_schemas_FleetRunPage": {
+        "additionalProperties": false,
+        "description": "One page of the fleet run feed. Items is never null. NextCursor is absent on the last page.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_FleetRunRow"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "components_schemas_FleetRunRow": {
+        "additionalProperties": false,
+        "description": "One run of the fleet run feed. It extends RunSummary with the tenant, the title, and the trigger.",
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "buildNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "canWrite": {
+            "description": "True when the caller may write the run's job.",
+            "type": "boolean"
+          },
+          "cause": {
+            "type": "string"
+          },
+          "changeRequest": {
+            "$ref": "#/components/schemas/components_schemas_ChangeRequest"
+          },
+          "cluster": {
+            "description": "The cluster that holds the run.",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "durationMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "endedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "interruptedReason": {
+            "description": "The reason of an INTERRUPTED run, such as cell-lost.",
+            "type": "string"
+          },
+          "jobPath": {
+            "type": "string"
+          },
+          "pendingInput": {
+            "description": "True while a RUNNING run waits for an input answer.",
+            "type": "boolean"
+          },
+          "queueWaitMs": {
+            "description": "Milliseconds from queue to start. Absent until the run starts.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "queuedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "scmForge": {
+            "description": "The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.\n",
+            "enum": [
+              "github",
+              "gitlab",
+              "gitea"
+            ],
+            "type": "string"
+          },
+          "scmRevision": {
+            "type": "string"
+          },
+          "scmUrl": {
+            "description": "Repository URL of the run, from the SCM source. Absent when Jenkins reports none.",
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant": {
+            "description": "The rail and URL name of the tenant. A controller tenant reads namespace/controller.",
+            "type": "string"
+          },
+          "title": {
+            "description": "The first line of the newest commit message, else the job path.",
+            "type": "string"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/components_schemas_FleetRunTrigger"
+          },
+          "triggerSource": {
+            "description": "Kind of cause that started the run. Absent when Jenkins reports no cause list.\n",
+            "enum": [
+              "user",
+              "webhook",
+              "cron",
+              "upstream",
+              "replay",
+              "restart",
+              "scm",
+              "other"
+            ],
+            "type": "string",
+            "x-enum-varnames": [
+              "User",
+              "Webhook",
+              "Cron",
+              "Upstream",
+              "Replay",
+              "Restart",
+              "Scm",
+              "Other"
+            ]
+          },
+          "upstream": {
+            "$ref": "#/components/schemas/components_schemas_FleetRunUpstream"
+          }
+        },
+        "required": [
+          "runId",
+          "status",
+          "cluster",
+          "tenant",
+          "title",
+          "trigger",
+          "pendingInput",
+          "canWrite",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "components_schemas_FleetRunTrigger": {
+        "additionalProperties": false,
+        "description": "The trigger class of a fleet run, with the label the UI shows.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "pullRequest",
+              "push",
+              "cron",
+              "manual",
+              "upstream",
+              "webhook",
+              "replay",
+              "restart",
+              "other"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label"
+        ],
+        "type": "object"
+      },
+      "components_schemas_FleetRunUpstream": {
+        "additionalProperties": false,
+        "description": "The run that started a fleet run. Job is the tenant-qualified job path.",
+        "properties": {
+          "buildNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "job": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant",
+          "job"
+        ],
+        "type": "object"
+      },
       "components_schemas_FreshnessJSON": {
         "additionalProperties": false,
         "description": "Observability freshness information.",
@@ -12784,6 +13427,204 @@
         },
         "type": "object"
       },
+      "components_schemas_PipelinesOverview": {
+        "additionalProperties": false,
+        "description": "The body of GET /pipelines/overview. Tenants is in attention order.",
+        "properties": {
+          "attention": {
+            "$ref": "#/components/schemas/components_schemas_PipelinesOverviewAttention"
+          },
+          "canReadFleetLocks": {
+            "type": "boolean"
+          },
+          "clusters": {
+            "description": "The count of distinct clusters over every rail row.",
+            "type": "integer"
+          },
+          "localCluster": {
+            "type": "string"
+          },
+          "tenants": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_PipelinesOverviewTenant"
+            },
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/components_schemas_PipelinesOverviewTotals"
+          },
+          "windowStart": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "windowStart",
+          "localCluster",
+          "clusters",
+          "canReadFleetLocks",
+          "totals",
+          "attention",
+          "tenants"
+        ],
+        "type": "object"
+      },
+      "components_schemas_PipelinesOverviewAttention": {
+        "additionalProperties": false,
+        "description": "The counts that need a look now.",
+        "properties": {
+          "awaitingCell": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failed24h": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "locksHeld": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "waitingInput": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "failed24h",
+          "waitingInput",
+          "awaitingCell",
+          "locksHeld"
+        ],
+        "type": "object"
+      },
+      "components_schemas_PipelinesOverviewTenant": {
+        "additionalProperties": false,
+        "description": "One rail row of the overview. Placement is placed when any row of the name is placed.",
+        "properties": {
+          "clusters": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "failed24h": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "locksHeld": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "placement": {
+            "enum": [
+              "placed",
+              "awaitingCell",
+              "controllers"
+            ],
+            "type": "string"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_RecentRunResult"
+            },
+            "type": "array"
+          },
+          "running": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runs24h": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "waitingInput": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "clusters",
+          "placement",
+          "runs24h",
+          "failed24h",
+          "running",
+          "waitingInput",
+          "locksHeld",
+          "recent"
+        ],
+        "type": "object"
+      },
+      "components_schemas_PipelinesOverviewTotals": {
+        "additionalProperties": false,
+        "description": "The counts of the overview window, the 24 hours before the reference time (UTC).",
+        "properties": {
+          "failed": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "finished": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "interrupted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "medianDurationMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "medianQueueWaitMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "p90DurationMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "passRate": {
+            "description": "Passed divided by finished. Absent when no run has finished.",
+            "type": "number"
+          },
+          "passed": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "queued": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "running": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runs24h": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runsPrior24h": {
+            "description": "The runs of the 24 hours before the window.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs24h",
+          "runsPrior24h",
+          "passed",
+          "failed",
+          "interrupted",
+          "finished",
+          "running",
+          "queued"
+        ],
+        "type": "object"
+      },
       "components_schemas_PluginAdvisory": {
         "additionalProperties": false,
         "description": "A non-classification finding (e.g. dependencyMinimumUnsatisfied).",
@@ -13604,6 +14445,27 @@
         "required": [
           "jobName",
           "buildNumber",
+          "status"
+        ],
+        "type": "object"
+      },
+      "components_schemas_RecentRunResult": {
+        "additionalProperties": false,
+        "description": "One recent run of a rail tenant.",
+        "properties": {
+          "result": {
+            "description": "The result of the run. Absent while the run has none.",
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
           "status"
         ],
         "type": "object"
@@ -24266,6 +25128,239 @@
         "tags": [
           "Pipelines"
         ]
+      }
+    },
+    "/api/v1/pipelines/overview": {
+      "get": {
+        "description": "Counts the runs of the 24 hours before the server's UTC time, and the prior 24 hours for the delta. The live counts have no time bound. A held fleet lock counts only when the caller may read its job.\n",
+        "operationId": "getPipelinesOverview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_PipelinesOverview"
+                }
+              }
+            },
+            "description": "The overview of the tenants the caller may read."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/components_responses_Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
+          }
+        },
+        "summary": "Answers the counters, the attention counts, and the tenant rail of the pipelines home.",
+        "tags": [
+          "Pipelines"
+        ]
+      }
+    },
+    "/api/v1/pipelines/runs": {
+      "get": {
+        "description": "Answers one page of the fleet run feed, newest first by default. Each tenant contributes only the runs its job grants of read reach. A tenant filter that names no readable tenant answers an empty list. A trigger filter refills the page from at most five store pages, so it can answer a short page with a nextCursor. A cursor of another sort or order answers 400.\n",
+        "operationId": "listFleetRuns",
+        "parameters": [
+          {
+            "description": "A rail name. Repeat the parameter to name several tenants.",
+            "explode": true,
+            "in": "query",
+            "name": "tenant",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "A job path. Match exactly.",
+            "in": "query",
+            "name": "job",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "trigger",
+            "schema": {
+              "enum": [
+                "pullRequest",
+                "push",
+                "cron",
+                "manual",
+                "upstream",
+                "webhook",
+                "replay",
+                "restart",
+                "other"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "enum": [
+                "QUEUED",
+                "RUNNING",
+                "COMPLETED",
+                "WAITING_INPUT"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "result",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "branch",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "A positive Go duration such as 24h, or an RFC 3339 time.",
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Literal text that matches the job path, the branch, or the commit.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "default": "started",
+              "enum": [
+                "started",
+                "duration",
+                "tenant",
+                "job",
+                "status",
+                "actor"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_FleetRunPage"
+                }
+              }
+            },
+            "description": "A page of the fleet run feed."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/components_responses_Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
+          }
+        },
+        "summary": "Lists the runs of every pipelines tenant the caller may read.",
+        "tags": [
+          "Pipelines"
+        ]
+      }
+    },
+    "/api/v1/pipelines/runs/stream": {
+      "get": {
+        "description": "Streams one frame per live run notification of every readable tenant, with the event name run, stage, lock, input, or wait. The stream writes no initial frame and replays nothing. It uses `?ticket=` for browser EventSource auth, and the ticket carries the scope pipelines-runs.\n",
+        "operationId": "streamFleetRuns",
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The event stream (event kinds run, stage, lock, input, and wait)."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
+          }
+        },
+        "summary": "Streams live run notifications for every tenant the caller may read, via Server-Sent Events.",
+        "tags": [
+          "Pipelines"
+        ],
+        "x-sse": true
       }
     },
     "/api/v1/pipelines/{tenant}": {

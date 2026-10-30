@@ -560,3 +560,93 @@
         $ref: '../components/responses.yaml#/NotFound'
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/pipelines/runs:
+  get:
+    operationId: listFleetRuns
+    tags: [Pipelines]
+    summary: Lists the runs of every pipelines tenant the caller may read.
+    description: >
+      Answers one page of the fleet run feed, newest first by default. Each
+      tenant contributes only the runs its job grants of read reach. A tenant
+      filter that names no readable tenant answers an empty list. A trigger
+      filter refills the page from at most five store pages, so it can answer
+      a short page with a nextCursor. A cursor of another sort or order
+      answers 400.
+    parameters:
+      - {name: tenant, in: query, style: form, explode: true, description: 'A rail name. Repeat the parameter to name several tenants.', schema: {type: array, items: {type: string}}}
+      - {name: job, in: query, description: 'A job path. Match exactly.', schema: {type: string}}
+      - {name: trigger, in: query, schema: {type: string, enum: [pullRequest, push, cron, manual, upstream, webhook, replay, restart, other]}}
+      - {name: status, in: query, schema: {type: string, enum: [QUEUED, RUNNING, COMPLETED, WAITING_INPUT]}}
+      - {name: result, in: query, schema: {type: string}}
+      - {name: branch, in: query, schema: {type: string}}
+      - {name: actor, in: query, schema: {type: string}}
+      - {name: since, in: query, description: 'A positive Go duration such as 24h, or an RFC 3339 time.', schema: {type: string}}
+      - {name: q, in: query, description: 'Literal text that matches the job path, the branch, or the commit.', schema: {type: string}}
+      - {name: sort, in: query, schema: {type: string, enum: [started, duration, tenant, job, status, actor], default: started}}
+      - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      - {name: cursor, in: query, schema: {type: string}}
+    responses:
+      "200":
+        description: A page of the fleet run feed.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FleetRunPage'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "500":
+        $ref: '../components/responses.yaml#/Internal'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/pipelines/overview:
+  get:
+    operationId: getPipelinesOverview
+    tags: [Pipelines]
+    summary: Answers the counters, the attention counts, and the tenant rail of the pipelines home.
+    description: >
+      Counts the runs of the 24 hours before the server's UTC time, and the
+      prior 24 hours for the delta. The live counts have no time bound. A
+      held fleet lock counts only when the caller may read its job.
+    responses:
+      "200":
+        description: The overview of the tenants the caller may read.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/PipelinesOverview'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "500":
+        $ref: '../components/responses.yaml#/Internal'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/pipelines/runs/stream:
+  get:
+    operationId: streamFleetRuns
+    tags: [Pipelines]
+    summary: Streams live run notifications for every tenant the caller may read, via Server-Sent Events.
+    description: >
+      Streams one frame per live run notification of every readable tenant,
+      with the event name run, stage, lock, input, or wait. The stream writes
+      no initial frame and replays nothing. It uses `?ticket=` for browser
+      EventSource auth, and the ticket carries the scope pipelines-runs.
+    x-sse: true
+    responses:
+      "200":
+        description: The event stream (event kinds run, stage, lock, input, and wait).
+        content:
+          text/event-stream:
+            schema:
+              type: string
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'

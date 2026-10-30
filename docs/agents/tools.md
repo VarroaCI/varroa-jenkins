@@ -55,7 +55,7 @@ it is not wired, `search` still returns the first four.
 The result also carries `clusters`, one read status for each cluster with `name`, `ok`, and `error`.
 A cluster with `ok: false` returned incomplete results.
 
-The MCP server also exposes fifteen pipeline tools: `run_pipeline`, `list_runs`,
+The MCP server also exposes sixteen pipeline tools: `run_pipeline`, `list_runs`, `get_pipelines_overview`,
 `get_run`, `get_run_log`, `list_job_branches`, `get_job_health`, `list_fleet_locks`, `release_fleet_lock`,
 `proceed_run_input`, `abort_run_input`, `replay_run`, `restart_run`, `scan_multibranch`, `get_tenant_cell`, and `lint_jenkinsfile`. They operate on the
 build record store. The `lint_jenkinsfile` tool takes `tenant` and `jenkinsfile` and lints the Jenkinsfile on the tenant's cell. It returns `valid` and the `errors` list, and it writes nothing. The propose-pipeline session calls it before it opens a pull request. It contacts the tenant's cell and does not read the build record store. The `scan_multibranch` tool starts a scan of a multibranch job or an organization folder and returns
@@ -63,7 +63,7 @@ a `scanId` and the state `requested`. A job that is neither answers an error. Re
 `runId`, an `intentKey`, and the state `requested`. A refused trigger ends the run with status `COMPLETED`
 and result `TRIGGER_FAILED`; `get_run` shows the `triggerReasonCode` and `triggerError`.
 The `list_runs` tool takes `limit` with the same default of 50 and the same
-maximum of 200 as `list_activity`. The `get_run` tool returns one run's
+maximum of 200 as `list_activity`. Without `tenant`, the `list_runs` tool lists the runs of every tenant you can read, newest first. It takes `job`, `branch`, `result`, `actor`, `trigger`, and `since` as filters. With `tenant`, it lists the runs of one job and needs `job`. Each run is a fleet row in both modes. The `get_pipelines_overview` tool takes no argument. It answers the 24-hour counters, the attention counts, and the tenant rail of every tenant you can read. The `get_run` tool returns one run's
 detail, with the run's `upstream` link and the first page of its `downstream` links. It also carries
 `quality`, the run's coverage and warnings summaries. The `get_run_log` tool returns a bounded tail of the run's console
 log, never a stream; `tailLines` defaults to 100 and clamps between 1 and

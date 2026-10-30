@@ -342,6 +342,12 @@ paths:
     $ref: './paths/version-candidates.yaml#/~1api~1v1~1version-candidates~1{name}~1promote'
   /api/v1/pipelines:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines'
+  /api/v1/pipelines/runs:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1runs'
+  /api/v1/pipelines/overview:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1overview'
+  /api/v1/pipelines/runs/stream:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1runs~1stream'
   /api/v1/pipelines/{tenant}:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{tenant}'
   /api/v1/pipelines/{tenant}/jobs/{job}:
@@ -664,6 +670,24 @@ components:
       $ref: './components/schemas.yaml#/PluginAdvisory'
     RunSummary:
       $ref: './components/schemas.yaml#/RunSummary'
+    FleetRunRow:
+      $ref: './components/schemas.yaml#/FleetRunRow'
+    FleetRunTrigger:
+      $ref: './components/schemas.yaml#/FleetRunTrigger'
+    FleetRunUpstream:
+      $ref: './components/schemas.yaml#/FleetRunUpstream'
+    FleetRunPage:
+      $ref: './components/schemas.yaml#/FleetRunPage'
+    RecentRunResult:
+      $ref: './components/schemas.yaml#/RecentRunResult'
+    PipelinesOverview:
+      $ref: './components/schemas.yaml#/PipelinesOverview'
+    PipelinesOverviewTotals:
+      $ref: './components/schemas.yaml#/PipelinesOverviewTotals'
+    PipelinesOverviewAttention:
+      $ref: './components/schemas.yaml#/PipelinesOverviewAttention'
+    PipelinesOverviewTenant:
+      $ref: './components/schemas.yaml#/PipelinesOverviewTenant'
     RunningRun:
       $ref: './components/schemas.yaml#/RunningRun'
     PipelineSummary:

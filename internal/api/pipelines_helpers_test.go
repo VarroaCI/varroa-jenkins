@@ -29,6 +29,20 @@ type fakeRecordReader struct {
 
 	schemaTooOld bool
 
+	// placements answers ListAllTenantPlacements.
+	placements []recordstore.TenantPlacement
+	// acrossQueries records each ListRunsAcross query in call order.
+	// acrossPages answers the calls in order; a call past the end answers an empty page.
+	acrossQueries []recordstore.RunsAcrossQuery
+	acrossPages   []recordstore.RunPage
+	acrossErr     error
+	// overviewScopes is keyed by tenantKey. RunsOverview copies each queried
+	// scope's counts from it, in the query's scope order.
+	overviewScopes  map[string]recordstore.ScopeOverview
+	overviewTotals  recordstore.RunsOverviewTotals
+	overviewErr     error
+	overviewQueries []recordstore.RunsOverviewQuery
+
 	// jobInventory is keyed by tenantKey, "<cluster>/<tenant>".
 	jobInventory    map[string]recordstore.JobInventory
 	jobInventoryErr error
@@ -641,6 +655,40 @@ func (f *fakeRecordReader) JobQualityTrend(_ context.Context, _, _, _ string, ru
 		q := f.quality[id]
 		out.Coverage = append(out.Coverage, q.Coverage...)
 		out.Warnings = append(out.Warnings, q.Warnings...)
+	}
+	return out, nil
+}
+
+// ListAllTenantPlacements answers the fake's placement rows.
+func (f *fakeRecordReader) ListAllTenantPlacements(context.Context) ([]recordstore.TenantPlacement, error) {
+	return f.placements, nil
+}
+
+// ListRunsAcross records the query and answers the next seeded page.
+func (f *fakeRecordReader) ListRunsAcross(_ context.Context, q recordstore.RunsAcrossQuery) (recordstore.RunPage, error) {
+	f.acrossQueries = append(f.acrossQueries, q)
+	if f.acrossErr != nil {
+		return recordstore.RunPage{}, f.acrossErr
+	}
+	if len(f.acrossPages) == 0 {
+		return recordstore.RunPage{}, nil
+	}
+	page := f.acrossPages[0]
+	f.acrossPages = f.acrossPages[1:]
+	return page, nil
+}
+
+// RunsOverview records the query and answers the fake's overview counts.
+func (f *fakeRecordReader) RunsOverview(_ context.Context, q recordstore.RunsOverviewQuery) (recordstore.RunsOverview, error) {
+	f.overviewQueries = append(f.overviewQueries, q)
+	if f.overviewErr != nil {
+		return recordstore.RunsOverview{}, f.overviewErr
+	}
+	out := recordstore.RunsOverview{WindowStart: q.Now.Add(-24 * time.Hour), Totals: f.overviewTotals}
+	for _, scope := range q.Scopes {
+		so := f.overviewScopes[f.tenantKey(scope.Cluster, scope.Tenant)]
+		so.Cluster, so.Tenant = scope.Cluster, scope.Tenant
+		out.Scopes = append(out.Scopes, so)
 	}
 	return out, nil
 }

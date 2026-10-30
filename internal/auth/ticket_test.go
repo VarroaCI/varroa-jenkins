@@ -122,6 +122,7 @@ func TestSSEScope(t *testing.T) {
 		"/api/v1/runs/run-123":                     "",
 		"/api/v1/runs/run-123/artifacts":           "",
 		"/api/v1/pipelines/payments/stream":        "pipelines:payments",
+		"/api/v1/pipelines/runs/stream":            "pipelines-runs",
 		"/api/v1/pipelines//stream":                "",
 		"/api/v1/pipelines/payments/cell":          "",
 		"/api/v1/assistant/sessions/s-1/events":    "assistant:s-1",

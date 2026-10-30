@@ -1,6 +1,7 @@
 package api
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/varroaci/varroa-jenkins/internal/auth"
@@ -159,4 +160,67 @@ func (a *Authorizer) TenantMemberRoles(tenant string) []rbac.TenantMemberRole {
 		return nil
 	}
 	return a.resolver.TenantMemberRoles(parsed)
+}
+
+// PipelineReadJobPatterns answers the anchored job-path regexps that the
+// fleet run reads push into SQL. It holds decision steps 1, 2, and 4 for
+// the read verb, and it reads each grant alone, as grantsAllow does.
+//
+// The bool is false when no grant of the caller holds pipelines read on the
+// tenant. A nil slice with true means one read grant has no glob restriction,
+// so every job of the tenant is readable. Otherwise the slice is the union of
+// the read grants' patterns and never mixes in a write grant.
+func (a *Authorizer) PipelineReadJobPatterns(claims *auth.Claims, ref TenantRef) ([]string, bool) {
+	grants, ok := a.tenantGrants(claims, ref.Tenant, ref.Folder)
+	if !ok {
+		return nil, false
+	}
+	patterns := []string{}
+	found := false
+	for _, grant := range grants {
+		if !hasVerb(grant.Capabilities, "pipelines", "read") {
+			continue
+		}
+		found = true
+		if grant.Globs == nil {
+			return nil, true
+		}
+		patterns = append(patterns, jobPatternRegexps(ref.Folder, grant.Globs)...)
+	}
+	if !found {
+		return nil, false
+	}
+	return patterns, true
+}
+
+// jobPatternRegexps translates each folder-relative glob into an anchored
+// regular expression over the full job path. The Postgres operator "~"
+// evaluates these expressions, so they use only the forms that
+// jobglob.RegexpBody emits plus regexp.QuoteMeta output and "^", "$", "(?:",
+// and ")". A nil globs answers nil.
+//
+// A glob that matches the empty folder-relative path also admits the folder
+// itself. grantsAllow admits that path, so the patterns must too.
+func jobPatternRegexps(folder string, globs []string) []string {
+	if globs == nil {
+		return nil
+	}
+	out := make([]string, 0, len(globs)+1)
+	admitsFolder := false
+	quoted := regexp.QuoteMeta(folder)
+	for _, glob := range globs {
+		body := jobglob.RegexpBody(glob)
+		if folder == "" {
+			out = append(out, "^(?:"+body+")$")
+		} else {
+			out = append(out, "^"+quoted+"/(?:"+body+")$")
+		}
+		if jobglob.Match(glob, "") {
+			admitsFolder = true
+		}
+	}
+	if folder != "" && admitsFolder {
+		out = append(out, "^"+quoted+"$")
+	}
+	return out
 }

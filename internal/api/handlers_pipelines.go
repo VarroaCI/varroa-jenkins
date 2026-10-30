@@ -1018,7 +1018,12 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func parseRunsLimit(r *http.Request) (int, error) {
-	raw := r.URL.Query().Get("limit")
+	return runsLimitValue(r.URL.Query().Get("limit"))
+}
+
+// runsLimitValue reads one raw limit value. An empty value is the default of
+// 50, and any other value must lie between 1 and 200.
+func runsLimitValue(raw string) (int, error) {
 	if raw == "" {
 		return 50, nil
 	}
@@ -1246,10 +1251,26 @@ type tenantFetch struct {
 // and never repeats rows. A tenant dropped from admitted between two
 // pages is silently absent from both the query and the next cursor,
 // and paging continues.
+// listRunsMerged answers the per-tenant run list of GET /pipelines/{tenant}/jobs/{job}/runs.
 func (s *Server) listRunsMerged(ctx context.Context, admitted []TenantRef, jobPath string, filters listRunsFilters, limit int, cursor string) (runListResponse, *ServiceError, error) {
+	merged, next, serr, err := s.mergeRunPages(ctx, admitted, jobPath, filters, limit, cursor)
+	if serr != nil || err != nil {
+		return runListResponse{}, serr, err
+	}
+	resp := runListResponse{Items: make([]runSummaryJSON, len(merged)), NextCursor: next}
+	for i, run := range merged {
+		resp.Items[i] = buildRunSummary(run)
+	}
+	return resp, nil, nil
+}
+
+// mergeRunPages reads one page of the runs of the admitted tenants, merged
+// newest first, and answers the stored runs with the cross-tenant cursor for
+// the next page. Each caller maps the runs onto its own row shape.
+func (s *Server) mergeRunPages(ctx context.Context, admitted []TenantRef, jobPath string, filters listRunsFilters, limit int, cursor string) ([]recordstore.Run, string, *ServiceError, error) {
 	incoming, err := decodeCrossTenantCursor(cursor)
 	if err != nil {
-		return runListResponse{}, &ServiceError{Status: http.StatusBadRequest, Message: "invalid cursor"}, nil
+		return nil, "", &ServiceError{Status: http.StatusBadRequest, Message: "invalid cursor"}, nil
 	}
 
 	// nextTenants starts with every already-exhausted tenant carried
@@ -1278,7 +1299,7 @@ func (s *Server) listRunsMerged(ctx context.Context, admitted []TenantRef, jobPa
 			Cursor:  tenantCursor,
 		})
 		if err != nil {
-			return runListResponse{}, nil, err
+			return nil, "", nil, err
 		}
 		fetches = append(fetches, &tenantFetch{ref: ref, page: page})
 	}
@@ -1332,18 +1353,15 @@ func (s *Server) listRunsMerged(ctx context.Context, admitted []TenantRef, jobPa
 		nextTenants = nil
 	}
 
-	resp := runListResponse{Items: make([]runSummaryJSON, len(merged))}
-	for i, run := range merged {
-		resp.Items[i] = buildRunSummary(run)
-	}
+	next := ""
 	if len(nextTenants) > 0 {
 		cur, err := encodeCrossTenantCursor(crossTenantCursor{Tenants: nextTenants})
 		if err != nil {
-			return runListResponse{}, nil, err
+			return nil, "", nil, err
 		}
-		resp.NextCursor = cur
+		next = cur
 	}
-	return resp, nil, nil
+	return merged, next, nil, nil
 }
 
 // --- GET /pipelines/{tenant}/cell ---

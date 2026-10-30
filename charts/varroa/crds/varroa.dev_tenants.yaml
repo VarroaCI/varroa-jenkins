@@ -675,6 +675,9 @@ spec:
             dot, because it names the agent Service
           rule: '!has(self.spec) || !has(self.spec.pipelines) || (size(self.metadata.name)
             <= 47 && !self.metadata.name.contains(''.''))'
+        - message: the Tenant names runs and overview are reserved by the pipelines
+            API
+          rule: self.metadata.name != 'runs' && self.metadata.name != 'overview'
     served: true
     storage: true
     subresources:
