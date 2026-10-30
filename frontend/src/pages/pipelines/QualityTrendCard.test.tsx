@@ -104,6 +104,84 @@ describe("QualityTrendCard", () => {
     expect(screen.queryByText("Branch")).toBeNull();
   });
 
+  it("scales the coverage axis to the data of both series", () => {
+    const { container } = renderCard({
+      coverage: [
+        {
+          id: "jacoco",
+          name: "jacoco",
+          points: [
+            { runId: "run-2", buildNumber: 2, linePercent: 60, branchPercent: 75 },
+            { runId: "run-1", buildNumber: 1, linePercent: 80, branchPercent: 75 },
+          ],
+        },
+      ],
+    }, [window[1], window[2]]);
+    expect(container.querySelector('[data-axis="max"]')).toHaveTextContent("85%");
+    expect(container.querySelector('[data-axis="min"]')).toHaveTextContent("55%");
+    const lineDots = container.querySelectorAll('circle[data-series="line"]');
+    expect(lineDots).toHaveLength(2);
+    expect(lineDots[0]).toHaveAttribute("cy", "16");
+    expect(lineDots[1]).toHaveAttribute("cy", "64");
+    const branchDots = container.querySelectorAll('circle[data-series="branch"]');
+    expect(branchDots).toHaveLength(2);
+    for (const dot of branchDots) expect(dot).toHaveAttribute("cy", "28");
+    expect(container.querySelector("svg")).toHaveAttribute("aria-label", expect.stringContaining("scale 55% to 85%"));
+  });
+
+  it("centres a flat coverage series in a 10-point span", () => {
+    const { container } = renderCard({
+      coverage: [
+        {
+          id: "jacoco",
+          name: "jacoco",
+          points: [
+            { runId: "run-3", buildNumber: 3, linePercent: 80 },
+            { runId: "run-2", buildNumber: 2, linePercent: 80 },
+            { runId: "run-1", buildNumber: 1, linePercent: 80 },
+          ],
+        },
+      ],
+    });
+    expect(container.querySelector('[data-axis="max"]')).toHaveTextContent("85%");
+    expect(container.querySelector('[data-axis="min"]')).toHaveTextContent("75%");
+    const dots = container.querySelectorAll('circle[data-series="line"]');
+    expect(dots).toHaveLength(3);
+    for (const dot of dots) expect(dot).toHaveAttribute("cy", "40");
+  });
+
+  it("keeps a 10-point span at the top of the scale", () => {
+    const { container } = renderCard({
+      coverage: [
+        { id: "jacoco", name: "jacoco", points: [{ runId: "run-3", buildNumber: 3, linePercent: 100 }] },
+      ],
+    });
+    expect(container.querySelector('[data-axis="max"]')).toHaveTextContent("100%");
+    expect(container.querySelector('[data-axis="min"]')).toHaveTextContent("90%");
+    expect(container.querySelector('circle[data-series="line"]')).toHaveAttribute("cy", "4");
+  });
+
+  it("keeps a 10-point span at the bottom of the scale", () => {
+    const { container } = renderCard({
+      coverage: [
+        { id: "jacoco", name: "jacoco", points: [{ runId: "run-3", buildNumber: 3, linePercent: 0 }] },
+      ],
+    });
+    expect(container.querySelector('[data-axis="max"]')).toHaveTextContent("10%");
+    expect(container.querySelector('[data-axis="min"]')).toHaveTextContent("0%");
+    expect(container.querySelector('circle[data-series="line"]')).toHaveAttribute("cy", "76");
+  });
+
+  it("uses the full scale when no point has a percent", () => {
+    const { container } = renderCard({
+      coverage: [
+        { id: "jacoco", name: "jacoco", points: [{ runId: "run-3", buildNumber: 3 }] },
+      ],
+    });
+    expect(container.querySelector('[data-axis="max"]')).toHaveTextContent("100%");
+    expect(container.querySelector('[data-axis="min"]')).toHaveTextContent("0%");
+  });
+
   it("renders a series name as text", () => {
     const { container } = renderCard({
       warnings: [

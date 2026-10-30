@@ -15,6 +15,37 @@
   height: auto;
 }
 
+.plot {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.25rem;
+}
+
+.axis {
+  position: relative;
+  width: 3em;
+  color: var(--text-2);
+  font-size: 0.6875rem;
+  line-height: 1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The data band starts PAD (4 of 80 units, 5%) inside the SVG edges. Each
+   label centres on its band edge. */
+.axis > span {
+  position: absolute;
+  right: 0;
+}
+
+.axis > span[data-axis="max"] {
+  top: calc(5% - 0.5em);
+}
+
+.axis > span[data-axis="min"] {
+  bottom: calc(5% - 0.5em);
+}
+
 .legend {
   display: flex;
   align-items: center;

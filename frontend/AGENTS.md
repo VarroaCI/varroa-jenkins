@@ -236,7 +236,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   lock under the tenant's own prefix that another tenant's run holds publishes
   its `lock` notification on the holder's subject, which the tenant stream does
   not carry), `PipelinePage.tsx` (`/pipelines/:tenant/:job`, one job's
-  health (the `JobHealthCard.tsx` Health card, which draws the result strip, the duration chart, and the test chart from `job.trend`), the `QualityTrendCard.tsx` **Quality trend** card beside it (`QualityTrendCard.module.css`, one inline SVG line chart per coverage series and one bar chart per warnings series over the health window, each point a link to its run), definition, and run list, and hosts `RunDrawer.tsx`'s parameter form; a `wait` stream frame of its own job refetches the job read, which feeds the Waiting card, and the runs table),
+  health (the `JobHealthCard.tsx` Health card, which draws the result strip, the duration chart, and the test chart from `job.trend`), the `QualityTrendCard.tsx` **Quality trend** card beside it (`QualityTrendCard.module.css`, one inline SVG line chart per coverage series on one y-axis that spans the data of both series (padding 5, minimum span 10, clamped to 0..100) with HTML bound labels, and one bar chart per warnings series over the health window, each point a link to its run), definition, and run list, and hosts `RunDrawer.tsx`'s parameter form; a `wait` stream frame of its own job refetches the job read, which feeds the Waiting card, and the runs table),
   `BuildPage.tsx` (`/pipelines/:tenant/:job/:run`, one run's detail; owns both
   `useEventStream` calls, the tenant run stream and the run log stream; renders
   the run's `summary` as a header row, renders its failure `digest` in a
