@@ -44,8 +44,8 @@
      they stay on --accent, which clears the 3:1 non-text bar at 3.88:1.
 
      LIGHT — fill = --accent-strong, label = white:
-       honey 6.46:1 · rust 9.56:1 · pollen 4.64:1 · propolis 11.16:1
-       (fill vs page: 5.99 / 8.86 / 4.30 / 10.34 — all clear 3:1) */
+       honey 6.46:1 · rust 9.56:1 · pollen 5.89:1 · propolis 11.16:1
+       (fill vs page: 5.99 / 8.86 / 5.45 / 10.34 — all clear 3:1) */
   --accent-fill: var(--accent-strong);
   --accent-fill-hover: #883B10;   /* white 7.84:1 */
   --on-accent: #FFFFFF;
@@ -56,7 +56,7 @@
 
 html[data-accent="honey"]  { --accent: #C2611C; --accent-soft: #FAE7D1; --accent-strong: #9C4413; --accent-fill-hover: #883B10; }
 html[data-accent="rust"]   { --accent: #A23B1E; --accent-soft: #F6E0D6; --accent-strong: #7C2A12; --accent-fill-hover: #6B240F; }
-html[data-accent="pollen"] { --accent: #D69214; --accent-soft: #FBEDC9; --accent-strong: #A4670B; --accent-fill-hover: #8E590A; }
+html[data-accent="pollen"] { --accent: #D69214; --accent-soft: #FBEDC9; --accent-strong: #8F5808; --accent-fill-hover: #7A4B06; }
 html[data-accent="propolis"] { --accent: #7A4A1F; --accent-soft: #EEE1CE; --accent-strong: #583214; --accent-fill-hover: #4A2A11; }
 
 html[data-theme="dark"] {
@@ -71,17 +71,25 @@ html[data-theme="dark"] {
   --shadow-md: 0 4px 16px rgba(0, 0, 0, .5);
   --shadow-lg: 0 18px 48px rgba(0, 0, 0, .6);
 
-  /* DARK inverts the strategy. --accent-strong on near-black is a muddy
-     2.93:1 shape, so the fill LIGHTENS and the label goes dark:
+  /* DARK inverts the strategy. The light --accent-strong measures 2.93:1
+     on near-black, so the fill LIGHTENS and the label goes dark:
        honey 5.21:1 · rust 4.98:1 · pollen 7.41:1 · propolis 4.78:1
        (fill vs page: 5.93 / 5.67 / 8.44 / 5.44 — all clear 3:1)
-     Unlike light, dark needs a per-variant fill — --accent-strong is
-     the wrong direction here, so the cascade can't do it for us. */
+     Each variant sets its own fill, because the light value is the wrong
+     direction here. */
   --accent-fill: #D9762A;
   --accent-fill-hover: #E88F4A;   /* --on-accent 6.71:1 */
   --on-accent: #2A1B0E;
+
+  /* Text-safe accents. The light values fall under 4.5:1 on the dark
+     surfaces, so dark lightens both. Each value clears 4.5:1 on --bg,
+     --surface, --surface-2, --surface-3, and --accent-soft:
+       --accent         honey 4.79 · rust 4.81 · pollen 5.59 · propolis 5.04
+       --accent-strong  honey 5.93 · rust 5.20 · pollen 7.90 · propolis 5.70 */
+  --accent: #DB7A30;
+  --accent-strong: #E88F4A;
 }
 
-html[data-theme="dark"][data-accent="rust"]     { --accent-fill: #D6704C; --accent-fill-hover: #E08060; }
-html[data-theme="dark"][data-accent="pollen"]   { --accent-fill: #E0A21A; --accent-fill-hover: #EDB53C; }
-html[data-theme="dark"][data-accent="propolis"] { --accent-fill: #B08048; --accent-fill-hover: #C69963; }
+html[data-theme="dark"][data-accent="rust"]     { --accent: #D97A55; --accent-strong: #E08060; --accent-fill: #D6704C; --accent-fill-hover: #E08060; }
+html[data-theme="dark"][data-accent="pollen"]   { --accent: #D69214; --accent-strong: #EDB53C; --accent-fill: #E0A21A; --accent-fill-hover: #EDB53C; }
+html[data-theme="dark"][data-accent="propolis"] { --accent: #BE8E58; --accent-strong: #C69963; --accent-fill: #B08048; --accent-fill-hover: #C69963; }

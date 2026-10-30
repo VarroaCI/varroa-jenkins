@@ -109,7 +109,8 @@
   background: var(--code-bg);
   color-scheme: dark;
   color: var(--code-text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
   border-radius: 0 0 var(--radius) var(--radius);
   font-family: var(--mono);
   font-size: 12.5px;

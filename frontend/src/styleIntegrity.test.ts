@@ -216,16 +216,6 @@ describe("style integrity — color-scheme", () => {
   const tokensPath = path.join(srcDir, "styles", "tokens.css");
   const tokens = fs.readFileSync(tokensPath, "utf-8");
 
-  // Returns the body of the first rule whose selector text matches, or an
-  // empty string when the rule is absent.
-  function ruleBody(css: string, selector: string): string {
-    const start = css.indexOf(selector);
-    if (start === -1) return "";
-    const open = css.indexOf("{", start);
-    const close = css.indexOf("}", open);
-    return css.slice(open + 1, close);
-  }
-
   it("tokens.css sets the light scheme on :root", () => {
     expect(ruleBody(tokens, ":root {")).toMatch(/color-scheme:\s*light/);
   });
@@ -248,5 +238,97 @@ describe("style integrity — color-scheme", () => {
       }
     }
     expect(violations).toEqual([]);
+  });
+});
+
+/** Returns the body of the first rule whose selector text matches, or an
+ *  empty string when the rule is absent. */
+function ruleBody(css: string, selector: string): string {
+  const start = css.indexOf(selector);
+  if (start === -1) return "";
+  const open = css.indexOf("{", start);
+  const close = css.indexOf("}", open);
+  return css.slice(open + 1, close);
+}
+
+/* ------------------------------------------------------------------ */
+/*  (e) Text-safe accent contrast on every theme surface               */
+/* ------------------------------------------------------------------ */
+describe("style integrity — accent text contrast", () => {
+  const tokensPath = path.join(srcDir, "styles", "tokens.css");
+  const tokens = fs.readFileSync(tokensPath, "utf-8");
+  const globalCss = fs.readFileSync(path.join(srcDir, "styles", "global.css"), "utf-8");
+  const variants = ["honey", "rust", "pollen", "propolis"];
+
+  function channel(c: number): number {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  }
+
+  function luminance(hex: string): number {
+    const n = parseInt(hex.slice(1), 16);
+    return 0.2126 * channel((n >> 16) & 255) + 0.7152 * channel((n >> 8) & 255) + 0.0722 * channel(n & 255);
+  }
+
+  function contrast(a: string, b: string): number {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  // The first selector that declares the token wins, so a variant rule
+  // overrides the theme block it sits under.
+  function tokenValue(selectors: string[], name: string): string | undefined {
+    const re = new RegExp("(?<![\\w-])" + name + ":\\s*(#[0-9A-Fa-f]{6})");
+    for (const sel of selectors) {
+      const m = re.exec(ruleBody(tokens, sel));
+      if (m) return m[1];
+    }
+    return undefined;
+  }
+
+  const surfaceTokens = ["--bg", "--surface", "--surface-2", "--surface-3", "--accent-soft"];
+
+  function surfaces(selectors: string[]): string[] {
+    return surfaceTokens.map((name) => {
+      const value = tokenValue(selectors, name);
+      expect(value, `${name} resolves`).toBeDefined();
+      return value as string;
+    });
+  }
+
+  for (const v of variants) {
+    const darkSelectors = [`html[data-theme="dark"][data-accent="${v}"] {`, 'html[data-theme="dark"] {'];
+    const lightSelectors = [`html[data-accent="${v}"] {`, ":root {"];
+
+    it(`dark --accent-strong clears 4.5:1 on every dark surface (${v})`, () => {
+      const fg = tokenValue(darkSelectors, "--accent-strong");
+      expect(fg).toBeDefined();
+      for (const bg of surfaces(darkSelectors)) {
+        expect(contrast(fg as string, bg)).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    it(`dark --accent clears 4.5:1 on every dark surface (${v})`, () => {
+      const fg = tokenValue(darkSelectors, "--accent");
+      expect(fg).toBeDefined();
+      for (const bg of surfaces(darkSelectors)) {
+        expect(contrast(fg as string, bg)).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    it(`light --accent-strong clears 4.5:1 on every light surface (${v})`, () => {
+      const fg = tokenValue(lightSelectors, "--accent-strong");
+      expect(fg).toBeDefined();
+      for (const bg of surfaces(lightSelectors)) {
+        expect(contrast(fg as string, bg)).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+  }
+
+  it("global.css gives a bare textarea the theme tokens", () => {
+    const body = ruleBody(globalCss, ":where(textarea) {");
+    expect(body).toContain("var(--text)");
+    expect(body).toContain("var(--surface-2)");
+    expect(body).toContain("var(--border-strong)");
   });
 });
