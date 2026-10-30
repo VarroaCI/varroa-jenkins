@@ -4,12 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"sort"
-	"strings"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
-	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
@@ -48,108 +45,21 @@ func (s *Server) handleListPipelineTenants(w http.ResponseWriter, r *http.Reques
 	s.writeJSON(w, http.StatusOK, body)
 }
 
-// listPipelineTenants builds the GET /pipelines body. A local Tenant hides a
-// placement row of the same name, because the tenant resolver opens the
-// local Tenant first for that name. One name placed on two other clusters
-// answers one row for each cluster. A local Tenant without spec.pipelines
-// answers a row only when the tenant resolver would resolve it to a
-// readable controller tenant (design D1 step 2).
+// listPipelineTenants builds the GET /pipelines body. It projects the rows of
+// readablePipelineTenants, so the list and the fleet reads share one walk. A
+// local Tenant hides a placement row of the same name, because the tenant
+// resolver opens the local Tenant first for that name. One name placed on two
+// other clusters answers one row for each cluster.
 func (s *Server) listPipelineTenants(ctx context.Context, claims *auth.Claims) (pipelineTenantListJSON, error) {
-	local := ""
-	if s.deps.Brood != nil {
-		local = s.deps.Brood.LocalCluster()
-	}
-
-	var rows []pipelineTenantJSON
-	var fanOut []*v1alpha1.Tenant
-	localNames := make(map[string]bool)
-	if s.deps.Store != nil {
-		tenants, err := crdstore.List[v1alpha1.Tenant](ctx, s.deps.Store, "", "")
-		if err != nil {
-			return pipelineTenantListJSON{}, err
-		}
-		for _, tenant := range tenants {
-			localNames[tenant.Name] = true
-			if tenant.Spec.Pipelines == nil {
-				if len(tenant.Spec.Namespaces) > 0 {
-					fanOut = append(fanOut, tenant)
-				}
-				continue
-			}
-			rows = append(rows, localPipelineTenantRow(tenant, local))
-		}
-	}
-
-	placements, recordStore, err := s.allTenantPlacements(ctx)
+	readable, recordStore, err := s.readablePipelineTenants(ctx, claims)
 	if err != nil {
 		return pipelineTenantListJSON{}, err
 	}
-	for _, row := range placements {
-		if localNames[row.Tenant] || strings.Contains(row.Tenant, "/") || !livePlacementRow(row, local) {
-			continue
-		}
-		rows = append(rows, pipelineTenantJSON{
-			Name:          row.Tenant,
-			Cluster:       row.Cluster,
-			Cell:          row.Cell,
-			CellNamespace: row.Namespace,
-			Placed:        true,
-		})
+	items := make([]pipelineTenantJSON, 0, len(readable))
+	for _, t := range readable {
+		items = append(items, t.Row)
 	}
-
-	readable := make(map[string]bool)
-	items := make([]pipelineTenantJSON, 0, len(rows))
-	for _, row := range rows {
-		ok, seen := readable[row.Name]
-		if !seen {
-			ref := TenantRef{Tenant: row.Name, TenantName: row.Name, Folder: row.Name}
-			ok = s.deps.Authorizer.CanReadPipeline(claims, ref, "")
-			readable[row.Name] = ok
-		}
-		if ok {
-			items = append(items, row)
-		}
-	}
-	items = append(items, s.fanOutPipelineTenants(ctx, claims, fanOut, local)...)
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].Name != items[j].Name {
-			return items[i].Name < items[j].Name
-		}
-		return items[i].Cluster < items[j].Cluster
-	})
 	return pipelineTenantListJSON{Items: items, RecordStore: recordStore}, nil
-}
-
-// fanOutPipelineTenants answers the local Tenants without spec.pipelines that
-// the tenant resolver would fan out over controllers. A Tenant with no
-// readable controller tenant, or with more tenants than the resolver
-// admits, is left out, because the resolver answers 404 or 422 for it.
-// A failed controller list leaves these rows out; it does not fail the
-// read. The name-based readable filter does not apply: the check runs on
-// each controller tenant.
-func (s *Server) fanOutPipelineTenants(ctx context.Context, claims *auth.Claims, tenants []*v1alpha1.Tenant, local string) []pipelineTenantJSON {
-	if len(tenants) == 0 || s.deps.Brood == nil {
-		return nil
-	}
-	all, _, err := s.deps.Brood.ListAll(ctx, "", "")
-	if err != nil {
-		s.deps.Logger.Warn("list pipelines tenants: list controllers", "error", err)
-		return nil
-	}
-	var rows []pipelineTenantJSON
-	for _, tenant := range tenants {
-		refs := tenantNamespaceTenants(tenant.Spec.Namespaces, all)
-		if len(refs) == 0 || len(refs) > maxTenantTenants {
-			continue
-		}
-		for _, ref := range refs {
-			if s.deps.Authorizer.CanReadPipeline(claims, ref, "") {
-				rows = append(rows, pipelineTenantJSON{Name: tenant.Name, Cluster: local, Placed: false})
-				break
-			}
-		}
-	}
-	return rows
 }
 
 // allTenantPlacements reads every placement row. It reports false, with

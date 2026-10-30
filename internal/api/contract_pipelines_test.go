@@ -25,6 +25,27 @@ func init() {
 			WantStatus: http.StatusOK,
 		},
 		contractCase{
+			Name:       "listFleetRuns-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/pipelines/runs",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
+			Name:       "getPipelinesOverview-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/pipelines/overview",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
+			Name:       "streamFleetRuns-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/pipelines/runs/stream",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
 			Name:       "listPipelines-recordStoreDisabled",
 			Method:     "GET",
 			Path:       "/api/v1/pipelines/payments",

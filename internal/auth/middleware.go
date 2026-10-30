@@ -213,6 +213,9 @@ func sseScope(path string) string {
 			return "run:" + segs[0]
 		}
 	}
+	if p == "/pipelines/runs/stream" {
+		return "pipelines-runs"
+	}
 	if strings.HasPrefix(p, "/pipelines/") {
 		segs := strings.Split(strings.TrimPrefix(p, "/pipelines/"), "/")
 		// /pipelines/{tenant}/stream. A tenant name holds no "/".

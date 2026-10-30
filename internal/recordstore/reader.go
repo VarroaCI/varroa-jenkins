@@ -43,6 +43,12 @@ type Reader interface {
 	ListJobSummaries(ctx context.Context, cluster, tenant string, since time.Time) ([]JobSummary, error)
 	GetJobSummary(ctx context.Context, cluster, tenant, jobPath string) (JobSummary, error)
 	ListRuns(ctx context.Context, q RunQuery) (RunPage, error)
+	// ListRunsAcross pages the runs of every scope in q by keyset. A
+	// cursor of another sort or order answers ErrInvalidCursor.
+	ListRunsAcross(ctx context.Context, q RunsAcrossQuery) (RunPage, error)
+	// RunsOverview answers the aggregate counts and the recent runs of every
+	// scope in q, for the 24 hours before q.Now.
+	RunsOverview(ctx context.Context, q RunsOverviewQuery) (RunsOverview, error)
 	// ListDownstreamRuns pages the runs whose upstream run id is
 	// q.UpstreamRunID, newest first.
 	ListDownstreamRuns(ctx context.Context, q DownstreamRunQuery) (RunPage, error)

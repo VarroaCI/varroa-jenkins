@@ -8049,3 +8049,247 @@ QualityTrend:
       type: array
       items: {$ref: '#/WarningsTrendSeries'}
   additionalProperties: false
+
+FleetRunRow:
+  type: object
+  description: One run of the fleet run feed. It extends RunSummary with the tenant, the title, and the trigger.
+  required:
+  - runId
+  - status
+  - cluster
+  - tenant
+  - title
+  - trigger
+  - pendingInput
+  - canWrite
+  - createdAt
+  properties:
+    runId:
+      type: string
+    buildNumber:
+      type: integer
+      format: int64
+    jobPath:
+      type: string
+    status:
+      type: string
+    result:
+      type: string
+    branch:
+      type: string
+    scmRevision:
+      type: string
+    actor:
+      type: string
+    cause:
+      type: string
+    scmUrl:
+      type: string
+      description: Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
+    scmForge:
+      type: string
+      enum:
+      - github
+      - gitlab
+      - gitea
+      description: 'The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+
+        '
+    triggerSource:
+      type: string
+      enum:
+      - user
+      - webhook
+      - cron
+      - upstream
+      - replay
+      - restart
+      - scm
+      - other
+      x-enum-varnames:
+      - User
+      - Webhook
+      - Cron
+      - Upstream
+      - Replay
+      - Restart
+      - Scm
+      - Other
+      description: 'Kind of cause that started the run. Absent when Jenkins reports no cause list.
+
+        '
+    changeRequest:
+      $ref: '#/ChangeRequest'
+    queuedAt:
+      type: string
+      format: date-time
+    startedAt:
+      type: string
+      format: date-time
+    endedAt:
+      type: string
+      format: date-time
+    durationMs:
+      type: integer
+      format: int64
+    cluster:
+      type: string
+      description: The cluster that holds the run.
+    tenant:
+      type: string
+      description: The rail and URL name of the tenant. A controller tenant reads namespace/controller.
+    title:
+      type: string
+      description: The first line of the newest commit message, else the job path.
+    trigger:
+      $ref: '#/FleetRunTrigger'
+    pendingInput:
+      type: boolean
+      description: True while a RUNNING run waits for an input answer.
+    queueWaitMs:
+      type: integer
+      format: int64
+      description: Milliseconds from queue to start. Absent until the run starts.
+    interruptedReason:
+      type: string
+      description: The reason of an INTERRUPTED run, such as cell-lost.
+    upstream:
+      $ref: '#/FleetRunUpstream'
+    canWrite:
+      type: boolean
+      description: True when the caller may write the run's job.
+    createdAt:
+      type: string
+      format: date-time
+  additionalProperties: false
+
+FleetRunTrigger:
+  type: object
+  description: The trigger class of a fleet run, with the label the UI shows.
+  required: [kind, label]
+  properties:
+    kind:
+      type: string
+      enum: [pullRequest, push, cron, manual, upstream, webhook, replay, restart, other]
+    label:
+      type: string
+  additionalProperties: false
+
+FleetRunUpstream:
+  type: object
+  description: The run that started a fleet run. Job is the tenant-qualified job path.
+  required: [tenant, job]
+  properties:
+    tenant:
+      type: string
+    job:
+      type: string
+    buildNumber:
+      type: integer
+      format: int64
+    runId:
+      type: string
+  additionalProperties: false
+
+FleetRunPage:
+  type: object
+  description: One page of the fleet run feed. Items is never null. NextCursor is absent on the last page.
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/FleetRunRow'
+    nextCursor:
+      type: string
+  additionalProperties: false
+
+RecentRunResult:
+  type: object
+  description: One recent run of a rail tenant.
+  required: [runId, status]
+  properties:
+    runId:
+      type: string
+    status:
+      type: string
+    result:
+      type: string
+      description: The result of the run. Absent while the run has none.
+  additionalProperties: false
+
+PipelinesOverviewTotals:
+  type: object
+  description: The counts of the overview window, the 24 hours before the reference time (UTC).
+  required: [runs24h, runsPrior24h, passed, failed, interrupted, finished, running, queued]
+  properties:
+    runs24h: {type: integer, format: int64}
+    runsPrior24h: {type: integer, format: int64, description: The runs of the 24 hours before the window.}
+    passed: {type: integer, format: int64}
+    failed: {type: integer, format: int64}
+    interrupted: {type: integer, format: int64}
+    finished: {type: integer, format: int64}
+    running: {type: integer, format: int64}
+    queued: {type: integer, format: int64}
+    passRate:
+      type: number
+      description: Passed divided by finished. Absent when no run has finished.
+    medianQueueWaitMs: {type: integer, format: int64}
+    medianDurationMs: {type: integer, format: int64}
+    p90DurationMs: {type: integer, format: int64}
+  additionalProperties: false
+
+PipelinesOverviewAttention:
+  type: object
+  description: The counts that need a look now.
+  required: [failed24h, waitingInput, awaitingCell, locksHeld]
+  properties:
+    failed24h: {type: integer, format: int64}
+    waitingInput: {type: integer, format: int64}
+    awaitingCell: {type: integer, format: int64}
+    locksHeld: {type: integer, format: int64}
+  additionalProperties: false
+
+PipelinesOverviewTenant:
+  type: object
+  description: One rail row of the overview. Placement is placed when any row of the name is placed.
+  required: [name, clusters, placement, runs24h, failed24h, running, waitingInput, locksHeld, recent]
+  properties:
+    name: {type: string}
+    clusters:
+      type: array
+      items: {type: string}
+    placement:
+      type: string
+      enum: [placed, awaitingCell, controllers]
+    runs24h: {type: integer, format: int64}
+    failed24h: {type: integer, format: int64}
+    running: {type: integer, format: int64}
+    waitingInput: {type: integer, format: int64}
+    locksHeld: {type: integer, format: int64}
+    recent:
+      type: array
+      items:
+        $ref: '#/RecentRunResult'
+  additionalProperties: false
+
+PipelinesOverview:
+  type: object
+  description: The body of GET /pipelines/overview. Tenants is in attention order.
+  required: [windowStart, localCluster, clusters, canReadFleetLocks, totals, attention, tenants]
+  properties:
+    windowStart:
+      type: string
+      format: date-time
+    localCluster: {type: string}
+    clusters: {type: integer, description: The count of distinct clusters over every rail row.}
+    canReadFleetLocks: {type: boolean}
+    totals:
+      $ref: '#/PipelinesOverviewTotals'
+    attention:
+      $ref: '#/PipelinesOverviewAttention'
+    tenants:
+      type: array
+      items:
+        $ref: '#/PipelinesOverviewTenant'
+  additionalProperties: false

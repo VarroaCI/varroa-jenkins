@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -15,10 +17,10 @@ import (
 )
 
 // =============================================================================
-// Pipeline tools (15): run_pipeline, list_runs, get_run, get_run_log,
+// Pipeline tools (16): run_pipeline, list_runs, get_run, get_run_log,
 // list_job_branches, get_job_health, list_fleet_locks, release_fleet_lock,
 // proceed_run_input, abort_run_input, replay_run, restart_run,
-// scan_multibranch, get_tenant_cell, lint_jenkinsfile
+// scan_multibranch, get_tenant_cell, lint_jenkinsfile, get_pipelines_overview
 //
 // Design D1a: these tools call the same internal services the
 // pipelines HTTP handlers call (internal/api's RunPipeline, ListRuns,
@@ -44,6 +46,7 @@ const (
 func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	registerRunPipelineTool(mcpServer, deps)
 	registerListRunsTool(mcpServer, deps)
+	registerGetPipelinesOverviewTool(mcpServer, deps)
 	registerGetRunTool(mcpServer, deps)
 	registerGetRunLogTool(mcpServer, deps)
 	registerListJobBranchesTool(mcpServer, deps)
@@ -365,14 +368,18 @@ func registerAbortRunInputTool(mcpServer *server.MCPServer, deps *api.Dependenci
 
 func registerListRunsTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listRunsTool := mcp.NewTool("list_runs",
-		mcp.WithDescription("List runs of one pipeline job, newest first, merged across every "+
-			"tenant the job path resolves to. Capped at limit (default 50, max 200)."),
-		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant, or the controller name for a single-controller tenant")),
-		mcp.WithString("job", mcp.Required(), mcp.Description("Full job path, e.g. checkout-api/main")),
+		mcp.WithDescription("List runs, newest first. Without tenant, list the runs of every tenant you can read, "+
+			"filtered by job, branch, result, actor, trigger, and since. With tenant, list the runs of one job, "+
+			"which needs job; cause applies to that mode, and trigger and since do not. "+
+			"Each run is a fleet row. Capped at limit (default 50, max 200)."),
+		mcp.WithString("tenant", mcp.Description("Tenant, or the controller name for a single-controller tenant. Omit it to list every readable tenant")),
+		mcp.WithString("job", mcp.Description("Full job path, e.g. checkout-api/main. Required with tenant")),
 		mcp.WithString("branch", mcp.Description("Filter by branch")),
 		mcp.WithString("result", mcp.Description("Filter by result: SUCCESS, FAILURE, UNSTABLE, or ABORTED")),
 		mcp.WithString("actor", mcp.Description("Filter by the user who started the run")),
-		mcp.WithString("cause", mcp.Description("Filter by cause text")),
+		mcp.WithString("cause", mcp.Description("Filter by cause text. Applies with tenant only")),
+		mcp.WithString("trigger", mcp.Description("Filter by trigger kind: pullRequest, push, cron, manual, upstream, webhook, replay, restart, or other. Applies without tenant only")),
+		mcp.WithString("since", mcp.Description("Lower bound: a Go duration such as 24h, or an RFC 3339 time. Applies without tenant only")),
 		mcp.WithNumber("limit", mcp.Description("Maximum number of runs to return (default 50, max 200)")),
 		mcp.WithString("cursor", mcp.Description("Opaque cursor from a previous call's nextCursor")),
 		withListOutput(runListOutputSchema),
@@ -384,38 +391,92 @@ func registerListRunsTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		}
 		args := getArgs(req)
 		tenant := strArg(args, "tenant")
-		job := strArg(args, "job")
-		if tenant == "" || job == "" {
-			return mcp.NewToolResultError("tenant and job are required"), nil
-		}
-		limit := defaultListRunsLimit
-		if n, ok := args["limit"].(float64); ok {
-			limit = int(n)
-			if limit < 1 {
-				limit = 1
+		limit := listRunsLimitArg(args)
+		if tenant != "" {
+			if strArg(args, "job") == "" {
+				return mcp.NewToolResultError("job is required when tenant is set"), nil
 			}
-			if limit > maxListRunsLimit {
-				limit = maxListRunsLimit
+			if strArg(args, "trigger") != "" || strArg(args, "since") != "" {
+				return mcp.NewToolResultError("trigger and since apply without tenant only"), nil
+			}
+			page, serr, err := api.NewServer(deps).ListTenantFleetRuns(ctx, claims, tenant,
+				strArg(args, "job"), strArg(args, "branch"), strArg(args, "result"), strArg(args, "actor"),
+				strArg(args, "cause"), limit, strArg(args, "cursor"))
+			return fleetRunsResult(page, serr, err)
+		}
+		if strArg(args, "cause") != "" {
+			return mcp.NewToolResultError("cause applies with tenant only"), nil
+		}
+		values := url.Values{}
+		for _, key := range []string{"job", "branch", "result", "actor", "trigger", "since", "cursor"} {
+			if v := strArg(args, key); v != "" {
+				values.Set(key, v)
 			}
 		}
-		page, serr, err := api.NewServer(deps).ListRuns(ctx, claims, tenant, job,
-			strArg(args, "branch"), strArg(args, "result"), strArg(args, "actor"), strArg(args, "cause"),
-			limit, strArg(args, "cursor"))
+		params, err := api.ParseFleetRunsQuery(values, time.Now().UTC())
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		params.Limit = limit
+		page, serr, err := api.NewServer(deps).ListFleetRuns(ctx, claims, params)
+		return fleetRunsResult(page, serr, err)
+	})
+}
+
+// listRunsLimitArg reads the limit argument of list_runs. It defaults to
+// defaultListRunsLimit and clamps to the range 1 to maxListRunsLimit.
+func listRunsLimitArg(args map[string]any) int {
+	limit := defaultListRunsLimit
+	if n, ok := args["limit"].(float64); ok {
+		limit = int(n)
+		if limit < 1 {
+			limit = 1
+		}
+		if limit > maxListRunsLimit {
+			limit = maxListRunsLimit
+		}
+	}
+	return limit
+}
+
+// fleetRunsResult maps one page of fleet rows, or the error of its read, onto
+// the list envelope: items, count, and nextCursor.
+func fleetRunsResult(page api.FleetRunPage, serr *api.ServiceError, err error) (*mcp.CallToolResult, error) {
+	if serr != nil {
+		return mcp.NewToolResultError(serr.Error()), nil
+	}
+	if err != nil {
+		return mcp.NewToolResultError("list runs failed: " + err.Error()), nil
+	}
+	items := page.Items
+	if items == nil {
+		items = []api.FleetRunRow{}
+	}
+	return resultJSON(map[string]any{
+		"items":      items,
+		"count":      len(items),
+		"nextCursor": page.NextCursor,
+	})
+}
+
+func registerGetPipelinesOverviewTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	overviewTool := mcp.NewTool("get_pipelines_overview",
+		mcp.WithDescription("Read the pipelines home: the 24-hour counters, the attention counts, and the tenant rail "+
+			"of every tenant you can read. Takes no argument."),
+	)
+	addTool(mcpServer, kindRead, overviewTool, func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		claims, toolErr := requirePipelineCaller(ctx, deps)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		out, serr, err := api.NewServer(deps).PipelinesOverview(ctx, claims, time.Now().UTC())
 		if serr != nil {
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
 		if err != nil {
-			return mcp.NewToolResultError("list runs failed: " + err.Error()), nil
+			return mcp.NewToolResultError("pipelines overview failed: " + err.Error()), nil
 		}
-		items := page.Items
-		if items == nil {
-			items = []api.RunSummary{}
-		}
-		return resultJSON(map[string]any{
-			"items":      items,
-			"count":      len(items),
-			"nextCursor": page.NextCursor,
-		})
+		return resultJSON(out)
 	})
 }
 
@@ -556,14 +617,21 @@ var jobBranchesOutputSchema = json.RawMessage(`{
   }
 }`)
 
-// runListOutputSchema describes list_runs' items: api.RunSummary
-// serializes directly.
-var runListOutputSchema = listOutputSchema("Run summary.", []schemaField{
+// runListOutputSchema describes list_runs' items: the fleet run rows. The
+// tenant mode and the fleet mode answer the same row shape.
+var runListOutputSchema = listOutputSchema("Fleet run row.", []schemaField{
 	{Name: "runId", Type: "string", Desc: "Run id (UUIDv7)."},
+	{Name: "cluster", Type: "string", Desc: "Cluster that holds the run."},
+	{Name: "tenant", Type: "string", Desc: "Tenant of the run, as the rail names it."},
+	{Name: "title", Type: "string", Desc: "First line of the newest commit message, else the job path."},
 	{Name: "buildNumber", Type: "integer", Desc: "Jenkins build number, once assigned."},
 	{Name: "jobPath", Type: "string", Desc: "Full job path."},
 	{Name: "status", Type: "string", Desc: "QUEUED, RUNNING, or COMPLETED."},
 	{Name: "result", Type: "string", Desc: "SUCCESS, FAILURE, UNSTABLE, or ABORTED, once known."},
+	{Name: "pendingInput", Type: "boolean", Desc: "True while a RUNNING run waits for an input answer."},
+	{Name: "canWrite", Type: "boolean", Desc: "True when the caller may write the run's job."},
+	{Name: "trigger", Type: "object", Desc: "Trigger: kind and label, such as pullRequest and Pull request #178."},
+	{Name: "upstream", Type: "object", Desc: "Run that started this run: tenant, job, buildNumber, runId. Absent otherwise."},
 	{Name: "branch", Type: "string", Desc: "SCM branch, if any."},
 	{Name: "scmRevision", Type: "string", Desc: "SCM revision, if any."},
 	{Name: "actor", Type: "string", Desc: "User who started the run, if any."},
@@ -576,6 +644,9 @@ var runListOutputSchema = listOutputSchema("Run summary.", []schemaField{
 	{Name: "startedAt", Type: "string", Desc: "Start time, RFC3339."},
 	{Name: "endedAt", Type: "string", Desc: "End time, RFC3339."},
 	{Name: "durationMs", Type: "integer", Desc: "Duration in milliseconds, once ended."},
+	{Name: "queueWaitMs", Type: "integer", Desc: "Milliseconds from queue to start. Absent until the run starts."},
+	{Name: "interruptedReason", Type: "string", Desc: "Reason of an INTERRUPTED run, such as cell-lost."},
+	{Name: "createdAt", Type: "string", Desc: "Creation time, RFC3339."},
 })
 
 func registerListFleetLocksTool(mcpServer *server.MCPServer, deps *api.Dependencies) {

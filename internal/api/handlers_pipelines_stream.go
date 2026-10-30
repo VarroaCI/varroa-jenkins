@@ -34,12 +34,6 @@ func (s *Server) handleTenantRunStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		s.writeJSONError(w, http.StatusInternalServerError, "streaming not supported")
-		return
-	}
-
 	ctx := r.Context()
 	claims := auth.ClaimsFromContext(ctx)
 	refs, serr := s.resolveTenantTenants(ctx, claims, r.PathValue("tenant"))
@@ -53,8 +47,52 @@ func (s *Server) handleTenantRunStream(w http.ResponseWriter, r *http.Request) {
 		s.writeJSONError(w, http.StatusNotFound, "not found")
 		return
 	}
-	filter := s.runStreamFilter(claims, refs)
+	s.serveRunStream(w, r, keys, s.runStreamFilter(claims, refs))
+}
 
+// handleFleetRunStream streams the run notifications of every tenant the
+// caller may read. The ticket scope pipelines-runs opens it. The keys are the
+// readable scopes of the pipelines walk, and the filter applies the per-tenant
+// job check to each notification.
+func (s *Server) handleFleetRunStream(w http.ResponseWriter, r *http.Request) {
+	if s.deps.RecordStore == nil {
+		s.pipelinesUnavailable(w)
+		return
+	}
+	if s.deps.RunFanout == nil {
+		s.writeJSONError(w, http.StatusServiceUnavailable, "SSE not available")
+		return
+	}
+
+	ctx := r.Context()
+	claims := auth.ClaimsFromContext(ctx)
+	readable, _, err := s.readablePipelineTenants(ctx, claims)
+	if s.handleReaderError(w, err, "list pipelines tenants") {
+		return
+	}
+	var refs []TenantRef
+	for _, t := range readable {
+		refs = append(refs, t.Refs...)
+	}
+	keys := runStreamKeys(refs)
+	if len(keys) == 0 {
+		s.writeJSONError(w, http.StatusNotFound, "not found")
+		return
+	}
+	s.serveRunStream(w, r, keys, s.runStreamFilter(claims, refs))
+}
+
+// serveRunStream writes the run notification frames of keys that pass filter,
+// until the client leaves or the fan-out closes the channel. It pings every
+// thirty seconds so a proxy keeps the connection open.
+func (s *Server) serveRunStream(w http.ResponseWriter, r *http.Request, keys []string, filter func(recordstore.RunNotification) bool) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		s.writeJSONError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	ctx := r.Context()
 	ch := s.deps.RunFanout.Subscribe(keys, filter)
 	defer s.deps.RunFanout.Unsubscribe(keys, ch)
 

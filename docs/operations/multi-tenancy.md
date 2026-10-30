@@ -29,6 +29,8 @@ kubectl get tenant payments -o yaml
 
 `namespaces` must not be empty. `roleRef` defaults to `developer`. `members` names local users; `subjects` names identities from the configured provider.
 
+The names `runs` and `overview` are reserved. The pipelines API uses them as routes.
+
 ## Control namespace access
 
 Only configured deployable namespaces accept controller creation. Configure them through the installation values or a `Tenant`; then use [Varroa RBAC](../security/varroa-rbac.md) to grant API access and [Jenkins RBAC](../security/jenkins-rbac.md) to grant Jenkins permissions.

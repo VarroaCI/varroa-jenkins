@@ -80,6 +80,8 @@ Stop when one step explains the symptom. Do not guess past the evidence.
 | Why does Jenkins not start? | `get_controller_logs` |
 | Why did this build fail? | `get_run`, then `get_run_log` |
 | Which builds ran for this job? | `list_runs` |
+| What failed today across my tenants? | `list_runs` with `result` FAILURE and `since` 24h |
+| Which tenants need attention? | `get_pipelines_overview` |
 | Where does this tenant run? | `get_tenant_cell` |
 | Is this cell full? | `get_cell_usage` |
 | What may I do? | `get_my_permissions` |

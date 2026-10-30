@@ -377,6 +377,38 @@ const (
 	Released ComponentsSchemasFleetLockReleaseResponseState = "released"
 )
 
+// Defines values for ComponentsSchemasFleetRunRowScmForge.
+const (
+	ComponentsSchemasFleetRunRowScmForgeGitea  ComponentsSchemasFleetRunRowScmForge = "gitea"
+	ComponentsSchemasFleetRunRowScmForgeGithub ComponentsSchemasFleetRunRowScmForge = "github"
+	ComponentsSchemasFleetRunRowScmForgeGitlab ComponentsSchemasFleetRunRowScmForge = "gitlab"
+)
+
+// Defines values for ComponentsSchemasFleetRunRowTriggerSource.
+const (
+	ComponentsSchemasFleetRunRowTriggerSourceCron     ComponentsSchemasFleetRunRowTriggerSource = "cron"
+	ComponentsSchemasFleetRunRowTriggerSourceOther    ComponentsSchemasFleetRunRowTriggerSource = "other"
+	ComponentsSchemasFleetRunRowTriggerSourceReplay   ComponentsSchemasFleetRunRowTriggerSource = "replay"
+	ComponentsSchemasFleetRunRowTriggerSourceRestart  ComponentsSchemasFleetRunRowTriggerSource = "restart"
+	ComponentsSchemasFleetRunRowTriggerSourceScm      ComponentsSchemasFleetRunRowTriggerSource = "scm"
+	ComponentsSchemasFleetRunRowTriggerSourceUpstream ComponentsSchemasFleetRunRowTriggerSource = "upstream"
+	ComponentsSchemasFleetRunRowTriggerSourceUser     ComponentsSchemasFleetRunRowTriggerSource = "user"
+	ComponentsSchemasFleetRunRowTriggerSourceWebhook  ComponentsSchemasFleetRunRowTriggerSource = "webhook"
+)
+
+// Defines values for ComponentsSchemasFleetRunTriggerKind.
+const (
+	ComponentsSchemasFleetRunTriggerKindCron        ComponentsSchemasFleetRunTriggerKind = "cron"
+	ComponentsSchemasFleetRunTriggerKindManual      ComponentsSchemasFleetRunTriggerKind = "manual"
+	ComponentsSchemasFleetRunTriggerKindOther       ComponentsSchemasFleetRunTriggerKind = "other"
+	ComponentsSchemasFleetRunTriggerKindPullRequest ComponentsSchemasFleetRunTriggerKind = "pullRequest"
+	ComponentsSchemasFleetRunTriggerKindPush        ComponentsSchemasFleetRunTriggerKind = "push"
+	ComponentsSchemasFleetRunTriggerKindReplay      ComponentsSchemasFleetRunTriggerKind = "replay"
+	ComponentsSchemasFleetRunTriggerKindRestart     ComponentsSchemasFleetRunTriggerKind = "restart"
+	ComponentsSchemasFleetRunTriggerKindUpstream    ComponentsSchemasFleetRunTriggerKind = "upstream"
+	ComponentsSchemasFleetRunTriggerKindWebhook     ComponentsSchemasFleetRunTriggerKind = "webhook"
+)
+
 // Defines values for ComponentsSchemasGroupEntrySource.
 const (
 	ComponentsSchemasGroupEntrySourceBoth  ComponentsSchemasGroupEntrySource = "both"
@@ -557,6 +589,13 @@ const (
 	Marker ComponentsSchemasPipelineTemplateInfoSource = "marker"
 )
 
+// Defines values for ComponentsSchemasPipelinesOverviewTenantPlacement.
+const (
+	ComponentsSchemasPipelinesOverviewTenantPlacementAwaitingCell ComponentsSchemasPipelinesOverviewTenantPlacement = "awaitingCell"
+	ComponentsSchemasPipelinesOverviewTenantPlacementControllers  ComponentsSchemasPipelinesOverviewTenantPlacement = "controllers"
+	ComponentsSchemasPipelinesOverviewTenantPlacementPlaced       ComponentsSchemasPipelinesOverviewTenantPlacement = "placed"
+)
+
 // Defines values for ComponentsSchemasProposePipelineErrorCode.
 const (
 	ComponentsSchemasProposePipelineErrorCodeAssistantBusy        ComponentsSchemasProposePipelineErrorCode = "assistant_busy"
@@ -645,9 +684,9 @@ const (
 
 // Defines values for ComponentsSchemasRunSummaryScmForge.
 const (
-	ComponentsSchemasRunSummaryScmForgeGitea  ComponentsSchemasRunSummaryScmForge = "gitea"
-	ComponentsSchemasRunSummaryScmForgeGithub ComponentsSchemasRunSummaryScmForge = "github"
-	ComponentsSchemasRunSummaryScmForgeGitlab ComponentsSchemasRunSummaryScmForge = "gitlab"
+	Gitea  ComponentsSchemasRunSummaryScmForge = "gitea"
+	Github ComponentsSchemasRunSummaryScmForge = "github"
+	Gitlab ComponentsSchemasRunSummaryScmForge = "gitlab"
 )
 
 // Defines values for ComponentsSchemasRunSummaryTriggerSource.
@@ -772,11 +811,11 @@ const (
 
 // Defines values for ComponentsSchemasTenantCellState.
 const (
-	Moving        ComponentsSchemasTenantCellState = "moving"
-	NotCellHosted ComponentsSchemasTenantCellState = "notCellHosted"
-	Placed        ComponentsSchemasTenantCellState = "placed"
-	Rehydrating   ComponentsSchemasTenantCellState = "rehydrating"
-	Unplaced      ComponentsSchemasTenantCellState = "unplaced"
+	ComponentsSchemasTenantCellStateMoving        ComponentsSchemasTenantCellState = "moving"
+	ComponentsSchemasTenantCellStateNotCellHosted ComponentsSchemasTenantCellState = "notCellHosted"
+	ComponentsSchemasTenantCellStatePlaced        ComponentsSchemasTenantCellState = "placed"
+	ComponentsSchemasTenantCellStateRehydrating   ComponentsSchemasTenantCellState = "rehydrating"
+	ComponentsSchemasTenantCellStateUnplaced      ComponentsSchemasTenantCellState = "unplaced"
 )
 
 // Defines values for ComponentsSchemasTenantMemberRole.
@@ -894,6 +933,43 @@ const (
 	ApproveControllerJSONBodyActionPluginRoll   ApproveControllerJSONBodyAction = "plugin-roll"
 	ApproveControllerJSONBodyActionReload       ApproveControllerJSONBodyAction = "reload"
 	ApproveControllerJSONBodyActionRestart      ApproveControllerJSONBodyAction = "restart"
+)
+
+// Defines values for ListFleetRunsParamsTrigger.
+const (
+	Cron        ListFleetRunsParamsTrigger = "cron"
+	Manual      ListFleetRunsParamsTrigger = "manual"
+	Other       ListFleetRunsParamsTrigger = "other"
+	PullRequest ListFleetRunsParamsTrigger = "pullRequest"
+	Push        ListFleetRunsParamsTrigger = "push"
+	Replay      ListFleetRunsParamsTrigger = "replay"
+	Restart     ListFleetRunsParamsTrigger = "restart"
+	Upstream    ListFleetRunsParamsTrigger = "upstream"
+	Webhook     ListFleetRunsParamsTrigger = "webhook"
+)
+
+// Defines values for ListFleetRunsParamsStatus.
+const (
+	COMPLETED    ListFleetRunsParamsStatus = "COMPLETED"
+	QUEUED       ListFleetRunsParamsStatus = "QUEUED"
+	RUNNING      ListFleetRunsParamsStatus = "RUNNING"
+	WAITINGINPUT ListFleetRunsParamsStatus = "WAITING_INPUT"
+)
+
+// Defines values for ListFleetRunsParamsSort.
+const (
+	Actor    ListFleetRunsParamsSort = "actor"
+	Duration ListFleetRunsParamsSort = "duration"
+	Job      ListFleetRunsParamsSort = "job"
+	Started  ListFleetRunsParamsSort = "started"
+	Status   ListFleetRunsParamsSort = "status"
+	Tenant   ListFleetRunsParamsSort = "tenant"
+)
+
+// Defines values for ListFleetRunsParamsOrder.
+const (
+	Asc  ListFleetRunsParamsOrder = "asc"
+	Desc ListFleetRunsParamsOrder = "desc"
 )
 
 // Defines values for ListTenantAgentSessionsParamsState.
@@ -2903,6 +2979,92 @@ type ComponentsSchemasFleetPluginsRollup struct {
 	Items    []ComponentsSchemasFleetPluginRollupItem `json:"items"`
 }
 
+// ComponentsSchemasFleetRunPage One page of the fleet run feed. Items is never null. NextCursor is absent on the last page.
+type ComponentsSchemasFleetRunPage struct {
+	Items      []ComponentsSchemasFleetRunRow `json:"items"`
+	NextCursor *string                        `json:"nextCursor,omitempty"`
+}
+
+// ComponentsSchemasFleetRunRow One run of the fleet run feed. It extends RunSummary with the tenant, the title, and the trigger.
+type ComponentsSchemasFleetRunRow struct {
+	Actor       *string `json:"actor,omitempty"`
+	Branch      *string `json:"branch,omitempty"`
+	BuildNumber *int64  `json:"buildNumber,omitempty"`
+
+	// CanWrite True when the caller may write the run's job.
+	CanWrite bool    `json:"canWrite"`
+	Cause    *string `json:"cause,omitempty"`
+
+	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
+	ChangeRequest *ComponentsSchemasChangeRequest `json:"changeRequest,omitempty"`
+
+	// Cluster The cluster that holds the run.
+	Cluster    string     `json:"cluster"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	DurationMs *int64     `json:"durationMs,omitempty"`
+	EndedAt    *time.Time `json:"endedAt,omitempty"`
+
+	// InterruptedReason The reason of an INTERRUPTED run, such as cell-lost.
+	InterruptedReason *string `json:"interruptedReason,omitempty"`
+	JobPath           *string `json:"jobPath,omitempty"`
+
+	// PendingInput True while a RUNNING run waits for an input answer.
+	PendingInput bool `json:"pendingInput"`
+
+	// QueueWaitMs Milliseconds from queue to start. Absent until the run starts.
+	QueueWaitMs *int64     `json:"queueWaitMs,omitempty"`
+	QueuedAt    *time.Time `json:"queuedAt,omitempty"`
+	Result      *string    `json:"result,omitempty"`
+	RunId       string     `json:"runId"`
+
+	// ScmForge The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+	ScmForge    *ComponentsSchemasFleetRunRowScmForge `json:"scmForge,omitempty"`
+	ScmRevision *string                               `json:"scmRevision,omitempty"`
+
+	// ScmUrl Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
+	ScmUrl    *string    `json:"scmUrl,omitempty"`
+	StartedAt *time.Time `json:"startedAt,omitempty"`
+	Status    string     `json:"status"`
+
+	// Tenant The rail and URL name of the tenant. A controller tenant reads namespace/controller.
+	Tenant string `json:"tenant"`
+
+	// Title The first line of the newest commit message, else the job path.
+	Title string `json:"title"`
+
+	// Trigger The trigger class of a fleet run, with the label the UI shows.
+	Trigger ComponentsSchemasFleetRunTrigger `json:"trigger"`
+
+	// TriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
+	TriggerSource *ComponentsSchemasFleetRunRowTriggerSource `json:"triggerSource,omitempty"`
+
+	// Upstream The run that started a fleet run. Job is the tenant-qualified job path.
+	Upstream *ComponentsSchemasFleetRunUpstream `json:"upstream,omitempty"`
+}
+
+// ComponentsSchemasFleetRunRowScmForge The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+type ComponentsSchemasFleetRunRowScmForge string
+
+// ComponentsSchemasFleetRunRowTriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
+type ComponentsSchemasFleetRunRowTriggerSource string
+
+// ComponentsSchemasFleetRunTrigger The trigger class of a fleet run, with the label the UI shows.
+type ComponentsSchemasFleetRunTrigger struct {
+	Kind  ComponentsSchemasFleetRunTriggerKind `json:"kind"`
+	Label string                               `json:"label"`
+}
+
+// ComponentsSchemasFleetRunTriggerKind defines model for ComponentsSchemasFleetRunTrigger.Kind.
+type ComponentsSchemasFleetRunTriggerKind string
+
+// ComponentsSchemasFleetRunUpstream The run that started a fleet run. Job is the tenant-qualified job path.
+type ComponentsSchemasFleetRunUpstream struct {
+	BuildNumber *int64  `json:"buildNumber,omitempty"`
+	Job         string  `json:"job"`
+	RunId       *string `json:"runId,omitempty"`
+	Tenant      string  `json:"tenant"`
+}
+
 // ComponentsSchemasFreshnessJSON Observability freshness information.
 type ComponentsSchemasFreshnessJSON struct {
 	MiteTTL    *int    `json:"miteTTL,omitempty"`
@@ -3759,6 +3921,66 @@ type ComponentsSchemasPipelineTriggers struct {
 	Webhook *bool `json:"webhook,omitempty"`
 }
 
+// ComponentsSchemasPipelinesOverview The body of GET /pipelines/overview. Tenants is in attention order.
+type ComponentsSchemasPipelinesOverview struct {
+	// Attention The counts that need a look now.
+	Attention         ComponentsSchemasPipelinesOverviewAttention `json:"attention"`
+	CanReadFleetLocks bool                                        `json:"canReadFleetLocks"`
+
+	// Clusters The count of distinct clusters over every rail row.
+	Clusters     int                                        `json:"clusters"`
+	LocalCluster string                                     `json:"localCluster"`
+	Tenants      []ComponentsSchemasPipelinesOverviewTenant `json:"tenants"`
+
+	// Totals The counts of the overview window, the 24 hours before the reference time (UTC).
+	Totals      ComponentsSchemasPipelinesOverviewTotals `json:"totals"`
+	WindowStart time.Time                                `json:"windowStart"`
+}
+
+// ComponentsSchemasPipelinesOverviewAttention The counts that need a look now.
+type ComponentsSchemasPipelinesOverviewAttention struct {
+	AwaitingCell int64 `json:"awaitingCell"`
+	Failed24h    int64 `json:"failed24h"`
+	LocksHeld    int64 `json:"locksHeld"`
+	WaitingInput int64 `json:"waitingInput"`
+}
+
+// ComponentsSchemasPipelinesOverviewTenant One rail row of the overview. Placement is placed when any row of the name is placed.
+type ComponentsSchemasPipelinesOverviewTenant struct {
+	Clusters     []string                                          `json:"clusters"`
+	Failed24h    int64                                             `json:"failed24h"`
+	LocksHeld    int64                                             `json:"locksHeld"`
+	Name         string                                            `json:"name"`
+	Placement    ComponentsSchemasPipelinesOverviewTenantPlacement `json:"placement"`
+	Recent       []ComponentsSchemasRecentRunResult                `json:"recent"`
+	Running      int64                                             `json:"running"`
+	Runs24h      int64                                             `json:"runs24h"`
+	WaitingInput int64                                             `json:"waitingInput"`
+}
+
+// ComponentsSchemasPipelinesOverviewTenantPlacement defines model for ComponentsSchemasPipelinesOverviewTenant.Placement.
+type ComponentsSchemasPipelinesOverviewTenantPlacement string
+
+// ComponentsSchemasPipelinesOverviewTotals The counts of the overview window, the 24 hours before the reference time (UTC).
+type ComponentsSchemasPipelinesOverviewTotals struct {
+	Failed            int64  `json:"failed"`
+	Finished          int64  `json:"finished"`
+	Interrupted       int64  `json:"interrupted"`
+	MedianDurationMs  *int64 `json:"medianDurationMs,omitempty"`
+	MedianQueueWaitMs *int64 `json:"medianQueueWaitMs,omitempty"`
+	P90DurationMs     *int64 `json:"p90DurationMs,omitempty"`
+
+	// PassRate Passed divided by finished. Absent when no run has finished.
+	PassRate *float32 `json:"passRate,omitempty"`
+	Passed   int64    `json:"passed"`
+	Queued   int64    `json:"queued"`
+	Running  int64    `json:"running"`
+	Runs24h  int64    `json:"runs24h"`
+
+	// RunsPrior24h The runs of the 24 hours before the window.
+	RunsPrior24h int64 `json:"runsPrior24h"`
+}
+
 // ComponentsSchemasPluginAdvisory A non-classification finding (e.g. dependencyMinimumUnsatisfied).
 type ComponentsSchemasPluginAdvisory struct {
 	Code       string `json:"code"`
@@ -4079,6 +4301,14 @@ type ComponentsSchemasRecentBuild struct {
 	StartedAt       *string `json:"startedAt,omitempty"`
 	Status          string  `json:"status"`
 	Url             *string `json:"url,omitempty"`
+}
+
+// ComponentsSchemasRecentRunResult One recent run of a rail tenant.
+type ComponentsSchemasRecentRunResult struct {
+	// Result The result of the run. Absent while the run has none.
+	Result *string `json:"result,omitempty"`
+	RunId  string  `json:"runId"`
+	Status string  `json:"status"`
 }
 
 // ComponentsSchemasReconcileBlocked Read-only projection of whether the controller's reconcile loop is currently blocked by an unresolved error.
@@ -6170,6 +6400,42 @@ type ChangeMyPasswordJSONBody struct {
 	OldPassword string `json:"oldPassword"`
 }
 
+// ListFleetRunsParams defines parameters for ListFleetRuns.
+type ListFleetRunsParams struct {
+	// Tenant A rail name. Repeat the parameter to name several tenants.
+	Tenant *[]string `form:"tenant,omitempty" json:"tenant,omitempty"`
+
+	// Job A job path. Match exactly.
+	Job     *string                     `form:"job,omitempty" json:"job,omitempty"`
+	Trigger *ListFleetRunsParamsTrigger `form:"trigger,omitempty" json:"trigger,omitempty"`
+	Status  *ListFleetRunsParamsStatus  `form:"status,omitempty" json:"status,omitempty"`
+	Result  *string                     `form:"result,omitempty" json:"result,omitempty"`
+	Branch  *string                     `form:"branch,omitempty" json:"branch,omitempty"`
+	Actor   *string                     `form:"actor,omitempty" json:"actor,omitempty"`
+
+	// Since A positive Go duration such as 24h, or an RFC 3339 time.
+	Since *string `form:"since,omitempty" json:"since,omitempty"`
+
+	// Q Literal text that matches the job path, the branch, or the commit.
+	Q      *string                   `form:"q,omitempty" json:"q,omitempty"`
+	Sort   *ListFleetRunsParamsSort  `form:"sort,omitempty" json:"sort,omitempty"`
+	Order  *ListFleetRunsParamsOrder `form:"order,omitempty" json:"order,omitempty"`
+	Limit  *int                      `form:"limit,omitempty" json:"limit,omitempty"`
+	Cursor *string                   `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListFleetRunsParamsTrigger defines parameters for ListFleetRuns.
+type ListFleetRunsParamsTrigger string
+
+// ListFleetRunsParamsStatus defines parameters for ListFleetRuns.
+type ListFleetRunsParamsStatus string
+
+// ListFleetRunsParamsSort defines parameters for ListFleetRuns.
+type ListFleetRunsParamsSort string
+
+// ListFleetRunsParamsOrder defines parameters for ListFleetRuns.
+type ListFleetRunsParamsOrder string
+
 // ListTenantAgentSessionsParams defines parameters for ListTenantAgentSessions.
 type ListTenantAgentSessionsParams struct {
 	State  *ListTenantAgentSessionsParamsState `form:"state,omitempty" json:"state,omitempty"`
@@ -7432,6 +7698,15 @@ type ClientInterface interface {
 
 	// ListPipelineTenants request
 	ListPipelineTenants(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPipelinesOverview request
+	GetPipelinesOverview(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListFleetRuns request
+	ListFleetRuns(ctx context.Context, params *ListFleetRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StreamFleetRuns request
+	StreamFleetRuns(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListPipelines request
 	ListPipelines(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -9679,6 +9954,42 @@ func (c *Client) UpdateMyPreferences(ctx context.Context, body UpdateMyPreferenc
 
 func (c *Client) ListPipelineTenants(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListPipelineTenantsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetPipelinesOverview(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPipelinesOverviewRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListFleetRuns(ctx context.Context, params *ListFleetRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListFleetRunsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) StreamFleetRuns(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStreamFleetRunsRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -16964,6 +17275,301 @@ func NewListPipelineTenantsRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewGetPipelinesOverviewRequest generates requests for GetPipelinesOverview
+func NewGetPipelinesOverviewRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/overview")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListFleetRunsRequest generates requests for ListFleetRuns
+func NewListFleetRunsRequest(server string, params *ListFleetRunsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/runs")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Tenant != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "tenant", runtime.ParamLocationQuery, *params.Tenant); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Job != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "job", runtime.ParamLocationQuery, *params.Job); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Trigger != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "trigger", runtime.ParamLocationQuery, *params.Trigger); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Status != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "status", runtime.ParamLocationQuery, *params.Status); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Result != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "result", runtime.ParamLocationQuery, *params.Result); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Branch != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "branch", runtime.ParamLocationQuery, *params.Branch); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Actor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "actor", runtime.ParamLocationQuery, *params.Actor); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Since != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "since", runtime.ParamLocationQuery, *params.Since); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Q != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "q", runtime.ParamLocationQuery, *params.Q); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Sort != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "sort", runtime.ParamLocationQuery, *params.Sort); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Order != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "order", runtime.ParamLocationQuery, *params.Order); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cursor", runtime.ParamLocationQuery, *params.Cursor); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewStreamFleetRunsRequest generates requests for StreamFleetRuns
+func NewStreamFleetRunsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/runs/stream")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListPipelinesRequest generates requests for ListPipelines
 func NewListPipelinesRequest(server string, tenant ComponentsParametersTenant) (*http.Request, error) {
 	var err error
@@ -20566,6 +21172,15 @@ type ClientWithResponsesInterface interface {
 	// ListPipelineTenantsWithResponse request
 	ListPipelineTenantsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPipelineTenantsResponse, error)
 
+	// GetPipelinesOverviewWithResponse request
+	GetPipelinesOverviewWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetPipelinesOverviewResponse, error)
+
+	// ListFleetRunsWithResponse request
+	ListFleetRunsWithResponse(ctx context.Context, params *ListFleetRunsParams, reqEditors ...RequestEditorFn) (*ListFleetRunsResponse, error)
+
+	// StreamFleetRunsWithResponse request
+	StreamFleetRunsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*StreamFleetRunsResponse, error)
+
 	// ListPipelinesWithResponse request
 	ListPipelinesWithResponse(ctx context.Context, tenant ComponentsParametersTenant, reqEditors ...RequestEditorFn) (*ListPipelinesResponse, error)
 
@@ -24021,6 +24636,81 @@ func (r ListPipelineTenantsResponse) StatusCode() int {
 	return 0
 }
 
+type GetPipelinesOverviewResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasPipelinesOverview
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON500      *ComponentsResponsesInternal
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPipelinesOverviewResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPipelinesOverviewResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListFleetRunsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasFleetRunPage
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON500      *ComponentsResponsesInternal
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListFleetRunsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListFleetRunsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type StreamFleetRunsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r StreamFleetRunsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StreamFleetRunsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListPipelinesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -27376,6 +28066,33 @@ func (c *ClientWithResponses) ListPipelineTenantsWithResponse(ctx context.Contex
 		return nil, err
 	}
 	return ParseListPipelineTenantsResponse(rsp)
+}
+
+// GetPipelinesOverviewWithResponse request returning *GetPipelinesOverviewResponse
+func (c *ClientWithResponses) GetPipelinesOverviewWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetPipelinesOverviewResponse, error) {
+	rsp, err := c.GetPipelinesOverview(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPipelinesOverviewResponse(rsp)
+}
+
+// ListFleetRunsWithResponse request returning *ListFleetRunsResponse
+func (c *ClientWithResponses) ListFleetRunsWithResponse(ctx context.Context, params *ListFleetRunsParams, reqEditors ...RequestEditorFn) (*ListFleetRunsResponse, error) {
+	rsp, err := c.ListFleetRuns(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListFleetRunsResponse(rsp)
+}
+
+// StreamFleetRunsWithResponse request returning *StreamFleetRunsResponse
+func (c *ClientWithResponses) StreamFleetRunsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*StreamFleetRunsResponse, error) {
+	rsp, err := c.StreamFleetRuns(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStreamFleetRunsResponse(rsp)
 }
 
 // ListPipelinesWithResponse request returning *ListPipelinesResponse
@@ -34151,6 +34868,147 @@ func ParseListPipelineTenantsResponse(rsp *http.Response) (*ListPipelineTenantsR
 			return nil, err
 		}
 		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPipelinesOverviewResponse parses an HTTP response from a GetPipelinesOverviewWithResponse call
+func ParseGetPipelinesOverviewResponse(rsp *http.Response) (*GetPipelinesOverviewResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPipelinesOverviewResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasPipelinesOverview
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ComponentsResponsesInternal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListFleetRunsResponse parses an HTTP response from a ListFleetRunsWithResponse call
+func ParseListFleetRunsResponse(rsp *http.Response) (*ListFleetRunsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListFleetRunsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasFleetRunPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ComponentsResponsesInternal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStreamFleetRunsResponse parses an HTTP response from a StreamFleetRunsWithResponse call
+func ParseStreamFleetRunsResponse(rsp *http.Response) (*StreamFleetRunsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StreamFleetRunsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 

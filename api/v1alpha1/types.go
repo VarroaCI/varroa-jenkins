@@ -1513,6 +1513,7 @@ type GroupList struct {
 // +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.roleRef"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:validation:XValidation:rule="!has(self.spec) || !has(self.spec.pipelines) || (size(self.metadata.name) <= 47 && !self.metadata.name.contains('.'))",message="a pipelines tenant name is at most 47 characters and contains no dot, because it names the agent Service"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name != 'runs' && self.metadata.name != 'overview'",message="the Tenant names runs and overview are reserved by the pipelines API"
 
 // Tenant is a cluster-scoped group of users with namespace-scoped role bindings.
 // The operator composes it into a Group + VarroaRoleBinding.

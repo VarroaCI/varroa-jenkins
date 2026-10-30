@@ -78,6 +78,11 @@ func (s *Server) handleStreamTicket(w http.ResponseWriter, r *http.Request) {
 		if !s.mintRunTicketAuthorized(w, r, claims, strings.TrimPrefix(scope, "run:")) {
 			return
 		}
+	case scope == "pipelines-runs":
+		if s.deps.RecordStore == nil {
+			s.pipelinesUnavailable(w)
+			return
+		}
 	case strings.HasPrefix(scope, "pipelines:"):
 		if !s.mintPipelinesTicketAuthorized(w, r, claims, strings.TrimPrefix(scope, "pipelines:")) {
 			return
@@ -109,7 +114,7 @@ func (s *Server) handleStreamTicket(w http.ResponseWriter, r *http.Request) {
 // take exactly one token after the prefix.
 func validStreamScope(scope string) bool {
 	switch scope {
-	case "brood", "activity":
+	case "brood", "activity", "pipelines-runs":
 		return true
 	}
 	if rest, ok := strings.CutPrefix(scope, "controller:"); ok {

@@ -225,3 +225,22 @@ cases:
     field: spec.pipelines.notifications.webhook
     new: {spec: {pipelines: {profile: lts, agentNamespace: tenant-a, notifications: {webhook: {url: "ftp://files.example.com/hook", secretRef: {name: hook}}}}}}
     want: reject
+  # Root rule: the names runs and overview are routes of the pipelines API.
+  - name: tenant named payments accepted by the reserved-name rule
+    rule: |-
+      self.metadata.name != 'runs' && self.metadata.name != 'overview'
+    field: ""
+    new: {metadata: {name: payments}, spec: {namespaces: [tenant-a]}}
+    want: accept
+  - name: tenant named runs refused
+    rule: |-
+      self.metadata.name != 'runs' && self.metadata.name != 'overview'
+    field: ""
+    new: {metadata: {name: runs}, spec: {namespaces: [tenant-a]}}
+    want: reject
+  - name: tenant named overview refused
+    rule: |-
+      self.metadata.name != 'runs' && self.metadata.name != 'overview'
+    field: ""
+    new: {metadata: {name: overview}, spec: {pipelines: {profile: lts, agentNamespace: tenant-a}}}
+    want: reject

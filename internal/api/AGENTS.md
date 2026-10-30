@@ -419,7 +419,12 @@ federation, activity persistence, and SSE fanout.
   `canReadPipeline`, `canWritePipeline`, `canReadRun` — never a controller-scoped
   check. `canReadRun` builds its `RunTenantRow` from the run row's own `tenant` and
   `job_path` columns, so a run whose cell was deleted still resolves for a permitted
-  caller. **`GET /pipelines` (`handlers_pipelines_list.go`) is the landing-page tenant
+  caller. **The command center (`handlers_pipelines_fleet.go`, `handlers_pipelines_overview.go`,
+  `handlers_pipelines_stream.go`) reads the tenants through `readablePipelineTenants`
+  (`pipelines_readable.go`), the one readable-tenant walk.** `runScopes` turns each readable
+  ref into a fleet scope with its `PipelineReadJobPatterns`. Rows map through
+  `buildFleetRunRow` (`pipelines_fleet_row.go`). `pipelines-runs` is the stream ticket scope.
+  **`GET /pipelines` (`handlers_pipelines_list.go`) is the landing-page tenant
   list**: every local Tenant with `spec.pipelines`, every live placement row of
   another cluster (`Reader.ListAllTenantPlacements`), each filtered per name by
   `CanReadPipeline`, and each local Tenant without `spec.pipelines` whose
