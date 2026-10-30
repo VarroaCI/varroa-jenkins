@@ -18,6 +18,8 @@ import java.util.logging.Logger;
  *
  * <p>The reader keeps at most 20 reports of each kind, at most 16 extra
  * coverage metrics per report, and at most 128 code points of each name.
+ * It counts what it does not keep. Each count travels with the event, so
+ * the operator sees that a set was trimmed.
  */
 final class VarroaRunQuality {
 
@@ -39,14 +41,22 @@ final class VarroaRunQuality {
     private VarroaRunQuality() {
     }
 
-    /** The two lists a completed run reports. */
+    /**
+     * The two lists a completed run reports, and the count of reports of
+     * each kind the reader did not keep.
+     */
     static final class Reports {
         final List<BuildCoverageReport> coverage;
         final List<BuildWarningsReport> warnings;
+        final int coverageDropped;
+        final int warningsDropped;
 
-        Reports(List<BuildCoverageReport> coverage, List<BuildWarningsReport> warnings) {
+        Reports(List<BuildCoverageReport> coverage, List<BuildWarningsReport> warnings,
+                int coverageDropped, int warningsDropped) {
             this.coverage = coverage;
             this.warnings = warnings;
+            this.coverageDropped = coverageDropped;
+            this.warningsDropped = warningsDropped;
         }
     }
 
@@ -57,13 +67,20 @@ final class VarroaRunQuality {
                 VarroaRunRecorder.findActionsByClassName(actions, WARNINGS_ACTION));
     }
 
-    /** Reads the given actions. A failed action skips only its own report. */
+    /**
+     * Reads the given actions. A failed action skips only its own report.
+     * An action past the bound is not read. It counts as dropped, even when
+     * it would have failed to read.
+     */
     static Reports collect(List<?> coverageActions, List<?> warningsActions) {
         List<BuildCoverageReport> coverage = new ArrayList<>();
-        for (Object action : coverageActions) {
+        int coverageDropped = 0;
+        for (int i = 0; i < coverageActions.size(); i++) {
             if (coverage.size() >= MAX_REPORTS) {
+                coverageDropped = coverageActions.size() - i;
                 break;
             }
+            Object action = coverageActions.get(i);
             try {
                 BuildCoverageReport report = readCoverage(action);
                 if (report != null) {
@@ -74,10 +91,13 @@ final class VarroaRunQuality {
             }
         }
         List<BuildWarningsReport> warnings = new ArrayList<>();
-        for (Object action : warningsActions) {
+        int warningsDropped = 0;
+        for (int i = 0; i < warningsActions.size(); i++) {
             if (warnings.size() >= MAX_REPORTS) {
+                warningsDropped = warningsActions.size() - i;
                 break;
             }
+            Object action = warningsActions.get(i);
             try {
                 BuildWarningsReport report = readWarnings(action);
                 if (report != null) {
@@ -87,7 +107,7 @@ final class VarroaRunQuality {
                 LOGGER.log(Level.FINE, "VarroaRunQuality: skipped a warnings report", e);
             }
         }
-        return new Reports(coverage, warnings);
+        return new Reports(coverage, warnings, coverageDropped, warningsDropped);
     }
 
     /** Reads one coverage action. Returns null when the action has no URL name. */
@@ -116,6 +136,7 @@ final class VarroaRunQuality {
         BuildCoverageCounter line = null;
         BuildCoverageCounter branch = null;
         List<BuildCoverageCounter> metrics = new ArrayList<>();
+        int metricsDropped = 0;
         for (Object value : (List<?>) values) {
             BuildCoverageCounter counter = coverageCounter(value);
             if (counter == null) {
@@ -127,6 +148,8 @@ final class VarroaRunQuality {
                 branch = counter;
             } else if (metrics.size() < MAX_METRICS) {
                 metrics.add(counter);
+            } else {
+                metricsDropped++;
             }
         }
 
@@ -149,6 +172,7 @@ final class VarroaRunQuality {
                 .branch(branch)
                 .modifiedLines(modifiedLines)
                 .metrics(metrics)
+                .metricsDropped(metricsDropped)
                 .gateStatus(gateStatusOf(VarroaRunRecorder.invokeNoArg(action, "getQualityGateResult")))
                 .build();
     }

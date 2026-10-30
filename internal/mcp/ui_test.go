@@ -128,6 +128,18 @@ func TestUIViewResourcesRead(t *testing.T) {
 	}
 }
 
+// TestGetRunViewNotesDroppedReports asserts that the run card names the
+// reports Varroa did not keep, from the coverageDropped and warningsDropped
+// fields of the quality summary.
+func TestGetRunViewNotesDroppedReports(t *testing.T) {
+	src := viewSource(t, "get_run")
+	for _, want := range []string{"q.coverageDropped", "q.warningsDropped", "not kept"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("get_run view lacks %q", want)
+		}
+	}
+}
+
 // viewSource reads one embedded view document.
 func viewSource(t *testing.T, tool string) string {
 	t.Helper()

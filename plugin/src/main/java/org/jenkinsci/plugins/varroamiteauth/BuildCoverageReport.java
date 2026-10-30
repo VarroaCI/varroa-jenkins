@@ -23,6 +23,7 @@ public final class BuildCoverageReport {
     private final BuildCoverageCounter modifiedLines;
     private final List<BuildCoverageCounter> metrics;
     private final String gateStatus;
+    private final int metricsDropped;
 
     private BuildCoverageReport(Builder b) {
         this.id = b.id;
@@ -32,6 +33,7 @@ public final class BuildCoverageReport {
         this.modifiedLines = b.modifiedLines;
         this.metrics = List.copyOf(b.metrics);
         this.gateStatus = b.gateStatus;
+        this.metricsDropped = b.metricsDropped;
     }
 
     public String getId() {
@@ -62,6 +64,11 @@ public final class BuildCoverageReport {
         return gateStatus;
     }
 
+    /** The coverage metrics past the bound that the plugin did not send. */
+    public int getMetricsDropped() {
+        return metricsDropped;
+    }
+
     /** Serializes the report to a {@link JSONObject} with proto JSON field names. */
     public JSONObject toJson() {
         JSONObject o = new JSONObject();
@@ -86,6 +93,9 @@ public final class BuildCoverageReport {
         if (!gateStatus.isEmpty()) {
             o.put("gate_status", gateStatus);
         }
+        if (metricsDropped > 0) {
+            o.put("metrics_dropped", metricsDropped);
+        }
         return o;
     }
 
@@ -101,6 +111,7 @@ public final class BuildCoverageReport {
         private BuildCoverageCounter modifiedLines;
         private List<BuildCoverageCounter> metrics = new ArrayList<>();
         private String gateStatus = "";
+        private int metricsDropped;
 
         private Builder() {
         }
@@ -137,6 +148,11 @@ public final class BuildCoverageReport {
 
         public Builder gateStatus(String v) {
             this.gateStatus = v != null ? v : "";
+            return this;
+        }
+
+        public Builder metricsDropped(int v) {
+            this.metricsDropped = Math.max(0, v);
             return this;
         }
 

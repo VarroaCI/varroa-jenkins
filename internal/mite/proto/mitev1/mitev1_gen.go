@@ -71,13 +71,14 @@ type BuildCoverageCounter struct {
 
 // BuildCoverageReport holds the summary of one coverage report of a run.
 type BuildCoverageReport struct {
-	Id            string                  `json:"id"`
-	Name          string                  `json:"name,omitempty"`
-	Line          *BuildCoverageCounter   `json:"line,omitempty"`
-	Branch        *BuildCoverageCounter   `json:"branch,omitempty"`
-	ModifiedLines *BuildCoverageCounter   `json:"modified_lines,omitempty"`
-	Metrics       []*BuildCoverageCounter `json:"metrics,omitempty"`
-	GateStatus    string                  `json:"gate_status,omitempty"`
+	Id             string                  `json:"id"`
+	Name           string                  `json:"name,omitempty"`
+	Line           *BuildCoverageCounter   `json:"line,omitempty"`
+	Branch         *BuildCoverageCounter   `json:"branch,omitempty"`
+	ModifiedLines  *BuildCoverageCounter   `json:"modified_lines,omitempty"`
+	Metrics        []*BuildCoverageCounter `json:"metrics,omitempty"`
+	GateStatus     string                  `json:"gate_status,omitempty"`
+	MetricsDropped int                     `json:"metrics_dropped,omitempty"`
 }
 
 type BuildEvent struct {
@@ -142,6 +143,8 @@ type BuildEvent struct {
 	TestSuites              []*BuildTestSuite      `json:"test_suites,omitempty"`
 	CoverageReports         []*BuildCoverageReport `json:"coverage_reports,omitempty"`
 	WarningsReports         []*BuildWarningsReport `json:"warnings_reports,omitempty"`
+	CoverageReportsDropped  int                    `json:"coverage_reports_dropped,omitempty"`
+	WarningsReportsDropped  int                    `json:"warnings_reports_dropped,omitempty"`
 }
 
 type BuildInput struct {

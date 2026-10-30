@@ -30,18 +30,23 @@ func (r *pgReader) RunQuality(ctx context.Context, runID string) (RunQuality, er
 		return RunQuality{}, fmt.Errorf("run quality: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	coverage, err := runCoverageRows(ctx, tx, runID)
+	coverage, coverageDropped, err := runCoverageRows(ctx, tx, runID)
 	if err != nil {
 		return RunQuality{}, err
 	}
-	warnings, err := runWarningsRows(ctx, tx, runID)
+	warnings, warningsDropped, err := runWarningsRows(ctx, tx, runID)
 	if err != nil {
 		return RunQuality{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return RunQuality{}, fmt.Errorf("run quality: commit: %w", err)
 	}
-	return RunQuality{Coverage: coverage, Warnings: warnings}, nil
+	return RunQuality{
+		Coverage:        coverage,
+		Warnings:        warnings,
+		CoverageDropped: coverageDropped,
+		WarningsDropped: warningsDropped,
+	}, nil
 }
 
 // JobQualityTrend answers the coverage and warnings rows of the listed
@@ -74,11 +79,16 @@ func (r *pgReader) JobQualityTrend(ctx context.Context, cluster, tenant, jobPath
 	return RunQuality{Coverage: coverage, Warnings: warnings}, nil
 }
 
-func runCoverageRows(ctx context.Context, q querier, runID string) ([]RunCoverage, error) {
+// runCoverageRows answers the coverage rows of one run and the run's count
+// of reports the store does not hold. Every row of a run stores that
+// count, so the count is the largest of its rows. A run with no rows
+// answers zero.
+func runCoverageRows(ctx context.Context, q querier, runID string) ([]RunCoverage, int32, error) {
 	rows, err := q.Query(ctx, `
 		SELECT c.run_id::text, c.report_id, c.name,
 		       c.line_covered, c.line_total, c.branch_covered, c.branch_total,
 		       c.modified_line_covered, c.modified_line_total, c.metrics, c.gate_status,
+		       c.reports_dropped, c.metrics_dropped,
 		       b.run_id::text, b.line_covered, b.line_total, b.branch_covered, b.branch_total,
 		       br.build_number
 		FROM varroa.run_coverage c
@@ -95,17 +105,19 @@ func runCoverageRows(ctx context.Context, q querier, runID string) ([]RunCoverag
 		ORDER BY c.report_id
 	`, runID)
 	if err != nil {
-		return nil, fmt.Errorf("run quality coverage: %w", err)
+		return nil, 0, fmt.Errorf("run quality coverage: %w", err)
 	}
 	defer rows.Close()
 
 	var out []RunCoverage
+	var reportsDropped int32
 	for rows.Next() {
 		var (
 			row                                    RunCoverage
 			lineCov, lineTot, branchCov, branchTot *int32
 			modCov, modTot                         *int32
 			metrics                                []byte
+			rowReportsDropped                      int32
 			baseRunID                              *string
 			baseLineCov, baseLineTot               *int32
 			baseBranchCov, baseBranchTot           *int32
@@ -113,12 +125,14 @@ func runCoverageRows(ctx context.Context, q querier, runID string) ([]RunCoverag
 		)
 		if err := rows.Scan(&row.RunID, &row.ReportID, &row.Name,
 			&lineCov, &lineTot, &branchCov, &branchTot, &modCov, &modTot, &metrics, &row.GateStatus,
+			&rowReportsDropped, &row.MetricsDropped,
 			&baseRunID, &baseLineCov, &baseLineTot, &baseBranchCov, &baseBranchTot, &baseBuild,
 		); err != nil {
-			return nil, fmt.Errorf("scan run quality coverage: %w", err)
+			return nil, 0, fmt.Errorf("scan run quality coverage: %w", err)
 		}
+		reportsDropped = max(reportsDropped, rowReportsDropped)
 		if row.Metrics, err = decodeMetrics(metrics); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		row.Line = counterOf(lineCov, lineTot)
 		row.Branch = counterOf(branchCov, branchTot)
@@ -134,15 +148,18 @@ func runCoverageRows(ctx context.Context, q querier, runID string) ([]RunCoverag
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("run quality coverage: %w", err)
+		return nil, 0, fmt.Errorf("run quality coverage: %w", err)
 	}
-	return out, nil
+	return out, reportsDropped, nil
 }
 
-func runWarningsRows(ctx context.Context, q querier, runID string) ([]RunWarnings, error) {
+// runWarningsRows answers the warnings rows of one run and the run's count
+// of reports the store does not hold. The count rule matches
+// runCoverageRows.
+func runWarningsRows(ctx context.Context, q querier, runID string) ([]RunWarnings, int32, error) {
 	rows, err := q.Query(ctx, `
 		SELECT w.run_id::text, w.report_id, w.name, w.total, w.error, w.high, w.normal, w.low,
-		       w.new_total, w.fixed_total, w.gate_status,
+		       w.new_total, w.fixed_total, w.gate_status, w.reports_dropped,
 		       b.run_id::text, b.total, br.build_number
 		FROM varroa.run_warnings w
 		LEFT JOIN LATERAL (
@@ -158,34 +175,37 @@ func runWarningsRows(ctx context.Context, q querier, runID string) ([]RunWarning
 		ORDER BY w.report_id
 	`, runID)
 	if err != nil {
-		return nil, fmt.Errorf("run quality warnings: %w", err)
+		return nil, 0, fmt.Errorf("run quality warnings: %w", err)
 	}
 	defer rows.Close()
 
 	var out []RunWarnings
+	var reportsDropped int32
 	for rows.Next() {
 		var (
 			row       RunWarnings
+			rowDrop   int32
 			baseRunID *string
 			baseTotal *int32
 			baseBuild *int64
 		)
 		if err := rows.Scan(&row.RunID, &row.ReportID, &row.Name,
 			&row.Total, &row.Error, &row.High, &row.Normal, &row.Low,
-			&row.NewTotal, &row.FixedTotal, &row.GateStatus,
+			&row.NewTotal, &row.FixedTotal, &row.GateStatus, &rowDrop,
 			&baseRunID, &baseTotal, &baseBuild,
 		); err != nil {
-			return nil, fmt.Errorf("scan run quality warnings: %w", err)
+			return nil, 0, fmt.Errorf("scan run quality warnings: %w", err)
 		}
+		reportsDropped = max(reportsDropped, rowDrop)
 		if baseRunID != nil {
 			row.Base = &WarningsBase{RunID: *baseRunID, BuildNumber: baseBuild, Total: derefInt32(baseTotal)}
 		}
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("run quality warnings: %w", err)
+		return nil, 0, fmt.Errorf("run quality warnings: %w", err)
 	}
-	return out, nil
+	return out, reportsDropped, nil
 }
 
 func trendCoverageRows(ctx context.Context, q querier, cluster, tenant, jobPath string, runIDs []string) ([]RunCoverage, error) {

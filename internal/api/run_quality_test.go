@@ -189,6 +189,14 @@ func TestGetRunCarriesQuality(t *testing.T) {
 		detail.Quality.Coverage[0].Line.Percent == nil || *detail.Quality.Coverage[0].Line.Percent != 81.2 {
 		t.Fatalf("quality = %+v, want the jacoco line at 81.2", detail.Quality)
 	}
+	reader.quality["r1"] = recordstore.RunQuality{
+		Coverage:        []recordstore.RunCoverage{{RunID: "r1", ReportID: "jacoco", Name: "Coverage"}},
+		CoverageDropped: 3,
+	}
+	rec = doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if !strings.Contains(rec.Body.String(), `"coverageDropped":3`) {
+		t.Fatalf("body lacks coverageDropped 3: %s", rec.Body.String())
+	}
 }
 
 // TestGetRunOmitsQualityWithoutRows asserts that a run with no quality row
@@ -288,5 +296,35 @@ func TestBuildRunQualityCapsReports(t *testing.T) {
 	out := buildRunQuality(q)
 	if out == nil || len(out.Coverage) != runQualityMaxReports || len(out.Warnings) != runQualityMaxReports {
 		t.Fatalf("quality = %+v, want %d of each kind", out, runQualityMaxReports)
+	}
+	if out.CoverageDropped != 5 || out.WarningsDropped != 5 {
+		t.Fatalf("dropped = %d/%d, want 5/5 for 25 rows of each kind", out.CoverageDropped, out.WarningsDropped)
+	}
+}
+
+// TestBuildRunQualityDroppedCounts asserts that the store's count adds to
+// the rows the API caps, and that a run with every report kept has none.
+func TestBuildRunQualityDroppedCounts(t *testing.T) {
+	q := recordstore.RunQuality{
+		Coverage:        []recordstore.RunCoverage{{ReportID: "c", MetricsDropped: 4}},
+		Warnings:        []recordstore.RunWarnings{{ReportID: "w"}},
+		CoverageDropped: 2,
+		WarningsDropped: 1,
+	}
+	out := buildRunQuality(q)
+	if out.CoverageDropped != 2 || out.WarningsDropped != 1 {
+		t.Fatalf("dropped = %d/%d, want 2/1", out.CoverageDropped, out.WarningsDropped)
+	}
+	if out.Coverage[0].MetricsDropped != 4 {
+		t.Fatalf("metricsDropped = %d, want 4", out.Coverage[0].MetricsDropped)
+	}
+
+	kept := buildRunQuality(recordstore.RunQuality{Coverage: []recordstore.RunCoverage{{ReportID: "c"}}})
+	raw, err := json.Marshal(kept)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "Dropped") || strings.Contains(string(raw), "metricsDropped") {
+		t.Fatalf("a set with every report kept wrote a dropped key: %s", raw)
 	}
 }

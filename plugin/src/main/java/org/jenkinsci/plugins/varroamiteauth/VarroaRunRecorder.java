@@ -835,6 +835,8 @@ public final class VarroaRunRecorder {
                     VarroaRunQuality.Reports quality = VarroaRunQuality.read(run.getAllActions());
                     b.coverageReports(quality.coverage);
                     b.warningsReports(quality.warnings);
+                    b.coverageReportsDropped(quality.coverageDropped);
+                    b.warningsReportsDropped(quality.warningsDropped);
                 } catch (RuntimeException | LinkageError e) {
                     LOGGER.log(Level.FINE, "VarroaRunRecorder.Runs: failed to read the quality reports", e);
                 }

@@ -167,6 +167,12 @@ function qualityLine(q) {
     if (w.delta) s += " (" + signedNum(w.delta.total) + ")";
     parts.push(s);
   });
+  if (present(q.coverageDropped) && q.coverageDropped > 0) {
+    parts.push(q.coverageDropped + " more coverage " + (q.coverageDropped === 1 ? "report" : "reports") + " not kept");
+  }
+  if (present(q.warningsDropped) && q.warningsDropped > 0) {
+    parts.push(q.warningsDropped + " more warnings " + (q.warningsDropped === 1 ? "report" : "reports") + " not kept");
+  }
   return parts.join(", ");
 }
 

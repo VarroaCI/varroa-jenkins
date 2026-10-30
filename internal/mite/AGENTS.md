@@ -223,6 +223,11 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   and `warnings`, and both keys are always present. The gateway clamps the
   lists to 20 reports, 16 metrics per report, and 128 runes per text field.
   It writes `new_total` and `fixed_total` only when `has_reference` is true.
+  Each list has a count of what it did not keep: `coverage_dropped` and
+  `warnings_dropped` are always present, and each coverage entry carries
+  `metrics_dropped` when it is positive. The gateway adds its own overflow to
+  the plugin's counts, which are fields 62 and 63 and the proto
+  `BuildCoverageReport.metrics_dropped` (field 8). A negative count reads as zero.
 - **Command outcomes** (`bus_handler.go`, `build_events.go`) — a
   `CommandResult` for a pending imperative publishes one envelope on the
   same `builds.<cluster>.<ns>.<cell>` subject the build events use.

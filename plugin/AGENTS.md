@@ -352,7 +352,10 @@ the root AGENTS.md greenfield rule.
   `Baseline` through the action's class loader. A missing class skips the report. The
   reader keeps 20 reports of each kind, 16 extra metrics per coverage report, and 128 code
   points of each id and name. A read failure skips one report at FINE, and the run still
-  completes. The value classes are `BuildCoverageCounter`, `BuildCoverageReport`, and
+  completes. The reader counts what it does not keep: fields 62 and 63
+  (`coverage_reports_dropped`, `warnings_reports_dropped`) hold the reports past the bound
+  of 20, and `BuildCoverageReport.metrics_dropped` (field 8) holds the metrics past 16.
+  An action past the bound is not read, and it still counts as dropped. The value classes are `BuildCoverageCounter`, `BuildCoverageReport`, and
   `BuildWarningsReport`. `BuildEvent.toBuilder()` copies both lists. Only `Runs.onCompleted`
   reads the reports, never the boot reconcile path.
 - **Cross-tenant pipeline API** (the `varroa` global variable; D1, D2, D11, D12):

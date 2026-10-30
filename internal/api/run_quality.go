@@ -39,6 +39,9 @@ type CoverageReportJSON struct {
 	Metrics       map[string]QualityCounterJSON `json:"metrics,omitempty"`
 	GateStatus    string                        `json:"gateStatus,omitempty"`
 	Delta         *CoverageDeltaJSON            `json:"delta,omitempty"`
+	// MetricsDropped counts the metrics of this report that Varroa did not
+	// keep. It is absent when Varroa kept every metric.
+	MetricsDropped int32 `json:"metricsDropped,omitempty"`
 }
 
 // WarningsDeltaJSON compares a warnings report with the same report of the
@@ -72,6 +75,11 @@ type WarningsReportJSON struct {
 type RunQualityJSON struct {
 	Coverage []CoverageReportJSON `json:"coverage,omitempty"`
 	Warnings []WarningsReportJSON `json:"warnings,omitempty"`
+	// CoverageDropped and WarningsDropped count the reports of each kind
+	// that Varroa did not keep. Each is absent when Varroa kept every
+	// report.
+	CoverageDropped int32 `json:"coverageDropped,omitempty"`
+	WarningsDropped int32 `json:"warningsDropped,omitempty"`
 }
 
 // CoverageTrendPointJSON is one run of a coverage trend series. A percent
@@ -117,7 +125,9 @@ type QualityTrendJSON struct {
 }
 
 // runQualityMaxReports bounds the coverage and warnings reports one run
-// answers. The completion event carries at most this many of each.
+// answers. The plugin keeps at most this many of each, and the store holds
+// no more. buildRunQuality still caps a longer set and counts the rest as
+// dropped.
 const runQualityMaxReports = 20
 
 // roundTenth rounds v to one decimal. It maps a negative zero to zero.
@@ -173,18 +183,22 @@ func buildRunQuality(q recordstore.RunQuality) *RunQualityJSON {
 	if len(q.Coverage) == 0 && len(q.Warnings) == 0 {
 		return nil
 	}
-	out := &RunQualityJSON{}
+	out := &RunQualityJSON{
+		CoverageDropped: q.CoverageDropped + int32(max(0, len(q.Coverage)-runQualityMaxReports)),
+		WarningsDropped: q.WarningsDropped + int32(max(0, len(q.Warnings)-runQualityMaxReports)),
+	}
 	for _, row := range q.Coverage {
 		if len(out.Coverage) == runQualityMaxReports {
 			break
 		}
 		rep := CoverageReportJSON{
-			ID:            row.ReportID,
-			Name:          row.Name,
-			Line:          qualityCounter(row.Line),
-			Branch:        qualityCounter(row.Branch),
-			ModifiedLines: qualityCounter(row.ModifiedLines),
-			GateStatus:    derefQualityString(row.GateStatus),
+			ID:             row.ReportID,
+			Name:           row.Name,
+			Line:           qualityCounter(row.Line),
+			Branch:         qualityCounter(row.Branch),
+			ModifiedLines:  qualityCounter(row.ModifiedLines),
+			GateStatus:     derefQualityString(row.GateStatus),
+			MetricsDropped: row.MetricsDropped,
 		}
 		if len(row.Metrics) > 0 {
 			rep.Metrics = make(map[string]QualityCounterJSON, len(row.Metrics))

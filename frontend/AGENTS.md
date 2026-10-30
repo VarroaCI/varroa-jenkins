@@ -248,7 +248,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   `PendingInputCard.module.css`, in a `Pending input` card between the
   `Digest` card and the `Pipeline` card; the `QualityCard.tsx` **Quality** card
   (`QualityCard.module.css`) sits directly below the `Pipeline` card, outside the tabs, and
-  renders the run's `run.quality` coverage and warnings tables, with each change linked to its base run; its `Tests` tab shows the report
+  renders the run's `run.quality` coverage and warnings tables, with each change linked to its base run, and a note under each table when `coverageDropped` or `warningsDropped` is positive; its `Tests` tab shows the report
   line, then the case table, grouped under a suite header row each time the
   suite changes, in the response order (`testCaseGroups.ts`; the Class column
   shows only when a suite holds two or more classes), then the suite table),

@@ -23,6 +23,12 @@ function signedCount(v: number): string {
   return v > 0 ? `+${v}` : String(v);
 }
 
+// droppedNote names the reports Varroa did not keep. The bound of 20 matches
+// the API cap, which the plugin also applies.
+function droppedNote(count: number, noun: string): string {
+  return `Jenkins published ${count} more ${noun}${count === 1 ? "" : "s"}. Varroa keeps the first 20.`;
+}
+
 function gateClass(status: string): string {
   switch (status) {
     case "PASSED":
@@ -168,18 +174,26 @@ export function QualityCard({ quality, tenant, jobPath }: {
   const coverage = quality?.coverage ?? [];
   const warnings = quality?.warnings ?? [];
   if (coverage.length === 0 && warnings.length === 0) return null;
+  const coverageDropped = quality?.coverageDropped ?? 0;
+  const warningsDropped = quality?.warningsDropped ?? 0;
   return (
     <Card title="Quality">
       {coverage.length > 0 && (
         <>
           <h3 className={styles.heading}>Coverage</h3>
           <CoverageTable reports={coverage} tenant={tenant} jobPath={jobPath} />
+          {coverageDropped > 0 && (
+            <p className={styles.note}>{droppedNote(coverageDropped, "coverage report")}</p>
+          )}
         </>
       )}
       {warnings.length > 0 && (
         <>
           <h3 className={styles.heading}>Warnings</h3>
           <WarningsTable reports={warnings} tenant={tenant} jobPath={jobPath} />
+          {warningsDropped > 0 && (
+            <p className={styles.note}>{droppedNote(warningsDropped, "warnings report")}</p>
+          )}
         </>
       )}
     </Card>

@@ -227,7 +227,7 @@ The build page shows a **Quality** card below the Pipeline card with the coverag
 reports of the build. A coverage row shows the line, branch, and modified-line percentages. A
 warnings row shows the total and the count for each severity. It shows the new and fixed counts
 only when Jenkins found a reference build. Each row shows its gate status and its change since the
-newest earlier build of the job with the same report. The change links to that build. The card is
+newest earlier build of the job with the same report. The change links to that build. When Jenkins publishes more than 20 reports of a kind, the card tells how many it did not keep. The card is
 absent when the build published no report.
 
 ## Run a job with parameters
@@ -295,7 +295,7 @@ The lint never starts or wakes a cell. A hibernated or stopped cell answers 409,
 
 ## Publish coverage and warnings
 
-Add the `recordCoverage` and `recordIssues` steps to a job. When the build completes, Varroa keeps a summary of each report. A coverage summary holds the line and branch counts. It also holds the modified-lines counts when the plugin computes them. It holds up to 16 other coverage metrics and the gate status. A warnings summary holds the total, the error, high, normal, and low counts. It also holds the gate status. It holds the new and fixed counts only when the report has a reference build. Varroa keeps at most 20 reports of each kind. It cuts each id and name at 128 characters. Varroa does not keep the report files. A build with no report has no summary.
+Add the `recordCoverage` and `recordIssues` steps to a job. When the build completes, Varroa keeps a summary of each report. A coverage summary holds the line and branch counts. It also holds the modified-lines counts when the plugin computes them. It holds up to 16 other coverage metrics and the gate status. A warnings summary holds the total, the error, high, normal, and low counts. It also holds the gate status. It holds the new and fixed counts only when the report has a reference build. Varroa keeps at most 20 reports of each kind. The run detail API and the MCP get_run tool count the reports and metrics that Varroa did not keep. It cuts each id and name at 128 characters. Varroa does not keep the report files. A build with no report has no summary.
 
 ```groovy
 pipeline {

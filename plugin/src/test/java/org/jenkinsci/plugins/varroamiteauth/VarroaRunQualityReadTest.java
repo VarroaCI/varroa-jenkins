@@ -275,6 +275,7 @@ public class VarroaRunQualityReadTest {
         assertEquals(16, report.getMetrics().size());
         assertEquals("M0", report.getMetrics().get(0).getMetric());
         assertEquals("M15", report.getMetrics().get(15).getMetric());
+        assertEquals(4, report.getMetricsDropped());
     }
 
     @Test
@@ -288,6 +289,8 @@ public class VarroaRunQualityReadTest {
         assertEquals(20, reports.coverage.size());
         assertEquals("c0", reports.coverage.get(0).getId());
         assertEquals("c19", reports.coverage.get(19).getId());
+        assertEquals(5, reports.coverageDropped);
+        assertEquals(0, reports.warningsDropped);
     }
 
     @Test
@@ -301,6 +304,18 @@ public class VarroaRunQualityReadTest {
         assertEquals(20, reports.warnings.size());
         assertEquals("w0", reports.warnings.get(0).getId());
         assertEquals("w19", reports.warnings.get(19).getId());
+        assertEquals(5, reports.warningsDropped);
+        assertEquals(0, reports.coverageDropped);
+    }
+
+    @Test
+    public void reportsWithinTheBoundsDropNothing() {
+        List<Object> coverage = List.of(coverage("c0", List.of(value(FakeMetric.LINE, 1, 2))));
+        List<Object> warnings = List.of(warnings("w0", new FakeResult(false, false, null)));
+        VarroaRunQuality.Reports reports = VarroaRunQuality.collect(coverage, warnings);
+
+        assertEquals(0, reports.coverageDropped);
+        assertEquals(0, reports.warningsDropped);
     }
 
     @Test

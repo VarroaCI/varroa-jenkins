@@ -251,7 +251,8 @@ type testSuiteEntry struct {
 
 // Bounds a run.quality envelope keeps. The gateway clamps every list and
 // every text field before it publishes, so a plugin cannot push an
-// oversized payload.
+// oversized payload. It counts each report and metric it clamps, so the
+// recorder can show the cut.
 const (
 	qualityReportLimit = 20
 	qualityMetricLimit = 16
@@ -278,6 +279,9 @@ type coverageReportEntry struct {
 	ModifiedLines *coverageCounterEntry  `json:"modified_lines,omitempty"`
 	Metrics       []coverageCounterEntry `json:"metrics,omitempty"`
 	GateStatus    string                 `json:"gate_status,omitempty"`
+	// MetricsDropped counts the metrics past qualityMetricLimit and the
+	// metrics the plugin did not send past its own bound.
+	MetricsDropped int `json:"metrics_dropped,omitempty"`
 }
 
 // warningsReportEntry is one entry of a run.quality envelope's
@@ -717,16 +721,20 @@ func coverageCounter(c *mitev1.BuildCoverageCounter, withMetric bool) *coverageC
 
 // coverageEntries maps the coverage reports of a COMPLETED event. It skips
 // a nil element, keeps at most qualityReportLimit reports, and keeps at
-// most qualityMetricLimit metrics per report. It never returns nil, so the
-// recorder reads the key as present.
-func coverageEntries(in []*mitev1.BuildCoverageReport) []coverageReportEntry {
+// most qualityMetricLimit metrics per report. It returns the kept entries
+// and the count of reports the run did not keep. That count adds the
+// plugin's own count, pluginDropped, to the reports past the bound here.
+// It never returns a nil slice, so the recorder reads the key as present.
+func coverageEntries(in []*mitev1.BuildCoverageReport, pluginDropped int) ([]coverageReportEntry, int) {
 	out := make([]coverageReportEntry, 0, len(in))
+	dropped := nonNeg(pluginDropped)
 	for _, r := range in {
 		if r == nil {
 			continue
 		}
 		if len(out) == qualityReportLimit {
-			break
+			dropped++
+			continue
 		}
 		e := coverageReportEntry{
 			ID:            truncateQualityText(r.Id),
@@ -736,32 +744,39 @@ func coverageEntries(in []*mitev1.BuildCoverageReport) []coverageReportEntry {
 			ModifiedLines: coverageCounter(r.ModifiedLines, false),
 			GateStatus:    truncateQualityText(r.GateStatus),
 		}
+		metricsDropped := 0
 		for _, m := range r.Metrics {
 			if m == nil {
 				continue
 			}
 			if len(e.Metrics) == qualityMetricLimit {
-				break
+				metricsDropped++
+				continue
 			}
 			e.Metrics = append(e.Metrics, *coverageCounter(m, true))
 		}
+		e.MetricsDropped = nonNeg(r.MetricsDropped) + metricsDropped
 		out = append(out, e)
 	}
-	return out
+	return out, dropped
 }
 
 // warningsEntries maps the warnings reports of a COMPLETED event. It skips
-// a nil element and keeps at most qualityReportLimit reports. The new and
-// fixed counts are set only when the plugin found a reference build. The
-// has_reference flag itself is not forwarded.
-func warningsEntries(in []*mitev1.BuildWarningsReport) []warningsReportEntry {
+// a nil element and keeps at most qualityReportLimit reports. It returns
+// the kept entries and the count of reports the run did not keep, which
+// adds the plugin's count, pluginDropped, to the reports past the bound.
+// The new and fixed counts are set only when the plugin found a reference
+// build. The has_reference flag itself is not forwarded.
+func warningsEntries(in []*mitev1.BuildWarningsReport, pluginDropped int) ([]warningsReportEntry, int) {
 	out := make([]warningsReportEntry, 0, len(in))
+	dropped := nonNeg(pluginDropped)
 	for _, r := range in {
 		if r == nil {
 			continue
 		}
 		if len(out) == qualityReportLimit {
-			break
+			dropped++
+			continue
 		}
 		e := warningsReportEntry{
 			ID:         truncateQualityText(r.Id),
@@ -780,16 +795,31 @@ func warningsEntries(in []*mitev1.BuildWarningsReport) []warningsReportEntry {
 		}
 		out = append(out, e)
 	}
-	return out
+	return out, dropped
+}
+
+// nonNeg returns a count from the plugin as an int. A negative count
+// becomes zero, so a bad plugin value cannot lower the gateway's count.
+func nonNeg(v int) int {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 // qualityPayload maps the coverage and warnings reports of a COMPLETED
 // event onto a run.quality payload. Both keys are always present, even
 // when one list is empty, because a completed run carries its whole set.
+// The coverage_dropped and warnings_dropped keys count the reports the
+// run did not keep, so the recorder can store the cut.
 func qualityPayload(evt *mitev1.BuildEvent) map[string]interface{} {
+	coverage, coverageDropped := coverageEntries(evt.CoverageReports, evt.CoverageReportsDropped)
+	warnings, warningsDropped := warningsEntries(evt.WarningsReports, evt.WarningsReportsDropped)
 	return map[string]interface{}{
-		"coverage": coverageEntries(evt.CoverageReports),
-		"warnings": warningsEntries(evt.WarningsReports),
+		"coverage":         coverage,
+		"coverage_dropped": coverageDropped,
+		"warnings":         warnings,
+		"warnings_dropped": warningsDropped,
 	}
 }
 

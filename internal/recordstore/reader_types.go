@@ -388,6 +388,9 @@ type RunCoverage struct {
 	Metrics       map[string]CoverageCounter
 	GateStatus    *string
 	Base          *CoverageBase
+	// MetricsDropped counts the metrics of this report that the store
+	// does not hold. Set only by RunQuality.
+	MetricsDropped int32
 }
 
 // CoverageBase is the newest earlier run of the same job that holds a row
@@ -432,4 +435,8 @@ type WarningsBase struct {
 type RunQuality struct {
 	Coverage []RunCoverage
 	Warnings []RunWarnings
+	// CoverageDropped and WarningsDropped count the reports of each kind
+	// that the store does not hold. Set only by RunQuality.
+	CoverageDropped int32
+	WarningsDropped int32
 }

@@ -169,6 +169,8 @@ var expectedColumns = map[string][]columnSpec{
 		{"metrics", "jsonb", false},
 		{"gate_status", "text", true},
 		{"created_at", "timestamp with time zone", false},
+		{"reports_dropped", "integer", false},
+		{"metrics_dropped", "integer", false},
 	},
 	"run_warnings": {
 		{"run_id", "uuid", false},
@@ -186,6 +188,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"fixed_total", "integer", true},
 		{"gate_status", "text", true},
 		{"created_at", "timestamp with time zone", false},
+		{"reports_dropped", "integer", false},
 	},
 	"log_chunks": {
 		{"object_key", "text", false},

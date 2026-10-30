@@ -303,6 +303,11 @@ type RunTestReportPayload struct {
 type RunQualityPayload struct {
 	Coverage []RunCoveragePayload `json:"coverage"`
 	Warnings []RunWarningsPayload `json:"warnings"`
+	// CoverageDropped and WarningsDropped count the reports the run
+	// published that the gateway did not send. A negative count reads as
+	// zero.
+	CoverageDropped int `json:"coverage_dropped"`
+	WarningsDropped int `json:"warnings_dropped"`
 }
 
 // RunCoverageCounterPayload is one covered and total count of a coverage
@@ -324,6 +329,9 @@ type RunCoveragePayload struct {
 	ModifiedLines *RunCoverageCounterPayload  `json:"modified_lines,omitempty"`
 	Metrics       []RunCoverageCounterPayload `json:"metrics,omitempty"`
 	GateStatus    string                      `json:"gate_status,omitempty"`
+	// MetricsDropped counts the metrics of this report that the gateway
+	// did not send. A negative count reads as zero.
+	MetricsDropped int `json:"metrics_dropped,omitempty"`
 }
 
 // RunWarningsPayload is one entry of a run.quality payload's warnings list.
