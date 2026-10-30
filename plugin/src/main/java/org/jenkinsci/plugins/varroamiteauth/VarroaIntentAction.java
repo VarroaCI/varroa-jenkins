@@ -50,7 +50,7 @@ public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAc
     private volatile long grantedNumber;
     private volatile long numberConflict;
     private transient volatile boolean applyPending;
-    private transient volatile int markFailures;
+    private transient int markFailures;
     private transient volatile long claimNotBeforeMillis;
 
     /**
@@ -194,18 +194,18 @@ public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAc
      * Counts one failed start mark and answers the new count. Only the
      * claimer writes the count, one attempt at a time. Package-private.
      */
-    int addMarkFailure() {
+    synchronized int addMarkFailure() {
         markFailures = markFailures + 1;
         return markFailures;
     }
 
     /** Clears the failed start-mark count after a granted mark. Package-private. */
-    void clearMarkFailures() {
+    synchronized void clearMarkFailures() {
         markFailures = 0;
     }
 
     /** Returns the count of failed start marks since the last granted one. */
-    public int getMarkFailures() {
+    public synchronized int getMarkFailures() {
         return markFailures;
     }
 

@@ -158,7 +158,7 @@ final class RunJournal {
             String json = Files.readString(file, StandardCharsets.UTF_8);
             long modified = Files.getLastModifiedTime(file).toMillis();
             Entry entry = Entry.fromJson(JSONObject.fromObject(json), modified);
-            String expected = file.getFileName().toString();
+            String expected = fileName(file);
             if (!isValidRunId(entry.runId) || !expected.equals(entry.runId + FILE_SUFFIX)) {
                 throw new IllegalArgumentException("the run id does not match the file name");
             }
@@ -244,5 +244,10 @@ final class RunJournal {
                     o.optBoolean("pipeline", false),
                     lastSeenMillis);
         }
+    }
+
+    private static String fileName(Path p) {
+        Path n = p.getFileName();
+        return n == null ? "" : n.toString();
     }
 }

@@ -190,7 +190,7 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
             long dropped = 0L;
             List<Path> pending = new ArrayList<>();
             for (Path file : listChunkFilesLocked(dir)) {
-                ParsedName parsed = parseName(file.getFileName().toString());
+                ParsedName parsed = parseName(fileName(file));
                 if (parsed == null) {
                     continue;
                 }
@@ -205,7 +205,7 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
             }
             List<LogChunk> replay = new ArrayList<>();
             for (Path file : pending) {
-                ParsedName parsed = parseName(file.getFileName().toString());
+                ParsedName parsed = parseName(fileName(file));
                 try {
                     byte[] data = Files.readAllBytes(file);
                     replay.add(new LogChunk(runId, jobPath, buildNumber, parsed.seq, parsed.nodeId, parsed.stageId,
@@ -234,7 +234,10 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
 
     /** Writes {@code value} to {@code target} through a temporary file and a rename. Caller holds the run's lock. */
     private static void writeLongFileLocked(Path temp, Path target, long value) throws IOException {
-        Files.createDirectories(target.getParent());
+        Path parent = target.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
         Files.write(temp, Long.toString(value).getBytes(StandardCharsets.US_ASCII));
         Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
@@ -279,7 +282,7 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
             List<Path> files = listChunkFilesLocked(dir);
             ByteBuffer buf = new ByteBuffer();
             for (Path file : files) {
-                ParsedName parsed = parseName(file.getFileName().toString());
+                ParsedName parsed = parseName(fileName(file));
                 if (parsed == null) {
                     continue;
                 }
@@ -336,7 +339,7 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
         long dropped = 0L;
         if (Files.isDirectory(dir)) {
             for (Path file : listChunkFilesLocked(dir)) {
-                ParsedName parsed = parseName(file.getFileName().toString());
+                ParsedName parsed = parseName(fileName(file));
                 if (parsed != null) {
                     dropped += parsed.droppedBytes;
                 }
@@ -570,5 +573,10 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
             this.replay = List.copyOf(replay);
             this.droppedBytes = droppedBytes;
         }
+    }
+
+    private static String fileName(Path p) {
+        Path n = p.getFileName();
+        return n == null ? "" : n.toString();
     }
 }

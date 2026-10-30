@@ -6,6 +6,7 @@ import java.net.URL;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.PublicKey;
 import java.security.Signature;
@@ -146,7 +147,7 @@ public class JWTValidator {
         try {
             String[] parts = token.split("\\.");
             if (parts.length != 3) return null;
-            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]));
+            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
             Object iss = ((Map<String, Object>) new JsonSlurper().parseText(payloadJson)).get("iss");
             if (!(iss instanceof String)) return null;
             String norm = (String) iss;
@@ -169,7 +170,7 @@ public class JWTValidator {
             if (parts.length != 3) return null;
 
             // Parse header to get kid
-            String headerJson = new String(Base64.getUrlDecoder().decode(parts[0]));
+            String headerJson = new String(Base64.getUrlDecoder().decode(parts[0]), StandardCharsets.UTF_8);
             Map<String, Object> header = (Map<String, Object>) new JsonSlurper().parseText(headerJson);
             String kid = (String) header.get("kid");
 
@@ -186,14 +187,14 @@ public class JWTValidator {
             // Verify signature
             Signature sig = Signature.getInstance("SHA256withRSA");
             sig.initVerify(key);
-            sig.update((parts[0] + "." + parts[1]).getBytes());
+            sig.update((parts[0] + "." + parts[1]).getBytes(StandardCharsets.UTF_8));
             if (!sig.verify(Base64.getUrlDecoder().decode(parts[2]))) {
                 LOGGER.warning("varroa-mite-auth: JWT signature invalid");
                 return null;
             }
 
             // Parse payload
-            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]));
+            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
             Map<String, Object> payload = (Map<String, Object>) new JsonSlurper().parseText(payloadJson);
 
             // Check expiry — REQUIRED (fail closed). A token with no exp must be rejected.
@@ -327,14 +328,14 @@ public class JWTValidator {
             // Verify signature
             Signature sig = Signature.getInstance("SHA256withRSA");
             sig.initVerify(pubKey);
-            sig.update((parts[0] + "." + parts[1]).getBytes());
+            sig.update((parts[0] + "." + parts[1]).getBytes(StandardCharsets.UTF_8));
             if (!sig.verify(Base64.getUrlDecoder().decode(parts[2]))) {
                 LOGGER.warning("varroa-mite-auth: operator JWT signature invalid");
                 return null;
             }
 
             // Verify kid matches configured key (prerequisite for key rotation).
-            String opHeaderJson = new String(Base64.getUrlDecoder().decode(parts[0]));
+            String opHeaderJson = new String(Base64.getUrlDecoder().decode(parts[0]), StandardCharsets.UTF_8);
             Map<String, Object> opHeader = (Map<String, Object>) new JsonSlurper().parseText(opHeaderJson);
             if (expectedKid != null && !expectedKid.isEmpty()) {
                 String opKid = (String) opHeader.get("kid");
@@ -345,7 +346,7 @@ public class JWTValidator {
             }
 
             // Parse payload
-            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]));
+            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
             Map<String, Object> payload = (Map<String, Object>) new JsonSlurper().parseText(payloadJson);
 
             // Check expiry (required — tokens without exp are rejected).

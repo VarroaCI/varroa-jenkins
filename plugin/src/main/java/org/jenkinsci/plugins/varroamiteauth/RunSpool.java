@@ -451,7 +451,7 @@ public class RunSpool {
     }
 
     private Entry readEntry(Path file) {
-        String name = file.getFileName().toString();
+        String name = fileName(file);
         boolean runState = name.startsWith(RUN_STATE_PREFIX);
         String body = runState ? name.substring(RUN_STATE_PREFIX.length()) : name;
         int dash = body.indexOf('-');
@@ -514,7 +514,7 @@ public class RunSpool {
     }
 
     private static boolean isCompletedFile(Path file) {
-        String name = file.getFileName().toString();
+        String name = fileName(file);
         return name.contains("-" + BuildEvent.PHASE_COMPLETED + FILE_SUFFIX);
     }
 
@@ -589,5 +589,10 @@ public class RunSpool {
         public JSONObject toJsonObject() {
             return JSONObject.fromObject(json);
         }
+    }
+
+    private static String fileName(Path p) {
+        Path n = p.getFileName();
+        return n == null ? "" : n.toString();
     }
 }

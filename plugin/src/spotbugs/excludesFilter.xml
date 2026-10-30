@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+  <!-- The mite writes the loopback token to this fixed path in the shared pod volume. The path is a contract with cmd/mite. -->
+  <Match>
+    <Class name="org.jenkinsci.plugins.varroamiteauth.LoopbackTokenFile"/>
+    <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
+  </Match>
+  <!-- Jenkins registers one filter instance. The static field is the process-wide activity gauge that the mite reads. -->
+  <Match>
+    <Class name="org.jenkinsci.plugins.varroamiteauth.HttpActivityFilter"/>
+    <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD"/>
+  </Match>
+</FindBugsFilter>

@@ -1260,7 +1260,8 @@ public final class VarroaRunRecorder {
         b.jobDisplayName(truncate(job.getDisplayName(), MAX_FIELD_512));
         b.buildDisplayName(truncate(run.getDisplayName(), MAX_FIELD_512));
         b.url(truncate(run.getUrl(), MAX_FIELD_512));
-        b.result(run.getResult() != null ? run.getResult().toString() : "");
+        Result r = run.getResult();
+        b.result(r != null ? r.toString() : "");
 
         List<Cause> causes = run.getCauses();
         b.actor(ActivityRunListener.resolveActorFromCauses(causes));
@@ -1355,7 +1356,7 @@ public final class VarroaRunRecorder {
             Method m = pv.getClass().getMethod("getValue");
             Object v = m.invoke(pv);
             return v != null ? String.valueOf(v) : "";
-        } catch (Exception e) {
+        } catch (ReflectiveOperationException | RuntimeException e) {
             return String.valueOf(pv);
         }
     }
@@ -1381,9 +1382,6 @@ public final class VarroaRunRecorder {
             sets = scmRun.getChangeSets();
         } catch (Exception e) {
             LOGGER.log(Level.FINE, "VarroaRunRecorder: failed to read change sets", e);
-            return List.of();
-        }
-        if (sets == null) {
             return List.of();
         }
         List<List<BuildChange>> changeSets = new ArrayList<>();
@@ -1659,7 +1657,7 @@ public final class VarroaRunRecorder {
                 return null;
             }
             ChangeRequestSCMHead request = (ChangeRequestSCMHead) head;
-            String target = request.getTarget() != null ? orEmpty(request.getTarget().getName()) : "";
+            String target = orEmpty(request.getTarget().getName());
             String source = head instanceof ChangeRequestSCMHead2
                     ? orEmpty(((ChangeRequestSCMHead2) head).getOriginName())
                     : "";
@@ -1690,8 +1688,7 @@ public final class VarroaRunRecorder {
         String head = "";
         String revision = "";
         if (scmRevision != null) {
-            SCMHead scmHead = scmRevision.getHead();
-            head = scmHead != null ? orEmpty(scmHead.getName()) : "";
+            head = orEmpty(scmRevision.getHead().getName());
             revision = truncate(revisionHash(scmRevision), MAX_FIELD_512);
         }
         return new SourceFacts(head, head, revision, "", "", "", List.of(), List.of());
@@ -2428,8 +2425,8 @@ public final class VarroaRunRecorder {
         LabelAction label = (LabelAction) start.getAction(LabelAction.class);
         String name = label != null ? truncate(label.getDisplayName(), MAX_FIELD_512) : "";
         String parallelBranchName = "";
-        if (parallel) {
-            ThreadNameAction thread = (ThreadNameAction) start.getAction(ThreadNameAction.class);
+        ThreadNameAction thread = (ThreadNameAction) start.getAction(ThreadNameAction.class);
+        if (thread != null) {
             parallelBranchName = truncate(thread.getThreadName(), MAX_FIELD_512);
         }
         WorkspaceAction workspace = (WorkspaceAction) start.getAction(WorkspaceAction.class);

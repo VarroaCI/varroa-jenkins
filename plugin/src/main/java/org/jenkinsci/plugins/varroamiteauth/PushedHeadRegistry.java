@@ -84,9 +84,6 @@ public final class PushedHeadRegistry {
                 return false;
             }
             Map<SCMHead, SCMRevision> heads = event.heads(source);
-            if (heads == null) {
-                return false;
-            }
             for (Map.Entry<SCMHead, SCMRevision> named : heads.entrySet()) {
                 if (!named.getKey().getName().equals(head.getName())) {
                     continue;

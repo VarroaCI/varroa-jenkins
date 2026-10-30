@@ -95,7 +95,7 @@ final class VarroaTenantResolver {
             Object role = roleMap.getClass().getMethod("getRole", String.class)
                 .invoke(roleMap, "varroa:tenant:" + tenant);
             return role != null;
-        } catch (Exception e) {
+        } catch (ReflectiveOperationException | RuntimeException e) {
             return false;
         }
     }

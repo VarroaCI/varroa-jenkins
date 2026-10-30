@@ -1,5 +1,6 @@
 package org.jenkinsci.plugins.varroamiteauth.template;
 
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -45,6 +46,23 @@ final class TemplateVersion implements Comparable<TemplateVersion> {
             return Integer.compare(minor, o.minor);
         }
         return Integer.compare(patch, o.patch);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof TemplateVersion)) {
+            return false;
+        }
+        TemplateVersion other = (TemplateVersion) o;
+        return major == other.major && minor == other.minor && patch == other.patch;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(major, minor, patch);
     }
 
     @Override
