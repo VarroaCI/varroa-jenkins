@@ -4,10 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { age } from "../components/activityTimeline.util";
-import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../components/RecoveryState";
+import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage, RecordStoreUnreachablePage } from "../components/RecoveryState";
 import { listAllFleetLocks, releaseFleetLock } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import { ApiError } from "../hooks/useApi";
+import { ApiError, isRecordStoreUnreachable } from "../hooks/useApi";
 import { canDoGlobal } from "../hooks/usePermissions";
 import { holderOf, holdsLock } from "../lib/fleetLocks";
 import { controllerRoute } from "../routing";
@@ -233,6 +233,7 @@ export default function Locks() {
 
   if (locks.error instanceof ApiError && locks.error.status === 403) return <ForbiddenPage />;
   if (locks.error instanceof ApiError && locks.error.status === 404) return <NotFoundPage />;
+  if (isRecordStoreUnreachable(locks.error)) return <RecordStoreUnreachablePage onRetry={() => void locks.refetch()} />;
   if (locks.error instanceof ApiError && locks.error.status === 503) return <RecordStoreDisabledPage />;
   if (locks.error) return <GenericErrorPage />;
 

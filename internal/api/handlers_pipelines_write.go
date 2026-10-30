@@ -275,6 +275,9 @@ func (s *Server) runForWrite(ctx context.Context, claims *auth.Claims, runID str
 		if errors.Is(err, recordstore.ErrRunNotFound) {
 			return recordstore.Run{}, TenantRef{}, &ServiceError{Status: http.StatusNotFound, Message: "run not found"}
 		}
+		if errors.Is(err, recordstore.ErrUnavailable) {
+			return recordstore.Run{}, TenantRef{}, recordStoreUnreachable()
+		}
 		if errors.Is(err, recordstore.ErrSchemaTooOld) {
 			return recordstore.Run{}, TenantRef{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
 		}

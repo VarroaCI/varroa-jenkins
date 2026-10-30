@@ -2,9 +2,9 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getPipelinesOverview } from "../../api/client";
 import { Button } from "../../components/Button";
-import { RecordStoreDisabledPage, RecoveryState } from "../../components/RecoveryState";
+import { RecordStoreDisabledPage, RecordStoreUnreachablePage, RecoveryState } from "../../components/RecoveryState";
 import { useAssistant } from "../../components/assistant/AssistantProvider";
-import { ApiError } from "../../hooks/useApi";
+import { ApiError, isRecordStoreUnreachable } from "../../hooks/useApi";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { canAccessTenantPipeline, usePermissions } from "../../hooks/usePermissions";
 import { AttentionStrip } from "./AttentionStrip";
@@ -67,6 +67,9 @@ export default function PipelinesIndex() {
   }
 
   if (overviewQuery.isError) {
+    if (isRecordStoreUnreachable(overviewQuery.error)) {
+      return <RecordStoreUnreachablePage onRetry={() => void overviewQuery.refetch()} />;
+    }
     if (overviewQuery.error instanceof ApiError && overviewQuery.error.status === 503) {
       return <RecordStoreDisabledPage />;
     }

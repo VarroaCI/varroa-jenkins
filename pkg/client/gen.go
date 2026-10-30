@@ -2814,6 +2814,9 @@ type ComponentsSchemasEffectiveBundle struct {
 
 // ComponentsSchemasError defines model for components_schemas_Error.
 type ComponentsSchemasError struct {
+	// Code Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed.
+	Code *string `json:"code,omitempty"`
+
 	// Error Human-readable error message.
 	Error string `json:"error"`
 }

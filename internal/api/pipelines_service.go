@@ -144,13 +144,16 @@ func convertJSON[T any](in any) (T, error) {
 }
 
 // readerServiceError maps a recordstore.Reader failure onto a
-// *ServiceError: nil stays nil, ErrSchemaTooOld is 503, and every other
-// error is 500. It is handleReaderError's non-HTTP counterpart, for a
-// caller that reports through a *ServiceError instead of writing an
-// HTTP response.
+// *ServiceError: nil stays nil, ErrUnavailable is 503 with the unreachable
+// code, ErrSchemaTooOld is 503, and every other error is 500. It is
+// handleReaderError's non-HTTP counterpart, for a caller that reports
+// through a *ServiceError instead of writing an HTTP response.
 func (s *Server) readerServiceError(err error, action string) *ServiceError {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, recordstore.ErrUnavailable) {
+		return recordStoreUnreachable()
 	}
 	if errors.Is(err, recordstore.ErrSchemaTooOld) {
 		return &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}

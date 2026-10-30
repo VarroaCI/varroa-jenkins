@@ -5,9 +5,9 @@ import { TargetApprovalsCard } from "../../components/assistant/TargetApprovalsC
 import { useOptionalAuth } from "../../context/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getPipelineJob, listRuns, tenantRunStreamUrl, type ListRunsParams } from "../../api/client";
-import { ApiError } from "../../hooks/useApi";
+import { ApiError, isRecordStoreUnreachable } from "../../hooks/useApi";
 import { useEventStream } from "../../hooks/useEventStream";
-import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
+import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage, RecordStoreUnreachablePage } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
 import { usePermissions, canAccessTenantPipeline } from "../../hooks/usePermissions";
 import { age } from "../../components/activityTimeline.util";
@@ -349,6 +349,7 @@ export default function PipelinePage() {
   const jobError = jobQuery.error;
   if (jobError instanceof ApiError && jobError.status === 403) return <ForbiddenPage />;
   if (jobError instanceof ApiError && jobError.status === 404) return <NotFoundPage />;
+  if (isRecordStoreUnreachable(jobError)) return <RecordStoreUnreachablePage onRetry={() => void jobQuery.refetch()} />;
   if (jobError instanceof ApiError && jobError.status === 503) return <RecordStoreDisabledPage />;
   if (jobError) return <GenericErrorPage />;
   const jobDetail = jobQuery.data;

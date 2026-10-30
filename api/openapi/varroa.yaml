@@ -235,7 +235,7 @@ components:
           schema:
             $ref: '#/components/schemas/components_schemas_Error'
       description: |
-        The upstream data source is temporarily unavailable (search sources, or the build record store when it is disabled or its schema is too old).
+        The upstream data source is temporarily unavailable (search sources, or the build record store when it is disabled, its schema is too old, or unreachable (code `record_store_unreachable`)).
     components_responses_Unauthorized:
       content:
         application/json:
@@ -2002,6 +2002,10 @@ components:
     Error:
       additionalProperties: false
       properties:
+        code:
+          description: |
+            Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed.
+          type: string
         error:
           description: Human-readable error message.
           type: string
@@ -8100,6 +8104,10 @@ components:
     components_schemas_Error:
       additionalProperties: false
       properties:
+        code:
+          description: |
+            Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed.
+          type: string
         error:
           description: Human-readable error message.
           type: string

@@ -41,6 +41,9 @@ type ServiceError struct {
 	// HolderCell names the cell that still runs a fleet lock's holder,
 	// for the 409 a force release answers on holder_live.
 	HolderCell *FleetLockHolderCell
+	// Code is a stable machine-readable reason, set only where a client
+	// branches on the reason. It is written as the "code" body field.
+	Code string
 }
 
 func (e *ServiceError) Error() string { return e.Message }
@@ -178,6 +181,11 @@ func (s *Server) writeServiceError(w http.ResponseWriter, serr *ServiceError) {
 		s.writeJSON(w, serr.Status, map[string]interface{}{
 			"error":      serr.Message,
 			"holderCell": serr.HolderCell,
+		})
+	case serr.Code != "":
+		s.writeJSON(w, serr.Status, map[string]string{
+			"error": serr.Message,
+			"code":  serr.Code,
 		})
 	default:
 		s.writeJSONError(w, serr.Status, serr.Message)

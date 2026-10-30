@@ -192,7 +192,7 @@ func (s *Server) assistantStoreError(w http.ResponseWriter, err error) {
 		writeAssistantError(s, w, http.StatusConflict, assistantErrApprovalExpired, "the approval expired")
 	case errors.Is(err, store.ErrConflict):
 		writeAssistantError(s, w, http.StatusConflict, assistantErrBusy, "the session changed; reload and try again")
-	case errors.Is(err, recordstore.ErrSchemaTooOld), errors.Is(err, store.ErrSchemaTooOld):
+	case errors.Is(err, recordstore.ErrUnavailable), errors.Is(err, recordstore.ErrSchemaTooOld), errors.Is(err, store.ErrSchemaTooOld):
 		writeAssistantError(s, w, http.StatusServiceUnavailable, assistantErrDisabled, "the assistant store is not ready")
 	default:
 		s.deps.Logger.Error("assistant store", "error", err)

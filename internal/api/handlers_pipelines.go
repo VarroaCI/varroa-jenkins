@@ -279,12 +279,31 @@ func (s *Server) pipelinesUnavailable(w http.ResponseWriter) {
 	s.writeJSONError(w, http.StatusServiceUnavailable, "record store not configured")
 }
 
+// codeRecordStoreUnreachable is the 503 code for a record store that did
+// not answer. The frontend shows "unreachable" with Retry for it.
+const codeRecordStoreUnreachable = "record_store_unreachable"
+
+// recordStoreUnreachable is the ServiceError for an unreachable record store.
+func recordStoreUnreachable() *ServiceError {
+	return &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store unreachable", Code: codeRecordStoreUnreachable}
+}
+
+// writeRecordStoreUnreachable answers 503 with the record_store_unreachable code.
+func (s *Server) writeRecordStoreUnreachable(w http.ResponseWriter) {
+	s.writeServiceError(w, recordStoreUnreachable())
+}
+
 // handleReaderError maps a recordstore.Reader failure onto its HTTP
-// shape: ErrSchemaTooOld is 503, everything else is 500. It returns
-// true when it wrote a response, so the caller returns immediately.
+// shape: ErrUnavailable is 503 with the unreachable code, ErrSchemaTooOld
+// is 503, everything else is 500. It returns true when it wrote a
+// response, so the caller returns immediately.
 func (s *Server) handleReaderError(w http.ResponseWriter, err error, action string) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, recordstore.ErrUnavailable) {
+		s.writeRecordStoreUnreachable(w)
+		return true
 	}
 	if errors.Is(err, recordstore.ErrSchemaTooOld) {
 		s.pipelinesUnavailable(w)
@@ -306,6 +325,9 @@ func (s *Server) resolveTenantTenants(ctx context.Context, claims *auth.Claims, 
 		var serr *ServiceError
 		if errors.As(err, &serr) {
 			return nil, serr
+		}
+		if errors.Is(err, recordstore.ErrUnavailable) {
+			return nil, recordStoreUnreachable()
 		}
 		return nil, &ServiceError{Status: http.StatusInternalServerError, Message: "resolve tenant failed"}
 	}

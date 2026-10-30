@@ -40,6 +40,7 @@ import (
 	agentstore "github.com/varroaci/varroa-jenkins/internal/agent/store"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/forgerelay"
+	"github.com/varroaci/varroa-jenkins/internal/pgdial"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 	"github.com/varroaci/varroa-jenkins/internal/tenantagent/accept"
 	"github.com/varroaci/varroa-jenkins/internal/tenantagent/cache"
@@ -94,7 +95,7 @@ func run(logger *slog.Logger, busURL, caFile, passFile string, port int) error {
 		return errors.New("-bus-url or VARROA_BUS_URL is required")
 	}
 
-	pool, err := pgxpool.New(ctx, cfg.DSN)
+	pool, err := pgdial.NewPool(ctx, cfg.DSN)
 	if err != nil {
 		return fmt.Errorf("open record store pool: %w", err)
 	}

@@ -9,12 +9,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/pgdial"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
@@ -88,13 +88,13 @@ func run(ctx context.Context, cfg Config) error {
 	}
 	confirmedGoneGrace := cfg.confirmedGoneGrace()
 
-	pool, err := pgxpool.New(ctx, cfg.RecordStoreDSN)
+	pool, err := pgdial.NewPool(ctx, cfg.RecordStoreDSN)
 	if err != nil {
 		return fmt.Errorf("open record store pool: %w", err)
 	}
 	defer pool.Close()
 
-	sqlDB, err := sql.Open("pgx", cfg.RecordStoreDSN)
+	sqlDB, err := pgdial.OpenDB(cfg.RecordStoreDSN)
 	if err != nil {
 		return fmt.Errorf("open record store sql.DB: %w", err)
 	}

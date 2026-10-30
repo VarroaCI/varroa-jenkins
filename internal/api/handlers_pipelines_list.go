@@ -63,13 +63,17 @@ func (s *Server) listPipelineTenants(ctx context.Context, claims *auth.Claims) (
 }
 
 // allTenantPlacements reads every placement row. It reports false, with
-// no error, when the record store is off or its schema is too old: the
-// landing page then lists the local Tenants alone.
+// no error, when the record store is off, its schema is too old, or it
+// is unreachable: the landing page then lists the local Tenants alone.
 func (s *Server) allTenantPlacements(ctx context.Context) ([]recordstore.TenantPlacement, bool, error) {
 	if s.deps.RecordStore == nil {
 		return nil, false, nil
 	}
 	rows, err := s.deps.RecordStore.ListAllTenantPlacements(ctx)
+	if errors.Is(err, recordstore.ErrUnavailable) {
+		s.deps.Logger.Warn("record store unreachable; the pipelines landing page lists local Tenants only", "error", err)
+		return nil, false, nil
+	}
 	if errors.Is(err, recordstore.ErrSchemaTooOld) {
 		return nil, false, nil
 	}

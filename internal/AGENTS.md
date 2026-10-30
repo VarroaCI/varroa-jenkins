@@ -493,6 +493,7 @@ reading each package's entry point):
 - **`profileview/`** — small DTO helpers for `JenkinsVersionProfile` views,
   e.g. `PluginLinesFromYAML` extracting pinned `artifactId[@version]` lines
   from a materialized `plugins.yaml` for display.
+- **`pgdial/`** — the only place production code opens a record-store pool or connection (`NewPool`, `PoolConfig`, `ConnConfig`, `OpenDB`). It applies a default connect timeout of 5 seconds when the DSN sets no `connect_timeout`. The DSN's own value wins. Every new Postgres caller uses it.
 - **`logging/`** — thin `log/slog` wrapper (`logging.New`) standardizing
   level/format (`json`/`text`) across all three binaries.
 - **`hibernation/`** — shared controller-hibernation contracts: webhook replay

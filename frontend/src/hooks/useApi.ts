@@ -41,6 +41,15 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * isRecordStoreUnreachable reports a 503 whose code says the record store did
+ * not answer. The page offers Retry for it. A 503 with no code is a store that
+ * is off or too old, which RecordStoreDisabledPage covers.
+ */
+export function isRecordStoreUnreachable(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 503 && e.code === "record_store_unreachable";
+}
+
 function getToken(): string | null {
   try { return localStorage.getItem("varroa_id_token"); } catch { return null; }
 }

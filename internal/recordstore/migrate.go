@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+
+	"github.com/varroaci/varroa-jenkins/internal/pgdial"
 )
 
 // migrateLockKey is the pg_advisory_lock key the migration runner holds
@@ -41,7 +42,7 @@ func init() {
 // them; the loser observes the schema already at the target version and
 // returns nil.
 func RunMigrations(ctx context.Context, dsn string) error {
-	cfg, err := pgx.ParseConfig(dsn)
+	cfg, err := pgdial.ConnConfig(dsn)
 	if err != nil {
 		return fmt.Errorf("parse dsn: %w", err)
 	}

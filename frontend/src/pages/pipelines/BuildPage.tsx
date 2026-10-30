@@ -18,14 +18,14 @@ import {
   tenantRunStreamUrl,
   downloadRunArtifact,
 } from "../../api/client";
-import { ApiError } from "../../hooks/useApi";
+import { ApiError, isRecordStoreUnreachable } from "../../hooks/useApi";
 import { useEventStream, type SSEEvent } from "../../hooks/useEventStream";
 import { canAccessTenantPipeline, usePermissions } from "../../hooks/usePermissions";
 import { useToast } from "../../components/Toast";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { Tabs, tabPanelProps } from "../../components/Tabs";
-import { ForbiddenPage, GenericErrorPage, RecoveryState } from "../../components/RecoveryState";
+import { ForbiddenPage, GenericErrorPage, RecordStoreUnreachablePage, RecoveryState } from "../../components/RecoveryState";
 import type {
   RunCommandRefusal,
   RunDetail,
@@ -74,6 +74,7 @@ type RunPageStatus =
   | "found"
   | "forbidden"
   | "recordStoreOff"
+  | "recordStoreUnreachable"
   | "error"
   | "requested"
   | "notStarted"
@@ -153,6 +154,10 @@ function useRunRecord(runId: string | undefined, requested: boolean, streamOpen:
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) {
         setStatus("forbidden");
+        return true;
+      }
+      if (isRecordStoreUnreachable(e)) {
+        setStatus("recordStoreUnreachable");
         return true;
       }
       if (e instanceof ApiError && e.status === 503) {
@@ -605,6 +610,7 @@ export default function BuildPage() {
     );
   }
   if (status === "forbidden") return <ForbiddenPage />;
+  if (status === "recordStoreUnreachable") return <RecordStoreUnreachablePage onRetry={refetch} />;
   if (status === "recordStoreOff") {
     return (
       <RecoveryState
