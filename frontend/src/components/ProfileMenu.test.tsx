@@ -166,6 +166,23 @@ describe("ProfileMenu", () => {
       expect(screen.getByText("Not authenticated")).toBeInTheDocument();
     });
 
+    it("shows the username and its initial for a local account with no name or email", () => {
+      authState.user = {
+        subject: "local:ui-probe",
+        preferredUsername: "local:ui-probe",
+        email: "",
+        name: "",
+        groups: [],
+        authMode: "local",
+      };
+      renderProfileMenu();
+      expect(screen.getAllByText("U").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText("ui-probe")).toBeInTheDocument();
+      expect(screen.getByText("local:ui-probe")).toBeInTheDocument();
+      expect(screen.queryByText("Not authenticated")).not.toBeInTheDocument();
+      expect(screen.queryByText("Sign in")).not.toBeInTheDocument();
+    });
+
     it("shows 'Loading…' in dropdown when auth is loading", () => {
       authState.isLoading = true;
       renderProfileMenu();

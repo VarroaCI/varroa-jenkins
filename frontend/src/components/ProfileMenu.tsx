@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../context/ThemeContext";
 import { useAuth } from "../context/AuthContext";
+import { displayNameOf, initialsOf, secondaryLineOf } from "../lib/identity";
 import { useToast } from "./Toast";
 import styles from "./ProfileMenu.module.css";
 
@@ -21,12 +22,7 @@ export function ProfileMenu() {
 
   const { user: me, isLoading, logout: authLogout } = useAuth();
 
-  const initials = (me?.displayName || me?.name || "")
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "?";
+  const initials = initialsOf(me, "?");
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -59,10 +55,10 @@ export function ProfileMenu() {
           <div className={styles.avatarLg}>{isLoading ? "…" : initials}</div>
           <div>
             <div className={styles.menuName}>
-              {isLoading ? "Loading…" : me?.displayName || me?.name || "Sign in"}
+              {isLoading ? "Loading…" : me ? displayNameOf(me) : "Sign in"}
             </div>
             <div className={styles.menuEmail}>
-              {isLoading ? "" : me?.email || "Not authenticated"}
+              {isLoading ? "" : me ? secondaryLineOf(me) : "Not authenticated"}
             </div>
           </div>
         </div>
