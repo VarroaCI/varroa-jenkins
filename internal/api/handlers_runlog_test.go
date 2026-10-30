@@ -461,3 +461,64 @@ func TestRunLogStreamLoop_LiveWriteErrorEndsStream(t *testing.T) {
 		t.Fatal("stream loop kept running after a failed write")
 	}
 }
+
+// TestHandleStreamRunLog_StepLinesJoinTheirStage proves a step line with
+// no chunk stage joins the stage of its flow node, and the stage event
+// starts at the labelled block line, not at the outer stage step.
+func TestHandleStreamRunLog_StepLinesJoinTheirStage(t *testing.T) {
+	store := newRunLogTestStore(t)
+	runID := "run-stage-notes-1"
+
+	noteLines := []runLogLine{
+		testNewNodeNoteLine("4", "17", "17", "[Pipeline] stage"),
+		testNewNodeNoteLine("17", "18", "18", "[Pipeline] { (boom)"),
+		testNewNodeNoteLine("18", "19", "", "[Pipeline] error"),
+		testNewNodeNoteLine("", "20", "18", "[Pipeline] }"),
+		testNewNodeNoteLine("", "21", "17", "[Pipeline] // stage"),
+	}
+	var console []byte
+	entries := make([]runLogIndexEntry, 0, len(noteLines))
+	for i, ln := range noteLines {
+		raw := append(testNoteRawBytes(ln), '\n')
+		entries = append(entries, runLogIndexEntry{Seq: int64(i), Offset: int64(len(console)), Len: int64(len(raw)), Final: i == len(noteLines)-1})
+		console = append(console, raw...)
+	}
+	putRunLogConsole(t, store, runID, console)
+	putRunLogIndex(t, store, runID, entries)
+
+	run := recordstore.Run{
+		RunID: runID, Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: recordstore.StatusCompleted,
+		Payload: json.RawMessage(`{"log_summary":{"finalized":true,"chunk_count":5,"incomplete":false}}`),
+	}
+	reader := newFakeRecordReader()
+	reader.addRun(run)
+	reader.stages[runID] = []recordstore.Stage{{RunID: runID, StageID: "18", Name: "boom", Status: "FAILURE"}}
+	srv := newRunFixtureServer(reader, store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(150*time.Millisecond, cancel)
+	rec := doStreamRunLogRequest(ctx, srv, runID, "")
+
+	lines := runLogLineEvents(t, rec.Body.String())
+	wantStage := []string{"", "18", "18", "18", ""}
+	if len(lines) != len(wantStage) {
+		t.Fatalf("lines = %d, want %d: %s", len(lines), len(wantStage), rec.Body.String())
+	}
+	for i, ln := range lines {
+		if ln.StageID != wantStage[i] {
+			t.Errorf("line %d (%q) stageId = %q, want %q", ln.N, ln.Text, ln.StageID, wantStage[i])
+		}
+	}
+
+	stages := eventsNamed(parseSSEEvents(rec.Body.String()), "stage")
+	if len(stages) != 1 {
+		t.Fatalf("stage events = %d, want 1: %s", len(stages), rec.Body.String())
+	}
+	var ev runLogStageEvent
+	if err := json.Unmarshal([]byte(stages[0].Data), &ev); err != nil {
+		t.Fatalf("decode stage event: %v", err)
+	}
+	if ev.StageID != "18" || ev.StartLine != 2 || ev.StartOffset != int64(len(testNoteRawBytes(noteLines[0]))+1) {
+		t.Fatalf("stage event = %+v, want stage 18 starting at line 2", ev)
+	}
+}

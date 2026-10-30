@@ -80,8 +80,10 @@ func writeRunLogEvent(w io.Writer, flusher interface{ Flush() }, event string, p
 }
 
 // runLogLineToEvent converts a computed line into its wire event. The
-// two types share every field name, so the conversion is a plain
-// re-typing.
+// wire type carries no note payload, so the fields are copied one by one.
 func runLogLineToEvent(ln runLogLine) runLogLineEvent {
-	return runLogLineEvent(ln)
+	return runLogLineEvent{
+		N: ln.N, Off: ln.Off, TsMs: ln.TsMs,
+		StageID: ln.StageID, NodeID: ln.NodeID, Text: ln.Text,
+	}
 }

@@ -67,6 +67,13 @@ type runLogLiveAssembler struct {
 	nextLine   int64
 	partial    []byte
 	partialOff int64
+	// attr attributes each line to its flow node. A nil attributor
+	// leaves every line as its chunk named it.
+	attr *runLogStageAttributor
+	// partialStage and partialNode are the chunk attribution of the
+	// buffered partial line, from the chunk that started it.
+	partialStage string
+	partialNode  string
 }
 
 // newRunLogLiveAssembler starts an assembler at watermark (the end
@@ -105,6 +112,9 @@ func (a *runLogLiveAssembler) feed(chunk runLiveLogChunk) (lines []runLogLine, g
 		return nil, true
 	}
 	a.watermark = newWatermark
+	if len(a.partial) == 0 && len(trimmed) > 0 {
+		a.partialStage, a.partialNode = chunk.StageID, chunk.NodeID
+	}
 	a.partial = append(a.partial, trimmed...)
 
 	var out []runLogLine
@@ -113,11 +123,18 @@ func (a *runLogLiveAssembler) feed(chunk runLiveLogChunk) (lines []runLogLine, g
 		if idx < 0 {
 			break
 		}
+		var notePayload string
+		if chunk.NodeID == "" {
+			notePayload = consoleNotePayloadAtLineStart(a.partial[:idx])
+		}
 		text := string(stripConsoleNotes(a.partial[:idx]))
-		out = append(out, runLogLine{
+		line := runLogLine{
 			N: a.nextLine, Off: a.partialOff, TsMs: chunk.TsMs,
 			StageID: chunk.StageID, NodeID: chunk.NodeID, Text: text,
-		})
+			notePayload: notePayload,
+		}
+		a.attr.attribute(&line)
+		out = append(out, line)
 		a.nextLine++
 		a.partialOff += int64(idx) + 1
 		a.partial = a.partial[idx+1:]
@@ -140,12 +157,14 @@ func (a *runLogLiveAssembler) resync(consoleData []byte, all []runLogLine) []run
 		last := resumed[len(resumed)-1]
 		a.partial = append([]byte(nil), consoleData[last.Off:]...)
 		a.partialOff = last.Off
+		a.partialStage, a.partialNode = last.StageID, last.NodeID
 		resumed = resumed[:len(resumed)-1]
 	}
 	out := make([]runLogLine, 0, len(resumed))
 	for _, ln := range resumed {
 		ln.N = a.nextLine
 		a.nextLine++
+		a.attr.attribute(&ln)
 		out = append(out, ln)
 	}
 	a.watermark = total
@@ -160,7 +179,15 @@ func (a *runLogLiveAssembler) flushPartial() (line runLogLine, ok bool) {
 	if len(a.partial) == 0 {
 		return runLogLine{}, false
 	}
-	line = runLogLine{N: a.nextLine, Off: a.partialOff, Text: string(stripConsoleNotes(a.partial))}
+	line = runLogLine{
+		N:           a.nextLine,
+		Off:         a.partialOff,
+		StageID:     a.partialStage,
+		NodeID:      a.partialNode,
+		Text:        string(stripConsoleNotes(a.partial)),
+		notePayload: consoleNotePayloadAtLineStart(a.partial),
+	}
+	a.attr.attribute(&line)
 	a.nextLine++
 	a.partial = nil
 	return line, true

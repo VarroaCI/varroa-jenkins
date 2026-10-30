@@ -219,3 +219,64 @@ func TestRunLogLiveAssembler_ResyncContinuesNumberingAndOffsets(t *testing.T) {
 		t.Fatalf("lines = %+v, want one line \"delta\" at offset 28 numbered 15", next)
 	}
 }
+
+// TestRunLogLiveAssembler_AttributesNoteLines proves the live path joins
+// a nodeless note line to its block through the same attributor as the
+// history replay, and leaves a noded chunk's line as the chunk named it.
+func TestRunLogLiveAssembler_AttributesNoteLines(t *testing.T) {
+	block := testNewNodeNoteLine("17", "18", "18", "[Pipeline] { (boom)")
+	step := testNewNodeNoteLine("18", "19", "", "[Pipeline] error")
+	raw := append(testNoteRawBytes(block), '\n')
+	raw = append(raw, testNoteRawBytes(step)...)
+	raw = append(raw, '\n')
+
+	a := newRunLogLiveAssembler(0, 1)
+	a.attr = newRunLogStageAttributor(nil)
+	got := mustFeed(t, a, runLiveLogChunk{Offset: 0, Len: int64(len(raw)), Data: raw})
+	if len(got) != 2 {
+		t.Fatalf("lines = %+v, want two", got)
+	}
+	if got[0].StageID != "18" || got[1].StageID != "18" {
+		t.Fatalf("StageIDs = %q, %q; want both 18", got[0].StageID, got[1].StageID)
+	}
+
+	noded := newRunLogLiveAssembler(0, 1)
+	noded.attr = newRunLogStageAttributor(nil)
+	out := mustFeed(t, noded, runLiveLogChunk{NodeID: "n1", StageID: "chunk", Offset: 0, Len: int64(len(raw)), Data: raw})
+	if len(out) != 2 || out[0].StageID != "chunk" || out[1].StageID != "chunk" {
+		t.Fatalf("noded lines = %+v, want chunk stage on both", out)
+	}
+}
+
+// TestRunLogLiveAssembler_FlushPartialAttributesNoteLine proves the final
+// unterminated line of a finalized log takes its flow-node stage.
+func TestRunLogLiveAssembler_FlushPartialAttributesNoteLine(t *testing.T) {
+	block := testNewNodeNoteLine("17", "18", "18", "[Pipeline] { (boom)")
+	step := testNewNodeNoteLine("18", "19", "", "[Pipeline] error")
+	raw := append(testNoteRawBytes(block), '\n')
+	raw = append(raw, testNoteRawBytes(step)...)
+
+	a := newRunLogLiveAssembler(0, 1)
+	a.attr = newRunLogStageAttributor(nil)
+	if got := mustFeed(t, a, runLiveLogChunk{Offset: 0, Len: int64(len(raw)), Data: raw}); len(got) != 1 {
+		t.Fatalf("lines = %+v, want one terminated line", got)
+	}
+	line, ok := a.flushPartial()
+	if !ok {
+		t.Fatal("flushPartial ok = false, want the unterminated line")
+	}
+	if line.StageID != "18" {
+		t.Fatalf("StageID = %q, want 18", line.StageID)
+	}
+}
+
+// TestRunLogLiveAssembler_FlushPartialKeepsChunkStage proves an
+// unterminated final line keeps the stage of the chunk that started it.
+func TestRunLogLiveAssembler_FlushPartialKeepsChunkStage(t *testing.T) {
+	a := newRunLogLiveAssembler(0, 1)
+	mustFeed(t, a, runLiveLogChunk{NodeID: "n1", StageID: "s9", Offset: 0, Len: 4, Data: []byte("tail")})
+	line, ok := a.flushPartial()
+	if !ok || line.StageID != "s9" || line.NodeID != "n1" || line.Text != "tail" {
+		t.Fatalf("flushPartial = %+v, %v; want stage s9 node n1 text tail", line, ok)
+	}
+}
