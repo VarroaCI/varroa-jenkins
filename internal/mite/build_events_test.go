@@ -1629,11 +1629,11 @@ func TestBuildPayloadGroup_PublishesQualityForWarningsAlone(t *testing.T) {
 }
 
 func TestQualityPayload_ReferenceRule(t *testing.T) {
-	without := warningsEntries([]*mitev1.BuildWarningsReport{{Id: "w", NewTotal: 5, FixedTotal: 6}})
+	without, _ := warningsEntries([]*mitev1.BuildWarningsReport{{Id: "w", NewTotal: 5, FixedTotal: 6}}, 0)
 	if without[0].NewTotal != nil || without[0].FixedTotal != nil {
 		t.Fatalf("new/fixed set without a reference: %+v", without[0])
 	}
-	with := warningsEntries([]*mitev1.BuildWarningsReport{{Id: "w", HasReference: true}})
+	with, _ := warningsEntries([]*mitev1.BuildWarningsReport{{Id: "w", HasReference: true}}, 0)
 	if with[0].NewTotal == nil || with[0].FixedTotal == nil || *with[0].NewTotal != 0 || *with[0].FixedTotal != 0 {
 		t.Fatalf("zero new/fixed with a reference = %+v, want pointers to 0", with[0])
 	}
@@ -1657,6 +1657,9 @@ func TestQualityPayload_MapsCoverageCounters(t *testing.T) {
 		}},
 	}
 	p := qualityPayload(evt)
+	if p["coverage_dropped"] != 0 || p["warnings_dropped"] != 0 {
+		t.Fatalf("dropped counts = %v / %v, want 0 / 0", p["coverage_dropped"], p["warnings_dropped"])
+	}
 	cov := p["coverage"].([]coverageReportEntry)
 	if len(cov) != 2 {
 		t.Fatalf("coverage len = %d, want 2", len(cov))
@@ -1704,9 +1707,17 @@ func TestQualityPayload_ClampsBounds(t *testing.T) {
 		}
 		reports = append(reports, r)
 	}
-	cov := coverageEntries(reports)
+	cov, covDropped := coverageEntries(reports, 0)
 	if len(cov) != qualityReportLimit {
 		t.Fatalf("coverage len = %d, want %d", len(cov), qualityReportLimit)
+	}
+	// Twenty-five reports are non-nil: twenty are kept, five are dropped.
+	if covDropped != 5 {
+		t.Fatalf("coverage dropped = %d, want 5", covDropped)
+	}
+	// Twenty metrics are sent: sixteen are kept, four are dropped.
+	if cov[0].MetricsDropped != 4 {
+		t.Fatalf("metrics dropped = %d, want 4", cov[0].MetricsDropped)
 	}
 	if len([]rune(cov[0].ID)) != qualityTextLimit || len([]rune(cov[0].Name)) != qualityTextLimit {
 		t.Fatalf("id/name runes = %d/%d, want %d", len([]rune(cov[0].ID)), len([]rune(cov[0].Name)), qualityTextLimit)
@@ -1718,8 +1729,68 @@ func TestQualityPayload_ClampsBounds(t *testing.T) {
 		t.Fatalf("metric runes = %d, want %d", len([]rune(cov[0].Metrics[0].Metric)), qualityTextLimit)
 	}
 
-	warn := warningsEntries([]*mitev1.BuildWarningsReport{nil, {Id: long}})
+	warn, warnDropped := warningsEntries([]*mitev1.BuildWarningsReport{nil, {Id: long}}, 0)
 	if len(warn) != 1 || len([]rune(warn[0].ID)) != qualityTextLimit {
 		t.Fatalf("warnings = %+v, want one entry with a clamped id", warn)
+	}
+	if warnDropped != 0 {
+		t.Fatalf("warnings dropped = %d, want 0", warnDropped)
+	}
+}
+
+func TestQualityPayload_AddsPluginDroppedCounts(t *testing.T) {
+	// The plugin sent 7 reports and counted none past its own bound.
+	// The gateway keeps all of them, so the count is the plugin's 7.
+	few := make([]*mitev1.BuildCoverageReport, 7)
+	for i := range few {
+		few[i] = &mitev1.BuildCoverageReport{Id: fmt.Sprintf("c%d", i)}
+	}
+	if _, dropped := coverageEntries(few, 7); dropped != 7 {
+		t.Fatalf("plugin 7 and no overflow: dropped = %d, want 7", dropped)
+	}
+
+	// The plugin sent 25 reports and counted 2 more, so it sent 20 of
+	// its 22 reports. Two reports are past the gateway bound: 2 + 3 = 5.
+	many := make([]*mitev1.BuildCoverageReport, 23)
+	for i := range many {
+		many[i] = &mitev1.BuildCoverageReport{Id: fmt.Sprintf("c%d", i)}
+	}
+	cov, dropped := coverageEntries(many, 2)
+	if len(cov) != qualityReportLimit || dropped != 5 {
+		t.Fatalf("plugin 2 plus 3 overflow: kept %d dropped %d, want %d and 5", len(cov), dropped, qualityReportLimit)
+	}
+
+	warnMany := make([]*mitev1.BuildWarningsReport, 23)
+	for i := range warnMany {
+		warnMany[i] = &mitev1.BuildWarningsReport{Id: fmt.Sprintf("w%d", i)}
+	}
+	_, warnDropped := warningsEntries(warnMany, 2)
+	if warnDropped != 5 {
+		t.Fatalf("warnings plugin 2 plus 3 overflow: dropped = %d, want 5", warnDropped)
+	}
+
+	// The plugin counted 6 metrics past its bound and sent none past ours.
+	r := &mitev1.BuildCoverageReport{Id: "jacoco", MetricsDropped: 6}
+	entries, _ := coverageEntries([]*mitev1.BuildCoverageReport{r}, 0)
+	if entries[0].MetricsDropped != 6 {
+		t.Fatalf("metrics dropped = %d, want 6", entries[0].MetricsDropped)
+	}
+}
+
+func TestQualityPayload_NegativeDroppedCountsReadZero(t *testing.T) {
+	cov, dropped := coverageEntries(nil, -4)
+	if dropped != 0 || cov == nil {
+		t.Fatalf("coverage: dropped = %d, nil = %v, want 0 and a non-nil slice", dropped, cov == nil)
+	}
+	_, warnDropped := warningsEntries(nil, -4)
+	if warnDropped != 0 {
+		t.Fatalf("warnings dropped = %d, want 0", warnDropped)
+	}
+	p := qualityPayload(&mitev1.BuildEvent{
+		CoverageReportsDropped: -1,
+		WarningsReportsDropped: -1,
+	})
+	if p["coverage_dropped"] != 0 || p["warnings_dropped"] != 0 {
+		t.Fatalf("payload dropped counts = %v / %v, want 0 / 0", p["coverage_dropped"], p["warnings_dropped"])
 	}
 }

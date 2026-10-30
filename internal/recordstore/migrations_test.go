@@ -53,6 +53,7 @@ func TestMigrationsFSListsEveryFile(t *testing.T) {
 		"00040_team_agent_spend.sql":                       false,
 		"00041_rename_team_to_tenant.sql":                  false,
 		"00042_run_quality.sql":                            false,
+		"00043_run_quality_dropped.sql":                    false,
 	}
 	for _, entry := range entries {
 		if _, ok := want[entry.Name()]; !ok {

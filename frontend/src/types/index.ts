@@ -1696,6 +1696,8 @@ export interface CoverageReport {
   gateStatus?: string;
   /** Absent when no earlier run of the job has the same report. */
   delta?: CoverageDelta;
+  /** The metrics of this report that Varroa did not keep. Absent when none. */
+  metricsDropped?: number;
 }
 
 /** A warnings report compared with the newest earlier run of the same job
@@ -1727,6 +1729,10 @@ export interface WarningsReport {
 export interface RunQuality {
   coverage?: CoverageReport[];
   warnings?: WarningsReport[];
+  /** The coverage reports that Varroa did not keep. Absent when none. */
+  coverageDropped?: number;
+  /** The warnings reports that Varroa did not keep. Absent when none. */
+  warningsDropped?: number;
 }
 
 /** One run of a coverage trend series. */

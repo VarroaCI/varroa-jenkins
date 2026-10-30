@@ -7916,6 +7916,10 @@ CoverageReport:
       additionalProperties: {$ref: '#/QualityCounter'}
     gateStatus: {type: string}
     delta: {$ref: '#/CoverageDelta'}
+    metricsDropped:
+      type: integer
+      format: int32
+      description: Absent when Varroa kept every metric of the report.
   additionalProperties: false
 
 WarningsDelta:
@@ -7969,6 +7973,18 @@ RunQuality:
       type: array
       maxItems: 20
       items: {$ref: '#/WarningsReport'}
+    coverageDropped:
+      type: integer
+      format: int32
+      description: >
+        The coverage reports of the run that Varroa did not keep. Absent
+        when Varroa kept every report.
+    warningsDropped:
+      type: integer
+      format: int32
+      description: >
+        The warnings reports of the run that Varroa did not keep. Absent
+        when Varroa kept every report.
   additionalProperties: false
 
 CoverageTrendPoint:

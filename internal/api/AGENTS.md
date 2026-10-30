@@ -505,7 +505,9 @@ federation, activity persistence, and SSE fanout.
   response field. `runDetailJSON` (`handlers_runs.go`) and `RunDetail`
   (`pipelines_service.go`) must carry the same JSON tags, because
   `convertJSON` matches them by tag. Both carry `quality`. `run_quality.go` maps
-  the rows and computes every percent and delta. A failed quality read logs a
+  the rows and computes every percent and delta. It sets `coverageDropped` and
+  `warningsDropped` (the stored count plus any rows past the cap of 20) and
+  `metricsDropped` per coverage report. Each is `omitempty`. A failed quality read logs a
   warning and leaves the field out. `qualityTrend` (job detail and
   `JobHealthResult`) reads the run ids of `summary.RecentRuns`.
   The run detail and the run summary carry `scmUrl`, `scmForge`, and `triggerSource`, read from `runs.payload`

@@ -279,6 +279,102 @@ func TestApplyRunQualityDedupesReportIDs(t *testing.T) {
 	}
 }
 
+// TestApplyRunQualityStoresDroppedCounts asserts that the plugin's and the
+// gateway's dropped counts land on the rows. The report count is copied to
+// every coverage row and to the warnings row. The metrics count is per row.
+func TestApplyRunQualityStoresDroppedCounts(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:quality-dropped-1")
+	g := NewIngester(pool, nil, nil)
+
+	env := newTestEnvelope(t, runID, "manual:quality-dropped-1", KindRunQuality, RunQualityPayload{
+		Coverage: []RunCoveragePayload{
+			{ID: "jacoco", Name: "Coverage", MetricsDropped: 4},
+			{ID: "cobertura", Name: "Cobertura"},
+		},
+		Warnings:        []RunWarningsPayload{{ID: "checkstyle", Total: 3}},
+		CoverageDropped: 5,
+		WarningsDropped: 2,
+	})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply run.quality with dropped counts: %v", err)
+	}
+
+	rows, err := db.Query(`SELECT report_id, reports_dropped, metrics_dropped FROM varroa.run_coverage
+		WHERE run_id = $1 ORDER BY report_id`, runID)
+	if err != nil {
+		t.Fatalf("read run_coverage: %v", err)
+	}
+	defer rows.Close()
+	got := map[string][2]int{}
+	for rows.Next() {
+		var id string
+		var reports, metrics int
+		if err := rows.Scan(&id, &reports, &metrics); err != nil {
+			t.Fatalf("scan run_coverage: %v", err)
+		}
+		got[id] = [2]int{reports, metrics}
+	}
+	if got["jacoco"] != [2]int{5, 4} || got["cobertura"] != [2]int{5, 0} {
+		t.Fatalf("run_coverage (reports, metrics) = %v, want jacoco 5/4 and cobertura 5/0", got)
+	}
+
+	var warnDropped int
+	if err := db.QueryRow(`SELECT reports_dropped FROM varroa.run_warnings WHERE run_id = $1`,
+		runID).Scan(&warnDropped); err != nil {
+		t.Fatalf("read run_warnings: %v", err)
+	}
+	if warnDropped != 2 {
+		t.Fatalf("run_warnings reports_dropped = %d, want 2", warnDropped)
+	}
+}
+
+// TestApplyRunQualityCountsDedupedReports asserts that a report the dedupe
+// removes counts as dropped, on top of the count the payload sends. A
+// negative payload count stores as zero.
+func TestApplyRunQualityCountsDedupedReports(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:quality-dedupe-count-1")
+	g := NewIngester(pool, nil, nil)
+
+	env := newTestEnvelope(t, runID, "manual:quality-dedupe-count-1", KindRunQuality, RunQualityPayload{
+		Coverage: []RunCoveragePayload{
+			{ID: "", Name: "no id"},
+			{ID: "jacoco", Name: "first"},
+			{ID: "jacoco", Name: "second"},
+		},
+		Warnings: []RunWarningsPayload{
+			{ID: "checkstyle", Total: 1},
+			{ID: "checkstyle", Total: 2},
+		},
+		CoverageDropped: -4,
+		WarningsDropped: -1,
+	})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply run.quality with deduped reports: %v", err)
+	}
+
+	var coverageDropped, warnDropped int
+	if err := db.QueryRow(`SELECT reports_dropped FROM varroa.run_coverage WHERE run_id = $1`,
+		runID).Scan(&coverageDropped); err != nil {
+		t.Fatalf("read run_coverage: %v", err)
+	}
+	if coverageDropped != 2 {
+		t.Fatalf("coverage reports_dropped = %d, want 2 (the empty id and the duplicate)", coverageDropped)
+	}
+	if err := db.QueryRow(`SELECT reports_dropped FROM varroa.run_warnings WHERE run_id = $1`,
+		runID).Scan(&warnDropped); err != nil {
+		t.Fatalf("read run_warnings: %v", err)
+	}
+	if warnDropped != 1 {
+		t.Fatalf("warnings reports_dropped = %d, want 1 (the duplicate alone)", warnDropped)
+	}
+}
+
 // TestApplyRunQualityMalformedPayload asserts that a payload of the wrong
 // shape is refused as a malformed envelope.
 func TestApplyRunQualityMalformedPayload(t *testing.T) {

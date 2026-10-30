@@ -7568,6 +7568,10 @@ components:
             $ref: '#/components/schemas/components_schemas_QualityCounter'
           description: The named counters of the report, keyed by metric name.
           type: object
+        metricsDropped:
+          description: Absent when Varroa kept every metric of the report.
+          format: int32
+          type: integer
         modifiedLines:
           $ref: '#/components/schemas/components_schemas_QualityCounter'
         name:
@@ -10867,11 +10871,21 @@ components:
             $ref: '#/components/schemas/components_schemas_CoverageReport'
           maxItems: 20
           type: array
+        coverageDropped:
+          description: |
+            The coverage reports of the run that Varroa did not keep. Absent when Varroa kept every report.
+          format: int32
+          type: integer
         warnings:
           items:
             $ref: '#/components/schemas/components_schemas_WarningsReport'
           maxItems: 20
           type: array
+        warningsDropped:
+          description: |
+            The warnings reports of the run that Varroa did not keep. Absent when Varroa kept every report.
+          format: int32
+          type: integer
       type: object
     components_schemas_RunRestart:
       additionalProperties: false

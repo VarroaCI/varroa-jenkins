@@ -207,4 +207,35 @@ public class BuildEventJsonTest {
         assertEquals("checkstyle", copy.getWarningsReports().get(0).getId());
     }
 
+
+    @Test
+    public void droppedCountsWriteKeysOnlyWhenPositive() {
+        JSONObject none = BuildEvent.builder().phase(BuildEvent.PHASE_COMPLETED).build().toJson();
+        assertFalse(none.has("coverage_reports_dropped"));
+        assertFalse(none.has("warnings_reports_dropped"));
+
+        BuildEvent event = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_COMPLETED)
+                .coverageReportsDropped(5)
+                .warningsReportsDropped(2)
+                .build();
+        JSONObject o = event.toJson();
+        assertEquals(5, o.getInt("coverage_reports_dropped"));
+        assertEquals(2, o.getInt("warnings_reports_dropped"));
+
+        BuildEvent copy = event.toBuilder().build();
+        assertEquals(5, copy.getCoverageReportsDropped());
+        assertEquals(2, copy.getWarningsReportsDropped());
+
+        BuildEvent negative = BuildEvent.builder().coverageReportsDropped(-3).build();
+        assertEquals(0, negative.getCoverageReportsDropped());
+    }
+
+    @Test
+    public void metricsDroppedWritesKeyOnlyWhenPositive() {
+        assertFalse(BuildCoverageReport.builder().id("jacoco").build().toJson().has("metrics_dropped"));
+        JSONObject o = BuildCoverageReport.builder().id("jacoco").metricsDropped(4).build().toJson();
+        assertEquals(4, o.getInt("metrics_dropped"));
+    }
+
 }

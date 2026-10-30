@@ -49,3 +49,9 @@
 .gateOther {
   color: var(--text-2);
 }
+
+.note {
+  margin: 0.5rem 0 0;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}

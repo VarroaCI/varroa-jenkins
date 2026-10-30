@@ -2626,6 +2626,9 @@ type ComponentsSchemasCoverageReport struct {
 	// Metrics The named counters of the report, keyed by metric name.
 	Metrics *map[string]ComponentsSchemasQualityCounter `json:"metrics,omitempty"`
 
+	// MetricsDropped Absent when Varroa kept every metric of the report.
+	MetricsDropped *int32 `json:"metricsDropped,omitempty"`
+
 	// ModifiedLines One covered and total count of a coverage report.
 	ModifiedLines *ComponentsSchemasQualityCounter `json:"modifiedLines,omitempty"`
 	Name          string                           `json:"name"`
@@ -4467,7 +4470,13 @@ type ComponentsSchemasRunNoteList struct {
 // ComponentsSchemasRunQuality A run's quality summaries. Each list is ordered by report id. A report carries a delta against the newest earlier run of the same job with the same report id.
 type ComponentsSchemasRunQuality struct {
 	Coverage *[]ComponentsSchemasCoverageReport `json:"coverage,omitempty"`
-	Warnings *[]ComponentsSchemasWarningsReport `json:"warnings,omitempty"`
+
+	// CoverageDropped The coverage reports of the run that Varroa did not keep. Absent when Varroa kept every report.
+	CoverageDropped *int32                             `json:"coverageDropped,omitempty"`
+	Warnings        *[]ComponentsSchemasWarningsReport `json:"warnings,omitempty"`
+
+	// WarningsDropped The warnings reports of the run that Varroa did not keep. Absent when Varroa kept every report.
+	WarningsDropped *int32 `json:"warningsDropped,omitempty"`
 }
 
 // ComponentsSchemasRunRestart GET /runs/{run}/restart. Whether a completed declarative run restarts from a stage. The stages list is always present, and it is empty when the run does not restart.

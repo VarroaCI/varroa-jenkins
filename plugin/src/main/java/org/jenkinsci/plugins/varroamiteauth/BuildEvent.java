@@ -70,6 +70,10 @@ import java.util.Map;
  * 20 of each kind. Only the {@code COMPLETED} event carries them.
  * {@link #toJson()} writes no key for an empty list.
  *
+ * <p>Fields 62 and 63, {@code coverage_reports_dropped} and {@code
+ * warnings_reports_dropped}, count the reports of each kind the plugin did
+ * not send past the bound. {@link #toJson()} writes no key for zero.
+ *
  * <p>Field 56, {@code change_request}, names the change request a
  * multibranch pull-request run builds. Only the {@code STARTED} event
  * carries it. {@link #toJson()} writes no key for a null value or an
@@ -149,6 +153,8 @@ public final class BuildEvent implements PostableEvent {
     private final String rejectedSignature;
     private final List<BuildCoverageReport> coverageReports;
     private final List<BuildWarningsReport> warningsReports;
+    private final int coverageReportsDropped;
+    private final int warningsReportsDropped;
 
     private BuildEvent(Builder b) {
         this.phase = orEmpty(b.phase);
@@ -212,6 +218,8 @@ public final class BuildEvent implements PostableEvent {
         this.rejectedSignature = orEmpty(b.rejectedSignature);
         this.coverageReports = List.copyOf(b.coverageReports);
         this.warningsReports = List.copyOf(b.warningsReports);
+        this.coverageReportsDropped = b.coverageReportsDropped;
+        this.warningsReportsDropped = b.warningsReportsDropped;
     }
 
     private static String orEmpty(String s) {
@@ -472,6 +480,16 @@ public final class BuildEvent implements PostableEvent {
         return warningsReports;
     }
 
+    /** Field 62: the coverage reports past the bound that the plugin did not send. */
+    public int getCoverageReportsDropped() {
+        return coverageReportsDropped;
+    }
+
+    /** Field 63: the warnings reports past the bound that the plugin did not send. */
+    public int getWarningsReportsDropped() {
+        return warningsReportsDropped;
+    }
+
     /** Field 51: the grant the run applied. Zero for a run with no grant. */
     public long getGrantedBuildNumber() {
         return grantedBuildNumber;
@@ -646,6 +664,12 @@ public final class BuildEvent implements PostableEvent {
             }
             o.put("warnings_reports", arr);
         }
+        if (coverageReportsDropped > 0) {
+            o.put("coverage_reports_dropped", coverageReportsDropped);
+        }
+        if (warningsReportsDropped > 0) {
+            o.put("warnings_reports_dropped", warningsReportsDropped);
+        }
         return o;
     }
 
@@ -724,7 +748,9 @@ public final class BuildEvent implements PostableEvent {
                 .changeRequest(changeRequest)
                 .rejectedSignature(rejectedSignature)
                 .coverageReports(coverageReports)
-                .warningsReports(warningsReports);
+                .warningsReports(warningsReports)
+                .coverageReportsDropped(coverageReportsDropped)
+                .warningsReportsDropped(warningsReportsDropped);
     }
 
     /**
@@ -848,6 +874,8 @@ public final class BuildEvent implements PostableEvent {
         private String rejectedSignature;
         private List<BuildCoverageReport> coverageReports = new ArrayList<>();
         private List<BuildWarningsReport> warningsReports = new ArrayList<>();
+        private int coverageReportsDropped;
+        private int warningsReportsDropped;
 
         private Builder() {
         }
@@ -1151,6 +1179,18 @@ public final class BuildEvent implements PostableEvent {
         /** Field 61: the warnings summary rows. A null list becomes an empty list. */
         public Builder warningsReports(List<BuildWarningsReport> v) {
             this.warningsReports = v != null ? new ArrayList<>(v) : new ArrayList<>();
+            return this;
+        }
+
+        /** Field 62: the coverage reports past the bound. A negative value becomes zero. */
+        public Builder coverageReportsDropped(int v) {
+            this.coverageReportsDropped = Math.max(0, v);
+            return this;
+        }
+
+        /** Field 63: the warnings reports past the bound. A negative value becomes zero. */
+        public Builder warningsReportsDropped(int v) {
+            this.warningsReportsDropped = Math.max(0, v);
             return this;
         }
 

@@ -249,6 +249,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   coverage or warnings report of a completed run. Each row holds summary
   numbers, copies its scope from the intent, and takes `created_at` from the
   run. Neither table has a foreign key to `runs` or partitioning.
+  `00043_run_quality_dropped.sql` adds the dropped counts: `run_coverage.reports_dropped`
+  and `metrics_dropped`, and `run_warnings.reports_dropped`. Each defaults to zero.
   `00017_run_test_cases.sql` adds the build-record table `run_test_cases`,
   one row per reported failed or skipped case, keyed
   `(run_id, suite, class_name, name)`. It carries `cluster`, `tenant`, and
@@ -864,7 +866,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   in one transaction. An absent key keeps them, and an empty list clears
   them. Each row copies its scope and `created_at` from the intent. The
   reports pass `dedupeCoverage` and `dedupeWarnings`, which drop an empty id
-  and keep the first of each id. The write never touches `runs`.
+  and keep the first of each id. Each table's `reports_dropped` is the payload's
+  `coverage_dropped` or `warnings_dropped` plus the reports the dedupe removed.
+  Each coverage row also stores its `metrics_dropped`. The write never touches `runs`.
   `test_report.blob_key` reaches `runs.test_report_key` only when it is
   not empty, and the size and the case count merge into `runs.payload`
   under `test_report`. The merge wraps `runs.payload` in `COALESCE`,
@@ -1534,7 +1538,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   the same cluster, tenant, job path, and report id, with `LEFT JOIN LATERAL`
   over `*_job_idx`, and joins `runs` on its primary key for the base build
   number. `JobQualityTrend` reads by `run_id = ANY(...)` under the primary key
-  and keeps the scope as filters. It carries no base.
+  and keeps the scope as filters. It carries no base. `RunQuality` answers
+  `CoverageDropped` and `WarningsDropped`, the largest stored `reports_dropped`
+  of the run's rows, and each `RunCoverage` carries its `MetricsDropped`. The
+  trend read carries no dropped counts.
 
   **`ReleaseGoneInstanceAgents`** (`instance_agents.go`) runs in the backstop
   round after the sweep. It publishes one `release_instance_agents` action for

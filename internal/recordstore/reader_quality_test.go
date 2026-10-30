@@ -164,6 +164,51 @@ func TestRunQualityNoRowsAnswersEmpty(t *testing.T) {
 	if len(q.Coverage) != 0 || len(q.Warnings) != 0 {
 		t.Fatalf("RunQuality = %+v, want empty", q)
 	}
+	if q.CoverageDropped != 0 || q.WarningsDropped != 0 {
+		t.Fatalf("dropped = %d/%d, want 0/0", q.CoverageDropped, q.WarningsDropped)
+	}
+}
+
+// TestRunQualityAnswersDroppedCounts checks that RunQuality answers the
+// stored dropped counts. The report count is the largest of the rows, and
+// the metrics count is per row.
+func TestRunQualityAnswersDroppedCounts(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	r := NewReader(pool)
+	ts := qualityTestTimes(1)
+	run := uuid.New()
+	qualityTestRun(t, db, run, ts[0], 1)
+	qualityTestCoverage(t, db, run, testJobPath, "jacoco", ts[0], 800)
+	qualityTestCoverage(t, db, run, testJobPath, "cobertura", ts[0], 700)
+	qualityTestWarnings(t, db, run, ts[0], 5)
+	for _, stmt := range []string{
+		`UPDATE varroa.run_coverage SET reports_dropped = 3 WHERE run_id = $1`,
+		`UPDATE varroa.run_coverage SET metrics_dropped = 2 WHERE run_id = $1 AND report_id = 'jacoco'`,
+		`UPDATE varroa.run_warnings SET reports_dropped = 1 WHERE run_id = $1`,
+	} {
+		if _, err := db.Exec(stmt, run); err != nil {
+			t.Fatalf("seed dropped counts: %v", err)
+		}
+	}
+
+	q, err := r.RunQuality(context.Background(), run.String())
+	if err != nil {
+		t.Fatalf("RunQuality: %v", err)
+	}
+	if q.CoverageDropped != 3 || q.WarningsDropped != 1 {
+		t.Fatalf("dropped = %d/%d, want 3/1", q.CoverageDropped, q.WarningsDropped)
+	}
+	for _, c := range q.Coverage {
+		want := int32(0)
+		if c.ReportID == "jacoco" {
+			want = 2
+		}
+		if c.MetricsDropped != want {
+			t.Fatalf("%s metricsDropped = %d, want %d", c.ReportID, c.MetricsDropped, want)
+		}
+	}
 }
 
 // TestJobQualityTrendWindowWithGaps checks that the trend read answers the

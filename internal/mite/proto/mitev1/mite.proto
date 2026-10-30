@@ -608,6 +608,8 @@ message BuildCoverageReport {
   BuildCoverageCounter modified_lines = 5;
   repeated BuildCoverageCounter metrics = 6;
   string gate_status = 7;
+  // The other coverage metrics the plugin did not send past the bound.
+  int32 metrics_dropped = 8;
 }
 
 // BuildWarningsReport holds the summary of one warnings report of a run.
@@ -705,6 +707,10 @@ message BuildEvent {
   // Only a COMPLETED event carries fields 60 and 61.
   repeated BuildCoverageReport coverage_reports = 60;
   repeated BuildWarningsReport warnings_reports = 61;
+  // The reports a COMPLETED event did not send past the bound. Zero when none.
+  int32 coverage_reports_dropped = 62;
+  // The reports a COMPLETED event did not send past the bound. Zero when none.
+  int32 warnings_reports_dropped = 63;
 }
 
 message ClaimRequest {

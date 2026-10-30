@@ -113,4 +113,31 @@ describe("QualityCard", () => {
     expect(screen.getByText("<img src=x onerror=alert(1)>")).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
   });
+
+  it("shows a note when coverage reports were not kept", () => {
+    renderCard({
+      coverage: [{ id: "jacoco", name: "jacoco", line: { covered: 1, total: 2, percent: 50 } }],
+      coverageDropped: 3,
+    });
+    expect(
+      screen.getByText("Jenkins published 3 more coverage reports. Varroa keeps the first 20."),
+    ).toBeInTheDocument();
+  });
+
+  it("uses the singular for one dropped warnings report", () => {
+    renderCard({
+      warnings: [{ id: "checkstyle", name: "checkstyle", total: 4, error: 0, high: 1, normal: 2, low: 1 }],
+      warningsDropped: 1,
+    });
+    expect(
+      screen.getByText("Jenkins published 1 more warnings report. Varroa keeps the first 20."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows no note without a dropped count", () => {
+    renderCard({
+      coverage: [{ id: "jacoco", name: "jacoco", line: { covered: 1, total: 2, percent: 50 } }],
+    });
+    expect(screen.queryByText(/Varroa keeps the first 20/)).toBeNull();
+  });
 });
