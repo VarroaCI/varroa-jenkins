@@ -191,6 +191,7 @@
     top: var(--drawer-top);
     right: 0;
     bottom: 0;
+    align-self: stretch;
     height: auto;
     width: min(400px, 90vw);
     z-index: 40;
@@ -207,6 +208,7 @@
   .drawer {
     position: fixed;
     inset: 0;
+    align-self: stretch;
     width: 100%;
     height: 100dvh;
     z-index: 56;

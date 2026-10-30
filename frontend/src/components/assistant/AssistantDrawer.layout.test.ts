@@ -58,4 +58,9 @@ describe("assistant drawer layout", () => {
     const mid = mediaBody(read("AssistantDrawer.module.css"), "(min-width: 640px) and (max-width: 1023.98px)");
     expect(ruleBody(mid, ".drawer")).toMatch(/position:\s*fixed/);
   });
+
+  it("the mid-width drawer stretches to the window bottom", () => {
+    const mid = mediaBody(read("AssistantDrawer.module.css"), "(min-width: 640px) and (max-width: 1023.98px)");
+    expect(ruleBody(mid, ".drawer")).toMatch(/align-self:\s*stretch/);
+  });
 });
