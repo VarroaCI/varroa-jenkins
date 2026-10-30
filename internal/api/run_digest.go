@@ -21,6 +21,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
@@ -204,6 +205,45 @@ func computeFailedTests(run recordstore.Run, read runTestCaseRead) *digestFailed
 	return out
 }
 
+// agentProvisionedLine matches the header that the Kubernetes plugin
+// prints when it provisions an agent. The pod manifest follows it.
+var agentProvisionedLine = regexp.MustCompile(`^Agent \S+ is provisioned from template \S+`)
+
+// dropAgentPodManifests returns lines without each agent provisioning
+// block. A block is the header line, then a line of three dashes, then
+// the pod manifest through its first empty line. A line that starts with
+// "[Pipeline] " ends a block early, and that line is kept. A header with
+// no dashes line after it drops the header alone.
+func dropAgentPodManifests(lines []runLogLine) []runLogLine {
+	out := make([]runLogLine, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		if !agentProvisionedLine.MatchString(trimCR(lines[i].Text)) {
+			out = append(out, lines[i])
+			continue
+		}
+		if i+1 < len(lines) && trimCR(lines[i+1].Text) == "---" {
+			j := i + 2
+			for j < len(lines) {
+				t := trimCR(lines[j].Text)
+				if strings.HasPrefix(t, "[Pipeline] ") {
+					break
+				}
+				j++
+				if t == "" {
+					break
+				}
+			}
+			i = j - 1
+		}
+	}
+	return out
+}
+
+// trimCR removes one trailing carriage return from a log line.
+func trimCR(s string) string {
+	return strings.TrimSuffix(s, "\r")
+}
+
 // computeLogTail returns the last runDigestTailLines lines of a run's
 // console log, and a flag that reports a hard read failure. The plugin
 // tags each line with the innermost stage that wrote it. The function
@@ -214,7 +254,8 @@ func computeFailedTests(run recordstore.Run, read runTestCaseRead) *digestFailed
 // undecodable index entry are hard failures, so the caller drops the log
 // tail and keeps the rest of the digest. An empty log is not a failure:
 // it answers no tail with the flag clear. The tail carries no ANSI escape
-// sequence, because a client shows it as plain text.
+// sequence, because a client shows it as plain text. The tail leaves out
+// each agent pod manifest that the Kubernetes plugin prints.
 func computeLogTail(ctx context.Context, store blob.Store, runID string, stageIDs map[string]bool) (tail *string, hardFailure bool) {
 	if store == nil {
 		return nil, true
@@ -244,6 +285,7 @@ func computeLogTail(ctx context.Context, store blob.Store, runID string, stageID
 		// no index yet.
 		tailLines = lines
 	}
+	tailLines = dropAgentPodManifests(tailLines)
 	if len(tailLines) == 0 {
 		return nil, false
 	}

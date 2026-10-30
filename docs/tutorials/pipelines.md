@@ -179,7 +179,7 @@ Open the **Log** tab. The log viewer supports:
 
 - A search box, bound to `/`.
 - A **First error** jump to the first line matching `error`, `failed`, `failure`, or
-  `exception`.
+  `exception`. It shows only for a `FAILURE`, `UNSTABLE`, `ABORTED`, or `INTERRUPTED` run.
 - A **Timestamps** toggle.
 - A **Follow** toggle that keeps the view at the newest line. It turns off when you scroll up,
   select a stage, or jump to a line with a permalink, a search, or **First error**. It is off

@@ -648,3 +648,153 @@ func TestComputeRunDigest_InterruptedRunCarriesNoLogTail(t *testing.T) {
 		}
 	})
 }
+
+// TestDropAgentPodManifests proves the helper removes each agent
+// provisioning block and keeps every other line.
+func TestDropAgentPodManifests(t *testing.T) {
+	mk := func(texts ...string) []runLogLine {
+		out := make([]runLogLine, 0, len(texts))
+		for i, tx := range texts {
+			out = append(out, runLogLine{N: int64(i + 1), Text: tx})
+		}
+		return out
+	}
+	texts := func(lines []runLogLine) []string {
+		out := make([]string, 0, len(lines))
+		for _, ln := range lines {
+			out = append(out, ln.Text)
+		}
+		return out
+	}
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "full block with a trailing blank",
+			in:   []string{"Agent p-1 is provisioned from template t", "---", "kind: \"Pod\"", "", "Running on p-1 in /w"},
+			want: []string{"Running on p-1 in /w"},
+		},
+		{
+			name: "header with no dashes line",
+			in:   []string{"Agent p-1 is provisioned from template t", "Running on p-1 in /w"},
+			want: []string{"Running on p-1 in /w"},
+		},
+		{
+			name: "block with no blank line ends at a pipeline line",
+			in:   []string{"Agent p-1 is provisioned from template t", "---", "kind: \"Pod\"", "[Pipeline] }"},
+			want: []string{"[Pipeline] }"},
+		},
+		{
+			name: "two blocks with CR line endings",
+			in: []string{"Agent p-1 is provisioned from template t\r", "---\r", "a: 1\r", "\r",
+				"Agent p-2 is provisioned from template t\r", "---\r", "b: 2\r", "\r", "ERROR: x"},
+			want: []string{"ERROR: x"},
+		},
+		{
+			name: "no block is unchanged",
+			in:   []string{"[Pipeline] {", "ERROR: x"},
+			want: []string{"[Pipeline] {", "ERROR: x"},
+		},
+		{
+			name: "dashes that do not follow a header are kept",
+			in:   []string{"Build step", "---", "kind: \"Pod\""},
+			want: []string{"Build step", "---", "kind: \"Pod\""},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := texts(dropAgentPodManifests(mk(tc.in...)))
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// agentManifestLines is a fail2-shaped log: an agent block between the
+// step lines, and the failure line at the end.
+var agentManifestLines = [][2]string{
+	{"", "[Pipeline] { (boom)"},
+	{"", "Agent p-1 is provisioned from template t"},
+	{"", "---"},
+	{"", "apiVersion: \"v1\""},
+	{"", "kind: \"Pod\""},
+	{"", "    - name: \"JENKINS_SECRET\""},
+	{"", ""},
+	{"", "Running on a-1 in /w"},
+	{"", "ERROR: boom"},
+}
+
+// TestComputeRunDigest_LogTailDropsTheAgentPodManifest proves the
+// whole-log fallback keeps no YAML line of an agent block.
+func TestComputeRunDigest_LogTailDropsTheAgentPodManifest(t *testing.T) {
+	store := newRunLogTestStore(t)
+	runID := "run-digest-manifest"
+	digestLog(t, store, runID, agentManifestLines)
+
+	run := newDigestRun(runID, "FAILURE")
+	stages := []recordstore.Stage{{RunID: runID, StageID: "boom", Name: "boom", Status: "FAILURE"}}
+	got := computeRunDigest(context.Background(), store, run, stages, runTestCaseRead{})
+	want := "[Pipeline] { (boom)\nRunning on a-1 in /w\nERROR: boom"
+	if got == nil {
+		t.Fatal("digest is absent, want a log tail")
+	}
+	if got.LogTail != want {
+		t.Fatalf("logTail = %q, want %q", got.LogTail, want)
+	}
+}
+
+// TestComputeRunDigest_LogTailCapsAfterTheManifestDrop proves the
+// fifty-line cap counts useful lines, not manifest lines.
+func TestComputeRunDigest_LogTailCapsAfterTheManifestDrop(t *testing.T) {
+	store := newRunLogTestStore(t)
+	runID := "run-digest-manifest-cap"
+	var lines [][2]string
+	for i := 1; i <= 30; i++ {
+		lines = append(lines, [2]string{"", fmt.Sprintf("early%02d", i)})
+	}
+	lines = append(lines, [2]string{"", "Agent p-1 is provisioned from template t"}, [2]string{"", "---"})
+	for i := 1; i <= 40; i++ {
+		lines = append(lines, [2]string{"", fmt.Sprintf("  yaml%02d: x", i)})
+	}
+	lines = append(lines, [2]string{"", ""})
+	for i := 1; i <= 60; i++ {
+		lines = append(lines, [2]string{"", fmt.Sprintf("line%02d", i)})
+	}
+	digestLog(t, store, runID, lines)
+
+	run := newDigestRun(runID, "FAILURE")
+	stages := []recordstore.Stage{{RunID: runID, StageID: "s1", Name: "Build", Status: "FAILURE"}}
+	got := computeRunDigest(context.Background(), store, run, stages, runTestCaseRead{})
+
+	var want []string
+	for i := 11; i <= 60; i++ {
+		want = append(want, fmt.Sprintf("line%02d", i))
+	}
+	if got.LogTail != strings.Join(want, "\n") {
+		t.Fatalf("logTail = %q, want the last fifty useful lines", got.LogTail)
+	}
+	if strings.Contains(got.LogTail, "yaml") {
+		t.Fatalf("logTail carries manifest lines: %q", got.LogTail)
+	}
+}
+
+// TestComputeRunDigest_UnstableRunTailDropsTheManifest proves an
+// UNSTABLE run with no failed stage keeps no YAML in its log tail.
+func TestComputeRunDigest_UnstableRunTailDropsTheManifest(t *testing.T) {
+	store := newRunLogTestStore(t)
+	runID := "run-digest-unstable-manifest"
+	digestLog(t, store, runID, agentManifestLines)
+
+	run := newDigestRun(runID, "UNSTABLE")
+	stages := []recordstore.Stage{{RunID: runID, StageID: "boom", Name: "boom", Status: "SUCCESS"}}
+	got := computeRunDigest(context.Background(), store, run, stages, runTestCaseRead{})
+	if got == nil || got.LogTail == "" {
+		t.Fatalf("digest = %+v, want a log tail", got)
+	}
+	if strings.Contains(got.LogTail, "apiVersion") || strings.Contains(got.LogTail, "JENKINS_SECRET") {
+		t.Fatalf("logTail carries manifest lines: %q", got.LogTail)
+	}
+}

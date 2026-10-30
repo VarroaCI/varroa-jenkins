@@ -305,7 +305,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   that flag false, after the `meta` frame and before the `end` frame. The
   stream sends `end` on its first poll tick, so the flag keeps a finished log
   from showing the notice. A `#L<n>` fragment in the URL also scrolls the page
-  to center the viewer; a search jump and the first-error jump do not. Follow is
+  to center the viewer; a search jump and the first-error jump do not. `BuildPage.tsx` passes `run.result` as `runResult`, and the first-error control shows only for a failing result. Follow is
   off and disabled once `runTerminal` is true and the log is finalized or the `end`
   frame arrived (`logDone` in `RunLogViewer.tsx`). The
   viewer derives each stage header from the `stageId` of the lines, not from

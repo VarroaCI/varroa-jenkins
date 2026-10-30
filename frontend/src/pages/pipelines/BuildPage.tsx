@@ -917,6 +917,7 @@ export default function BuildPage() {
           runTerminal={isTerminal(run)}
           logFinalized={run.logFinalized === true}
           stages={run.stages ?? EMPTY_STAGES}
+          runResult={run.result}
         />
       )}
 

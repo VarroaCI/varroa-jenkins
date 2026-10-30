@@ -57,7 +57,16 @@ export interface RunLogViewerProps {
    * with no lines of its own to its descendants.
    */
   stages?: readonly RunStage[];
+  /**
+   * The run's result, such as FAILURE or SUCCESS. Empty while the run has
+   * no result. The viewer shows the first-error control only for a failing
+   * result.
+   */
+  runResult?: string;
 }
+
+/** The results for which the viewer shows the first-error control. */
+const FIRST_ERROR_RESULTS = new Set(["FAILURE", "UNSTABLE", "ABORTED", "INTERRUPTED"]);
 
 /** Commands the build page issues into the viewer: keyboard shortcuts and graph selection. */
 export interface RunLogViewerHandle {
@@ -93,6 +102,7 @@ export function RunLogViewer({
   runTerminal,
   logFinalized,
   stages = NO_STAGES,
+  runResult,
   ref,
 }: RunLogViewerProps & { ref?: Ref<RunLogViewerHandle> }) {
   const [body, setBody] = useState<BodyRow[]>([]);
@@ -312,7 +322,7 @@ export function RunLogViewer({
             }}
           />
         </div>
-        {!!meta?.firstErrorLine && (
+        {!!meta?.firstErrorLine && !!runResult && FIRST_ERROR_RESULTS.has(runResult) && (
           <button type="button" className={styles.errorJump} onClick={() => jumpToLine(meta.firstErrorLine!)}>
             First error · line {meta.firstErrorLine}
           </button>

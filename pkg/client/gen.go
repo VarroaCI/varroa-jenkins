@@ -4224,7 +4224,7 @@ type ComponentsSchemasRunDetail struct {
 			Total   *int `json:"total,omitempty"`
 		} `json:"failedTests,omitempty"`
 
-		// LogTail The last 50 console log lines that carry the attribution of the failed stage or of a stage nested under it. The field falls back to the last 50 lines of the whole log when no log-index entry names one of those stages. The lines carry no ANSI escape sequence. It is absent when the server holds no blob store and when a log-index entry fails to decode. Absent for an INTERRUPTED run.
+		// LogTail The last 50 console log lines that carry the attribution of the failed stage or of a stage nested under it. The field falls back to the last 50 lines of the whole log when no log-index entry names one of those stages. The lines carry no ANSI escape sequence. It is absent when the server holds no blob store and when a log-index entry fails to decode. Absent for an INTERRUPTED run. The tail leaves out the pod manifest that the Kubernetes plugin prints when it provisions an agent.
 		LogTail *string `json:"logTail,omitempty"`
 
 		// Stage The name of the innermost stage whose status is FAILURE, in stage-start order. A stage or a parallel branch that holds a failed stage is never the answer. A parallel branch shows its branch name. Absent when no stage failed.
