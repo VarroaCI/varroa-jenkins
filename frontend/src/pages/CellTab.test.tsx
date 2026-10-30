@@ -451,3 +451,12 @@ describe("Script approvals panel", () => {
     expect(screen.getByText("acme / acme/build #4")).toBeInTheDocument();
   });
 });
+
+describe("Wide table scroll wrapper", () => {
+  it("wraps every table in the scroll wrapper", () => {
+    const { container } = renderTab();
+    const tables = container.querySelectorAll("table");
+    expect(tables.length).toBeGreaterThan(0);
+    tables.forEach((t) => expect(t.parentElement?.className).toMatch(/tableScroll/));
+  });
+});

@@ -158,14 +158,18 @@
   font-size: 13.5px;
 }
 
+.itemBody { flex: 1; min-width: 0; }
+
 .itemMeta {
   font-size: 11px;
   color: var(--text-2);
   margin-top: 2px;
   font-family: var(--mono);
+  overflow-wrap: anywhere;
 }
 
 .itemMissingBadge {
+  flex: none;
   font-size: 10.5px;
   padding: 2px 8px;
   border-radius: 5px;
@@ -176,6 +180,7 @@
 }
 
 .itemDriftedBadge {
+  flex: none;
   font-size: 10.5px;
   padding: 2px 8px;
   border-radius: 5px;
@@ -186,6 +191,7 @@
 }
 
 .statusBadge {
+  flex: none;
   padding: 2px 8px;
   border-radius: 5px;
   background: var(--ok-soft);

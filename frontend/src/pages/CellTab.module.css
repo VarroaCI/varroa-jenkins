@@ -68,11 +68,18 @@
   color: var(--text-2);
 }
 
+.tableScroll { composes: tableScroll from "./tables.module.css"; }
+
 .table {
   width: 100%;
+  min-width: 560px;
   border-collapse: collapse;
   font-size: 12.5px;
 }
+
+.wideTable { composes: table; min-width: 880px; }
+
+.nowrap { white-space: nowrap; }
 
 .table th {
   text-align: left;

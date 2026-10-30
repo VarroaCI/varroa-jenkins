@@ -168,33 +168,35 @@ function PoolBlock({
             : "This pool owns no cell: no Tenant requests its profile yet."}
         </p>
       ) : (
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Cell</th>
-              <th>Phase</th>
-              {!usageDisabled && <th>Tenants over cap</th>}
-              {!usageDisabled && <th>Queue</th>}
-              {!usageDisabled && <th>Runs 24 h</th>}
-              {!usageDisabled && <th>Failures 24 h</th>}
-              <th>Age</th>
-              <th>Unready since</th>
-            </tr>
-          </thead>
-          <tbody>
-            {controllersLoading || usageLoading
-              ? cells.map((c) => <SkeletonRow key={`${c.namespace}/${c.name}`} usageDisabled={usageDisabled} />)
-              : cells.map((c) => (
-                  <CellRow
-                    key={cellUsageKey(c.cluster, c.namespace, c.name)}
-                    cell={c}
-                    usage={usage.rows.get(cellUsageKey(c.cluster, c.namespace, c.name))}
-                    covered={usage.covered.has(c.cluster)}
-                    usageDisabled={usageDisabled}
-                  />
-                ))}
-          </tbody>
-        </table>
+        <div className={styles.tableScroll}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Cell</th>
+                <th>Phase</th>
+                {!usageDisabled && <th>Tenants over cap</th>}
+                {!usageDisabled && <th>Queue</th>}
+                {!usageDisabled && <th>Runs 24 h</th>}
+                {!usageDisabled && <th>Failures 24 h</th>}
+                <th>Age</th>
+                <th>Unready since</th>
+              </tr>
+            </thead>
+            <tbody>
+              {controllersLoading || usageLoading
+                ? cells.map((c) => <SkeletonRow key={`${c.namespace}/${c.name}`} usageDisabled={usageDisabled} />)
+                : cells.map((c) => (
+                    <CellRow
+                      key={cellUsageKey(c.cluster, c.namespace, c.name)}
+                      cell={c}
+                      usage={usage.rows.get(cellUsageKey(c.cluster, c.namespace, c.name))}
+                      covered={usage.covered.has(c.cluster)}
+                      usageDisabled={usageDisabled}
+                    />
+                  ))}
+            </tbody>
+          </table>
+        </div>
       )}
       <p className={styles.note}>This table lists the cells you may read.</p>
     </Card>

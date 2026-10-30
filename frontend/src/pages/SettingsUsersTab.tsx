@@ -90,7 +90,7 @@ export default function SettingsUsersTab() {
       )}
 
       <div className={styles.tableWrap}>
-        <table className={styles.table}>
+        <table className={styles.wideTable}>
           <thead>
             <tr>
               <th>Name</th><th>Email</th><th>Display Name</th><th>Groups</th><th>Last Login</th><th>Managed By</th><th></th>
@@ -101,7 +101,7 @@ export default function SettingsUsersTab() {
               <tr key={u.name}>
                 <td>
                   <Button variant="ghost" size="sm" className={`${styles.linkBtn} ${styles.profileVersion}`} onClick={() => setSelectedUser(selectedUser?.name === u.name ? null : u)}>
-                    {u.name}
+                    <span className={styles.userName} title={u.name}>{u.name}</span>
                   </Button>
                 </td>
                 <td>{u.email || "—"}</td><td>{u.displayName || "—"}</td><td>{u.groups?.join(", ") || "—"}</td><td>{u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : "Never"}</td><td>{u.purpose ? `${u.managedBy} · ${u.purpose}` : u.managedBy}</td>

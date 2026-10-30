@@ -29,6 +29,9 @@
 .linkBtn:hover { color: var(--accent-fill-hover); }
 .dangerLink { color: var(--bad-text); }
 .table { composes: dataTable from "./tables.module.css"; }
+
+/* A wide settings table sets a floor, so its cells do not wrap at every space. */
+.wideTable { composes: table; min-width: 760px; }
 .tableWrap { composes: tableScroll from "./tables.module.css"; }
 .sectionTitle { font-size: 1rem; margin-top: 24px; margin-bottom: 12px; }
 .split { display: flex; gap: 12px; }
@@ -133,3 +136,6 @@
 .preflightItem { font-size: .78rem; color: var(--text-2); }
 .candidateOverlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .candidateDialog { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 24px; max-width: 480px; width: 90%; }
+
+/* The full name stays in the title attribute, so a truncated name is still readable. */
+.userName { display: block; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }

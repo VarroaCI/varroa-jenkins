@@ -1080,4 +1080,11 @@ describe("PipelinePage — run table links", () => {
     const cell = header.closest("table")!.querySelector("tbody tr td:nth-child(7)")!;
     expect(cell.textContent).toBe("30s");
   });
+
+  it("wraps the builds table in the scroll wrapper", async () => {
+    mockListRuns.mockResolvedValue({ items: [oneRun()] });
+    renderPage();
+    const table = await screen.findByRole("table");
+    expect(table.parentElement?.className).toMatch(/tableScroll/);
+  });
 });

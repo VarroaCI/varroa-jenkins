@@ -67,3 +67,12 @@ describe("Agents", () => {
     await waitFor(() => expect(mockPut).toHaveBeenCalledWith("varroa-system", "ta-one", true));
   });
 });
+
+describe("Agents scroll wrapper", () => {
+  it("wraps the table in the scroll wrapper", async () => {
+    mockCanToggle.mockReturnValue(false);
+    renderAgents();
+    const table = await screen.findByRole("table");
+    expect(table.parentElement?.className).toMatch(/tableScroll/);
+  });
+});

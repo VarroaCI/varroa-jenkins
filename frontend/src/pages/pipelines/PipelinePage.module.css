@@ -1,5 +1,7 @@
 .table { composes: dataTable from "../tables.module.css"; }
 .nameCell { composes: nameCell from "../tables.module.css"; }
+.tableScroll { composes: tableScroll from "../tables.module.css"; }
+.buildsTable { composes: table; min-width: 760px; }
 
 .page {
   animation: fade 0.3s ease;
@@ -120,6 +122,11 @@
   font-size: 12px;
   color: var(--text-2);
   text-decoration: none;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .resultBadge {

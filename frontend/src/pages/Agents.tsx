@@ -31,47 +31,49 @@ export default function Agents() {
         {list.error && <p role="alert">The Tenant agents could not be read.</p>}
         {list.data && list.data.items.length === 0 && <p>No Tenant agents are configured.</p>}
         {list.data && list.data.items.length > 0 && (
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th scope="col">Name</th>
-                <th scope="col">Tenant</th>
-                <th scope="col">Cluster</th>
-                <th scope="col">State</th>
-                <th scope="col">Sessions today</th>
-                <th scope="col">Failed today</th>
-                <th scope="col">Spend today</th>
-                <th scope="col">Unattended</th>
-                <th scope="col">Errors</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.data.items.map((item) => (
-                <tr key={`${item.namespace}/${item.name}`}>
-                  <td>{item.namespace}/{item.name}</td>
-                  <td>{item.tenant}</td>
-                  <td>{item.cluster || "-"}</td>
-                  <td>
-                    {item.paused ? `Paused: ${item.paused.reason}` : item.enabled ? "Active" : "Disabled"}
-                  </td>
-                  <td>{item.sessionsToday}</td>
-                  <td>{item.failedToday}</td>
-                  <td>{item.spendToday}</td>
-                  <td>
-                    {item.unattendedGranted.length > 0 ? `Granted: ${item.unattendedGranted.join(", ")}` : "Not granted"}
-                    {canToggle && (
-                      <button type="button" onClick={() => void toggle(item)}>
-                        {item.unattendedGranted.length > 0 ? "Revoke" : "Grant"}
-                      </button>
-                    )}
-                  </td>
-                  <td>
-                    {item.conditions.length === 0 ? "None" : item.conditions.map((c) => c.reason).join(", ")}
-                  </td>
+          <div className={styles.tableScroll}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Tenant</th>
+                  <th scope="col">Cluster</th>
+                  <th scope="col">State</th>
+                  <th scope="col">Sessions today</th>
+                  <th scope="col">Failed today</th>
+                  <th scope="col">Spend today</th>
+                  <th scope="col">Unattended</th>
+                  <th scope="col">Errors</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {list.data.items.map((item) => (
+                  <tr key={`${item.namespace}/${item.name}`}>
+                    <td>{item.namespace}/{item.name}</td>
+                    <td>{item.tenant}</td>
+                    <td>{item.cluster || "-"}</td>
+                    <td>
+                      {item.paused ? `Paused: ${item.paused.reason}` : item.enabled ? "Active" : "Disabled"}
+                    </td>
+                    <td>{item.sessionsToday}</td>
+                    <td>{item.failedToday}</td>
+                    <td>{item.spendToday}</td>
+                    <td>
+                      {item.unattendedGranted.length > 0 ? `Granted: ${item.unattendedGranted.join(", ")}` : "Not granted"}
+                      {canToggle && (
+                        <button type="button" onClick={() => void toggle(item)}>
+                          {item.unattendedGranted.length > 0 ? "Revoke" : "Grant"}
+                        </button>
+                      )}
+                    </td>
+                    <td>
+                      {item.conditions.length === 0 ? "None" : item.conditions.map((c) => c.reason).join(", ")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
     </div>

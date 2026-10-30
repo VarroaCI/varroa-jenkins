@@ -280,7 +280,7 @@ export default function ComposedBundleDetail() {
           <div className={styles.itemList}>
             {bundle.resolvedInputs!.map((input) => (
               <div className={styles.itemRow} key={input.index}>
-                <div><div className={styles.itemName}>{input.index + 1}. {input.name}</div><div className={styles.itemMeta}>{input.kind} · {input.type || "unknown type"} · {input.namespace || "bundle namespace"}{input.revision ? ` · ${input.revision}` : ""}</div></div>
+                <div className={styles.itemBody}><div className={styles.itemName}>{input.index + 1}. {input.name}</div><div className={styles.itemMeta}>{input.kind} · {input.type || "unknown type"} · {input.namespace || "bundle namespace"}{input.revision ? ` · ${input.revision}` : ""}</div></div>
                 <span className={input.status === "Missing" ? styles.itemMissingBadge : input.status === "Drifted" ? styles.itemDriftedBadge : styles.statusBadge}>{input.status}</span>
               </div>
             ))}
