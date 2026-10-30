@@ -75,3 +75,19 @@ func (f *fakeConfigBroodForTest) CellGrants(context.Context, string, []string) (
 func (f *scopeTestConfigBrood) CellGrants(context.Context, string, []string) ([]bus.CellTenantGrants, error) {
 	return nil, errNoCellPools
 }
+
+func (f *stubConfigBrood) CellLint(context.Context, string, bus.CellLintRequest) (bus.CellLintResponse, error) {
+	return bus.CellLintResponse{}, errNoCellPools
+}
+
+func (f *fakeConfigBrood) CellLint(context.Context, string, bus.CellLintRequest) (bus.CellLintResponse, error) {
+	return bus.CellLintResponse{}, errNoCellPools
+}
+
+func (f *fakeConfigBroodForTest) CellLint(context.Context, string, bus.CellLintRequest) (bus.CellLintResponse, error) {
+	return bus.CellLintResponse{}, errNoCellPools
+}
+
+func (f *scopeTestConfigBrood) CellLint(context.Context, string, bus.CellLintRequest) (bus.CellLintResponse, error) {
+	return bus.CellLintResponse{}, errNoCellPools
+}

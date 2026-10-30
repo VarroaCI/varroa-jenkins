@@ -100,7 +100,14 @@ func TestServeCommandResponders_HeldPreviewDoesNotBlockSecond(t *testing.T) {
 // BFF sends every compose on bundles.preview.
 func TestCommandResponders_OnlyComposeRowsAreConcurrent(t *testing.T) {
 	r := &operatorCommandRunner{cluster: "core", logger: slog.Default()}
-	concurrent := map[string]bool{"bundles.preview": true}
+	// concurrent maps each concurrent row to its limit and its subject.
+	concurrent := map[string]struct {
+		limit   int
+		subject string
+	}{
+		"bundles.preview": {composeConcurrency, bus.OperatorBundlesSubject("core", "preview")},
+		"cells.lint":      {cellLintConcurrency, bus.OperatorCellsSubject("core", "lint")},
+	}
 	seen := map[string]bool{}
 	for _, cr := range r.commandResponders(context.Background()) {
 		if seen[cr.subject] {
@@ -110,9 +117,9 @@ func TestCommandResponders_OnlyComposeRowsAreConcurrent(t *testing.T) {
 			t.Errorf("subject %s is served but has no sender", cr.subject)
 		}
 		seen[cr.subject] = true
-		if concurrent[cr.name] {
-			if cr.limit != composeConcurrency {
-				t.Errorf("%s limit = %d, want %d", cr.name, cr.limit, composeConcurrency)
+		if want, ok := concurrent[cr.name]; ok {
+			if cr.limit != want.limit {
+				t.Errorf("%s limit = %d, want %d", cr.name, cr.limit, want.limit)
 			}
 			continue
 		}
@@ -120,8 +127,8 @@ func TestCommandResponders_OnlyComposeRowsAreConcurrent(t *testing.T) {
 			t.Errorf("%s limit = %d, want %d", cr.name, cr.limit, serialResponder)
 		}
 	}
-	for name := range concurrent {
-		if !seen[bus.OperatorBundlesSubject("core", name[len("bundles."):])] {
+	for name, want := range concurrent {
+		if !seen[want.subject] {
 			t.Errorf("no row serves %s", name)
 		}
 	}

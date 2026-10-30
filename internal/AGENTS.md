@@ -81,6 +81,8 @@ reading each package's entry point):
   (`lastused.go`).
 - **`jenkins/`** — HTTP client for the Jenkins REST API, used by mite
   sidecars to manage their local Jenkins instance (crumb handling, retries).
+  `jenkins/declarativelint/` calls a cell's declarative linter and parses its
+  reply; the BFF and the member operator both use it.
   Every error that quotes a 4 KiB error-body read goes through `refusalText`:
   a plugin refusal is plain text and passes whole; a Jenkins core HTML error
   page keeps only its `<title>`, without the ` - Jenkins` suffix. The text is

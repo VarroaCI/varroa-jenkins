@@ -40,6 +40,8 @@ type ConfigCRUD struct {
 	Logger            *slog.Logger
 	// Grants answers cells.grants from this cluster's own RBAC state.
 	Grants TenantGrantReader
+	// Linter answers cells.lint on this cluster's own cells.
+	Linter CellLinter
 }
 
 // NewConfigCRUD creates a new ConfigCRUD.

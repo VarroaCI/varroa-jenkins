@@ -1,8 +1,9 @@
 package bus
 
 // OperatorCellsSubject returns operator.<cluster>.cells.<verb>.
-// verb is grants. The grants verb takes CellGrantsRequest and answers
-// CellGrantsResponse.
+// verb is grants or lint. The grants verb takes CellGrantsRequest and
+// answers CellGrantsResponse. The lint verb takes CellLintRequest and
+// answers CellLintResponse.
 func OperatorCellsSubject(cluster, verb string) string {
 	return "operator." + cluster + ".cells." + verb
 }

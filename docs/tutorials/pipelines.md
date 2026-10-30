@@ -291,7 +291,7 @@ Or run the same check from a shell:
 varroactl lint jenkinsfile --tenant payments --file Jenkinsfile
 ```
 
-The lint never starts or wakes a cell. A hibernated or stopped cell answers 409, so start a run to wake the cell, then lint again. A tenant placed on a member cluster also answers 409, because the lint reaches only a cell on the core cluster.
+The lint never starts or wakes a cell. A hibernated or stopped cell answers 409, so start a run to wake the cell, then lint again. A tenant on a member cluster gets the same lint through that cluster's operator.
 
 ## Publish coverage and warnings
 
