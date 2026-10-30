@@ -84,7 +84,7 @@ describe("QualityTrendCard", () => {
     });
     expect(container.querySelectorAll("svg a")).toHaveLength(2);
     expect(container.querySelectorAll('polyline[data-series="line"]')).toHaveLength(0);
-    expect(container.querySelectorAll('circle[data-series="line"]')).toHaveLength(2);
+    expect(container.querySelectorAll('line[data-series="line"]')).toHaveLength(2);
   });
 
   it("omits the branch line when no point has a branch percent", () => {
@@ -119,13 +119,13 @@ describe("QualityTrendCard", () => {
     }, [window[1], window[2]]);
     expect(container.querySelector('[data-axis="max"]')).toHaveTextContent("85%");
     expect(container.querySelector('[data-axis="min"]')).toHaveTextContent("55%");
-    const lineDots = container.querySelectorAll('circle[data-series="line"]');
+    const lineDots = container.querySelectorAll('line[data-series="line"]');
     expect(lineDots).toHaveLength(2);
-    expect(lineDots[0]).toHaveAttribute("cy", "16");
-    expect(lineDots[1]).toHaveAttribute("cy", "64");
-    const branchDots = container.querySelectorAll('circle[data-series="branch"]');
+    expect(lineDots[0]).toHaveAttribute("y1", "16");
+    expect(lineDots[1]).toHaveAttribute("y1", "64");
+    const branchDots = container.querySelectorAll('line[data-series="branch"]');
     expect(branchDots).toHaveLength(2);
-    for (const dot of branchDots) expect(dot).toHaveAttribute("cy", "28");
+    for (const dot of branchDots) expect(dot).toHaveAttribute("y1", "28");
     expect(container.querySelector("svg")).toHaveAttribute("aria-label", expect.stringContaining("scale 55% to 85%"));
   });
 
@@ -145,9 +145,9 @@ describe("QualityTrendCard", () => {
     });
     expect(container.querySelector('[data-axis="max"]')).toHaveTextContent("85%");
     expect(container.querySelector('[data-axis="min"]')).toHaveTextContent("75%");
-    const dots = container.querySelectorAll('circle[data-series="line"]');
+    const dots = container.querySelectorAll('line[data-series="line"]');
     expect(dots).toHaveLength(3);
-    for (const dot of dots) expect(dot).toHaveAttribute("cy", "40");
+    for (const dot of dots) expect(dot).toHaveAttribute("y1", "40");
   });
 
   it("keeps a 10-point span at the top of the scale", () => {
@@ -158,7 +158,7 @@ describe("QualityTrendCard", () => {
     });
     expect(container.querySelector('[data-axis="max"]')).toHaveTextContent("100%");
     expect(container.querySelector('[data-axis="min"]')).toHaveTextContent("90%");
-    expect(container.querySelector('circle[data-series="line"]')).toHaveAttribute("cy", "4");
+    expect(container.querySelector('line[data-series="line"]')).toHaveAttribute("y1", "4");
   });
 
   it("keeps a 10-point span at the bottom of the scale", () => {
@@ -169,7 +169,7 @@ describe("QualityTrendCard", () => {
     });
     expect(container.querySelector('[data-axis="max"]')).toHaveTextContent("10%");
     expect(container.querySelector('[data-axis="min"]')).toHaveTextContent("0%");
-    expect(container.querySelector('circle[data-series="line"]')).toHaveAttribute("cy", "76");
+    expect(container.querySelector('line[data-series="line"]')).toHaveAttribute("y1", "76");
   });
 
   it("uses the full scale when no point has a percent", () => {
@@ -180,6 +180,40 @@ describe("QualityTrendCard", () => {
     });
     expect(container.querySelector('[data-axis="max"]')).toHaveTextContent("100%");
     expect(container.querySelector('[data-axis="min"]')).toHaveTextContent("0%");
+  });
+
+  it("puts a y scale on each warnings chart", () => {
+    const { container } = renderCard({
+      warnings: [
+        {
+          id: "lint",
+          name: "lint",
+          points: [
+            { runId: "run-2", buildNumber: 2, total: 9 },
+            { runId: "run-1", buildNumber: 1, total: 4 },
+          ],
+        },
+      ],
+    });
+    expect(container.querySelector('[data-axis="max"]')).toHaveTextContent("9");
+    expect(container.querySelector('[data-axis="min"]')).toHaveTextContent("0");
+  });
+
+  it("labels the first and last coverage builds with their values", () => {
+    const { container } = renderCard({
+      coverage: [
+        {
+          id: "jacoco",
+          name: "jacoco",
+          points: [
+            { runId: "run-2", buildNumber: 2, linePercent: 80 },
+            { runId: "run-1", buildNumber: 1, linePercent: 60 },
+          ],
+        },
+      ],
+    });
+    expect(container.querySelector('[data-end="first"]')).toHaveTextContent("#1 · 60.0%");
+    expect(container.querySelector('[data-end="last"]')).toHaveTextContent("#2 · 80.0%");
   });
 
   it("renders a series name as text", () => {

@@ -109,6 +109,23 @@ const jobDetail = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+/** runFixture is one run row for the builds table. */
+function runFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    runId: "run-1",
+    buildNumber: 42,
+    status: "COMPLETED",
+    result: "SUCCESS",
+    branch: "main",
+    scmRevision: "9f1c2d3aaaaaaaaa",
+    cause: "Push",
+    queuedAt: "2026-10-11T10:00:00Z",
+    startedAt: "2026-10-11T10:00:30Z",
+    durationMs: 60000,
+    ...overrides,
+  };
+}
+
 describe("PipelinePage", () => {
   beforeEach(() => {
     mockGetPipelineJob.mockReset();
@@ -128,7 +145,7 @@ describe("PipelinePage", () => {
     );
     renderPage();
     await screen.findByText("Health");
-    expect(screen.getByText(/1 of 1 builds passed/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 1 counted builds passed/)).toBeInTheDocument();
   });
 
   it("shows the Quality trend card when the job read carries qualityTrend", async () => {
@@ -187,10 +204,11 @@ describe("PipelinePage", () => {
     expect(screen.getByText(/Loading pipeline/)).toBeInTheDocument();
   });
 
-  it("shows the empty builds state", async () => {
+  it("shows the empty builds state with no filter group", async () => {
     mockGetPipelineJob.mockResolvedValue(jobDetail());
     renderPage();
-    await waitFor(() => expect(screen.getByText("No builds match this filter.")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("This job has no builds yet.")).toBeInTheDocument());
+    expect(screen.queryByRole("group", { name: "Filters" })).not.toBeInTheDocument();
   });
 
   it("renders the forbidden state on a 403", async () => {
@@ -219,10 +237,11 @@ describe("PipelinePage", () => {
 
   it("writes a filter to the URL, and the filtered view survives a reload", async () => {
     mockGetPipelineJob.mockResolvedValue(jobDetail());
+    mockListRuns.mockResolvedValue({ items: [runFixture()] });
     renderPage();
-    await waitFor(() => expect(screen.getByText("No builds match this filter.")).toBeInTheDocument());
+    await screen.findByRole("table");
 
-    fireEvent.change(screen.getByLabelText("Branch filter"), { target: { value: "main" } });
+    fireEvent.change(screen.getByLabelText("Branch"), { target: { value: "main" } });
     await waitFor(() => expect(screen.getByTestId("location").textContent).toContain("branch=main"));
 
     const reloadedUrl = screen.getByTestId("location").textContent!;
@@ -231,10 +250,81 @@ describe("PipelinePage", () => {
     // browser reload of that URL would present.
     mockGetPipelineJob.mockResolvedValue(jobDetail());
     renderPage(reloadedUrl);
-    await waitFor(() => {
-      const inputs = screen.getAllByLabelText("Branch filter") as HTMLInputElement[];
-      expect(inputs[inputs.length - 1].value).toBe("main");
+    await waitFor(() => expect(screen.getByLabelText("Branch")).toHaveValue("main"));
+  });
+
+  it("offers a Result select with the six results and writes result=FAILURE to the URL", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+    mockListRuns.mockResolvedValue({ items: [runFixture()] });
+    renderPage();
+    await screen.findByRole("table");
+
+    const select = screen.getByLabelText("Result") as HTMLSelectElement;
+    const options = within(select).getAllByRole("option").map((o) => o.getAttribute("value"));
+    expect(options).toEqual(["", "SUCCESS", "FAILURE", "UNSTABLE", "ABORTED", "INTERRUPTED", "NOT_BUILT"]);
+    fireEvent.change(select, { target: { value: "FAILURE" } });
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toContain("result=FAILURE"));
+  });
+
+  it("shows no filters for a multibranch job and does not read its runs", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail({ kind: "multibranch" }));
+    mockListJobBranches.mockResolvedValue({
+      jobPath: "payments/checkout-api/main",
+      truncated: false,
+      branches: [],
+      changeRequests: [],
+      tags: [],
+      repositories: [],
     });
+    renderPage();
+    await screen.findByText("No branches or pull requests discovered.");
+    expect(screen.queryByRole("group", { name: "Filters" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Branch")).not.toBeInTheDocument();
+    expect(mockListRuns).not.toHaveBeenCalled();
+  });
+
+  it("shows the badge off note after the definition row", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+    mockGetJobBadge.mockResolvedValue({ enabled: false });
+    renderPage();
+    const off = await screen.findByText(/Status badge: off for this tenant/);
+    const triggers = screen.getByText("Triggers");
+    expect(triggers.compareDocumentPosition(off) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("drops the duplicate Interrupted note", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+    mockListRuns.mockResolvedValue({ items: [runFixture({ result: "INTERRUPTED" })] });
+    renderPage();
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("INTERRUPTED")).toBeInTheDocument();
+    expect(within(table).queryByText("Interrupted")).not.toBeInTheDocument();
+  });
+
+  it("omits the build health row for a multibranch job", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail({ kind: "multibranch" }));
+    mockListJobBranches.mockResolvedValue({
+      jobPath: "payments/checkout-api/main",
+      truncated: false,
+      branches: [],
+      changeRequests: [],
+      tags: [],
+      repositories: [],
+    });
+    renderPage();
+    await screen.findByText("No branches or pull requests discovered.");
+    expect(screen.queryByText("Last 30 days")).not.toBeInTheDocument();
+    expect(screen.queryByText("Health")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Builds" })).not.toBeInTheDocument();
+  });
+
+  it("shows the not-counted note in the Last 30 days card", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+    renderPage();
+    await screen.findByText("Last 30 days");
+    const card = screen.getByText("Last 30 days").parentElement?.parentElement;
+    if (!card) throw new Error("Last 30 days card not found");
+    expect(within(card).getByText("Interrupted and not-built builds are not counted.")).toBeInTheDocument();
   });
 
   /** last30DaysRow reads the <dd> immediately after the named <dt> inside
@@ -251,7 +341,7 @@ describe("PipelinePage", () => {
   it("shows Not available on every Last 30 days row when the card is null", async () => {
     mockGetPipelineJob.mockResolvedValue(jobDetail());
     renderPage();
-    await waitFor(() => expect(screen.getByText("payments/checkout-api/main")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "main" })).toBeInTheDocument());
     expect(last30DaysRow("Builds")).toBe("Not available");
     expect(last30DaysRow("Pass rate")).toBe("Not available");
     expect(last30DaysRow("Median")).toBe("Not available");
@@ -272,7 +362,7 @@ describe("PipelinePage", () => {
       }),
     );
     renderPage();
-    await waitFor(() => expect(screen.getByText("payments/checkout-api/main")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "main" })).toBeInTheDocument());
     expect(last30DaysRow("Builds")).toBe("12");
     expect(last30DaysRow("Pass rate")).toBe("75%");
     expect(last30DaysRow("Median")).toBe("1m 5s");
@@ -283,7 +373,7 @@ describe("PipelinePage", () => {
   it("shows a dash for a Last 30 days row with no finished run or stage", async () => {
     mockGetPipelineJob.mockResolvedValue(jobDetail({ last30Days: { builds: 0 } }));
     renderPage();
-    await waitFor(() => expect(screen.getByText("payments/checkout-api/main")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "main" })).toBeInTheDocument());
     expect(last30DaysRow("Builds")).toBe("0");
     expect(last30DaysRow("Pass rate")).toBe("—");
     expect(last30DaysRow("Median")).toBe("—");
@@ -294,7 +384,7 @@ describe("PipelinePage", () => {
   it("offers no Run control to a caller with no tenant write grant", async () => {
     mockGetPipelineJob.mockResolvedValue(jobDetail());
     renderPage();
-    await waitFor(() => expect(screen.getByText("payments/checkout-api/main")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "main" })).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Run" })).not.toBeInTheDocument();
   });
 
@@ -393,7 +483,7 @@ describe("PipelinePage", () => {
     } as unknown as ReturnType<typeof usePermissions>);
     mockGetPipelineJob.mockResolvedValue(jobDetail({ jobPath: "forbidden/job" }));
     renderPage();
-    await waitFor(() => expect(screen.getByText("forbidden/job")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "job" })).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Run" })).not.toBeInTheDocument();
   });
 
@@ -480,7 +570,7 @@ describe("PipelinePage — Template row", () => {
   it("hides the Template row for a job with no catalog template", async () => {
     mockGetPipelineJob.mockResolvedValue(jobDetail());
     renderPage();
-    await waitFor(() => expect(screen.getByText("payments/checkout-api/main")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "main" })).toBeInTheDocument());
     expect(screen.queryByText("Template")).not.toBeInTheDocument();
   });
 
@@ -548,7 +638,7 @@ describe("PipelinePage — dependency edges", () => {
   it("hides the Upstream and Downstream rows for a job with no edge", async () => {
     mockGetPipelineJob.mockResolvedValue(jobDetail());
     renderPage();
-    await waitFor(() => expect(screen.getByText("payments/checkout-api/main")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "main" })).toBeInTheDocument());
     expect(screen.queryByText("Upstream")).not.toBeInTheDocument();
     expect(screen.queryByText("Downstream")).not.toBeInTheDocument();
   });
@@ -802,7 +892,7 @@ describe("PipelinePage — provenance rows", () => {
   async function renderJobWithDefinition(definition: Record<string, unknown>) {
     mockGetPipelineJob.mockResolvedValue(jobDetail({ definition }));
     renderPage();
-    await waitFor(() => expect(screen.getByText("payments/checkout-api/main")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "main" })).toBeInTheDocument());
   }
 
   it("links the Bundle row to the composed bundle page", async () => {

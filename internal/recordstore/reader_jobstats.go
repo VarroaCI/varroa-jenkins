@@ -14,7 +14,7 @@ type StageStat struct {
 
 // JobWindowStats summarizes one job's runs since a point in time, for
 // the pipeline job page's "Last 30 days" card. PassRate is nil when the
-// window holds no finished run, because a rate over zero runs has no
+// window holds no counted run, because a rate over zero runs has no
 // value to report. MedianDurationMs is nil for the same reason.
 // SlowestStage is nil when no run in the window carries a finished
 // stage. MedianQueueWaitMs is nil when no run in the window has both
@@ -28,14 +28,16 @@ type JobWindowStats struct {
 }
 
 // JobWindowStats summarizes jobPath's runs created at or after since.
-// Builds counts every run in the window, whatever its status. PassRate
-// and MedianDurationMs draw from finished runs only, a run whose
-// "result" column is set. A run reaches "result" exactly when Jenkins
-// has resolved its outcome, which excludes a queued, running, or
-// duplicate-superseded run. PassRate counts a "SUCCESS" result as a
-// pass; "UNSTABLE" and every other result count against the rate,
-// because the card answers "did the pipeline work", not "did it merely
-// finish". SlowestStage compares each stage name's median duration
+// Builds counts every run in the window, whatever its status.
+// MedianDurationMs draws from finished runs only, a run whose "result"
+// column is set. A run reaches "result" exactly when Jenkins has
+// resolved its outcome, which excludes a queued, running, or
+// duplicate-superseded run. PassRate divides the SUCCESS runs by the
+// counted runs. A counted run has a result other than INTERRUPTED and
+// NOT_BUILT: those two results say the build did not finish, so they
+// are not a pass or a fail. "UNSTABLE" and every other counted result
+// count against the rate, because the card answers "did the pipeline
+// work", not "did it merely finish". SlowestStage compares each stage name's median duration
 // across the window's runs, not its single slowest run: a median
 // resists one outlier run inflating a stage that usually runs fast.
 //
@@ -47,7 +49,7 @@ func (r *pgReader) JobWindowStats(ctx context.Context, cluster, tenant, jobPath 
 		return JobWindowStats{}, err
 	}
 
-	var builds, finished, passed int64
+	var builds, counted, passed int64
 	var medianDurationMs *int64
 	var medianQueueWaitMs *int64
 	var slowestStageName *string
@@ -70,7 +72,7 @@ func (r *pgReader) JobWindowStats(ctx context.Context, cluster, tenant, jobPath 
 		)
 		SELECT
 			(SELECT count(*) FROM window_runs) AS builds,
-			(SELECT count(*) FROM window_runs WHERE result IS NOT NULL) AS finished,
+			(SELECT count(*) FROM window_runs WHERE result IS NOT NULL AND result NOT IN ('INTERRUPTED', 'NOT_BUILT')) AS counted,
 			(SELECT count(*) FROM window_runs WHERE result = 'SUCCESS') AS passed,
 			(SELECT ROUND(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms)::numeric)::bigint
 			   FROM window_runs WHERE duration_ms IS NOT NULL) AS median_duration_ms,
@@ -81,15 +83,15 @@ func (r *pgReader) JobWindowStats(ctx context.Context, cluster, tenant, jobPath 
 			(SELECT stage_name FROM stage_medians ORDER BY median_duration_ms DESC, stage_name LIMIT 1) AS slowest_stage_name,
 			(SELECT median_duration_ms FROM stage_medians ORDER BY median_duration_ms DESC, stage_name LIMIT 1) AS slowest_stage_duration_ms
 	`, cluster, tenant, jobPath, since).Scan(
-		&builds, &finished, &passed, &medianDurationMs, &medianQueueWaitMs, &slowestStageName, &slowestStageDurationMs,
+		&builds, &counted, &passed, &medianDurationMs, &medianQueueWaitMs, &slowestStageName, &slowestStageDurationMs,
 	)
 	if err != nil {
 		return JobWindowStats{}, fmt.Errorf("read job window stats: %w", err)
 	}
 
 	stats := JobWindowStats{Builds: builds, MedianDurationMs: medianDurationMs, MedianQueueWaitMs: medianQueueWaitMs}
-	if finished > 0 {
-		rate := float64(passed) / float64(finished)
+	if counted > 0 {
+		rate := float64(passed) / float64(counted)
 		stats.PassRate = &rate
 	}
 	if slowestStageName != nil && slowestStageDurationMs != nil {

@@ -1,5 +1,5 @@
 .heading {
-  margin: 0.75rem 0 0.35rem;
+  margin: 1rem 0 0.35rem;
   color: var(--text-2);
   font-size: 0.8125rem;
   font-weight: 600;
@@ -7,43 +7,6 @@
 
 .heading:first-child {
   margin-top: 0;
-}
-
-.chart {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-.plot {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: 0.25rem;
-}
-
-.axis {
-  position: relative;
-  width: 3em;
-  color: var(--text-2);
-  font-size: 0.6875rem;
-  line-height: 1;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-/* The data band starts PAD (4 of 80 units, 5%) inside the SVG edges. Each
-   label centres on its band edge. */
-.axis > span {
-  position: absolute;
-  right: 0;
-}
-
-.axis > span[data-axis="max"] {
-  top: calc(5% - 0.5em);
-}
-
-.axis > span[data-axis="min"] {
-  bottom: calc(5% - 0.5em);
 }
 
 .legend {
@@ -82,11 +45,15 @@
 }
 
 .dotLine {
-  fill: var(--info);
+  stroke: var(--info);
+  stroke-width: 5;
+  stroke-linecap: round;
 }
 
 .dotBranch {
-  fill: var(--accent);
+  stroke: var(--accent);
+  stroke-width: 5;
+  stroke-linecap: round;
 }
 
 .bar {

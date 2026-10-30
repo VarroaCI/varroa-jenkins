@@ -30,7 +30,7 @@ function renderCard(props: { health: JobHealth; trend: JobTrendPoint[] }) {
 describe("JobHealthCard", () => {
   it("shows the health summary and the score", () => {
     renderCard({ health: counted(2, 3), trend });
-    expect(screen.getByText(/2 of 3 builds passed/)).toBeInTheDocument();
+    expect(screen.getByText(/2 of 3 counted builds passed/)).toBeInTheDocument();
     expect(screen.getByText(/· 66%/)).toBeInTheDocument();
   });
 
@@ -51,6 +51,26 @@ describe("JobHealthCard", () => {
     const bars = Array.from(container.querySelectorAll("rect > title")).map((t) => t.textContent);
     expect(bars).toEqual(["#1 · 2m 0s · FAILURE", "#2 · 1m 0s · INTERRUPTED", "#3 · 3m 0s · SUCCESS"]);
     expect(screen.getByRole("img", { name: /Build durations, oldest first\. Longest 3m 0s\./ })).toBeInTheDocument();
+  });
+
+  it("shows a legend for the result colours with Not counted", () => {
+    renderCard({ health: counted(2, 3), trend });
+    const legend = screen.getByRole("list", { name: "Result colours" });
+    expect(within(legend).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Passed",
+      "Unstable",
+      "Failed",
+      "Not counted",
+    ]);
+    expect(screen.getByText("Interrupted and not-built builds are not counted.")).toBeInTheDocument();
+  });
+
+  it("shows the duration scale and the first and last builds", () => {
+    const { container } = renderCard({ health: counted(2, 3), trend });
+    expect(container.querySelector('[data-axis="max"]')).toHaveTextContent("3m 0s");
+    expect(container.querySelector('[data-axis="min"]')).toHaveTextContent("0s");
+    expect(container.querySelector('[data-end="first"]')).toHaveTextContent("#1 · 2m 0s");
+    expect(container.querySelector('[data-end="last"]')).toHaveTextContent("#3 · 3m 0s");
   });
 
   it("draws the test chart when a run reported suite counters", () => {

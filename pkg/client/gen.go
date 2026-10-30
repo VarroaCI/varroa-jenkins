@@ -3756,7 +3756,7 @@ type ComponentsSchemasPipelineLast30Days struct {
 	// MedianQueueWaitMs The median wait between a build's queued moment and its started moment, in milliseconds. Absent when the job started no build in that window.
 	MedianQueueWaitMs *int64 `json:"medianQueueWaitMs,omitempty"`
 
-	// PassRate The share of finished runs whose result is SUCCESS. Null when the window holds no finished run.
+	// PassRate The share of counted finished runs whose result is SUCCESS. An INTERRUPTED or NOT_BUILT run is not counted. Null when the window holds no counted run.
 	PassRate *float64 `json:"passRate"`
 
 	// SlowestStage Null when no run in the window carries a finished stage.

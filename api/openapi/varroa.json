@@ -13047,7 +13047,7 @@
             "type": "integer"
           },
           "passRate": {
-            "description": "The share of finished runs whose result is SUCCESS. Null when the window holds no finished run.",
+            "description": "The share of counted finished runs whose result is SUCCESS. An INTERRUPTED or NOT_BUILT run is not counted. Null when the window holds no counted run.",
             "format": "double",
             "nullable": true,
             "type": "number"

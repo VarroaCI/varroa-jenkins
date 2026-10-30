@@ -121,7 +121,7 @@ A job page opens with a **Health** card. Health counts the job's last ten finish
 A run that succeeded passes. A run that failed, was unstable, or was aborted fails. A run that
 was interrupted or was not built does not count, so it does not change the score.
 
-The score is the share of counted runs that passed, rounded down. The glyph names the bucket:
+The summary counts counted builds, for example **2 of 3 counted builds passed**. The score is the share of counted runs that passed, rounded down. The **Last 30 days** card uses the same rule. The glyph names the bucket:
 
 | Bucket | Score | Glyph |
 |---|---|---|
@@ -133,7 +133,7 @@ The score is the share of counted runs that passed, rounded down. The glyph name
 
 A job with no counted run reads **No counted build yet**, and it shows no glyph.
 
-The card also shows three charts over the same runs, oldest on the left:
+A legend names the four colours. Each chart shows its scale and its first and last builds. The card shows three charts over the same runs, oldest on the left:
 
 - **Results** is one square for each run. Each square links to its build page. A run that was
   interrupted or was not built is grey, and its label says it is not counted.
@@ -165,8 +165,8 @@ A shared library in the **Ran with** row links to its repository: the commit, or
 
 The **Jenkinsfile** and **Source input** rows link GitHub, GitLab, Gitea, and Forgejo hosts when the forge is known. Other hosts show text.
 
-The page lists the job's builds, filterable by branch, result, actor, and cause. Each filter
-stays in the page URL, so a filtered view is shareable and survives a reload.
+The page lists the job's builds, filterable by branch, result, actor, and cause. The
+**Result** filter lists the six results. Each filter stays in the page URL, so a filtered view is shareable and survives a reload.
 
 The commit opens on GitHub, GitLab, Gitea, or Forgejo. Other hosts get a copy button.
 The branch opens the pipeline page filtered to that branch. The **Queue** column shows each build's wait.
@@ -280,7 +280,7 @@ Use `cancelInProgress` when a pull request builds again against a new target com
 ## Show a build badge
 
 The job page shows a status badge when the tenant turns badges on. The card shows the badge
-preview, its URL, and a Markdown snippet. Copy the snippet into a README.
+preview, its URL, and a Markdown snippet. Copy the snippet into a README. When badges are off, the page shows one line instead.
 
 The badge shows the result of the newest completed build. A build that failed to trigger does not
 count. The colours are:

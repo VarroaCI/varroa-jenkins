@@ -3,12 +3,16 @@ import { Card } from "../../components/Card";
 import type { JobHealth, JobTrendPoint } from "../../types";
 import { HealthGlyph } from "./HealthGlyph";
 import { formatDuration } from "./JobTree";
+import { PLOT_H, PLOT_W, TrendPlot, endLabels } from "./TrendPlot";
 import styles from "./JobHealthCard.module.css";
 
 const enc = (s: string) => encodeURIComponent(s);
 
 /** Results that the health window does not count. */
 const UNCOUNTED = new Set(["INTERRUPTED", "NOT_BUILT"]);
+
+/** The note that explains the grey squares and the counted total. */
+export const NOT_COUNTED_NOTE = "Interrupted and not-built builds are not counted.";
 
 function resultClass(result: string): string {
   if (UNCOUNTED.has(result)) return styles.resultUncounted;
@@ -50,22 +54,47 @@ function ResultStrip({ tenant, jobPath, points }: { tenant: string; jobPath: str
   );
 }
 
+/** ResultLegend names the four square colours. */
+function ResultLegend() {
+  const items: { cls: string; label: string }[] = [
+    { cls: styles.resultPassed, label: "Passed" },
+    { cls: styles.resultUnstable, label: "Unstable" },
+    { cls: styles.resultFailed, label: "Failed" },
+    { cls: styles.resultUncounted, label: "Not counted" },
+  ];
+  return (
+    <ul className={styles.legend} aria-label="Result colours">
+      {items.map((item) => (
+        <li key={item.label}>
+          <span className={`${styles.swatch} ${item.cls}`} aria-hidden="true" />
+          {item.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** DurationChart draws one bar per run with a duration, oldest on the left.
  * The tallest bar is the longest run in the window. */
 function DurationChart({ points }: { points: JobTrendPoint[] }) {
-  const width = 300;
-  const height = 80;
+  const height = PLOT_H;
   const durations = points.map((p) => p.durationMs ?? 0);
   const max = Math.max(...durations, 1);
-  const slot = width / Math.max(points.length, 1);
+  const slot = PLOT_W / Math.max(points.length, 1);
   const longest = Math.max(...durations, 0);
+  const ends = endLabels(
+    points.map((point) => ({ point })),
+    pointName,
+    (p) => (p.durationMs === undefined ? undefined : formatDuration(p.durationMs)),
+  );
   return (
-    <svg
-      className={styles.chart}
-      viewBox={`0 0 ${width} ${height}`}
-      preserveAspectRatio="none"
+    <TrendPlot
+      top={formatDuration(max)}
+      bottom="0s"
+      first={ends.first}
+      last={ends.last}
       role="img"
-      aria-label={`Build durations, oldest first. Longest ${formatDuration(longest)}.`}
+      ariaLabel={`Build durations, oldest first. Longest ${formatDuration(longest)}.`}
     >
       {points.map((point, i) => {
         if (point.durationMs === undefined) return null;
@@ -84,25 +113,30 @@ function DurationChart({ points }: { points: JobTrendPoint[] }) {
           </rect>
         );
       })}
-    </svg>
+    </TrendPlot>
   );
 }
 
 /** TestChart draws one stacked bar per run that reported suite counters:
  * passed, then failed, then skipped. The tallest bar is the largest total. */
 function TestChart({ points }: { points: JobTrendPoint[] }) {
-  const width = 300;
-  const height = 80;
+  const height = PLOT_H;
   const totals = points.map((p) => (p.tests ? p.tests.passed + p.tests.failed + p.tests.skipped : 0));
   const max = Math.max(...totals, 1);
-  const slot = width / Math.max(points.length, 1);
+  const slot = PLOT_W / Math.max(points.length, 1);
+  const ends = endLabels(
+    points.map((point) => ({ point })),
+    pointName,
+    (p) => (p.tests ? String(p.tests.passed + p.tests.failed + p.tests.skipped) : undefined),
+  );
   return (
-    <svg
-      className={styles.chart}
-      viewBox={`0 0 ${width} ${height}`}
-      preserveAspectRatio="none"
+    <TrendPlot
+      top={String(max)}
+      bottom="0"
+      first={ends.first}
+      last={ends.last}
       role="img"
-      aria-label="Test counts per build, oldest first: passed, failed, and skipped."
+      ariaLabel="Test counts per build, oldest first: passed, failed, and skipped."
     >
       {points.map((point, i) => {
         if (!point.tests) return null;
@@ -127,7 +161,7 @@ function TestChart({ points }: { points: JobTrendPoint[] }) {
           </g>
         );
       })}
-    </svg>
+    </TrendPlot>
   );
 }
 
@@ -158,15 +192,18 @@ export function JobHealthCard({
         <div className={styles.summary}>
           <HealthGlyph health={health} />
           <span>
-            {health.passed} of {health.counted} builds passed
+            {health.passed} of {health.counted} counted builds passed
             {health.score !== undefined && ` · ${health.score}%`}
           </span>
+          <span className={styles.window}>last {health.window} finished builds</span>
         </div>
       )}
       {points.length > 0 && (
         <>
           <h3 className={styles.heading}>Results</h3>
           <ResultStrip tenant={tenant} jobPath={jobPath} points={points} />
+          <ResultLegend />
+          <p className={styles.note}>{NOT_COUNTED_NOTE}</p>
           {hasDurations && (
             <>
               <h3 className={styles.heading}>Duration</h3>

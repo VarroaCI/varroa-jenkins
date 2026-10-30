@@ -138,6 +138,36 @@ func TestJobWindowStatsIgnoresRunBeforeTheWindow(t *testing.T) {
 	}
 }
 
+// TestJobWindowStatsPassRateSkipsInterruptedAndNotBuilt asserts an
+// INTERRUPTED or NOT_BUILT run counts in Builds but not in the pass
+// rate. Two SUCCESS runs are the only counted runs, so the rate is 1.0.
+func TestJobWindowStatsPassRateSkipsInterruptedAndNotBuilt(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	reader := NewReader(pool)
+	ctx := context.Background()
+
+	base := time.Now().UTC().Add(-time.Hour)
+	jobPath := "acme/app-uncounted"
+	dur := int64(1000)
+	seedJobSummaryRun(t, db, jobPath, base, "SUCCESS", &dur)
+	seedJobSummaryRun(t, db, jobPath, base.Add(time.Minute), "SUCCESS", &dur)
+	seedJobSummaryRun(t, db, jobPath, base.Add(2*time.Minute), "INTERRUPTED", &dur)
+	seedJobSummaryRun(t, db, jobPath, base.Add(3*time.Minute), "NOT_BUILT", &dur)
+
+	stats, err := reader.JobWindowStats(ctx, testCluster, testTenant, jobPath, base.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("JobWindowStats: %v", err)
+	}
+	if stats.Builds != 4 {
+		t.Fatalf("Builds = %d, want 4", stats.Builds)
+	}
+	if stats.PassRate == nil || *stats.PassRate != 1.0 {
+		t.Fatalf("PassRate = %v, want 1.0", stats.PassRate)
+	}
+}
+
 // seedJobQueueWaitRun inserts one run directly, with queued_at set to
 // createdAt. A non-nil waitMs inserts a completed build: status
 // COMPLETED, result SUCCESS, duration 1000 ms, and started_at waitMs
