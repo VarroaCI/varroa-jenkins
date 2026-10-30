@@ -42,6 +42,9 @@ queue, and your own running builds.
 One line counts the other tenants on the cell without naming them, and shows none of their jobs,
 builds, or counts.
 
+Beside the pill, one line names a member cluster, the other tenants, the free slots, and any
+warning. **Open cell** links to the cell when your access covers it.
+
 **Cell details** opens the cell's controller page, if your access covers it. Otherwise you still
 read every field.
 
@@ -67,7 +70,7 @@ cap, which stops a new tenant from landing even while the cell reports a free sl
 
 ## Read the pipelines tree
 
-Four cards follow the page head: **Running now**, **Pipelines**, **Locks**, and **Runners**.
+Four cards follow the page head: **Running now**, **Pipelines**, **Locks**, and **Runners**. An empty card reads one line of text.
 
 **Running now** holds one tile per build in progress: the job name, the build number, the
 current stage, the branch, and a progress bar against the job's usual duration. The stage line
@@ -75,7 +78,8 @@ names the run's top-level stage in progress. A running build with no stage in pr
 `Starting`, and a build that has not started reads `Queued`.
 
 **Pipelines** holds the tenant's folder tree. A job row carries its health, its last build, its
-branch, its last eight build durations, and when it last ran. **Queue wait** shows the job's
+branch, its last eight build durations, and when it last ran. The last build shows a status glyph
+and the actor. **Queue wait** shows the job's
 median wait from queue entry to start over the last 30 days. Health is a weather glyph. A job
 that never finished a counted build shows no glyph and an empty last build. See
 [Read a job's health](#read-a-jobs-health).

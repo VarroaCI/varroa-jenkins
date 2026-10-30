@@ -24,7 +24,6 @@
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  margin-top: 0.5rem;
   padding: 0.2rem 0.6rem;
   border: none;
   border-radius: var(--radius-sm);
@@ -35,6 +34,35 @@
 .cellPillOk   { composes: cellPill; background: var(--ok-soft);   color: var(--ok-text); }
 .cellPillInfo { composes: cellPill; background: var(--info-soft); color: var(--info-text); }
 .cellPillWarn { composes: cellPill; background: var(--warn-soft); color: var(--warn-text); }
+
+/* The row holds the pill and its one-line cell facts. */
+.cellRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.cellMeta {
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}
+
+.memberChip {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.cellWarn {
+  color: var(--warn-text);
+  font-weight: 600;
+}
 
 /* The margin keeps the open card clear of the page head above it. */
 .cellDisclosure {
@@ -83,6 +111,13 @@
   padding: 2rem 0;
   color: var(--text-2);
   text-align: center;
+}
+
+/* An empty card reads as one line of text, not a centred block. */
+.emptyLine {
+  padding: 0.25rem 0;
+  color: var(--text-2);
+  font-size: 0.875rem;
 }
 
 .emptyNote {

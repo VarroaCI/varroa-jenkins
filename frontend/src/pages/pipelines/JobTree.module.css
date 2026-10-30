@@ -116,6 +116,18 @@
   color: var(--text-2);
 }
 
+.lastBuildCell {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.actor {
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}
+
 .pendingBadge {
   margin-left: 0.5rem;
   padding: 0.05rem 0.4rem;

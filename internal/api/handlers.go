@@ -2713,6 +2713,11 @@ func (s *Server) handleActivityStream(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.deps.Broadcaster.Unsubscribe("*", ch)
 
+	// Send the headers now so the client sees the stream open before the
+	// first event or keepalive ping arrives.
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
 	keepalive := time.NewTicker(30 * time.Second)
 	defer keepalive.Stop()
 

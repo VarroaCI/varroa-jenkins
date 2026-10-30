@@ -14,6 +14,13 @@ export type Lane = "control" | "builds";
 export type RenderRow =
   | { kind: "event"; event: ActivityEvent }
   | {
+      /** repeat folds consecutive control events of one type, actor, and controller. */
+      kind: "repeat";
+      groupId: string;
+      members: ActivityEvent[];
+      newest: ActivityEvent;
+    }
+  | {
       kind: "group";
       groupId: string;
       groupKey: string;
@@ -124,13 +131,42 @@ export function groupKey(e: ActivityEvent): string {
 
 // ── Grouping (single pass, newest-first) ───────────────────────────────────
 
+/**
+ * repeatKey names a run of control events that fold into one row. The key
+ * holds the message too, so two distinct failures never share a row.
+ */
+export function repeatKey(e: ActivityEvent): string {
+  return [e.source, e.type, e.actor ?? "", groupKey(e), e.message].join(SEP);
+}
+
+/**
+ * isRoutineSignIn is true for a local sign-in that succeeded. The dashboard
+ * feed omits these; the activity page still lists them.
+ */
+export function isRoutineSignIn(e: ActivityEvent): boolean {
+  return e.type === "auth.local.login" && e.severity !== "warning";
+}
+
+/**
+ * activitySubject answers the bold lead of an activity row. A controller
+ * leads; otherwise the actor leads, unless the message already starts with it.
+ */
+export function activitySubject(e: ActivityEvent): { subject?: string; message: string } {
+  if (e.controller) return { subject: e.controller, message: e.message };
+  if (e.actor && !e.message.startsWith(e.actor)) return { subject: e.actor, message: e.message };
+  return { message: e.message };
+}
+
 export function groupEvents(rows: ActivityEvent[]): RenderRow[] {
   const result: RenderRow[] = [];
 
-  // Current open build group state
+  // At most one of the two open runs holds rows at a time. A build row
+  // closes the control run; a control row closes the build group.
   let openGroupKey: string | null = null;
   let openGroupMembers: ActivityEvent[] = [];
   let openGroupOldestTs: string | null = null;
+  let openRepeatKey: string | null = null;
+  let openRepeatMembers: ActivityEvent[] = [];
 
   function flushGroup() {
     if (openGroupMembers.length === 0) return;
@@ -166,13 +202,43 @@ export function groupEvents(rows: ActivityEvent[]): RenderRow[] {
     openGroupOldestTs = null;
   }
 
+  function flushRepeat() {
+    if (openRepeatMembers.length === 0) return;
+
+    if (openRepeatMembers.length === 1) {
+      result.push({ kind: "event", event: openRepeatMembers[0] });
+    } else {
+      const newest = openRepeatMembers[0];
+      const oldest = openRepeatMembers[openRepeatMembers.length - 1];
+      result.push({
+        kind: "repeat",
+        groupId: "repeat:" + openRepeatKey! + "@" + oldest.timestamp,
+        members: openRepeatMembers,
+        newest,
+      });
+    }
+
+    openRepeatKey = null;
+    openRepeatMembers = [];
+  }
+
   for (const row of rows) {
     if (laneFor(row) === "control") {
-      // Control-plane event flushes any open group
+      // A control row closes any open build group, then joins the repeat run.
       flushGroup();
-      result.push({ kind: "event", event: row });
+      const key = repeatKey(row);
+      if (openRepeatKey === key && openRepeatMembers.length < GROUP_MAX) {
+        openRepeatMembers.push(row);
+      } else {
+        flushRepeat();
+        openRepeatKey = key;
+        openRepeatMembers = [row];
+      }
       continue;
     }
+
+    // Build lane event closes the open repeat run.
+    flushRepeat();
 
     // Build lane event
     const gk = groupKey(row);
@@ -194,8 +260,9 @@ export function groupEvents(rows: ActivityEvent[]): RenderRow[] {
     }
   }
 
-  // Flush trailing open group
+  // Flush trailing open runs
   flushGroup();
+  flushRepeat();
 
   return result;
 }

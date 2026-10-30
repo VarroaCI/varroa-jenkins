@@ -19,6 +19,7 @@ vi.mock("../../api/client", () => ({
   listRunners: (...args: unknown[]) => mockListRunners(...args),
   getTenantCell: (...args: unknown[]) => mockGetTenantCell(...args),
   listFleetLocks: (...args: unknown[]) => mockListFleetLocks(...args),
+  listClusters: async () => [{ name: "core", core: true }],
   tenantRunStreamUrl: (tenant: string) => `/api/v1/pipelines/${encodeURIComponent(tenant)}/stream`,
 }));
 

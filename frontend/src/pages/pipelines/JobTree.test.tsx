@@ -106,6 +106,36 @@ function renderRows(rows: JobTreeNode[]) {
   );
 }
 
+function jobWithLastBuild(actor: string) {
+  const node = jobNode("acme/app-a", false);
+  return {
+    ...node,
+    summary: createPipelineSummary({
+      jobPath: "acme/app-a",
+      lastBuild: {
+        runId: "r1",
+        status: "COMPLETED",
+        result: "FAILURE",
+        buildNumber: 7,
+        actor,
+      },
+    }),
+  } as unknown as JobTreeNode;
+}
+
+describe("JobTree last build cell", () => {
+  it("shows the last build status glyph and actor", () => {
+    renderRows([jobWithLastBuild("alice")]);
+    expect(screen.getByRole("img", { name: "Failure" })).toBeInTheDocument();
+    expect(screen.getByText("by alice")).toBeInTheDocument();
+  });
+
+  it("hides an unknown actor", () => {
+    renderRows([jobWithLastBuild("unknown")]);
+    expect(screen.queryByText(/^by /)).not.toBeInTheDocument();
+  });
+});
+
 describe("JobTree pending badge", () => {
   it("shows a Pending badge on a pending job row", () => {
     renderRows([jobNode("acme/app-a", true)]);

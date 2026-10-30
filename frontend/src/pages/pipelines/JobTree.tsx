@@ -2,6 +2,8 @@ import type { CSSProperties, KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
 import { age } from "../../components/activityTimeline.util";
+import { RunGlyphMark } from "../../components/runs/RunGlyphMark";
+import { displayActor } from "../../components/runs/runActor";
 import type { PipelineSummary } from "../../types";
 import { breakablePath } from "./breakablePath";
 import { HealthGlyph } from "./HealthGlyph";
@@ -174,9 +176,15 @@ function JobRow({ tenant, node, item }: { tenant: string; node: JobTreeNode; ite
       </td>
       <td>
         {item.lastBuild ? (
-          <Link to={runHref(tenant, item.jobPath, item.lastBuild.runId)}>
-            #{item.lastBuild.buildNumber ?? "—"}
-          </Link>
+          <span className={styles.lastBuildCell}>
+            <RunGlyphMark size="sm" run={item.lastBuild} />
+            <Link to={runHref(tenant, item.jobPath, item.lastBuild.runId)}>
+              #{item.lastBuild.buildNumber ?? "—"}
+            </Link>
+            {displayActor(item.lastBuild.actor) && (
+              <span className={styles.actor}>by {displayActor(item.lastBuild.actor)}</span>
+            )}
+          </span>
         ) : (
           <span className={styles.dim}>—</span>
         )}

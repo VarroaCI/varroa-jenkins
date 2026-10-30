@@ -3,20 +3,9 @@ import { Link } from "react-router-dom";
 import { MoreVertical } from "lucide-react";
 import type { FleetRunRow } from "../../types";
 import { age } from "../activityTimeline.util";
-import { runGlyph, runGlyphLabel, runHref, runSecondLine, runTiming, type RunGlyph } from "./runRowText";
+import { runHref, runSecondLine, runTiming } from "./runRowText";
+import { RunGlyphMark } from "./RunGlyphMark";
 import styles from "./RunRow.module.css";
-
-const GLYPH_MARK: Record<RunGlyph, string> = {
-  success: "✓",
-  failure: "✕",
-  unstable: "!",
-  aborted: "–",
-  interrupted: "‖",
-  running: "●",
-  queued: "○",
-  waiting: "?",
-  other: "·",
-};
 
 export interface RunRowProps {
   run: FleetRunRow;
@@ -33,8 +22,6 @@ export interface RunRowProps {
  */
 export function RunRow({ run, now, localCluster, onRerun, onCancel }: RunRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const glyph = runGlyph(run);
-  const label = runGlyphLabel(glyph);
   const href = runHref(run.tenant, run.jobPath ?? "", run.runId);
   const started = run.startedAt ?? run.queuedAt ?? run.createdAt;
   const canRerun = run.canWrite && run.status === "COMPLETED";
@@ -48,9 +35,7 @@ export function RunRow({ run, now, localCluster, onRerun, onCancel }: RunRowProp
   return (
     <tr className={styles.row}>
       <td className={styles.statusCell}>
-        <span role="img" aria-label={label} className={`${styles.glyph} ${styles[glyph]}`}>
-          {GLYPH_MARK[glyph]}
-        </span>
+        <RunGlyphMark run={run} />
       </td>
       <td className={styles.runCell}>
         <Link to={href} className={styles.title}>

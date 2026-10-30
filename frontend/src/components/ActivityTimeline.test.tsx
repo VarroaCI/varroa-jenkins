@@ -246,11 +246,67 @@ describe("ActivityTimeline", () => {
 
     const pauseButton = screen.getByTitle("Pause to review");
     await userEvent.click(pauseButton);
-    expect(screen.getByText("▶ Live")).toBeInTheDocument();
+    expect(screen.getByText("▶ Resume")).toBeInTheDocument();
+    expect(screen.getByText("Paused · Disconnected")).toBeInTheDocument();
 
     // Click resume
     await userEvent.click(pauseButton);
-    expect(screen.getByText("⏸ Paused")).toBeInTheDocument();
+    expect(screen.getByText("⏸ Pause")).toBeInTheDocument();
+  });
+
+  it("folds repeated sign-ins into one row and expands it", async () => {
+    const ts = (sec: number) => {
+      const d = new Date("2024-01-01T00:00:00Z");
+      d.setUTCSeconds(d.getUTCSeconds() + sec);
+      return d.toISOString();
+    };
+    const events = [5, 4, 3, 2, 1].map((n) =>
+      createEvent({
+        timestamp: ts(n),
+        type: "auth.local.login",
+        source: "user",
+        actor: "local:bob",
+        controller: undefined,
+        message: "signed in with a local service account",
+      }),
+    );
+    mockBffFetch.mockResolvedValue({ items: events });
+    renderTimeline();
+
+    const header = await screen.findByText("× 5");
+    expect(screen.getAllByText("signed in with a local service account")).toHaveLength(1);
+
+    await userEvent.click(header.closest('[role="button"]') as HTMLElement);
+    // The header shows the newest message, and each of the five members shows its own.
+    expect(screen.getAllByText("signed in with a local service account")).toHaveLength(6);
+  });
+
+  it("keeps a lost stream visible while the view is paused", async () => {
+    mockSSEReadyState = "closed";
+    mockBffFetch.mockResolvedValue({ items: [] });
+    renderTimeline();
+
+    await userEvent.click(await screen.findByTitle("Pause to review"));
+    expect(screen.getByText("Paused · Disconnected")).toBeInTheDocument();
+  });
+
+  it("labels the category and source chip rows", async () => {
+    mockBffFetch.mockResolvedValue({ items: [] });
+    renderTimeline();
+
+    await waitFor(() => {
+      expect(screen.getByRole("group", { name: "Category" })).toBeInTheDocument();
+    });
+    expect(screen.getByRole("group", { name: "Source" })).toBeInTheDocument();
+  });
+
+  it("shows a neutral connecting state, not a failure dot", async () => {
+    mockSSEReadyState = "connecting";
+    mockBffFetch.mockResolvedValue({ items: [] });
+    const { container } = renderTimeline();
+
+    expect(await screen.findByText("Connecting…")).toBeInTheDocument();
+    expect(container.querySelector('[class*="deadDot"]')).toBeNull();
   });
 
   it("drops off-scope events when scope is set", async () => {

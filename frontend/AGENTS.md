@@ -130,6 +130,7 @@ TypeScript consumer of it.
 - **Activity icons**: `activityTypeMeta` in `src/components/activityTimeline.util.ts`
   is the only type-to-icon source for every activity surface (timeline and
   Dashboard). Live frames pass `isActivityEvent` before they reach the feed buffer.
+- **Run status glyph**: `components/runs/RunGlyphMark.tsx` is the one status mark for a run. `runGlyph` in `components/runs/runGlyph.ts` names the state and has no runtime imports, so a page can import it without a cycle. Do not draw a run status mark inline.
 - **Fleet-scale rendering**: the Dashboard brood-health card renders a phase
   bar, at most eight rows, and a "View all" link. `BroodControllerPicker`
   renders its rows through `useVirtualizer` inside the scroll container

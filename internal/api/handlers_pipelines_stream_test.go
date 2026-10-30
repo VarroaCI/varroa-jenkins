@@ -446,6 +446,40 @@ func TestHandleTenantRunStream_UnavailableWithoutDependencies(t *testing.T) {
 	})
 }
 
+// closedRunFanout answers a subscription whose channel is already closed.
+type closedRunFanout struct{}
+
+func (closedRunFanout) Subscribe([]string, func(recordstore.RunNotification) bool) <-chan sse.Record {
+	ch := make(chan sse.Record)
+	close(ch)
+	return ch
+}
+
+func (closedRunFanout) Unsubscribe([]string, <-chan sse.Record) {}
+
+// TestHandleTenantRunStream_FlushesHeadersOnConnect proves the run stream
+// flushes its 200 and headers at connect, before any notification arrives.
+func TestHandleTenantRunStream_FlushesHeadersOnConnect(t *testing.T) {
+	srv := streamTestServer(
+		fixedTenantResolver{refs: tenantStreamRefs()},
+		pipelineGrantAuthorizer([]string{"read"}, "team-a"),
+		closedRunFanout{},
+	)
+	req := httptest.NewRequest(http.MethodGet, "/pipelines/team-a/stream", nil).
+		WithContext(authContext(testClaims()))
+	req.SetPathValue("tenant", "team-a")
+	rec := httptest.NewRecorder()
+
+	srv.handleTenantRunStream(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+	if !rec.Flushed {
+		t.Errorf("headers were not flushed on connect")
+	}
+}
+
 // TestHandleTenantRunStream_RefusedTenantAnswers404 proves the handler writes the
 // resolution error unchanged, so a tenant the caller may not read answers 404.
 func TestHandleTenantRunStream_RefusedTenantAnswers404(t *testing.T) {
