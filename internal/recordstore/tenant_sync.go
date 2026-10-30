@@ -820,10 +820,10 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 			cluster, tenant, namespace, cell, generation, cell_instance, policy,
 			rehydrated_instance, pending_jobs, cell_alive, cell_alive_at, cell_last_seen_at,
 			dead_instances, announced_at, members, job_homes, incarnation, agent_namespace,
-			retired_incarnations, notification_webhook
+			retired_incarnations, notification_webhook, badge_token
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, $10, $11, $12, $13::jsonb, now(),
-			$14::jsonb, $15::jsonb, $16, $17, $18::jsonb, $19::jsonb
+			$14::jsonb, $15::jsonb, $16, $17, $18::jsonb, $19::jsonb, NULLIF($20, '')
 		)
 		ON CONFLICT (cluster, tenant) DO UPDATE SET
 			namespace           = EXCLUDED.namespace,
@@ -843,12 +843,13 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 			incarnation         = EXCLUDED.incarnation,
 			agent_namespace     = EXCLUDED.agent_namespace,
 			retired_incarnations = EXCLUDED.retired_incarnations,
-			notification_webhook = EXCLUDED.notification_webhook
+			notification_webhook = EXCLUDED.notification_webhook,
+			badge_token          = EXCLUDED.badge_token
 	`,
 		req.Cluster, req.Tenant, req.Namespace, req.Cell, generation, req.CellInstance, string(policy),
 		rehydratedInstance, string(pendingJobsJSON), req.CellAlive, req.CellAliveAt, req.CellLastSeenAt,
 		string(deadInstancesJSON), string(membersJSON), string(jobHomesJSON), identity.incarnation,
-		req.AgentNamespace, string(retiredJSON), webhookJSON,
+		req.AgentNamespace, string(retiredJSON), webhookJSON, req.BadgeToken,
 	); err != nil {
 		return fmt.Errorf("upsert tenant placement: %w", err)
 	}

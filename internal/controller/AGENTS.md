@@ -1276,7 +1276,9 @@ sections describe.
   `resolveTenantWebhook` (`tenant_controller.go`) reads the Secret that
   `notifications.webhook.secretRef` names, in `spec.pipelines.agentNamespace`,
   and sets the `Notifications` condition. `SyncPolicy.Webhook` travels in
-  the request's `notification_webhook` field and never in the policy JSON. `updateCellInstance` writes
+  the request's `notification_webhook` field and never in the policy JSON. `SyncPolicy.BadgeToken`
+  travels in the request's `badge_token` field the same way. It is set only while the badge switch is on,
+  and a change to it reannounces. `updateCellInstance` writes
   `Controller.status.cell.instance` from the running pod's `metadata.uid` on
   every controller-reconciler tick; it clears the field only on a confirmed
   absence, never on a transient pod-read error. **A pod in phase `Failed` or

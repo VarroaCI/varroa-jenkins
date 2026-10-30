@@ -207,7 +207,9 @@ spec:
 
 The badge URL holds the tenant's badge token in its path, so the URL is the credential. A caller
 with the URL reads the job name and its last result. The operator mints the token once. To rotate
-it, clear the token. The next reconcile tick mints a new one, and the old URLs answer 404:
+it, clear the token. The next reconcile tick mints a new one, and the old URLs answer 404. A tenant on a member cluster
+takes the new token on the next operator tick after the clear, so its old URLs answer 404 a little
+later:
 
 ```sh
 kubectl patch tenant payments --subresource=status --type=json \

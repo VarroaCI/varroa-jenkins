@@ -49,6 +49,12 @@ type SyncPolicy struct {
 	// its Secret is not usable. It never travels in the policy JSON; the
 	// announce request carries it on its own field.
 	Webhook *WebhookSync
+
+	// BadgeToken is the anonymous badge token of the tenant. It is set only
+	// while the tenant's badge switch is on. It never travels in the policy
+	// JSON; the announce request carries it on its own field. Equal compares
+	// it, so a rotation or a switch change sends a reannounce.
+	BadgeToken string
 }
 
 // WebhookSync is the receiver URL and the HMAC signing key the record
@@ -74,7 +80,8 @@ func (p SyncPolicy) Equal(other SyncPolicy) bool {
 		reflect.DeepEqual(p.Retention, other.Retention) &&
 		reflect.DeepEqual(p.ConcurrencyLimits, other.ConcurrencyLimits) &&
 		p.CellMaxRuns == other.CellMaxRuns &&
-		webhookSyncEqual(p.Webhook, other.Webhook)
+		webhookSyncEqual(p.Webhook, other.Webhook) &&
+		p.BadgeToken == other.BadgeToken
 }
 
 // webhookSyncEqual compares two resolved webhooks. Two nil values are

@@ -44,7 +44,7 @@ func TestSyncPolicyFor_ResolvesPoolMaxRunsPerTenant(t *testing.T) {
 
 	tenant := &v1alpha1.Tenant{Spec: v1alpha1.TenantSpec{Pipelines: &v1alpha1.TenantPipelinesSpec{CellPool: "pool-a"}}}
 	in := Inputs{Pools: []CellPoolSummary{{Name: "pool-a", MaxRunsPerTenant: 4}}}
-	if got := syncPolicyFor(in, tenant).CellMaxRuns; got != 4 {
+	if got := syncPolicyFor(in, tenant, &v1alpha1.TenantStatus{}).CellMaxRuns; got != 4 {
 		t.Fatalf("CellMaxRuns = %d, want 4", got)
 	}
 }

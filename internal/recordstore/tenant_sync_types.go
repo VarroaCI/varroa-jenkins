@@ -121,6 +121,11 @@ type TenantSyncRequest struct {
 	// tenant's completion webhook: the receiver URL and the HMAC signing
 	// key. Nil clears the stored webhook. The recorder never logs it.
 	NotificationWebhook *TenantSyncWebhook `json:"notification_webhook,omitempty"`
+
+	// BadgeToken applies to kind "announce". It is set only while the
+	// tenant's badge switch is on. An empty value clears the stored token.
+	// The recorder never logs it.
+	BadgeToken string `json:"badge_token,omitempty"`
 }
 
 // TenantSyncWebhook is a tenant's completion webhook as the operator
