@@ -94,7 +94,9 @@ import type {
   FleetLockListResponse,
   FleetLockReleaseRequest,
   FleetLockReleaseResponse,
-  PipelineTenantList,
+  FleetRunPage,
+  FleetRunSort,
+  PipelinesOverview,
   ProposePipelineResponse,
 } from "../types";
 import type { ControllerDetail } from "../hooks/useControllers";
@@ -1166,12 +1168,60 @@ const pipelinesBase = (tenant: string) => `/pipelines/${enc(tenant)}`;
 const jobBase = (tenant: string, jobPath: string) => `${pipelinesBase(tenant)}/jobs/${enc(jobPath)}`;
 const runBase = (runId: string) => `/runs/${enc(runId)}`;
 
-/**
- * Lists every pipelines Tenant the caller may read, on this cluster and on
- * each member cluster. The pipelines landing page reads this route.
- */
-export function listPipelineTenants(): Promise<PipelineTenantList> {
-  return bffFetch<PipelineTenantList>("/pipelines");
+/** The query of GET /pipelines/runs. Each tenant name is one repeated tenant parameter. */
+export interface FleetRunsParams {
+  tenant?: string[];
+  job?: string;
+  trigger?: string;
+  status?: string;
+  result?: string;
+  branch?: string;
+  actor?: string;
+  since?: string;
+  q?: string;
+  sort?: FleetRunSort;
+  order?: "asc" | "desc";
+  limit?: number;
+  cursor?: string;
+}
+
+function fleetRunsQS(p: FleetRunsParams): string {
+  const qs = new URLSearchParams();
+  for (const t of p.tenant ?? []) qs.append("tenant", t);
+  const scalars: [string, string | undefined][] = [
+    ["job", p.job],
+    ["trigger", p.trigger],
+    ["status", p.status],
+    ["result", p.result],
+    ["branch", p.branch],
+    ["actor", p.actor],
+    ["since", p.since],
+    ["q", p.q],
+    ["sort", p.sort],
+    ["order", p.order],
+    ["cursor", p.cursor],
+  ];
+  for (const [key, value] of scalars) {
+    if (value) qs.set(key, value);
+  }
+  if (p.limit) qs.set("limit", String(p.limit));
+  const s = qs.toString();
+  return s ? `?${s}` : "";
+}
+
+/** Reads one page of the run feed over every tenant the caller can read. */
+export function listFleetRuns(p: FleetRunsParams): Promise<FleetRunPage> {
+  return bffFetch<FleetRunPage>(`/pipelines/runs${fleetRunsQS(p)}`);
+}
+
+/** Reads the counters, the attention counts, and the tenant rail. */
+export function getPipelinesOverview(): Promise<PipelinesOverview> {
+  return bffFetch<PipelinesOverview>("/pipelines/overview");
+}
+
+/** fleetRunStreamUrl builds the fleet run stream URL. useEventStream appends the ticket. */
+export function fleetRunStreamUrl(): string {
+  return `${BFF_BASE}/pipelines/runs/stream`;
 }
 
 export function listPipelines(tenant: string): Promise<PipelineListResponse> {

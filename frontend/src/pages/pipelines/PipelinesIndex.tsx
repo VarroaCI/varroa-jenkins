@@ -1,62 +1,86 @@
-import { Link, Navigate } from "react-router-dom";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Waypoints } from "lucide-react";
-import { listPipelineTenants } from "../../api/client";
-import { RecoveryState } from "../../components/RecoveryState";
-import { Card } from "../../components/Card";
+import { getPipelinesOverview } from "../../api/client";
+import { Button } from "../../components/Button";
+import { RecordStoreDisabledPage, RecoveryState } from "../../components/RecoveryState";
+import { useAssistant } from "../../components/assistant/AssistantProvider";
+import { ApiError } from "../../hooks/useApi";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
+import { canAccessTenantPipeline, usePermissions } from "../../hooks/usePermissions";
+import { AttentionStrip } from "./AttentionStrip";
+import { FleetCounters } from "./FleetCounters";
+import { NewPipelinePanel } from "./NewPipelinePanel";
+import { RunFeed } from "./RunFeed";
+import { TenantRail } from "./TenantRail";
 import { indexTitle } from "./pageTitles";
+import { useFeedQuery, type FeedQuery } from "./feedQuery";
+import { useFleetLive } from "./useFleetLive";
 import styles from "./PipelinesIndex.module.css";
 
 /**
- * PipelinesIndex is the /pipelines landing page. It lists the Tenants the
- * caller may open (design ruling aa) and redirects when exactly one
- * qualifies. Every name comes from a GET /pipelines row. That read covers
- * the pipelines Tenants of this cluster and of each member cluster, and the
- * local Tenants whose namespaces hold a controller the caller may read. A
- * name in the caller's `tenants` grants that GET /pipelines does not
- * answer is not listed. When the GET /pipelines read fails, the page shows
- * an error with Retry and no link.
+ * PipelinesIndex is the /pipelines command center. It shows the attention
+ * strip, the counters, the tenant rail, and the run feed over every tenant
+ * the caller can read. A single tenant is selected in the view and not
+ * written to the URL, so the page never redirects.
  */
 export default function PipelinesIndex() {
-  const {
-    data: pipelineTenants,
-    isLoading: tenantsLoading,
-    isError: tenantsErrored,
-    refetch: refetchTenants,
-  } = useQuery({
-    queryKey: ["pipelineTenants"],
-    queryFn: listPipelineTenants,
+  const overviewQuery = useQuery({
+    queryKey: ["pipelines-overview"],
+    queryFn: getPipelinesOverview,
+    refetchInterval: 30_000,
   });
+  const overview = overviewQuery.data;
+  const perms = usePermissions().data;
+  const assistant = useAssistant();
+  const [storedQuery, setStoredQuery] = useFeedQuery();
+  const [showNew, setShowNew] = useState(false);
 
   useDocumentTitle(indexTitle());
 
-  if (tenantsLoading) {
+  // One name answers one rail row. The BFF sends each name once.
+  const names = useMemo(() => (overview?.tenants ?? []).map((t) => t.name), [overview]);
+  const single = names.length === 1 ? names[0] : undefined;
+  // A single tenant is the view's tenant, but the URL keeps no tenant for it.
+  const query = useMemo<FeedQuery>(
+    () => (single !== undefined && storedQuery.tenant.length === 0 ? { ...storedQuery, tenant: [single] } : storedQuery),
+    [storedQuery, single],
+  );
+  const onQuery = (next: FeedQuery) => {
+    const onlySingle = single !== undefined && next.tenant.length === 1 && next.tenant[0] === single;
+    setStoredQuery(onlySingle ? { ...next, tenant: [] } : next);
+  };
+  const onPreset = (p: Partial<FeedQuery>) => {
+    const next: FeedQuery = { ...query, ...p };
+    if (p.result) next.status = "";
+    if (p.status) next.result = "";
+    onQuery(next);
+  };
+
+  const live = useFleetLive(query, names.length > 0);
+
+  if (overviewQuery.isPending) {
     return (
       <div className={styles.page}>
-        <div className={styles.loading}>Loading tenants…</div>
+        <div className={styles.loading}>Loading pipelines…</div>
       </div>
     );
   }
 
-  if (tenantsErrored) {
+  if (overviewQuery.isError) {
+    if (overviewQuery.error instanceof ApiError && overviewQuery.error.status === 503) {
+      return <RecordStoreDisabledPage />;
+    }
     return (
       <RecoveryState
         kind="error"
-        title="Unable to load tenants"
-        message="Varroa could not load the tenant list."
-        onRetry={() => void refetchTenants()}
+        title="Unable to load pipelines"
+        message="Varroa could not load the pipelines overview."
+        onRetry={() => void overviewQuery.refetch()}
       />
     );
   }
 
-  // One name that two member clusters hold answers two rows. Both rows
-  // open the same URL, so the page shows the name once.
-  const names = new Set<string>();
-  for (const t of pipelineTenants?.items ?? []) names.add(t.name);
-  const tenants = Array.from(names).sort((a, b) => a.localeCompare(b));
-
-  if (tenants.length === 0) {
+  if (!overview || names.length === 0) {
     return (
       <RecoveryState
         kind="403"
@@ -66,29 +90,53 @@ export default function PipelinesIndex() {
     );
   }
 
-  if (tenants.length === 1) {
-    return <Navigate to={`/pipelines/${encodeURIComponent(tenants[0])}`} replace />;
-  }
+  const writable = names.filter((n) => canAccessTenantPipeline(perms, n, "write", ""));
+  const canNew = assistant.available && writable.length > 0;
+  const tenantWord = names.length === 1 ? "tenant" : "tenants";
+  const clusterWord = overview.clusters === 1 ? "cluster" : "clusters";
 
   return (
     <div className={styles.page}>
-      <div className={styles.pageHead}>
-        <div className={styles.pageTitle}>Pipelines</div>
-        <div className={styles.pageDesc}>Pick a Tenant to see its pipelines.</div>
+      <div className={styles.head}>
+        <div className={styles.headText}>
+          <h1 className={styles.title}>Pipelines</h1>
+          <p className={styles.desc}>
+            {`${names.length} ${tenantWord} you can read · ${overview.clusters} ${clusterWord} · runs from every tenant, newest first`}
+          </p>
+        </div>
+        {canNew && (
+          <Button variant="primary" onClick={() => setShowNew((open) => !open)}>
+            New pipeline
+          </Button>
+        )}
       </div>
-      <Card>
-        <ul className={styles.list}>
-          {tenants.map((name) => (
-            <li key={name}>
-              <Link to={`/pipelines/${encodeURIComponent(name)}`} className={styles.item}>
-                <Waypoints aria-hidden="true" size={18} className={styles.itemIcon} />
-                <span className={styles.itemLabel}>{name}</span>
-                <ChevronRight aria-hidden="true" size={16} className={styles.itemChevron} />
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </Card>
+
+      {showNew && canNew && <NewPipelinePanel tenants={writable} />}
+
+      <AttentionStrip overview={overview} onPreset={onPreset} />
+      <FleetCounters overview={overview} />
+
+      <div className={styles.body}>
+        <aside className={styles.rail}>
+          <TenantRail
+            tenants={overview.tenants}
+            localCluster={overview.localCluster}
+            selected={query.tenant}
+            onSelect={(selected) => onQuery({ ...query, tenant: selected })}
+            showAll={single === undefined}
+          />
+        </aside>
+        <div className={styles.feed}>
+          <RunFeed
+            query={query}
+            onQuery={onQuery}
+            tenants={names}
+            localCluster={overview.localCluster}
+            live={live}
+            onNewPipeline={canNew ? () => setShowNew(true) : undefined}
+          />
+        </div>
+      </div>
     </div>
   );
 }

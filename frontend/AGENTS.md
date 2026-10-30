@@ -235,10 +235,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   Jenkins link under a headless controller opens. It calls `getControllerJenkinsLink` and replaces
   the URL with the returned Varroa page, reading the raw pathname so `%252F` survives.
 - `src/pages/pipelines/` — the pipelines route tree: `PipelinesIndex.tsx`
-  (`/pipelines`, lists the names of `GET /pipelines` rows only, which include
-  member-cluster Tenants and controller-namespace Tenants; it does not merge the
-  caller's `tenants` grant names, and a failed read shows an error with Retry;
-  it redirects when exactly one name qualifies), `TenantHome.tsx` (`/pipelines/:tenant`, the jobs folder tree, a Running
+  (`/pipelines`, the command center: the `AttentionStrip.tsx` chips, the `FleetCounters.tsx` tiles, the `TenantRail.tsx` rail, and the `RunFeed.tsx` table; it reads `GET /pipelines/overview` on a 30-second refetch and never redirects, a single tenant is selected in the view and is not written to the URL; the view is the URL query through `feedQuery.ts`; `useFleetLive.ts` applies the `pipelines-runs` stream, with its pure rules in `feedLive.ts`; `NewPipelinePanel.tsx` holds the proposal form; a failed overview shows Retry, and a 503 shows the record-store state), `TenantHome.tsx` (`/pipelines/:tenant`, the jobs folder tree, a Running
   now strip, and a `Locks` card that reads `GET /pipelines/{tenant}/locks`,
   refetches on a `lock` stream frame under the same 2-second window a `run` or
   a `stage` frame uses, and polls that read on the cells cadence, because a
@@ -339,6 +336,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   trail; `src/components/Topbar.tsx` keeps its single area crumb and is not
   merged with it. `JobTree.tsx` shows a `Pending` badge on a job row or a multibranch node when
   `pending` is true; `PipelinePage.tsx` shows a note above the cards for a pending job.
+- **Fleet run table pieces**: `components/SortableHeader.tsx` (`SortableHeader`, `nextSort`) is the only sortable column header, and `components/FilterBar.tsx` (`FilterBar`, `FilterSelect`, `SearchBox`) is the only labelled filter row. `components/runs/RunRow.tsx` is the only run row; its pure text rules live in `runRowText.ts`. The pipelines feed and the tenant home both use these pieces. A sort or filter change drops the cursor, so no page read reuses a cursor under another view.
 - **`src/components/TenantScopeEditor.tsx`** owns the whole `tenants`
   dimension of a `VarroaRoleBinding` scope: the entry list, the `Tenant` name
   control, the `jobs` glob list, the grammar help, the six client-side

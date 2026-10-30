@@ -9,12 +9,24 @@ The pipelines pages need the [build record store](../operations/build-records.md
 `recordStore.enabled: true` in your Helm values before you start. With the store off, the
 **Pipelines** row still shows, and every page says so instead of listing builds.
 
+## Pipelines home
+
+Select **Pipelines** to see the runs of every tenant you can read, newest first.
+
+The attention strip shows counts that need action. Each chip sets a feed filter. The counters cover the last 24 hours.
+
+The tenant rail selects one tenant. Select a column header to sort the feed. The URL keeps the view, so a link reproduces it.
+
+Each row menu offers **Open**. **Re-run** and **Cancel** appear only when you can write the tenant.
+
+On a phone, the rail becomes a row of chips.
+
 ## Open a tenant
 
 Sign in and select **Pipelines** in the sidebar. You see the pipelines of every [Tenant](../security/varroa-rbac.md#grant-pipelines-access) that grants you a `pipelines`
 verb. `/pipelines` lists only the tenants that hold pipelines you can read, including member-cluster
-tenants. A tenant with no pipelines and no controllers in its namespaces does not show. It opens your
-only tenant automatically. With more than one, pick one.
+tenants. A tenant with no pipelines and no controllers in its namespaces does not show. Select a
+tenant in the rail, or open it with its **Open** link.
 
 A tenant on a member cluster shows its definition, parameters, declared jobs, source input, and version profile. Varroa reads them from the member at each request.
 

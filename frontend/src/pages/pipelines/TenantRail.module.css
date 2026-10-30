@@ -1,0 +1,132 @@
+.rail {
+  min-width: 0;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  min-width: 0;
+}
+
+.row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.select {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.select:hover {
+  border-color: var(--border-strong);
+}
+
+.select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+
+.failed {
+  flex-shrink: 0;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.strip {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.cell {
+  height: 6px;
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+
+.cellOk { background: var(--ok); }
+.cellFailed { background: var(--bad); }
+.cellRunning { background: var(--info); }
+.cellIdle { background: var(--surface-3); }
+
+.meta {
+  color: var(--text-2);
+  font-size: 12px;
+  overflow-wrap: break-word;
+}
+
+.open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+}
+
+.open:hover,
+.open:focus-visible {
+  color: var(--text);
+  border-color: var(--border-strong);
+  outline: none;
+}
+
+@media (max-width: 639.98px) {
+  .list {
+    flex-direction: row;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+  }
+
+  .item {
+    flex: 0 0 auto;
+    width: 11rem;
+  }
+}

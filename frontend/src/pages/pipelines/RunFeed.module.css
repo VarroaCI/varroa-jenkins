@@ -1,0 +1,121 @@
+.feed {
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  min-width: 0;
+}
+
+.toolbarTop {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  width: 100%;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.count {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.live {
+  font-variant-numeric: tabular-nums;
+}
+
+.banner {
+  width: 100%;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.filters {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.filtersOpen {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.filtersToggle {
+  display: none;
+}
+
+.table {
+  min-width: 52rem;
+}
+
+.loading,
+.empty {
+  padding: 2rem 0;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.empty p {
+  margin: 0 0 0.75rem;
+}
+
+.more {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.75rem;
+}
+
+@media (max-width: 639.98px) {
+  .filtersToggle {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .filters {
+    display: none;
+  }
+
+  .filtersOpen {
+    display: block;
+  }
+
+  .table {
+    min-width: 0;
+  }
+
+  .table thead {
+    display: none;
+  }
+
+  .table tbody {
+    display: block;
+  }
+
+  .table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

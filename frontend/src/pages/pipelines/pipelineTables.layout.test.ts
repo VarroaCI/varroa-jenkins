@@ -24,4 +24,10 @@ describe("pipelines table layout", () => {
     expect(read("TenantHome.module.css")).toMatch(/\.tableScroll\s*\{/);
     expect(read("BuildPage.module.css")).toMatch(/\.tableScroll\s*\{/);
   });
+
+  it("the pipelines home stacks at phone width", () => {
+    const page = read("PipelinesIndex.module.css");
+    expect(page).toMatch(/@media \(max-width: 639\.98px\)\s*\{[\s\S]*?\.body\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\);/);
+    expect(read("TenantRail.module.css")).toMatch(/@media \(max-width: 639\.98px\)\s*\{[\s\S]*?overflow-x:\s*auto;/);
+  });
 });

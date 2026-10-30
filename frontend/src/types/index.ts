@@ -2769,25 +2769,97 @@ export interface CellUsageListResponse {
   items: CellUsage[];
 }
 
-/**
- * One row of GET /pipelines, the landing-page list. cell and cellNamespace
- * are set only on a placed row.
- */
-export interface PipelineTenant {
-  name: string;
+/** The trigger class of a fleet run row, derived by the BFF at read time. */
+export type FleetTriggerKind =
+  | "pullRequest"
+  | "push"
+  | "cron"
+  | "manual"
+  | "upstream"
+  | "webhook"
+  | "replay"
+  | "restart"
+  | "other";
+
+/** The sort keys of the fleet run feed. */
+export type FleetRunSort = "started" | "duration" | "tenant" | "job" | "status" | "actor";
+
+/** One run row of GET /pipelines/runs. Tenant is the rail and URL name. */
+export interface FleetRunRow extends RunSummary {
   cluster: string;
-  cell?: string;
-  cellNamespace?: string;
-  placed: boolean;
+  tenant: string;
+  title: string;
+  trigger: { kind: FleetTriggerKind; label: string };
+  pendingInput: boolean;
+  queueWaitMs?: number;
+  interruptedReason?: string;
+  upstream?: { tenant: string; job: string; buildNumber?: number; runId?: string };
+  canWrite: boolean;
+  createdAt: string;
 }
 
-/**
- * The body of GET /pipelines. recordStore is false when the list carries
- * no Tenant that another cluster holds, because the record store is off.
- */
-export interface PipelineTenantList {
-  items: PipelineTenant[];
-  recordStore: boolean;
+/** One page of GET /pipelines/runs. nextCursor is absent on the last page. */
+export interface FleetRunPage {
+  items: FleetRunRow[];
+  nextCursor?: string;
+}
+
+/** One recent run of a rail tenant, newest first. */
+export interface RecentRunResult {
+  runId: string;
+  status: string;
+  result?: string;
+}
+
+/** The counters of GET /pipelines/overview over the window. */
+export interface PipelinesOverviewTotals {
+  runs24h: number;
+  runsPrior24h: number;
+  passed: number;
+  failed: number;
+  interrupted: number;
+  finished: number;
+  running: number;
+  queued: number;
+  passRate?: number;
+  medianQueueWaitMs?: number;
+  medianDurationMs?: number;
+  p90DurationMs?: number;
+}
+
+/** The attention counts that the attention strip shows. */
+export interface PipelinesOverviewAttention {
+  failed24h: number;
+  waitingInput: number;
+  awaitingCell: number;
+  locksHeld: number;
+}
+
+/** The placement state of one rail tenant. */
+export type PipelinesOverviewPlacement = "placed" | "awaitingCell" | "controllers";
+
+/** One rail row of GET /pipelines/overview. */
+export interface PipelinesOverviewTenant {
+  name: string;
+  clusters: string[];
+  placement: PipelinesOverviewPlacement;
+  runs24h: number;
+  failed24h: number;
+  running: number;
+  waitingInput: number;
+  locksHeld: number;
+  recent: RecentRunResult[];
+}
+
+/** The body of GET /pipelines/overview. */
+export interface PipelinesOverview {
+  windowStart: string;
+  localCluster: string;
+  clusters: number;
+  canReadFleetLocks: boolean;
+  totals: PipelinesOverviewTotals;
+  attention: PipelinesOverviewAttention;
+  tenants: PipelinesOverviewTenant[];
 }
 
 /** The placement state of a tenant's pipelines tenant. */
