@@ -67,6 +67,13 @@ describe("ProfileAssistantTab", () => {
     expect(await screen.findByText("0 of 100000 tokens used today (UTC)")).toBeTruthy();
   });
 
+  it("shows the spend as a bar with a percentage", async () => {
+    renderTab();
+    const bar = await screen.findByRole("progressbar", { name: "Tokens used today" });
+    expect(bar.getAttribute("aria-valuenow")).toBe("0");
+    expect(screen.getByText("0% of the day budget")).toBeTruthy();
+  });
+
   it("explains the explain notice when opened from a failed build", async () => {
     renderTab("/profile?tab=assistant", { from: "explain" });
     expect(await screen.findByText("Turn on the assistant to explain a failed build.")).toBeTruthy();

@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { renderWithProviders } from "../../test/render-utils";
 import { installMockEventSource, MockEventSource } from "../../test/mockEventSource";
 import { AssistantProvider, useAssistant } from "./AssistantProvider";
 import AssistantDrawer from "./AssistantDrawer";
 import * as client from "../../api/client";
 import type { AssistantSession } from "../../types/assistant";
+import { contextLabel } from "./routeContext";
 
 vi.mock("../../hooks/useApi", async (orig) => {
   const actual = await orig<typeof import("../../hooks/useApi")>();
@@ -123,6 +124,39 @@ describe("AssistantDrawer", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
     await waitFor(() => expect(client.cancelAssistantSession).toHaveBeenCalledWith("s1"));
     fireEvent.keyDown(screen.getByRole("complementary", { name: "Assistant" }), { key: "Escape" });
+    await waitFor(() => expect(screen.getByText("drawer closed")).toBeTruthy());
+  });
+
+  it("says when there are no sessions", async () => {
+    renderDrawer();
+    fireEvent.click(screen.getByText("toggle"));
+    fireEvent.click(await screen.findByRole("button", { name: "Sessions" }));
+    expect(await screen.findByText("No sessions yet.")).toBeTruthy();
+  });
+
+  it("lists sessions with a relative age and marks the current one", async () => {
+    const startedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    vi.mocked(client.listAssistantSessions).mockResolvedValueOnce({
+      items: [{ ...session, startedAt }],
+      nextCursor: null,
+    });
+    renderDrawer();
+    fireEvent.click(screen.getByText("open"));
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    fireEvent.click(await screen.findByRole("button", { name: "Sessions" }));
+    const list = await screen.findByRole("list", { name: "Sessions" });
+    const row = within(list).getByRole("button");
+    expect(row.textContent).toContain(contextLabel({ route: "dashboard" }));
+    expect(row.textContent).toMatch(/5m ago · Current/);
+    expect(row.getAttribute("aria-current")).toBe("true");
+  });
+
+  it("the header close control is a labelled button", async () => {
+    renderDrawer();
+    fireEvent.click(screen.getByText("toggle"));
+    const close = await screen.findByRole("button", { name: "Close" });
+    expect(close.tagName).toBe("BUTTON");
+    fireEvent.click(close);
     await waitFor(() => expect(screen.getByText("drawer closed")).toBeTruthy());
   });
 

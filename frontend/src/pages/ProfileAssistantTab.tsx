@@ -20,6 +20,7 @@ import { PausedBanner } from "../components/assistant/PausedBanner";
 import { HTTP_LABELS } from "../components/assistant/labels";
 import { PROVIDERS_FAILED, savedProviderGone } from "../components/assistant/providerChoice";
 import type { AssistantProvider, DataSharingLevel, MyAssistant, MyAssistantUpdate } from "../types/assistant";
+import styles from "./ProfileAssistantTab.module.css";
 
 const LEVELS: DataSharingLevel[] = ["none", "metadata", "logs"];
 
@@ -119,19 +120,24 @@ export function ProfileAssistantTab() {
   const used = me.data?.dayTokens ?? 0;
   const budget = me.data?.dayBudget ?? 0;
 
+  const pct = budget > 0 ? Math.min(100, Math.round((used / budget) * 100)) : 0;
+  const progressMax = Math.max(1, budget);
+  const progressNow = Math.min(progressMax, Math.max(0, used));
+
   return (
-    <div>
+    <div className={styles.stack}>
       {explained && (
         <p role="note">Turn on the assistant to explain a failed build.</p>
       )}
       <PausedBanner />
 
       <Card title="Assistant">
-        <label>
+        <label className={styles.switchRow}>
           <input
             type="checkbox"
             role="switch"
             aria-label="Assistant on"
+            className={styles.switch}
             checked={current.enabled}
             onChange={(e) => {
               // The server refuses a provider that the chart no longer lists, so the switch saves Default in that case.
@@ -140,56 +146,70 @@ export function ProfileAssistantTab() {
               setModel(next);
               save.mutate(next);
             }}
-          />{" "}
-          {current.enabled ? "On" : "Off"}
+          />
+          <span>{current.enabled ? "On" : "Off"}</span>
         </label>
+        <p className={styles.note}>The assistant button and its keyboard shortcut appear only when this is on.</p>
       </Card>
 
       <Card title="Model">
-        <label>
-          Provider{" "}
-          <select
-            aria-label="Provider"
-            value={current.provider}
-            onChange={(e) => {
-              const p = providerList.find((x) => x.name === e.target.value);
-              setModel({ ...current, provider: e.target.value, model: p?.models[0] ?? "" });
-            }}
-          >
-            <option value="">Default</option>
-            {gone && <option value={current.provider} disabled>{`${current.provider} (removed)`}</option>}
-            {listFailed && current.provider !== "" && <option value={current.provider} disabled>{current.provider}</option>}
-            {providerList.map((p) => (
-              <option key={p.name} value={p.name}>{p.available ? p.name : `${p.name} (unavailable)`}</option>
-            ))}
-          </select>
-        </label>{" "}
-        <label>
-          Model{" "}
-          <select aria-label="Model" value={current.model} disabled={gone || listFailed} onChange={(e) => setModel({ ...current, model: e.target.value })}>
-            <option value="">Default</option>
-            {listFailed && current.model !== "" && <option value={current.model} disabled>{current.model}</option>}
-            {(selectedProvider?.models ?? []).map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </label>{" "}
-        <label>
-          Data level{" "}
-          <select
-            aria-label="Data level"
-            value={current.dataSharing}
-            onChange={(e) => setModel({ ...current, dataSharing: e.target.value as DataSharingLevel })}
-          >
-            {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
-          </select>
-        </label>
-        {gone && <p role="status">The saved provider {current.provider} is not available. Pick a provider or Default.</p>}
-        {listFailed && <p role="alert">{PROVIDERS_FAILED}</p>}
-        <div>
-          <Button size="sm" disabled={gone} onClick={() => save.mutate(current)}>Save</Button>
+        <div className={styles.formGrid}>
+          <div className={styles.formGroup}>
+            <label htmlFor="profile-assistant-provider" className={styles.formLabel}>Provider</label>
+            <select
+              id="profile-assistant-provider"
+              aria-label="Provider"
+              className={styles.formSelect}
+              value={current.provider}
+              onChange={(e) => {
+                const p = providerList.find((x) => x.name === e.target.value);
+                setModel({ ...current, provider: e.target.value, model: p?.models[0] ?? "" });
+              }}
+            >
+              <option value="">Default</option>
+              {gone && <option value={current.provider} disabled>{`${current.provider} (removed)`}</option>}
+              {listFailed && current.provider !== "" && <option value={current.provider} disabled>{current.provider}</option>}
+              {providerList.map((p) => (
+                <option key={p.name} value={p.name}>{p.available ? p.name : `${p.name} (unavailable)`}</option>
+              ))}
+            </select>
+          </div>
+          <div className={styles.formGroup}>
+            <label htmlFor="profile-assistant-model" className={styles.formLabel}>Model</label>
+            <select
+              id="profile-assistant-model"
+              aria-label="Model"
+              className={styles.formSelect}
+              value={current.model}
+              disabled={gone || listFailed}
+              onChange={(e) => setModel({ ...current, model: e.target.value })}
+            >
+              <option value="">Default</option>
+              {listFailed && current.model !== "" && <option value={current.model} disabled>{current.model}</option>}
+              {(selectedProvider?.models ?? []).map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+          <div className={styles.formGroup}>
+            <label htmlFor="profile-assistant-level" className={styles.formLabel}>Data level</label>
+            <select
+              id="profile-assistant-level"
+              aria-label="Data level"
+              className={styles.formSelect}
+              value={current.dataSharing}
+              onChange={(e) => setModel({ ...current, dataSharing: e.target.value as DataSharingLevel })}
+            >
+              {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </div>
         </div>
-        {saveError && <p role="alert">{saveError}</p>}
+        {gone && <p role="status" className={styles.note}>The saved provider {current.provider} is not available. Pick a provider or Default.</p>}
+        {listFailed && <p role="alert" className={styles.note}>{PROVIDERS_FAILED}</p>}
+        <div className={styles.actions}>
+          <Button variant="primary" disabled={gone} onClick={() => save.mutate(current)}>Save</Button>
+        </div>
+        {saveError && <p role="alert" className={styles.error}>{saveError}</p>}
       </Card>
 
       <Card title="Data">
@@ -199,26 +219,47 @@ export function ProfileAssistantTab() {
 
       <Card title="Session key">
         <p role="status">{keyStatus(me.data)}</p>
-        <div>
-          <select aria-label="Key provider" value={keyProviderShown} onChange={(e) => setKeyProvider(e.target.value)}>
-            {providerList.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-          </select>{" "}
-          <input
-            type="password"
-            autoComplete="off"
-            aria-label="API key"
-            value={keyValue}
-            onChange={(e) => setKeyValue(e.target.value)}
-          />{" "}
-          <Button size="sm" disabled={keyBusy || !keyValue || !keyProviderShown} onClick={() => void setKey()}>Set key</Button>{" "}
-          <Button size="sm" variant="ghost" disabled={keyBusy || !me.data?.sessionKey} onClick={() => void clearKey()}>Clear key</Button>
+        <div className={styles.keyRow}>
+          <div className={styles.formGroup}>
+            <select
+              aria-label="Key provider"
+              className={styles.formSelect}
+              value={keyProviderShown}
+              onChange={(e) => setKeyProvider(e.target.value)}
+            >
+              {providerList.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+            </select>
+          </div>
+          <div className={styles.formGroup}>
+            <input
+              type="password"
+              autoComplete="off"
+              aria-label="API key"
+              className={styles.formInput}
+              value={keyValue}
+              onChange={(e) => setKeyValue(e.target.value)}
+            />
+          </div>
+          <Button variant="primary" disabled={keyBusy || !keyValue || !keyProviderShown} onClick={() => void setKey()}>Set key</Button>
+          <Button variant="ghost" disabled={keyBusy || !me.data?.sessionKey} onClick={() => void clearKey()}>Clear key</Button>
         </div>
-        {keyError && <p role="alert">{keyError}</p>}
+        {keyError && <p role="alert" className={styles.error}>{keyError}</p>}
       </Card>
 
       <Card title="Spend today">
         <p>{used} of {budget} tokens used today (UTC)</p>
-        <meter min={0} max={budget || 1} value={used} aria-label="Tokens used today" />
+        <div
+          role="progressbar"
+          aria-label="Tokens used today"
+          aria-valuemin={0}
+          aria-valuemax={progressMax}
+          aria-valuenow={progressNow}
+          aria-valuetext={`${used} of ${budget} tokens used`}
+          className={styles.bar}
+        >
+          <div className={styles.barFill} style={{ width: `${pct}%` }} />
+        </div>
+        <p className={styles.note}>{pct}% of the day budget</p>
       </Card>
     </div>
   );

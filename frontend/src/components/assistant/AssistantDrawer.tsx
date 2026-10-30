@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
+import { History, MessageSquarePlus, X } from "lucide-react";
 import { ApiError } from "../../hooks/useApi";
 import {
   approveAssistantApproval,
@@ -17,6 +18,8 @@ import { useAssistant } from "./AssistantProvider";
 import { useNarrowViewport } from "../../hooks/useNarrowViewport";
 import { emptyModel, type TranscriptModel } from "./transcript";
 import { contextLabel, contextDiffers, routeContext } from "./routeContext";
+import { Button } from "../Button";
+import { age } from "../activityTimeline.util";
 import { TranscriptView } from "./TranscriptView";
 import { TranscriptStream } from "./TranscriptStream";
 import styles from "./AssistantDrawer.module.css";
@@ -154,14 +157,32 @@ export default function AssistantDrawer() {
       <header className={styles.header}>
         <span className={styles.chip} title={contextLabel(ctx)}>{contextLabel(ctx)}</span>
         {sid && ctxDiffers && (
-          <button type="button" className={styles.linkBtn} onClick={a.newConversation}>
+          <Button variant="ghost" size="sm" className={styles.headerBtn} onClick={a.newConversation}>
+            <MessageSquarePlus size={14} aria-hidden="true" />
             New conversation for this page
-          </button>
+          </Button>
         )}
-        <button type="button" className={styles.linkBtn} onClick={() => setShowList((v) => !v)} aria-expanded={showList}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={styles.headerBtn}
+          onClick={() => setShowList((v) => !v)}
+          aria-expanded={showList}
+        >
+          <History size={14} aria-hidden="true" />
           Sessions
-        </button>
-        <button ref={closeRef} type="button" className={styles.linkBtn} onClick={a.closeDrawer}>Close</button>
+        </Button>
+        <Button
+          ref={closeRef}
+          variant="ghost"
+          size="sm"
+          className={styles.headerBtn}
+          aria-label="Close"
+          title="Close"
+          onClick={a.closeDrawer}
+        >
+          <X size={16} aria-hidden="true" />
+        </Button>
       </header>
 
       {a.paused && (
@@ -170,17 +191,25 @@ export default function AssistantDrawer() {
         </p>
       )}
 
-      {showList && (
+      {showList && sessions.isLoading && <p className={styles.empty}>Loading sessions…</p>}
+      {showList && sessions.isError && <p role="alert" className={styles.empty}>The sessions did not load.</p>}
+      {showList && sessions.data && sessions.data.items.length === 0 && (
+        <p className={styles.empty}>No sessions yet.</p>
+      )}
+      {showList && sessions.data && sessions.data.items.length > 0 && (
         <ul className={styles.list} aria-label="Sessions">
-          {(sessions.data?.items ?? []).map((s) => (
+          {sessions.data.items.map((s) => (
             <li key={s.id}>
               <button
                 type="button"
-                className={styles.linkBtn}
+                className={styles.sessionRow}
                 aria-current={s.id === sid ? "true" : undefined}
                 onClick={() => a.openSession(s.id)}
               >
-                {s.state} · {s.startedAt}
+                <span>{contextLabel(s.context)}</span>
+                <span className={styles.sessionMeta}>
+                  {s.state} · {age(s.startedAt)}{s.id === sid ? " · Current" : ""}
+                </span>
               </button>
             </li>
           ))}
@@ -199,8 +228,8 @@ export default function AssistantDrawer() {
 
       <TranscriptView model={model} approvalActions={(id) => (
         <>
-          <button type="button" onClick={() => void decide(id, true)}>Approve</button>
-          <button type="button" onClick={() => void decide(id, false)}>Deny</button>
+          <Button size="sm" variant="primary" onClick={() => void decide(id, true)}>Approve</Button>
+          <Button size="sm" onClick={() => void decide(id, false)}>Deny</Button>
         </>
       )} />
 
@@ -225,12 +254,12 @@ export default function AssistantDrawer() {
             }
           }}
         />
-        <button type="submit" disabled={!canSend || !composer.trim()}>Send</button>
+        <Button type="submit" variant="primary" disabled={!canSend || !composer.trim()}>Send</Button>
       </form>
 
       <footer className={styles.footer}>
         <span aria-live="polite">{state ? `State: ${state}` : "No session"}</span>
-        {running && <button type="button" onClick={stop}>Stop</button>}
+        {running && <Button size="sm" onClick={stop}>Stop</Button>}
       </footer>
     </section>
   );

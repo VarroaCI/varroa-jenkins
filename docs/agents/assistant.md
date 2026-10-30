@@ -90,6 +90,8 @@ controller in view. The assistant reads that context when you start a
 conversation. A follow-up message keeps the first context. Open a new
 conversation to change it.
 
+Select **Sessions** to see your recent conversations. On a phone, the drawer opens full screen.
+
 A tool call that changes something waits for approval. Approve or deny it in
 the drawer. You can only decide an approval that you started.
 
