@@ -192,6 +192,7 @@ describe("Topology panel", () => {
     renderTab();
     expect(screen.getByText("Pool tenant cap")).toBeInTheDocument();
     expect(screen.getByText("False (CellCapReached)")).toBeInTheDocument();
+    expect(screen.getByText("False (CellCapReached)")).toHaveClass(/flag/);
   });
 
   it("counts the pool approved signatures for a pool reader", () => {
@@ -368,6 +369,54 @@ describe("Permissions panel", () => {
     mockUseCellGrants.mockReturnValue({ data: grants, isLoading: false, error: null });
     renderTab();
     expect(screen.getByText(/stops at 50 grants/)).toBeInTheDocument();
+  });
+
+  it("lists a cluster-wide binding once above the tenant blocks", () => {
+    const grants = makeGrants();
+    const shared = {
+      source: "clusterWideBinding" as const,
+      binding: "all-viewers",
+      roleRef: "viewer",
+      subjects: [{ kind: "Group", name: "everyone" }],
+      verbs: ["read"],
+    };
+    grants.tenants[0].grants.push(shared);
+    grants.tenants[1].grants.push(shared);
+    mockUseCellGrants.mockReturnValue({ data: grants, isLoading: false, error: null });
+    renderTab();
+    expect(screen.getByText("Cluster-wide bindings")).toBeInTheDocument();
+    expect(screen.getAllByText("all-viewers")).toHaveLength(1);
+  });
+
+  it("states that only cluster-wide bindings reach a tenant", () => {
+    const grants = makeGrants();
+    grants.tenants[1].grants.push({
+      source: "clusterWideBinding",
+      binding: "all-viewers",
+      roleRef: "viewer",
+      subjects: [{ kind: "Group", name: "everyone" }],
+      verbs: ["read"],
+    });
+    mockUseCellGrants.mockReturnValue({ data: grants, isLoading: false, error: null });
+    renderTab();
+    expect(screen.getByText(/No grant reaches this tenant alone/)).toBeInTheDocument();
+  });
+
+  it("states that the cluster-wide list can be incomplete when a tenant list is cut", () => {
+    const grants = makeGrants();
+    grants.tenants[0].grants.push({
+      source: "clusterWideBinding",
+      binding: "all-viewers",
+      roleRef: "viewer",
+      subjects: [],
+      verbs: ["read"],
+    });
+    grants.tenants[1].truncated = true;
+    mockUseCellGrants.mockReturnValue({ data: grants, isLoading: false, error: null });
+    renderTab();
+    expect(
+      screen.getByText("The list can be incomplete: a tenant list stops at 50 grants."),
+    ).toBeInTheDocument();
   });
 });
 

@@ -205,7 +205,7 @@ describe("Degraded modes", () => {
     mockUseCellUsageIndex.mockReturnValue(usageIndex([], [], ["core"]));
     renderPage();
     expect(screen.getByText(/build record store is disabled/)).toBeInTheDocument();
-    expect(screen.queryByText("Tenants over cap")).not.toBeInTheDocument();
+    expect(screen.queryByText("Tenants / cap")).not.toBeInTheDocument();
     expect(screen.queryByText("Queue")).not.toBeInTheDocument();
     expect(screen.queryByText("Runs 24 h")).not.toBeInTheDocument();
     expect(screen.queryByText("Failures 24 h")).not.toBeInTheDocument();
@@ -219,7 +219,7 @@ describe("Degraded modes", () => {
     renderPage();
     const row = screen.getByRole("link", { name: "cell-a" }).closest("tr") as HTMLElement;
     const cells = within(row).getAllByRole("cell");
-    // Column order: cell, phase, tenants over cap, queue, runs, failures.
+    // Column order: cell, phase, tenants / cap, queue, runs, failures.
     expect(cells[3]).toHaveTextContent("—");
     expect(cells[3]).not.toHaveTextContent("0");
   });
@@ -330,7 +330,7 @@ describe("The usage join stays inside one cluster", () => {
     expect(rows).toHaveLength(2);
     const core = rows[0].closest("tr") as HTMLElement;
     const member = rows[1].closest("tr") as HTMLElement;
-    // Column order: cell, phase, tenants over cap, queue, runs, failures.
+    // Column order: cell, phase, tenants / cap, queue, runs, failures.
     expect(within(core).getAllByRole("cell")[4]).toHaveTextContent("7");
     expect(within(member).getAllByRole("cell")[4]).toHaveTextContent("42");
   });
@@ -596,6 +596,86 @@ describe("Pools on more than one cluster", () => {
     const heads = screen.getAllByRole("heading", { level: 2 });
     const coreBlock = heads[0].closest("div")?.parentElement?.parentElement as HTMLElement;
     expect(within(coreBlock).getByRole("link", { name: "plain-cell" })).toBeInTheDocument();
+  });
+});
+
+describe("Pool readiness and the cap wording", () => {
+  it("flags a pool whose PoolReady is not True", () => {
+    mockUseCellPools.mockReturnValue({
+      data: poolList([
+        pool({
+          status: {
+            warmCells: 0,
+            placedCells: 0,
+            unreadyCells: 0,
+            freeTenantSlots: 0,
+            conditions: [
+              {
+                type: "PoolReady",
+                status: "False",
+                reason: "ProfileMissing",
+                message: 'the JenkinsVersionProfile "x" does not exist',
+              },
+            ],
+          },
+        }),
+      ]),
+      isLoading: false,
+      error: null,
+    });
+    renderPage();
+    const warning = screen.getByRole("status");
+    expect(warning).toHaveTextContent("ProfileMissing");
+    expect(warning).toHaveTextContent('the JenkinsVersionProfile "x" does not exist');
+    expect(screen.getByText("False (ProfileMissing)")).toHaveClass(/warnValue/);
+  });
+
+  it("shows no warning for a ready pool", () => {
+    renderPage();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("states No limit for an unset max cells", () => {
+    mockUseCellPools.mockReturnValue({
+      data: poolList([pool({ spec: { profileRef: "lts-2-555", warm: 2, maxTenantsPerCell: 10 } })]),
+      isLoading: false,
+      error: null,
+    });
+    renderPage();
+    expect(screen.getByText("No limit")).toBeInTheDocument();
+  });
+
+  it("leaves the max-cells input empty with a No limit placeholder when unset", () => {
+    mockUseCellPools.mockReturnValue({
+      data: poolList([pool({ spec: { profileRef: "lts-2-555", warm: 2, maxTenantsPerCell: 10 } })]),
+      isLoading: false,
+      error: null,
+    });
+    renderPage();
+    const maxCells = screen.getByLabelText("Max cells of lts-2-555 on core") as HTMLInputElement;
+    expect(maxCells.value).toBe("");
+    expect(maxCells).toHaveAttribute("placeholder", "No limit");
+  });
+
+  it("writes 0 when the user clears a max-cells limit", async () => {
+    const user = userEvent.setup();
+    mockPatchCellPool.mockResolvedValue(pool());
+    renderPage();
+    await user.clear(screen.getByLabelText("Max cells of lts-2-555 on core"));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() =>
+      expect(mockPatchCellPool).toHaveBeenCalledWith("lts-2-555", "core", { spec: { maxCells: 0 } }),
+    );
+  });
+
+  it("states the readable-cells rule once", () => {
+    mockUseCellPools.mockReturnValue({
+      data: poolList([pool(), pool({ name: "lts-3-000" })]),
+      isLoading: false,
+      error: null,
+    });
+    renderPage();
+    expect(screen.getAllByText(/lists the cells you may read/)).toHaveLength(1);
   });
 });
 

@@ -38,7 +38,7 @@ The panel renders the cell usage read: the tenant cap, the free slots, the queue
 
 ### Permissions
 
-The panel lists one block for each tenant, with the subjects, the pipelines verbs, and the job globs of each grant, plus the tenant's generated Jenkins item role and its folder pattern. The panel also lists the generated member roles of each tenant, with the folder pattern, the subjects, and the permissions of each role. It edits no binding, and a link opens the Access page. A tenant that no binding and no Tenant membership reaches says so.
+The panel lists one block for each tenant, with the subjects, the pipelines verbs, and the job globs of each grant, plus the tenant's generated Jenkins item role and its folder pattern. The panel also lists the generated member roles of each tenant, with the folder pattern, the subjects, and the permissions of each role. It edits no binding, and a link opens the Access page. A tenant that no binding and no Tenant membership reaches says so. Cluster-wide bindings reach every tenant, so the panel lists them once, above the tenant blocks. Each tenant block lists only the grants that reach that tenant alone.
 
 ### Script approvals
 
@@ -57,18 +57,18 @@ and the pool, for example `east / lts-2-570`. Each block states:
 | Placed cells | Cells that hold at least one tenant |
 | Unready cells | Cells whose `CellReady` condition is not True |
 | Free slots on placed cells | The spare capacity of the placed cells only |
-| Max cells | The cap on the pool's cells, placed included |
-| Pool ready | The `PoolReady` condition and its reason |
+| Max cells | The cap on the pool's cells, placed included. **No limit** when the cap is unset or 0. |
+| Pool ready | The `PoolReady` condition and its reason. A pool that is not ready shows a warning band with the condition message. |
 
 The warm-cell count and the free-slot count measure different things. Do not add them.
 
-A table under each block lists that pool's cells: the cells of the block's cluster whose pool label names the block's pool. Each row links to that cell's Cell tab. Cell, Phase, Age, and Unready since come from the controllers list. Tenants over cap, Queue, Runs 24 h, and Failures 24 h come from the batch cell usage read, one read for each cluster. A cell name is unique inside one cluster only, so the page joins on the cluster, the namespace, and the name. A cell whose cluster answered no read shows **not available**, which is not a count of zero. A pool that owns no cell states the reason.
+A table under each block lists that pool's cells: the cells of the block's cluster whose pool label names the block's pool. Each row links to that cell's Cell tab. Cell, Phase, Age, and Unready since come from the controllers list. Tenants / cap, Queue, Runs 24 h, and Failures 24 h come from the batch cell usage read, one read for each cluster. A cell name is unique inside one cluster only, so the page joins on the cluster, the namespace, and the name. A cell whose cluster answered no read shows **not available**, which is not a count of zero. A pool that owns no cell states the reason.
 
 ## The scale control
 
 Each pool block carries an inline scale control for a caller who holds `cellpools:update`. Every other caller sees no control at all.
 
-The control edits `warm` and `maxCells`. Press **Apply** to write them. The write goes to the pool on the block's own cluster, and the operator of that cluster applies it. The write carries only the dial you changed, so another operator's value is kept, and an Apply with no change sends nothing.
+The control edits `warm` and `maxCells`. Press **Apply** to write them. The write goes to the pool on the block's own cluster, and the operator of that cluster applies it. The write carries only the dial you changed, so another operator's value is kept, and an Apply with no change sends nothing. An empty Max cells field means no limit. It writes 0.
 
 A new `warm` below the reported warm-cell count drains free cells, and the control asks for a confirm that names both numbers. A drain never touches a cell that holds a tenant.
 
@@ -89,7 +89,7 @@ The operator sets `status.cell.evacuate` when a cell stays unready past twice it
 | Missing | Result |
 |---|---|
 | Cluster-wide `cellpools:read` | The `/cells` route and its navigation row do not render |
-| `controllers:read` on a cell | That cell has no row, and the table says it lists readable cells only |
+| `controllers:read` on a cell | That cell has no row, and the page says it lists readable cells only |
 | The build record store | The batch read answers `503`, and the table drops its four usage columns |
 | An answer from a member cluster | The page names that cluster and the error, and shows no block for its pools |
 | Cluster-wide `rolebindings:read` | The Permissions panel names the missing verb and lists no grant |

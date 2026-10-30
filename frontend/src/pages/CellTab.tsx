@@ -12,7 +12,8 @@ import type {
   CellSignatureRequester,
   ControllerDetail,
 } from "../hooks/useControllers";
-import type { CellPool, CellTenantGrants, CellUsage } from "../types";
+import type { CellGrant, CellPool, CellTenantGrants, CellUsage } from "../types";
+import { splitClusterWideGrants } from "./cellGrants.util";
 import styles from "./CellTab.module.css";
 
 /** An absent value renders as an em dash, never as zero. */
@@ -101,7 +102,11 @@ function TopologyPanel({
   if (canReadPools) {
     items.push({ key: "Pool tenant cap", value: String(pool?.spec.maxTenantsPerCell ?? DASH) });
     items.push({ key: "Pool tenant run cap", value: pool?.spec.maxRunsPerTenant ? String(pool.spec.maxRunsPerTenant) : "None" });
-    items.push({ key: "Pool ready", value: poolReadyLine(pool) });
+    const readyText = poolReadyLine(pool);
+    items.push({
+      key: "Pool ready",
+      value: poolNotReady(pool) ? <span className={styles.flag}>{readyText}</span> : readyText,
+    });
     items.push({ key: "Pool approved signatures", value: poolSignaturesLine(pool) });
   }
 
@@ -280,6 +285,13 @@ function poolReadyLine(pool?: CellPool): string {
   return `${condition.status}${reason}`;
 }
 
+// poolNotReady is true when the PoolReady condition exists and is not True.
+// An Unknown verdict counts as not ready.
+function poolNotReady(pool?: CellPool): boolean {
+  const condition = pool?.status.conditions?.find((c) => c.type === "PoolReady");
+  return condition != null && condition.status !== "True";
+}
+
 // poolSignaturesLine counts the signatures the pool approves. It names none
 // of them: the list is long, and the pool declaration holds the detail.
 function poolSignaturesLine(pool?: CellPool): string {
@@ -375,6 +387,39 @@ function CapacityPanel({
   );
 }
 
+function GrantsTable({ grants }: { grants: CellGrant[] }) {
+  return (
+    <div className={styles.tableScroll}>
+      <table className={styles.wideTable}>
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Binding</th>
+            <th>Role</th>
+            <th>Subjects</th>
+            <th>Verbs</th>
+            <th>Jobs</th>
+            <th>From</th>
+          </tr>
+        </thead>
+        <tbody>
+          {grants.map((g, i) => (
+            <tr key={`${g.binding ?? "tenant"}-${i}`}>
+              <td>{g.source}</td>
+              <td className={styles.mono}>{g.binding || DASH}</td>
+              <td className={styles.nowrap}>{g.roleRef}</td>
+              <td>{g.subjects.map((s) => `${s.kind}:${s.name}`).join(", ") || DASH}</td>
+              <td className={styles.nowrap}>{g.verbs.join(", ") || DASH}</td>
+              <td className={styles.mono}>{g.jobs ? g.jobs.join(", ") : "every job"}</td>
+              <td className={styles.mono}>{g.federatedFrom?.join(", ") || DASH}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function PermissionsPanel({
   tenants,
   entries,
@@ -387,6 +432,10 @@ function PermissionsPanel({
   loading: boolean;
 }) {
   const refused = error instanceof ApiError && error.status === 403;
+  // A cluster-wide binding reaches every tenant. The BFF repeats its row in
+  // each tenant entry, so the panel lists it once above the tenant blocks.
+  const split = splitClusterWideGrants(entries ?? []);
+  const anyTruncated = (entries ?? []).some((e) => e.truncated);
   return (
     <Card>
       <h3 className={styles.panelTitle}>Permissions</h3>
@@ -404,7 +453,20 @@ function PermissionsPanel({
       ) : tenants.length === 0 ? (
         <p className={styles.empty}>This cell holds no tenant, so no binding reaches it.</p>
       ) : (
-        (entries ?? []).map((entry) => (
+        <>
+          {split.clusterWide.length > 0 && (
+            <section className={styles.tenantBlock}>
+              <h4 className={styles.subTitle}>Cluster-wide bindings</h4>
+              <p className={styles.note}>These bindings reach every tenant on this cell.</p>
+              <GrantsTable grants={split.clusterWide} />
+              {anyTruncated && (
+                <p className={styles.note}>
+                  The list can be incomplete: a tenant list stops at 50 grants.
+                </p>
+              )}
+            </section>
+          )}
+          {split.tenants.map(({ entry, own }) => (
           <section key={entry.tenant} className={styles.tenantBlock}>
             <h4 className={styles.subTitle}>{entry.tenant}</h4>
             <KVGrid
@@ -449,37 +511,14 @@ function PermissionsPanel({
               <p className={styles.empty}>
                 No binding and no Tenant membership reaches this tenant. Nobody may build on it.
               </p>
+            ) : own.length === 0 ? (
+              <p className={styles.empty}>
+                No grant reaches this tenant alone. The cluster-wide bindings above apply.
+              </p>
             ) : (
-              <div className={styles.tableScroll}>
-                <table className={styles.wideTable}>
-                  <thead>
-                    <tr>
-                      <th>Source</th>
-                      <th>Binding</th>
-                      <th>Role</th>
-                      <th>Subjects</th>
-                      <th>Verbs</th>
-                      <th>Jobs</th>
-                      <th>From</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {entry.grants.map((g, i) => (
-                      <tr key={`${g.binding ?? "tenant"}-${i}`}>
-                        <td>{g.source}</td>
-                        <td className={styles.mono}>{g.binding || DASH}</td>
-                        <td className={styles.nowrap}>{g.roleRef}</td>
-                        <td>{g.subjects.map((s) => `${s.kind}:${s.name}`).join(", ") || DASH}</td>
-                        <td className={styles.nowrap}>{g.verbs.join(", ") || DASH}</td>
-                        <td className={styles.mono}>{g.jobs ? g.jobs.join(", ") : "every job"}</td>
-                        <td className={styles.mono}>{g.federatedFrom?.join(", ") || DASH}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <GrantsTable grants={own} />
             )}
-            {entry.grants.some((g) => g.source === "federatedBinding") && (
+            {own.some((g) => g.source === "federatedBinding") && (
               <p className={styles.note}>
                 A federatedBinding row is a copy of a core binding on this member cluster.
               </p>
@@ -490,7 +529,8 @@ function PermissionsPanel({
               </p>
             )}
           </section>
-        ))
+          ))}
+        </>
       )}
     </Card>
   );

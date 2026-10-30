@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "../components/Card";
@@ -121,13 +121,17 @@ function PoolBlock({
   canScale: boolean;
 }) {
   const ready = pool.status.conditions?.find((c) => c.type === "PoolReady");
+  // Any PoolReady status other than True, Unknown included, is not ready.
+  const notReady = ready != null && ready.status !== "True";
   const poolCap = pool.spec.maxTenantsPerCell;
   const differing = cells
     .map((c) => usage.rows.get(cellUsageKey(c.cluster, c.namespace, c.name)))
     .find((u) => u != null && poolCap != null && u.maxTenants !== poolCap);
+  const readyText = ready ? `${ready.status}${ready.reason ? ` (${ready.reason})` : ""}` : DASH;
 
   return (
     <Card>
+      <div className={notReady ? styles.poolNotReady : undefined}>
       <div className={styles.poolHead}>
         <div>
           <h2 className={styles.poolName}>
@@ -139,15 +143,21 @@ function PoolBlock({
         {canScale && <ScaleControl pool={pool} />}
       </div>
 
+      {notReady && (
+        <div className={styles.notReady} role="status">
+          Pool not ready: {ready.reason || ready.status}.{ready.message ? ` ${ready.message}` : ""}
+        </div>
+      )}
+
       <dl className={styles.counts}>
         <Count label="Warm cells" value={pool.status.warmCells} />
         <Count label="Placed cells" value={pool.status.placedCells} />
         <Count label="Unready cells" value={pool.status.unreadyCells} />
         <Count label="Free slots on placed cells" value={pool.status.freeTenantSlots} />
-        <Count label="Max cells" value={pool.spec.maxCells === 0 ? "unlimited" : pool.spec.maxCells ?? DASH} />
+        <Count label="Max cells" value={pool.spec.maxCells ? pool.spec.maxCells : "No limit"} />
         <Count
           label="Pool ready"
-          value={ready ? `${ready.status}${ready.reason ? ` (${ready.reason})` : ""}` : DASH}
+          value={<span className={notReady ? styles.warnValue : undefined}>{readyText}</span>}
         />
       </dl>
 
@@ -174,7 +184,7 @@ function PoolBlock({
               <tr>
                 <th>Cell</th>
                 <th>Phase</th>
-                {!usageDisabled && <th>Tenants over cap</th>}
+                {!usageDisabled && <th>Tenants / cap</th>}
                 {!usageDisabled && <th>Queue</th>}
                 {!usageDisabled && <th>Runs 24 h</th>}
                 {!usageDisabled && <th>Failures 24 h</th>}
@@ -198,12 +208,12 @@ function PoolBlock({
           </table>
         </div>
       )}
-      <p className={styles.note}>This table lists the cells you may read.</p>
+      </div>
     </Card>
   );
 }
 
-function Count({ label, value }: { label: string; value: number | string }) {
+function Count({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className={styles.count}>
       <dt>{label}</dt>
@@ -286,8 +296,10 @@ function ScaleControl({ pool }: { pool: CellPool }) {
   const queryClient = useQueryClient();
   const storedWarm = pool.spec.warm ?? 0;
   const storedMaxCells = pool.spec.maxCells ?? 0;
+  // Zero means no limit, so the max-cells field shows an empty input for it.
+  const seedMaxCells = (n: number) => (n === 0 ? "" : String(n));
   const [warm, setWarm] = useState(String(storedWarm));
-  const [maxCells, setMaxCells] = useState(String(storedMaxCells));
+  const [maxCells, setMaxCells] = useState(seedMaxCells(storedMaxCells));
   // dirty names the dials this caller typed into. A dial the caller never
   // touched is not an edit, whatever the poll later reports: comparing the
   // input against the live spec alone would turn another writer's change
@@ -303,7 +315,7 @@ function ScaleControl({ pool }: { pool: CellPool }) {
     if (!dirty.has("warm")) setWarm(String(storedWarm));
   }, [storedWarm, dirty]);
   useEffect(() => {
-    if (!dirty.has("maxCells")) setMaxCells(String(storedMaxCells));
+    if (!dirty.has("maxCells")) setMaxCells(seedMaxCells(storedMaxCells));
   }, [storedMaxCells, dirty]);
 
   const edit = (dial: ScaleDial, value: string) => {
@@ -396,10 +408,12 @@ function ScaleControl({ pool }: { pool: CellPool }) {
       </label>
       <label className={styles.field}>
         <span>Max cells</span>
+        <small className={styles.hint}>Empty or 0: no limit</small>
         <input
           type="number"
           min={0}
           value={maxCells}
+          placeholder="No limit"
           onChange={(e) => edit("maxCells", e.target.value)}
           aria-label={`Max cells of ${pool.name} on ${pool.cluster}`}
         />
