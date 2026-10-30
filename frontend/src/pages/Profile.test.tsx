@@ -218,6 +218,22 @@ describe("Profile page", () => {
     await screen.findByText("U");
   });
 
+  it("names a local account with no display name by its username", async () => {
+    mockBffFetch.mockResolvedValue({
+      subject: "local:ui-probe",
+      preferredUsername: "local:ui-probe",
+      email: "",
+      name: "",
+      groups: [],
+      authMode: "local",
+    });
+    renderProfile();
+
+    await screen.findByText("ui-probe");
+    expect(screen.getByText("U")).toBeInTheDocument();
+    expect(screen.getAllByText("local:ui-probe").length).toBeGreaterThanOrEqual(1);
+  });
+
   it("shows user info in account card", async () => {
     mockBffFetch.mockResolvedValue({
       subject: "user:test@example.com",

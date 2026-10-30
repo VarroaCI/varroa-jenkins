@@ -13,6 +13,7 @@ import { KVGrid } from "../components/KVGrid";
 import { useToast } from "../components/Toast";
 import type { MeResponse } from "../types/auth";
 import { changePassword } from "../api/client";
+import { displayNameOf, initialsOf } from "../lib/identity";
 import styles from "./Profile.module.css";
 
 /** Names the session source the profile page shows after the group chip. */
@@ -126,12 +127,7 @@ export default function Profile() {
   }
 
   const me = data;
-  const initials = (me?.displayName || me?.name || "U")
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+  const initials = initialsOf(me, "U");
 
   return (
     <div className={styles.page}>
@@ -164,7 +160,7 @@ export default function Profile() {
           <div className={styles.accountHeader}>
             <div className={styles.avatar}>{initials}</div>
             <div>
-              <div className={styles.displayName}>{me?.displayName || me?.name || "—"}</div>
+              <div className={styles.displayName}>{displayNameOf(me) || "—"}</div>
               <div className={styles.muted}>{me?.email}</div>
               <div className={styles.roleTag}>
                 <span className={styles.rolePill}>⚿ {me?.groups?.[0] || "user"}</span>
