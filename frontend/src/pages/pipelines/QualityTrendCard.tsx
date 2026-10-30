@@ -16,6 +16,11 @@ const W = 300;
 const H = 80;
 const PAD = 4;
 
+// The coverage axis pads the data by PAD_PCT points on each side. Its span is
+// at least MIN_SPAN points, and its bounds stay in 0..100.
+const PAD_PCT = 5;
+const MIN_SPAN = 10;
+
 const enc = (s: string) => encodeURIComponent(s);
 
 const runHref = (tenant: string, jobPath: string, runId: string) =>
@@ -43,13 +48,30 @@ function slotsFor<P extends { runId: string }>(window: JobTrendPoint[], points: 
   return ids.map((runId) => ({ runId, point: byRun.get(runId) }));
 }
 
-// geometry maps a slot index to its x centre and a percent to its y.
-function geometry(n: number) {
+// coverageRange returns the y axis bounds for both coverage series. The axis
+// covers both series. The span is at least MIN_SPAN points, and the bounds
+// stay in 0..100.
+function coverageRange(points: CoverageTrendPoint[], hasBranch: boolean): { lo: number; hi: number } {
+  const values: number[] = [];
+  for (const p of points) {
+    if (p.linePercent !== undefined) values.push(p.linePercent);
+    if (hasBranch && p.branchPercent !== undefined) values.push(p.branchPercent);
+  }
+  if (values.length === 0) return { lo: 0, hi: 100 };
+  let lo = Math.max(0, Math.floor(Math.min(...values)) - PAD_PCT);
+  let hi = Math.min(100, Math.ceil(Math.max(...values)) + PAD_PCT);
+  lo = Math.max(0, Math.min(lo, hi - MIN_SPAN));
+  hi = Math.min(100, Math.max(hi, lo + MIN_SPAN));
+  return { lo, hi };
+}
+
+// geometry maps a slot index to its x centre, and a value in lo..hi to its y.
+function geometry(n: number, lo = 0, hi = 100) {
   const slot = W / Math.max(n, 1);
   return {
     slot,
     cx: (i: number) => i * slot + slot / 2,
-    y: (percent: number) => PAD + ((100 - percent) / 100) * (H - 2 * PAD),
+    y: (v: number) => PAD + ((hi - v) / (hi - lo)) * (H - 2 * PAD),
   };
 }
 
@@ -104,8 +126,9 @@ function CoverageChart({ tenant, jobPath, series, window }: {
   window: JobTrendPoint[];
 }) {
   const slots = slotsFor(window, series.points);
-  const { slot, cx, y } = geometry(slots.length);
   const hasBranch = series.points.some((p) => p.branchPercent !== undefined);
+  const { lo, hi } = coverageRange(series.points, hasBranch);
+  const { slot, cx, y } = geometry(slots.length, lo, hi);
   const lineSegs = segments(slots, cx, y, (p) => p.linePercent);
   const branchSegs = hasBranch ? segments(slots, cx, y, (p) => p.branchPercent) : [];
   return (
@@ -120,41 +143,47 @@ function CoverageChart({ tenant, jobPath, series, window }: {
           </>
         )}
       </p>
-      <svg
-        className={styles.chart}
-        viewBox={`0 0 ${W} ${H}`}
-        role="group"
-        aria-label={`${series.name} coverage per build, oldest first`}
-      >
-        {lineSegs.map((pts, k) => (
-          <polyline key={`line-${k}`} data-series="line" className={styles.lineLine} points={pts} fill="none" vectorEffect="non-scaling-stroke" />
-        ))}
-        {branchSegs.map((pts, k) => (
-          <polyline key={`branch-${k}`} data-series="branch" className={styles.lineBranch} points={pts} fill="none" vectorEffect="non-scaling-stroke" />
-        ))}
-        {slots.map((s, i) => {
-          if (!s.point) return null;
-          const p = s.point;
-          return (
-            <PointLink
-              key={s.runId}
-              tenant={tenant}
-              jobPath={jobPath}
-              runId={s.runId}
-              label={coverageLabel(p)}
-              x={i * slot}
-              width={slot}
-            >
-              {p.linePercent !== undefined && (
-                <circle data-series="line" className={styles.dotLine} cx={cx(i)} cy={y(p.linePercent)} r={2.5} />
-              )}
-              {hasBranch && p.branchPercent !== undefined && (
-                <circle data-series="branch" className={styles.dotBranch} cx={cx(i)} cy={y(p.branchPercent)} r={2.5} />
-              )}
-            </PointLink>
-          );
-        })}
-      </svg>
+      <div className={styles.plot}>
+        <div className={styles.axis} aria-hidden="true">
+          <span data-axis="max">{hi}%</span>
+          <span data-axis="min">{lo}%</span>
+        </div>
+        <svg
+          className={styles.chart}
+          viewBox={`0 0 ${W} ${H}`}
+          role="group"
+          aria-label={`${series.name} coverage per build, oldest first, scale ${lo}% to ${hi}%`}
+        >
+          {lineSegs.map((pts, k) => (
+            <polyline key={`line-${k}`} data-series="line" className={styles.lineLine} points={pts} fill="none" vectorEffect="non-scaling-stroke" />
+          ))}
+          {branchSegs.map((pts, k) => (
+            <polyline key={`branch-${k}`} data-series="branch" className={styles.lineBranch} points={pts} fill="none" vectorEffect="non-scaling-stroke" />
+          ))}
+          {slots.map((s, i) => {
+            if (!s.point) return null;
+            const p = s.point;
+            return (
+              <PointLink
+                key={s.runId}
+                tenant={tenant}
+                jobPath={jobPath}
+                runId={s.runId}
+                label={coverageLabel(p)}
+                x={i * slot}
+                width={slot}
+              >
+                {p.linePercent !== undefined && (
+                  <circle data-series="line" className={styles.dotLine} cx={cx(i)} cy={y(p.linePercent)} r={2.5} />
+                )}
+                {hasBranch && p.branchPercent !== undefined && (
+                  <circle data-series="branch" className={styles.dotBranch} cx={cx(i)} cy={y(p.branchPercent)} r={2.5} />
+                )}
+              </PointLink>
+            );
+          })}
+        </svg>
+      </div>
     </>
   );
 }

@@ -128,7 +128,7 @@ The card also shows three charts over the same runs, oldest on the left:
 
 A job whose builds publish coverage or warnings also shows a **Quality trend** card beside the
 Health card. It uses the same runs, oldest on the left. Each coverage report has a line chart of
-the line percent, and of the branch percent when present. Each warnings report has a bar chart of
+the line percent, and of the branch percent when present. The coverage axis covers only the range of the data, and two labels show its bounds. Each warnings report has a bar chart of
 the warning total. Each point links to its build page. A run without the report leaves a gap.
 
 A multibranch job or an organization folder holds no runs of its own, so it has no Health card.
