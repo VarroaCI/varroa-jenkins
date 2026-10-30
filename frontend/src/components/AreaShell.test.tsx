@@ -1,10 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import fs from "fs";
+import path from "path";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../test/render-utils";
 import { AreaShell } from "./AreaShell";
 import { SETTINGS_ITEMS, CATALOG_ITEMS } from "../lib/navAreas";
+import { NARROW_QUERY } from "../hooks/useNarrowViewport";
 
 vi.mock("../hooks/usePermissions", async () => {
   const actual = await vi.importActual<typeof import("../hooks/usePermissions")>(
@@ -316,6 +319,59 @@ describe("AreaShell", () => {
       const { container } = renderCatalogRouteFixture("/catalog/bundles/ns/x");
       expect(screen.getByText("Bundle detail")).toBeInTheDocument();
       expect(container.querySelector("nav")).toBeNull();
+    });
+  });
+
+  describe("narrow viewport", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("collapses the sub-nav to a horizontal strip at the shell phone breakpoint", () => {
+      const css = fs.readFileSync(path.join(__dirname, "AreaShell.module.css"), "utf8");
+      const start = css.indexOf(`@media ${NARROW_QUERY}`);
+      expect(start).toBeGreaterThanOrEqual(0);
+      const narrow = css.slice(start);
+      expect(narrow).toMatch(/\.shell\s*{[^}]*flex-direction:\s*column/);
+      expect(narrow).toMatch(/\.subNav\s*{[^}]*overflow-x:\s*auto/);
+    });
+
+    it("scrolls the active item into view when the strip overflows", () => {
+      vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (this: HTMLElement) {
+        return this.tagName === "NAV" ? 1000 : 0;
+      });
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+        return this.tagName === "NAV" ? 300 : 100;
+      });
+      vi.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockImplementation(function (this: HTMLElement) {
+        return this.getAttribute("aria-current") === "page" ? 800 : 0;
+      });
+      vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(100);
+      vi.mocked(usePermissions).mockReturnValue(
+        createPermissionsFixture({ "*": { "*": true } }) as unknown as ReturnType<typeof usePermissions>,
+      );
+
+      renderAreaShell(SETTINGS_ITEMS, "Settings", "/administration/assistant");
+      expect(screen.getByRole("navigation", { name: "Settings" }).scrollLeft).toBe(700);
+    });
+
+    it("leaves the strip scroll alone when the items fit", () => {
+      vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (this: HTMLElement) {
+        return this.tagName === "NAV" ? 300 : 0;
+      });
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+        return this.tagName === "NAV" ? 300 : 100;
+      });
+      vi.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockImplementation(function (this: HTMLElement) {
+        return this.getAttribute("aria-current") === "page" ? 800 : 0;
+      });
+      vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(100);
+      vi.mocked(usePermissions).mockReturnValue(
+        createPermissionsFixture({ "*": { "*": true } }) as unknown as ReturnType<typeof usePermissions>,
+      );
+
+      renderAreaShell(SETTINGS_ITEMS, "Settings", "/access/users");
+      expect(screen.getByRole("navigation", { name: "Settings" }).scrollLeft).toBe(0);
     });
   });
 });

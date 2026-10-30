@@ -75,7 +75,7 @@ TypeScript consumer of it.
 - **Sidebar collapse contract**: collapse is user-choice-only — localStorage
   key `varroa-sidebar-collapsed`, toggled by the foot button or `[` (guarded
   against inputs/palette); 640px is the single breakpoint and it swaps
-  drawer↔bottom-tab-bar; no width/orientation ever produces the icon rail;
+  drawer↔bottom-tab-bar; at the same breakpoint the area sub-nav (`AreaShell`) becomes a horizontal scroll strip above the content; no width/orientation ever produces the icon rail;
   door visibility unions live in `src/lib/navPermissions.ts` and the area
   sub-nav matrix in `src/lib/navAreas.ts` — single sources, never re-derive
   inline.
