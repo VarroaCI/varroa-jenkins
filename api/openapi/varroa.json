@@ -4288,7 +4288,7 @@
                 "type": "object"
               },
               "logTail": {
-                "description": "The last 50 console log lines that carry the attribution of the failed stage or of a stage nested under it. The field falls back to the last 50 lines of the whole log when no log-index entry names one of those stages. The lines carry no ANSI escape sequence. It is absent when the server holds no blob store and when a log-index entry fails to decode. Absent for an INTERRUPTED run.\n",
+                "description": "The last 50 console log lines that carry the attribution of the failed stage or of a stage nested under it. The field falls back to the last 50 lines of the whole log when no log-index entry names one of those stages. The lines carry no ANSI escape sequence. It is absent when the server holds no blob store and when a log-index entry fails to decode. Absent for an INTERRUPTED run. The tail leaves out the pod manifest that the Kubernetes plugin prints when it provisions an agent.\n",
                 "type": "string"
               },
               "stage": {
@@ -13940,7 +13940,7 @@
                 "type": "object"
               },
               "logTail": {
-                "description": "The last 50 console log lines that carry the attribution of the failed stage or of a stage nested under it. The field falls back to the last 50 lines of the whole log when no log-index entry names one of those stages. The lines carry no ANSI escape sequence. It is absent when the server holds no blob store and when a log-index entry fails to decode. Absent for an INTERRUPTED run.\n",
+                "description": "The last 50 console log lines that carry the attribution of the failed stage or of a stage nested under it. The field falls back to the last 50 lines of the whole log when no log-index entry names one of those stages. The lines carry no ANSI escape sequence. It is absent when the server holds no blob store and when a log-index entry fails to decode. Absent for an INTERRUPTED run. The tail leaves out the pod manifest that the Kubernetes plugin prints when it provisions an agent.\n",
                 "type": "string"
               },
               "stage": {

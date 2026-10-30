@@ -5947,7 +5947,7 @@ RunDetail:
             falls back to the last 50 lines of the whole log when no
             log-index entry names one of those stages. The lines carry
             no ANSI escape sequence. It is absent when the server holds no blob store and
-            when a log-index entry fails to decode. Absent for an INTERRUPTED run.
+            when a log-index entry fails to decode. Absent for an INTERRUPTED run. The tail leaves out the pod manifest that the Kubernetes plugin prints when it provisions an agent.
         failedTests:
           type: object
           description: >

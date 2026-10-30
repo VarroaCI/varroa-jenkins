@@ -56,7 +56,7 @@ The card shows up to five parts. Each part appears on its own.
 |---|---|
 | Stage | The innermost failed stage, or a failed branch with no stage |
 | Error | That stage's own stored error text |
-| Log tail | The last 50 plain-text log lines of that stage and its nested stages. An interrupted run has no log tail |
+| Log tail | The last 50 plain-text log lines of that stage and its nested stages, without the agent pod manifest. An interrupted run has no log tail |
 | Failed tests | The failed, skipped, and total counts of the run's tests |
 | Failed cases | At most ten failed cases by class and test name. Each links to that case's history |
 

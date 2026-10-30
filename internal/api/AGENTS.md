@@ -451,7 +451,7 @@ federation, activity persistence, and SSE fanout.
   bytes answers the same `503` when `deps.BlobStore` is nil. `GET /runs/{run}` is the stated
   exception: `run_digest.go` reads the console log for the digest's `logTail`, and a nil blob
   store or an undecodable log index degrades `logTail` to absent instead, so the run detail
-  answers either way. The digest is absent when no part has a value, and an `INTERRUPTED` run
+  answers either way. `run_digest.go` drops each agent provisioning block from the log tail before the 50-line cap. The digest is absent when no part has a value, and an `INTERRUPTED` run
   never carries a `logTail`. `Server.GetRun` reads `ListTestCases` once and shares it between the
   run detail's `cases` and the digest's `failedTests.cases`; a failed read leaves both lists
   absent and the run detail still answers. `GET /runs/{run}/script` (`run_script.go`,

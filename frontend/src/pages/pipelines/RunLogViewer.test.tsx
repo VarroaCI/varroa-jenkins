@@ -199,11 +199,11 @@ describe("RunLogViewer", () => {
     const { rerender } = render(
       <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[]} version={0} />,
     );
-    rerender(<RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[meta]} version={1} />);
+    rerender(<RunLogViewer runId="r1" runTerminal={false} logFinalized={false} runResult="FAILURE" frames={[meta]} version={1} />);
     rerender(
       <RunLogViewer
         runId="r1"
-        runTerminal={false} logFinalized={false}
+        runTerminal={false} logFinalized={false} runResult="FAILURE"
         frames={[meta, lineEvent(3, "boom: error occurred")]}
         version={2}
       />,
@@ -212,6 +212,54 @@ describe("RunLogViewer", () => {
     const btn = screen.getByRole("button", { name: "First error · line 3" });
     fireEvent.click(btn);
     expect(mockScrollToIndex).toHaveBeenCalledWith(0, { align: "center" });
+  });
+
+  it.each(["FAILURE", "UNSTABLE", "ABORTED", "INTERRUPTED"])("shows the first-error control for a %s run", (result) => {
+    const meta: RunLogViewerEvent = {
+      type: "meta",
+      data: { runId: "r1", chunkCount: 1, byteCount: 10, droppedBytes: 0, complete: true, status: "COMPLETED", firstErrorLine: 3 },
+    };
+    render(
+      <RunLogViewer
+        runId="r1"
+        runTerminal logFinalized={false} runResult={result}
+        frames={[meta, lineEvent(3, "boom: error occurred")]}
+        version={1}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "First error · line 3" })).toBeInTheDocument();
+  });
+
+  it("hides the first-error control for a SUCCESS run", () => {
+    const meta: RunLogViewerEvent = {
+      type: "meta",
+      data: { runId: "r1", chunkCount: 1, byteCount: 10, droppedBytes: 0, complete: true, status: "COMPLETED", firstErrorLine: 3 },
+    };
+    render(
+      <RunLogViewer
+        runId="r1"
+        runTerminal logFinalized={false} runResult="SUCCESS"
+        frames={[meta, lineEvent(3, "vitest: failure deletes tiles")]}
+        version={1}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /First error/ })).toBeNull();
+  });
+
+  it("hides the first-error control while the run has no result", () => {
+    const meta: RunLogViewerEvent = {
+      type: "meta",
+      data: { runId: "r1", chunkCount: 1, byteCount: 10, droppedBytes: 0, complete: true, status: "RUNNING", firstErrorLine: 3 },
+    };
+    render(
+      <RunLogViewer
+        runId="r1"
+        runTerminal={false} logFinalized={false}
+        frames={[meta, lineEvent(3, "boom: error occurred")]}
+        version={1}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /First error/ })).toBeNull();
   });
 
   it("shows a sticky-style header from a stage event and a gap row from a gap event", () => {
@@ -307,7 +355,7 @@ describe("RunLogViewer", () => {
         data: { ...(metaFrame.data as object), firstErrorLine: 2 },
       };
       const { rerender } = render(
-        <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[meta]} version={1} />,
+        <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} runResult="FAILURE" frames={[meta]} version={1} />,
       );
       // The toolbar jump names the same line before its row arrives.
       fireEvent.click(screen.getByRole("button", { name: "First error · line 2" }));
@@ -316,6 +364,7 @@ describe("RunLogViewer", () => {
           runId="r1"
           runTerminal={false}
           logFinalized={false}
+          runResult="FAILURE"
           frames={[meta, lineEvent(1, "first"), lineEvent(2, "boom: error")]}
           version={2}
         />,
@@ -341,6 +390,7 @@ describe("RunLogViewer", () => {
           runId="r1"
           runTerminal={false}
           logFinalized={false}
+          runResult="FAILURE"
           frames={[meta, lineEvent(1, "first"), lineEvent(2, "boom: error")]}
           version={1}
         />,
