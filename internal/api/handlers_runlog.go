@@ -163,6 +163,10 @@ func (s *Server) handleStreamRunLog(w http.ResponseWriter, r *http.Request) {
 	}
 	manifest := computeRunLogManifest(int64(len(consoleData)), entries, maxSeq, unattributed, summaryPtr)
 	lines := splitRunLogLines(consoleData, entries)
+	attr := newRunLogStageAttributor(stages)
+	for i := range lines {
+		attr.attribute(&lines[i])
+	}
 	// An unfinished build's snapshot may end mid-line. That fragment is
 	// held back for the live assembler, which completes it when the next
 	// chunk arrives; emitting it here would split one console line in two.
@@ -238,6 +242,7 @@ func (s *Server) handleStreamRunLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	assembler := newRunLogLiveAssembler(manifest.ByteCount, nextLiveLineNumber)
+	assembler.attr = attr
 	if tailOff >= 0 {
 		assembler.seedPartial(tailFragment, tailOff)
 	}

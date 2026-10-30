@@ -8,7 +8,7 @@ import {
 } from "react";
 import type { Ref } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Search as SearchIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, Search as SearchIcon } from "lucide-react";
 import { runLogUrl } from "../../api/client";
 import type {
   RunStage,
@@ -20,8 +20,14 @@ import type {
   RunLogStageEvent,
 } from "../../types";
 import { parseAnsiLine } from "./ansi";
-import type { BodyRow, LogRow, StageInfo } from "./logRows";
-import { buildLogRows, stageJumpIds, stageJumpIndex, stickyStage } from "./logRows";
+import type { BodyRow, GroupState, LogRow, StageInfo } from "./logRows";
+import {
+  buildLogRows,
+  hiddenGroupOfLine,
+  stageJumpIds,
+  stageJumpIndex,
+  stickyStage,
+} from "./logRows";
 import styles from "./RunLogViewer.module.css";
 
 /** The subset of useEventStream's frame shape RunLogViewer reads. */
@@ -79,6 +85,11 @@ export interface RunLogViewerHandle {
 
 const NO_STAGES: readonly RunStage[] = [];
 
+/** The noun that follows a line count: "1 line", "2 lines". */
+function lineWord(count: number): string {
+  return count === 1 ? "line" : "lines";
+}
+
 function permalinkLine(): number | null {
   const m = /^#L(\d+)$/.exec(window.location.hash);
   return m ? Number(m[1]) : null;
@@ -107,7 +118,19 @@ export function RunLogViewer({
 }: RunLogViewerProps & { ref?: Ref<RunLogViewerHandle> }) {
   const [body, setBody] = useState<BodyRow[]>([]);
   const [stageInfo, setStageInfo] = useState<Map<string, StageInfo>>(() => new Map());
-  const rows = useMemo<LogRow[]>(() => buildLogRows(body, stageInfo), [body, stageInfo]);
+  // The collapse state is per viewer and is not persisted. Every stage
+  // starts expanded, and every agent manifest starts folded.
+  const [collapsedStages, setCollapsedStages] = useState<Set<string>>(() => new Set());
+  const [expandedFolds, setExpandedFolds] = useState<Set<number>>(() => new Set());
+  const groupState = useMemo<GroupState>(
+    () => ({ collapsedStages, expandedFolds }),
+    [collapsedStages, expandedFolds],
+  );
+  const rows = useMemo<LogRow[]>(
+    () => buildLogRows(body, stageInfo, groupState),
+    [body, stageInfo, groupState],
+  );
+  const wrapRef = useRef<HTMLDivElement>(null);
   const [meta, setMeta] = useState<RunLogMetaEvent | null>(null);
   const [live, setLive] = useState(false);
   const [ended, setEnded] = useState<RunLogEndEvent | null>(null);
@@ -120,13 +143,9 @@ export function RunLogViewer({
   const [search, setSearch] = useState("");
   const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
   const [pendingLine, setPendingLine] = useState<number | null>(() => permalinkLine());
-  // The line the URL fragment names. Only that jump also scrolls the page,
-  // because the viewer can sit below the first screen of the build page.
-  const urlLineRef = useRef<number | null>(pendingLine);
   // A stage selection waits until a header of that stage, or of one of its
   // descendants, exists. A cold #stage-<id> load starts the wait here.
   const [pendingStage, setPendingStage] = useState<string | null>(() => stageFragment());
-  const urlStageRef = useRef<string | null>(pendingStage);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -145,6 +164,16 @@ export function RunLogViewer({
     estimateSize: () => 22,
     overscan: 20,
   });
+
+  // Every resolved jump also scrolls the page, when the viewer box is not
+  // fully in the window. The box's scroll margin keeps its top under the
+  // sticky top bar.
+  const bringViewerIntoView = useCallback(() => {
+    const r = scrollRef.current?.getBoundingClientRect();
+    if (!r || r.top < 0 || r.bottom > window.innerHeight) {
+      wrapRef.current?.scrollIntoView?.({ block: "start" });
+    }
+  }, []);
 
   // The frames that carry no log row: the manifest, a stage boundary, the
   // live flag, and the closing frame.
@@ -224,36 +253,52 @@ export function RunLogViewer({
   useEffect(() => {
     if (pendingLine == null) return;
     const idx = rows.findIndex((r) => r.kind === "line" && r.n === pendingLine);
-    if (idx !== -1) {
-      // This effect turns follow off for every resolved jump: a permalink,
-      // a search hit, or the first error. The scroll events of one frame
-      // coalesce, so the scroll handler never sees the jump as a scroll up,
-      // and the next row batch would otherwise pull the viewport to the end.
-      setFollow(false);
-      virtualizer.scrollToIndex(idx, { align: "center" });
-      if (urlLineRef.current === pendingLine) {
-        scrollRef.current?.scrollIntoView?.({ block: "center" });
+    if (idx === -1) {
+      // A line that a collapsed stage or a folded manifest hides opens
+      // those groups first. The rows change, and this effect runs again.
+      const hidden = hiddenGroupOfLine(body, groupState, pendingLine);
+      if (hidden?.stageId !== undefined) {
+        const sid = hidden.stageId;
+        setCollapsedStages((prev) => {
+          const next = new Set(prev);
+          next.delete(sid);
+          return next;
+        });
       }
-      urlLineRef.current = null;
-      setHighlightedLine(pendingLine);
-      setPendingLine(null);
+      if (hidden?.foldKey !== undefined) {
+        const key = hidden.foldKey;
+        setExpandedFolds((prev) => new Set(prev).add(key));
+      }
+      return;
     }
+    // This effect turns follow off for every resolved jump: a permalink,
+    // a search hit, or the first error. The scroll events of one frame
+    // coalesce, so the scroll handler never sees the jump as a scroll up,
+    // and the next row batch would otherwise pull the viewport to the end.
+    setFollow(false);
+    virtualizer.scrollToIndex(idx, { align: "center" });
+    bringViewerIntoView();
+    setHighlightedLine(pendingLine);
+    setPendingLine(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, pendingLine]);
+  }, [rows, pendingLine, body, groupState]);
 
   // A pending stage jump resolves once a header of that stage, or of one of
   // its descendants, exists. A resolved jump turns Follow off, so the next
   // batch of rows does not pull the view to the end.
   useEffect(() => {
     if (pendingStage == null) return;
-    const idx = stageJumpIndex(rows, stageJumpIds(pendingStage, stages));
+    const ids = stageJumpIds(pendingStage, stages);
+    const idx = stageJumpIndex(rows, ids);
     if (idx === -1) return;
+    setCollapsedStages((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
     setFollow(false);
     virtualizer.scrollToIndex(idx, { align: "start" });
-    if (urlStageRef.current === pendingStage) {
-      scrollRef.current?.scrollIntoView?.({ block: "center" });
-    }
-    urlStageRef.current = null;
+    bringViewerIntoView();
     setPendingStage(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, pendingStage, stages]);
@@ -265,17 +310,36 @@ export function RunLogViewer({
   }, []);
 
   const jumpToLine = useCallback((n: number) => {
-    urlLineRef.current = null;
     setPendingStage(null);
     setPendingLine(n);
   }, []);
 
+  // The search covers every body line, including the lines that a
+  // collapsed group hides. A hit in a hidden group opens that group.
   const runSearch = useCallback(() => {
     if (!search) return;
     const needle = search.toLowerCase();
-    const match = rows.find((r) => r.kind === "line" && r.text.toLowerCase().includes(needle));
+    const match = body.find((r) => r.kind === "line" && r.text.toLowerCase().includes(needle));
     if (match && match.kind === "line") jumpToLine(match.n);
-  }, [search, rows, jumpToLine]);
+  }, [search, body, jumpToLine]);
+
+  const toggleStage = useCallback((stageId: string) => {
+    setCollapsedStages((prev) => {
+      const next = new Set(prev);
+      if (next.has(stageId)) next.delete(stageId);
+      else next.add(stageId);
+      return next;
+    });
+  }, []);
+
+  const toggleFold = useCallback((key: number) => {
+    setExpandedFolds((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   useImperativeHandle(
     ref,
@@ -287,13 +351,14 @@ export function RunLogViewer({
       },
       toggleTimestamps: () => setShowTimestamps((t) => !t),
       scrollToStage: (stageId: string) => {
-        if (urlStageRef.current !== stageId) urlStageRef.current = null;
         setPendingLine(null);
         setPendingStage(stageId);
       },
     }),
     [logDone],
   );
+  // The stage selection's own expansion runs in the pending-stage effect,
+  // which waits for the header of the stage to exist.
 
   // The stage that names the first row of the view. The overscan rows
   // above the view do not count. The virtualizer instance is stable across
@@ -306,7 +371,7 @@ export function RunLogViewer({
     firstViewIndex === undefined ? null : stickyStage(rows, firstViewIndex, stageInfo);
 
   return (
-    <div className={styles.wrap}>
+    <div className={styles.wrap} ref={wrapRef}>
       <div className={styles.toolbar}>
         <div className={styles.searchBox}>
           <SearchIcon size={14} aria-hidden="true" />
@@ -393,9 +458,31 @@ export function RunLogViewer({
                 }}
               >
                 {row.kind === "header" && (
-                  <div className={styles.header} id={`stage-${row.stageId}`}>
-                    {row.name} — {row.status}
-                  </div>
+                  <button
+                    type="button"
+                    className={styles.header}
+                    id={row.continued ? undefined : `stage-${row.stageId}`}
+                    aria-expanded={!row.collapsed}
+                    onClick={() => toggleStage(row.stageId)}
+                  >
+                    {row.collapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+                    <span>
+                      {row.name} — {row.status}
+                      {row.continued && " (continued)"}
+                    </span>
+                    <span className={styles.headerCount}>· {row.lineCount} {lineWord(row.lineCount)}</span>
+                  </button>
+                )}
+                {row.kind === "fold" && (
+                  <button
+                    type="button"
+                    className={styles.fold}
+                    aria-expanded={!row.collapsed}
+                    onClick={() => toggleFold(row.key)}
+                  >
+                    {row.collapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+                    Agent pod manifest · {row.lineCount} {lineWord(row.lineCount)}
+                  </button>
                 )}
                 {row.kind === "gap" && (
                   <div className={styles.gap}>Missing bytes at sequence {row.seq}.</div>

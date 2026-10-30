@@ -34,6 +34,20 @@ beforeEach(() => {
   window.location.hash = "";
 });
 
+/**
+ * Stubs the viewer box as lying below the window's fold, so a jump that
+ * brings the viewer into view calls scrollIntoView. JSDOM has no layout.
+ */
+function stubViewerBelowFold(): () => void {
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function () {
+    return { top: 900, bottom: 1300, left: 0, right: 0, width: 0, height: 400, x: 0, y: 900, toJSON() {} } as DOMRect;
+  };
+  return () => {
+    HTMLElement.prototype.getBoundingClientRect = original;
+  };
+}
+
 const metaFrame: RunLogViewerEvent = {
   type: "meta",
   data: { runId: "r1", chunkCount: 1, byteCount: 10, droppedBytes: 0, complete: true, status: "SUCCESS" },
@@ -324,6 +338,7 @@ describe("RunLogViewer", () => {
     const spy = vi.fn();
     const original = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = spy;
+    const restoreRect = stubViewerBelowFold();
     try {
       window.location.hash = "#L2";
       render(
@@ -337,17 +352,19 @@ describe("RunLogViewer", () => {
       );
       expect(mockScrollToIndex).toHaveBeenCalledWith(1, { align: "center" });
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy).toHaveBeenCalledWith({ block: "center" });
-      expect(spy.mock.contexts[0]).toBe(screen.getByLabelText("Console log"));
+      expect(spy).toHaveBeenCalledWith({ block: "start" });
+      expect(spy.mock.contexts[0]).toBe(screen.getByLabelText("Console log").parentElement);
     } finally {
+      restoreRect();
       HTMLElement.prototype.scrollIntoView = original;
     }
   });
 
-  it("does not scroll the page for a toolbar jump to the URL permalink's own line", () => {
+  it("a toolbar jump brings the viewer into view", () => {
     const spy = vi.fn();
     const original = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = spy;
+    const restoreRect = stubViewerBelowFold();
     try {
       window.location.hash = "#L2";
       const meta: RunLogViewerEvent = {
@@ -370,35 +387,43 @@ describe("RunLogViewer", () => {
         />,
       );
       expect(mockScrollToIndex).toHaveBeenCalledWith(1, { align: "center" });
-      expect(spy).not.toHaveBeenCalled();
+      expect(spy).toHaveBeenCalledWith({ block: "start" });
     } finally {
+      restoreRect();
       HTMLElement.prototype.scrollIntoView = original;
     }
   });
 
-  it("does not scroll the page for a first-error jump", () => {
+  it("First error opens a folded group and brings the viewer into view", () => {
     const spy = vi.fn();
     const original = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = spy;
+    const restoreRect = stubViewerBelowFold();
     try {
-      const meta: RunLogViewerEvent = {
-        type: "meta",
-        data: { ...(metaFrame.data as object), firstErrorLine: 2 },
-      };
       render(
         <RunLogViewer
           runId="r1"
           runTerminal={false}
           logFinalized={false}
           runResult="FAILURE"
-          frames={[meta, lineEvent(1, "first"), lineEvent(2, "boom: error")]}
+          frames={[
+            { type: "meta", data: { ...(metaFrame.data as object), firstErrorLine: 3 } },
+            lineEvent(1, "Agent pod-1 is provisioned from template jnlp-agent"),
+            lineEvent(2, "---"),
+            lineEvent(3, "boom: error"),
+            lineEvent(4, ""),
+          ]}
           version={1}
         />,
       );
-      fireEvent.click(screen.getByRole("button", { name: "First error · line 2" }));
-      expect(mockScrollToIndex).toHaveBeenCalledWith(1, { align: "center" });
-      expect(spy).not.toHaveBeenCalled();
+      expect(screen.queryByText("boom: error")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "First error · line 3" }));
+      // The manifest opens on the jump: rows are L1, fold, L2, L3, L4.
+      expect(mockScrollToIndex).toHaveBeenCalledWith(3, { align: "center" });
+      expect(screen.getByText("boom: error")).toBeTruthy();
+      expect(spy).toHaveBeenCalledWith({ block: "start" });
     } finally {
+      restoreRect();
       HTMLElement.prototype.scrollIntoView = original;
     }
   });
@@ -476,10 +501,11 @@ describe("RunLogViewer", () => {
       />,
     );
     const order = Array.from(document.querySelectorAll("[data-index]")).map(
-      (row) => row.firstElementChild?.id,
+      (row) => row.firstElementChild?.id || "-",
     );
     expect(order).toEqual([
-      "stage-12", "L1", "L2", "stage-14", "L3", "stage-16", "L4", "L5", "L6", "stage-4", "L7", "L8",
+      "stage-12", "L1", "L2", "stage-14", "L3", "stage-16", "L4",
+      "-", "L5", "-", "L6", "stage-4", "L7", "-", "L8",
     ]);
   });
 
@@ -569,6 +595,7 @@ describe("RunLogViewer", () => {
     const original = HTMLElement.prototype.scrollIntoView;
     const scrollIntoView = vi.fn();
     HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const restoreRect = stubViewerBelowFold();
     try {
       const { rerender } = render(
         <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[]} version={0} />,
@@ -584,8 +611,9 @@ describe("RunLogViewer", () => {
         />,
       );
       expect(mockScrollToIndex).toHaveBeenCalledWith(2, { align: "start" });
-      expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
     } finally {
+      restoreRect();
       HTMLElement.prototype.scrollIntoView = original;
     }
   });
@@ -668,5 +696,99 @@ describe("RunLogViewer", () => {
     const follow = screen.getByRole("button", { name: "Follow" });
     expect(follow).toBeDisabled();
     expect(follow).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("collapses and expands a stage from its header button", () => {
+    render(
+      <RunLogViewer
+        runId="r1"
+        runTerminal={false}
+        logFinalized={false}
+        frames={[stageFrame("12", "Alpha"), lineEvent(1, "a1", "12"), lineEvent(2, "a2", "12"), stageFrame("14", "Bravo"), lineEvent(3, "b1", "14")]}
+        version={1}
+      />,
+    );
+    const header = screen.getByRole("button", { name: /Alpha — SUCCESS/ });
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(document.getElementById("L1")).not.toBeNull();
+
+    fireEvent.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(document.getElementById("L1")).toBeNull();
+    expect(document.getElementById("L2")).toBeNull();
+    expect(document.getElementById("L3")).not.toBeNull();
+
+    fireEvent.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(document.getElementById("L1")).not.toBeNull();
+  });
+
+  it("folds the pod manifest and expands it on click", () => {
+    render(
+      <RunLogViewer
+        runId="r1"
+        runTerminal={false}
+        logFinalized={false}
+        frames={[
+          lineEvent(1, "Agent pod-1 is provisioned from template jnlp-agent"),
+          lineEvent(2, "---"),
+          lineEvent(3, "kind: Pod"),
+          lineEvent(4, ""),
+          lineEvent(5, "after"),
+        ]}
+        version={1}
+      />,
+    );
+    const fold = screen.getByRole("button", { name: "Agent pod manifest · 3 lines" });
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    expect(document.getElementById("L3")).toBeNull();
+    expect(document.getElementById("L5")).not.toBeNull();
+
+    fireEvent.click(fold);
+    expect(fold.getAttribute("aria-expanded")).toBe("true");
+    expect(document.getElementById("L3")).not.toBeNull();
+  });
+
+  it("search finds a line in a folded manifest and expands it", () => {
+    render(
+      <RunLogViewer
+        runId="r1"
+        runTerminal={false}
+        logFinalized={false}
+        frames={[
+          lineEvent(1, "Agent pod-1 is provisioned from template jnlp-agent"),
+          lineEvent(2, "---"),
+          lineEvent(3, "kind: Pod"),
+          lineEvent(4, ""),
+        ]}
+        version={1}
+      />,
+    );
+    expect(document.getElementById("L3")).toBeNull();
+    const input = screen.getByLabelText("Search the log");
+    fireEvent.change(input, { target: { value: "kind: Pod" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(document.getElementById("L3")).not.toBeNull();
+  });
+
+  it("a stage selection expands a collapsed stage", () => {
+    const ref = createRef<RunLogViewerHandle>();
+    render(
+      <RunLogViewer
+        ref={ref}
+        runId="r1"
+        runTerminal={false}
+        logFinalized={false}
+        frames={[stageFrame("12", "Alpha"), lineEvent(1, "a1", "12"), stageFrame("14", "Bravo"), lineEvent(2, "b1", "14")]}
+        version={1}
+      />,
+    );
+    const header = screen.getByRole("button", { name: /Alpha — SUCCESS/ });
+    fireEvent.click(header);
+    expect(document.getElementById("L1")).toBeNull();
+
+    act(() => ref.current?.scrollToStage("12"));
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(document.getElementById("L1")).not.toBeNull();
   });
 });

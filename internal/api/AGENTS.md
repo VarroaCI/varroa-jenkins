@@ -397,13 +397,16 @@ federation, activity persistence, and SSE fanout.
 - Pipelines and runs (`handlers_pipelines.go`, `handlers_pipelines_write.go`,
   `handlers_pipelines_auth.go`, `handlers_runs.go`, `handlers_runlog.go`,
   `runlog_events.go`, `runlog_manifest.go`, `runlog_live.go`, `runlog_poll.go`,
-  `runlog_tail.go`, `runlog_notes.go`, `tenantresolver.go`, `pipelines_service.go`):
+  `runlog_tail.go`, `runlog_notes.go`, `runlog_stage_notes.go`, `tenantresolver.go`,
+  `pipelines_service.go`):
   serves the `/pipelines/{tenant}/...` and `/runs/{run}/...` paths over
   `internal/recordstore`. The run log manifest (`computeRunLogManifest`) serves each
   log part that `readRunLogUnattributed` names through `blob.UnindexedLogParts` (passing the
   highest index entry's `writer`; an index reservation at the next slot overrides it) as one
   unattributed chunk, never a missing sequence. `readRunLogIndex` skips a reservation line
-  (`reserved`). `readRunLogObject` is the only console reader; it serves
+  (`reserved`). The log stream reads the flow-node note of a `[Pipeline]` line for stage
+  attribution (`runlog_stage_notes.go`); the digest and `get_run_log` keep chunk attribution.
+  `readRunLogObject` is the only console reader; it serves
   no byte past those accepted parts, so a lost cell's late part never reaches a viewer. `TenantResolver` (`tenantresolver.go`, `deps.TenantResolver`)
   is the one seam that maps a `{tenant}` URL segment onto record-store tenants: a placed
   Tenant resolves to one tenant, an unplaced Tenant fans out over its namespaces, a name

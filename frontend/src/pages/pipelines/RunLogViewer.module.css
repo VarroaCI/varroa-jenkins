@@ -2,6 +2,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* A jump that scrolls the page leaves the viewer's top under the top bar. */
+  scroll-margin-top: 62px;
 }
 
 .toolbar {
@@ -9,6 +11,11 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  position: sticky;
+  top: 62px;
+  z-index: 2;
+  background: var(--bg);
+  padding-block: 6px;
 }
 
 .searchBox {
@@ -115,11 +122,19 @@
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.7;
-  height: 480px;
+  height: max(320px, calc(100dvh - 190px));
   overflow: auto;
 }
 
 .header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
   background: var(--surface-3);
   color: var(--text-2);
   font-size: 11px;
@@ -127,6 +142,50 @@
   text-transform: uppercase;
   letter-spacing: .3px;
   padding: 6px 12px;
+}
+
+.headerCount {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* The pod manifest fold uses the console's secondary grey, as .ts and .lineNo do. */
+.fold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--mono);
+  color: #6E7681;
+  background: transparent;
+  padding: 2px 12px;
+}
+
+@media (max-width: 639.98px) {
+  .toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .searchBox {
+    flex: 1 1 120px;
+  }
+
+  .searchBox input {
+    min-width: 0;
+  }
+
+  .rawLink {
+    margin-left: 0;
+  }
+
+  .scroll {
+    height: max(280px, calc(100dvh - 250px));
+  }
 }
 
 .gap {

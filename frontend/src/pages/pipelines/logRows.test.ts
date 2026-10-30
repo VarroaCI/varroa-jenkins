@@ -1,7 +1,46 @@
 import { describe, expect, it } from "vitest";
 import type { RunStage } from "../../types";
-import type { BodyRow, LogRow, StageInfo } from "./logRows";
-import { buildLogRows, stageJumpIds, stageJumpIndex, stickyStage } from "./logRows";
+import type { BodyRow, GroupState, LogRow, StageInfo } from "./logRows";
+import {
+  EMPTY_GROUP_STATE,
+  agentManifestFolds,
+  buildLogRows,
+  hiddenGroupOfLine,
+  stageJumpIds,
+  stageJumpIndex,
+  stickyStage,
+} from "./logRows";
+
+/** A short label per row: L<n> line, H<id> header, C<id> continued header, G<seq> gap, F<key> fold. */
+function rowLabel(r: LogRow): string {
+  if (r.kind === "line") return `L${r.n}`;
+  if (r.kind === "header") return `${r.continued ? "C" : "H"}${r.stageId}`;
+  if (r.kind === "fold") return `F${r.key}${r.collapsed ? "-closed" : ""}`;
+  return `G${r.seq}`;
+}
+
+const text = (n: number, body: string, stageId?: string): BodyRow => ({
+  kind: "line",
+  n,
+  off: n,
+  ts: 0,
+  text: body,
+  stageId,
+});
+
+const MANIFEST_HEADER = "Agent pod-1 is provisioned from template jnlp-agent";
+
+function manifestBody(): BodyRow[] {
+  return [
+    text(1, "before", "12"),
+    text(2, MANIFEST_HEADER, "12"),
+    text(3, "---", "12"),
+    text(4, "apiVersion: v1", "12"),
+    text(5, "kind: Pod", "12"),
+    text(6, ""),
+    text(7, "[Pipeline] { (boom)", "14"),
+  ];
+}
 
 const line = (n: number, stageId?: string): BodyRow => ({
   kind: "line",
@@ -44,7 +83,7 @@ describe("buildLogRows", () => {
       line(8, "16"),
     ];
     const rows = buildLogRows(body, info);
-    expect(rows.map((r) => (r.kind === "line" ? `L${r.n}` : r.kind === "header" ? `H${r.stageId}` : r.kind))).toEqual([
+    expect(rows.map(rowLabel)).toEqual([
       "H12",
       "L1",
       "L2",
@@ -52,10 +91,13 @@ describe("buildLogRows", () => {
       "L3",
       "H16",
       "L4",
+      "C12",
       "L5",
+      "C14",
       "L6",
       "H4",
       "L7",
+      "C16",
       "L8",
     ]);
   });
@@ -114,5 +156,72 @@ describe("stickyStage", () => {
     // rows: 0 H12, 1 L1, 2 H14, 3 L2
     expect(stickyStage(boundary, 2, info)).toEqual({ name: "Bravo", status: "FAILURE" });
     expect(stickyStage([], 0, info)).toBeNull();
+  });
+});
+
+describe("buildLogRows groups", () => {
+  it("marks a later run of a stage as continued", () => {
+    const rows = buildLogRows([text(1, "a", "12"), text(2, "b", "14"), text(3, "c", "12")], info);
+    expect(rows.filter((r) => r.kind === "header")).toEqual([
+      { kind: "header", stageId: "12", name: "Alpha", status: "SUCCESS", continued: false, collapsed: false, lineCount: 2 },
+      { kind: "header", stageId: "14", name: "Bravo", status: "FAILURE", continued: false, collapsed: false, lineCount: 1 },
+      { kind: "header", stageId: "12", name: "Alpha", status: "SUCCESS", continued: true, collapsed: false, lineCount: 2 },
+    ]);
+  });
+
+  it("hides a collapsed stage's lines and keeps its headers with the line count", () => {
+    const body: BodyRow[] = [text(1, "a", "12"), text(2, "b", "12"), text(3, "c", "14")];
+    const state: GroupState = { collapsedStages: new Set(["12"]), expandedFolds: new Set() };
+    const rows = buildLogRows(body, info, state);
+    expect(rows.map(rowLabel)).toEqual(["H12", "H14", "L3"]);
+    const header = rows[0];
+    expect(header).toMatchObject({ kind: "header", collapsed: true, lineCount: 2 });
+  });
+
+  it("folds an agent pod manifest by default", () => {
+    const rows = buildLogRows(manifestBody(), info);
+    expect(rows.map(rowLabel)).toEqual(["H12", "L1", "L2", "F3-closed", "H14", "L7"]);
+    expect(rows[3]).toEqual({ kind: "fold", key: 3, lineCount: 4, collapsed: true });
+  });
+
+  it("gives no fold row to a manifest inside a collapsed stage", () => {
+    const state: GroupState = { collapsedStages: new Set(["12"]), expandedFolds: new Set() };
+    const rows = buildLogRows(manifestBody(), info, state);
+    expect(rows.map(rowLabel)).toEqual(["H12", "H14", "L7"]);
+  });
+
+  it("shows the manifest lines once its fold is expanded", () => {
+    const state: GroupState = { collapsedStages: new Set(), expandedFolds: new Set([3]) };
+    const rows = buildLogRows(manifestBody(), info, state);
+    expect(rows.map(rowLabel)).toEqual(["H12", "L1", "L2", "F3", "L3", "L4", "L5", "L6", "H14", "L7"]);
+  });
+
+  it("ends a fold at its first empty line or before a [Pipeline] line", () => {
+    expect(agentManifestFolds(manifestBody())).toEqual([{ start: 2, end: 6, key: 3 }]);
+    const body: BodyRow[] = [
+      text(1, "Agent pod-1 is provisioned from template jnlp-agent"),
+      text(2, "---"),
+      text(3, "apiVersion: v1"),
+      text(4, "[Pipeline] step"),
+      text(5, "after"),
+    ];
+    expect(agentManifestFolds(body)).toEqual([{ start: 1, end: 3, key: 2 }]);
+  });
+
+  it("gives no fold to a provisioning line with no dashes after it", () => {
+    const body: BodyRow[] = [text(1, MANIFEST_HEADER), text(2, "plain"), text(3, "more")];
+    expect(agentManifestFolds(body)).toEqual([]);
+  });
+
+  it("hiddenGroupOfLine names the collapsed stage and the fold", () => {
+    const body = manifestBody();
+    const state: GroupState = { collapsedStages: new Set(["12"]), expandedFolds: new Set() };
+    expect(hiddenGroupOfLine(body, state, 4)).toEqual({ stageId: "12", foldKey: 3 });
+    expect(hiddenGroupOfLine(body, state, 7)).toBeNull();
+    expect(hiddenGroupOfLine(body, EMPTY_GROUP_STATE, 1)).toBeNull();
+    expect(hiddenGroupOfLine(body, { collapsedStages: new Set(["14"]), expandedFolds: new Set() }, 7)).toEqual({
+      stageId: "14",
+    });
+    expect(hiddenGroupOfLine(body, EMPTY_GROUP_STATE, 99)).toBeNull();
   });
 });

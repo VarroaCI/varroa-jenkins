@@ -327,3 +327,41 @@ func TestResumeLineIndex(t *testing.T) {
 		})
 	}
 }
+
+// TestSplitRunLogLines_NotePayloadOnlyForNodelessChunks proves that a
+// line keeps its flow-node note only when its chunk names no node and
+// is not a recovery entry.
+func TestSplitRunLogLines_NotePayloadOnlyForNodelessChunks(t *testing.T) {
+	plain := testNewNodeNoteLine("17", "18", "18", "[Pipeline] { (boom)")
+	nodeLine := testNewNodeNoteLine("17", "19", "19", "[Pipeline] { (node)")
+	recovery := testNewNodeNoteLine("17", "20", "20", "[Pipeline] { (rec)")
+
+	var console []byte
+	entries := map[int64]runLogIndexEntry{}
+	for i, ln := range []runLogLine{plain, nodeLine, recovery} {
+		raw := append(testNoteRawBytes(ln), '\n')
+		e := runLogIndexEntry{Seq: int64(i), Offset: int64(len(console)), Len: int64(len(raw))}
+		switch i {
+		case 1:
+			e.NodeID = "n1"
+		case 2:
+			e.Recovered = true
+		}
+		entries[e.Seq] = e
+		console = append(console, raw...)
+	}
+
+	lines := splitRunLogLines(console, entries)
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want 3", len(lines))
+	}
+	if lines[0].notePayload != plain.notePayload {
+		t.Errorf("nodeless line payload = %q, want %q", lines[0].notePayload, plain.notePayload)
+	}
+	if lines[1].notePayload != "" {
+		t.Errorf("node-attributed line payload = %q, want empty", lines[1].notePayload)
+	}
+	if lines[2].notePayload != "" {
+		t.Errorf("recovery line payload = %q, want empty", lines[2].notePayload)
+	}
+}

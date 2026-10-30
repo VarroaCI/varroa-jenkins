@@ -265,6 +265,11 @@ type runLogLine struct {
 	StageID string // empty for a line with no attribution
 	NodeID  string // empty for a line with no attribution
 	Text    string // console notes removed
+
+	// notePayload is the base64 flow-node note at the line start, set
+	// only for a chunk with no nodeId. The handler's stage attributor
+	// reads it; the digest and the text tail never do.
+	notePayload string
 }
 
 // runLogSpan is one index entry's byte range, for attributing a line's
@@ -327,6 +332,9 @@ func splitRunLogLines(consoleData []byte, entries map[int64]runLogIndexEntry) []
 			if !s.entry.Recovered {
 				line.StageID = s.entry.StageID
 				line.NodeID = s.entry.NodeID
+				if s.entry.NodeID == "" {
+					line.notePayload = consoleNotePayloadAtLineStart(consoleData[pos:end])
+				}
 			}
 		}
 		lines = append(lines, line)

@@ -202,11 +202,12 @@ Open the **Log** tab. The log viewer supports:
   and disabled when the run has ended and its log is complete.
 - A **Raw** link that opens the same log as plain text in a new tab.
 
-Select a stage in the stage graph to scroll the log to that stage's header. A header sits before
-the first line of its stage. A parallel branch that has no lines of its own opens at its first
-nested stage. A `#stage-<id>` fragment in the URL does the same and also scrolls the page. Every line carries a
-permalink: append `#L<line number>` to the build page URL to open it scrolled to that line,
-highlighted.
+A header sits before each run of a stage's lines. Select a header to collapse or expand its stage.
+The agent pod manifest is folded by default. A jump or search that finds a hidden line opens its group.
+
+Select a stage in the stage graph to scroll to its header and expand it. A `#stage-<id>` fragment does
+the same and also scrolls the page. Every line carries a permalink: append `#L<line number>` to the
+build page URL to open it scrolled to that line, highlighted.
 
 The **Log** tab shows a banner naming the reason when the run's log did not close complete, for
 example after a lost chunk. A log with that banner is missing bytes; do not treat it as the full
