@@ -569,3 +569,61 @@
   vertical-align: middle;
   letter-spacing: .2px;
 }
+
+/* ── Chip row labels ─────────────────────────────────────────── */
+
+.chipRowLabel {
+  min-width: 5rem;
+  align-self: center;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── Stream status: connecting and paused ────────────────────── */
+
+.waitDot,
+.idleDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.waitDot {
+  background: var(--warn);
+}
+
+.idleDot {
+  background: var(--text-3);
+}
+
+/* ── Repeat rows: consecutive control events folded into one ─── */
+
+.repeatContainer {
+  border-bottom: 1px solid var(--border);
+}
+
+.repeatMessage {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repeatMembers {
+  /* Members render their own event rows */
+}
+
+.repeatMemberRow {
+  padding-left: 24px;
+}
+
+.repeatMemberRow .eventRow {
+  border-bottom: 1px solid var(--border);
+}

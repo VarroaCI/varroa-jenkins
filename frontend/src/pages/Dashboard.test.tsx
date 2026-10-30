@@ -291,7 +291,7 @@ describe("Dashboard", () => {
       });
     });
 
-    it("renders a mapped icon for an auth.local.login event", async () => {
+    it("renders a mapped icon for an auth.local.login_failed event", async () => {
       mockUseControllers.mockReturnValue({
         data: [],
         isLoading: false,
@@ -299,25 +299,96 @@ describe("Dashboard", () => {
       });
       const authEvent = {
         timestamp: new Date().toISOString(),
-        type: "auth.local.login",
+        type: "auth.local.login_failed",
         source: "user",
         controller: "",
         namespace: "",
-        message: "Signed in",
+        message: "Sign-in failed",
       };
       // The feed refetches on mount, so the mocked /activity path must serve the event.
       vi.mocked(useApi.bffFetch).mockImplementation((path: string) =>
-        Promise.resolve(path === "/activity" ? { items: [authEvent] } : { items: [] }),
+        Promise.resolve(path.startsWith("/activity") ? { items: [authEvent] } : { items: [] }),
       );
       try {
         renderWithProviders(<Dashboard />);
         await waitFor(() => {
-          expect(screen.getByText("→")).toBeInTheDocument();
+          expect(screen.getByText("⚠")).toBeInTheDocument();
         });
         expect(screen.queryByText("·")).not.toBeInTheDocument();
       } finally {
         vi.mocked(useApi.bffFetch).mockResolvedValue({ items: [] });
       }
+    });
+  });
+
+  describe("Recent activity rows", () => {
+    // serveActivity answers the feed's /activity read with these events.
+    function serveActivity(items: unknown[]) {
+      vi.mocked(useApi.bffFetch).mockImplementation((path: string) =>
+        Promise.resolve(path.startsWith("/activity") ? { items } : { items: [] }),
+      );
+    }
+
+    afterEach(() => {
+      vi.mocked(useApi.bffFetch).mockResolvedValue({ items: [] });
+    });
+
+    it("omits routine sign-ins from Recent activity", async () => {
+      mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null });
+      serveActivity([
+        { timestamp: new Date().toISOString(), type: "auth.local.login", source: "user", message: "local:ui-probe signed in", severity: "info" },
+        { timestamp: new Date().toISOString(), type: "pipeline.run_requested", source: "user", message: "started build 4", actor: "local:bob" },
+      ]);
+      renderWithProviders(<Dashboard />);
+
+      expect(await screen.findByText("started build 4")).toBeInTheDocument();
+      expect(screen.queryByText(/signed in/)).not.toBeInTheDocument();
+    });
+
+    it("says only routine sign-ins happened when nothing else is recent", async () => {
+      mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null });
+      serveActivity([
+        { timestamp: new Date().toISOString(), type: "auth.local.login", source: "user", message: "local:ui-probe signed in", severity: "info" },
+      ]);
+      renderWithProviders(<Dashboard />);
+
+      expect(
+        await screen.findByText("The latest events are routine sign-ins. View all lists them."),
+      ).toBeInTheDocument();
+    });
+
+    it("shows the actor, not 'system', for an event with no controller", async () => {
+      mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null });
+      serveActivity([
+        { timestamp: new Date().toISOString(), type: "pipeline.run_requested", source: "user", message: "deployed X", actor: "local:bob" },
+      ]);
+      renderWithProviders(<Dashboard />);
+
+      expect(await screen.findByText("local:bob")).toBeInTheDocument();
+      expect(screen.queryByText("system")).not.toBeInTheDocument();
+    });
+
+    it("drops the bold prefix when the message names the actor", async () => {
+      mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null });
+      serveActivity([
+        { timestamp: new Date().toISOString(), type: "pipeline.run_requested", source: "user", message: "local:bob changed a setting", actor: "local:bob" },
+      ]);
+      const { container } = renderWithProviders(<Dashboard />);
+
+      expect(await screen.findByText("local:bob changed a setting")).toBeInTheDocument();
+      expect(container.querySelector("b")).toBeNull();
+    });
+
+    it("renders a relative age with the full date in its title", async () => {
+      mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null });
+      const ts = new Date().toISOString();
+      serveActivity([
+        { timestamp: ts, type: "pipeline.run_requested", source: "user", message: "deployed X", actor: "local:bob" },
+      ]);
+      renderWithProviders(<Dashboard />);
+
+      const age = await screen.findByTitle(new Date(ts).toLocaleString());
+      expect(age).toHaveTextContent("just now");
     });
   });
 
@@ -479,6 +550,44 @@ describe("Dashboard brood health rollup", () => {
     expect(within(rows[2]).getByRole("link", { name: /\/down$/ })).toBeInTheDocument();
     expect(screen.getByText(/and 4 more/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View all controllers" })).toHaveAttribute("href", "/controllers");
+  });
+
+  it("reads asleep for a hibernated controller and stopped for a stopped one", () => {
+    const ctrls = [
+      createControllerListItem({ name: "sleepy", phase: "Hibernated", miteConnected: false, jenkinsHealth: "unreachable" }),
+      createControllerListItem({ name: "halted", phase: "Stopped", miteConnected: false, jenkinsHealth: "unreachable" }),
+    ];
+    mockUseControllers.mockReturnValue({ data: ctrls, isLoading: false, error: null });
+    renderWithProviders(<Dashboard />);
+
+    const rows = screen.getAllByTestId("health-row");
+    // Both rank below the live rows, so they sort by name: halted, then sleepy.
+    expect(within(rows[0]).getByText("stopped")).toBeInTheDocument();
+    expect(within(rows[1]).getByText("asleep")).toBeInTheDocument();
+    expect(screen.queryByText("unreachable")).not.toBeInTheDocument();
+  });
+
+  it("keeps unreachable for a running controller that lost its mite", () => {
+    const ctrls = [
+      createControllerListItem({ name: "lost", phase: "Running", miteConnected: false, jenkinsHealth: "unreachable" }),
+    ];
+    mockUseControllers.mockReturnValue({ data: ctrls, isLoading: false, error: null });
+    renderWithProviders(<Dashboard />);
+
+    expect(screen.getByText("unreachable")).toBeInTheDocument();
+  });
+
+  it("lists live controllers before hibernated ones", () => {
+    const ctrls = [
+      createControllerListItem({ name: "aaa-sleep", phase: "Hibernated", miteConnected: false }),
+      createControllerListItem({ name: "zzz-live", phase: "Connected", miteConnected: true }),
+    ];
+    mockUseControllers.mockReturnValue({ data: ctrls, isLoading: false, error: null });
+    renderWithProviders(<Dashboard />);
+
+    const rows = screen.getAllByTestId("health-row");
+    expect(within(rows[0]).getByRole("link", { name: /zzz-live/ })).toBeInTheDocument();
+    expect(within(rows[1]).getByRole("link", { name: /aaa-sleep/ })).toBeInTheDocument();
   });
 
   it("renders a phase distribution bar with per-phase counts", () => {

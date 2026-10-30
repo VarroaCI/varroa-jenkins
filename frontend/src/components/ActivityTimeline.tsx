@@ -24,6 +24,16 @@ import {
 import type { ActivityEvent, ActivityFilters } from "../types";
 import styles from "./ActivityTimeline.module.css";
 
+/**
+ * streamLabel names the stream state. A paused view that has lost its stream
+ * still says so, so the reader learns that events are not arriving.
+ */
+function streamLabel(readyState: string, paused: boolean): string {
+  const base = readyState === "open" ? "Live" : readyState === "connecting" ? "Connecting…" : "Disconnected";
+  if (!paused) return base;
+  return readyState === "open" ? "Paused" : `Paused · ${base}`;
+}
+
 // ── Props ──────────────────────────────────────────────────────────────────
 
 interface ActivityTimelineProps {
@@ -312,6 +322,53 @@ export default function ActivityTimeline({
     );
   };
 
+  const renderRepeatRow = (row: RenderRow & { kind: "repeat" }) => {
+    const isExpanded = expandedGroups.has(row.groupId);
+    const sourceLabel = SOURCE_LABELS[row.newest.source] ?? row.newest.source;
+
+    return (
+      <div className={styles.repeatContainer}>
+        <div
+          className={`${styles.groupHeader} ${isExpanded ? styles.groupHeaderExpanded : ""}`}
+          onClick={() => toggleGroup(row.groupId)}
+          role="button"
+          tabIndex={0}
+          aria-expanded={isExpanded}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") toggleGroup(row.groupId);
+          }}
+        >
+          <div className={`${styles.laneRail} ${styles.laneRailControl}`} />
+          <span className={styles.groupToggle}>{isExpanded ? "▼" : "▶"}</span>
+          <div className={styles.groupMeta}>
+            <span className={styles.eventType}>{row.newest.type}</span>
+            <span
+              className={styles.sourceChip}
+              style={{
+                background: SOURCE_COLORS[row.newest.source] ?? "var(--surface-3)",
+              }}
+            >
+              {sourceLabel}
+            </span>
+            {row.newest.actor && <span className={styles.actor}>{row.newest.actor}</span>}
+            <span className={styles.groupCount}>× {row.members.length}</span>
+            <span className={styles.repeatMessage}>{row.newest.message}</span>
+            <span className={styles.groupTime}>{age(row.newest.timestamp)}</span>
+          </div>
+        </div>
+        {isExpanded && (
+          <div className={styles.repeatMembers}>
+            {row.members.map((member, idx) => (
+              <div key={`${member.timestamp}-${idx}`} className={styles.repeatMemberRow}>
+                {renderControlRow(member)}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderBuildGroupRow = (row: RenderRow & { kind: "group" }) => {
     const isExpanded = expandedGroups.has(row.groupId);
     const memberCount = row.members.length;
@@ -389,7 +446,10 @@ export default function ActivityTimeline({
     <div className={styles.timeline}>
       {/* Lane selector */}
       <div className={styles.filterBar}>
-        <div className={styles.chips}>
+        <div className={styles.chips} role="group" aria-labelledby="activity-lane-label">
+          <span id="activity-lane-label" className={styles.chipRowLabel}>
+            Category
+          </span>
           {LANE_CHIPS.map((chip) => {
             const count = chip === "All" ? laneCounts.All : chip === "Control plane" ? laneCounts.control : laneCounts.builds;
             if (chip !== "All" && count === 0) return null;
@@ -406,7 +466,10 @@ export default function ActivityTimeline({
           })}
         </div>
         {/* Source filter */}
-        <div className={styles.chips}>
+        <div className={styles.chips} role="group" aria-labelledby="activity-source-label">
+          <span id="activity-source-label" className={styles.chipRowLabel}>
+            Source
+          </span>
           {SOURCE_CHIPS.map((chip) => {
             const count = chip === "All" ? sourceCounts.All : sourceCounts[SOURCE_CHIP_TO_VALUE[chip]] ?? 0;
             if (chip !== "All" && count === 0) return null;
@@ -428,20 +491,22 @@ export default function ActivityTimeline({
       <div className={styles.streamStatus}>
         <span
           className={
-            readyState === "open" ? styles.liveDot : styles.deadDot
+            readyState === "open"
+              ? paused
+                ? styles.idleDot
+                : styles.liveDot
+              : readyState === "connecting"
+                ? styles.waitDot
+                : styles.deadDot
           }
         />
-        {readyState === "open"
-          ? "Live"
-          : readyState === "connecting"
-            ? "Connecting..."
-            : "Disconnected"}
+        {streamLabel(readyState, paused)}
         <button
           className={paused ? styles.pauseBtnLive : styles.pauseBtn}
           onClick={() => setPaused(!paused)}
           title={paused ? "Resume live updates" : "Pause to review"}
         >
-          {paused ? "▶ Live" : "⏸ Paused"}
+          {paused ? "▶ Resume" : "⏸ Pause"}
         </button>
         {pendingCount > 0 && (
           <button className={styles.newPill} onClick={handleResume}>
@@ -502,9 +567,9 @@ export default function ActivityTimeline({
               return (
                 <div
                   key={
-                    row.kind === "group"
-                      ? row.groupId
-                      : `${row.event.timestamp}-${virtualItem.index}`
+                    row.kind === "event"
+                      ? `${row.event.timestamp}-${virtualItem.index}`
+                      : row.groupId
                   }
                   data-index={virtualItem.index}
                   ref={virtualizer.measureElement}
@@ -518,9 +583,11 @@ export default function ActivityTimeline({
                 >
                   {row.kind === "group"
                     ? renderBuildGroupRow(row)
-                    : laneFor(row.event) === "builds"
-                      ? renderBuildRow(row.event)
-                      : renderControlRow(row.event)}
+                    : row.kind === "repeat"
+                      ? renderRepeatRow(row)
+                      : laneFor(row.event) === "builds"
+                        ? renderBuildRow(row.event)
+                        : renderControlRow(row.event)}
                 </div>
               );
             })}

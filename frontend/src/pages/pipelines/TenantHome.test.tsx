@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -17,6 +17,9 @@ const mockGetTenantCell = vi.fn();
 const mockListFleetLocks = vi.fn();
 const mockGetTenant = vi.fn();
 const mockGetMyPermissions = vi.fn();
+// mockListClusters answers the core cluster by default, so a core-placed
+// tenant shows no member chip.
+const mockListClusters = vi.fn(async () => [{ name: "core", core: true }]);
 // mockAssistant is the assistant state the proposal card reads.
 const mockAssistant = { available: false, switchOn: false };
 vi.mock("../../components/assistant/AssistantProvider", async (importOriginal) => ({
@@ -33,6 +36,7 @@ vi.mock("../../api/client", () => ({
   listRunners: (...args: unknown[]) => mockListRunners(...args),
   getTenantCell: (...args: unknown[]) => mockGetTenantCell(...args),
   listFleetLocks: (...args: unknown[]) => mockListFleetLocks(...args),
+  listClusters: () => mockListClusters(),
   tenantRunStreamUrl: (tenant: string) => `/api/v1/pipelines/${encodeURIComponent(tenant)}/stream`,
 }));
 
@@ -520,7 +524,9 @@ describe("TenantHome — Runners section", () => {
     mockListRunners.mockResolvedValue([]);
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("No runners registered for this tenant yet.")).toBeInTheDocument();
+      expect(
+        screen.getByText("No runners. An operator registers a Runner for this tenant."),
+      ).toBeInTheDocument();
     });
   });
 
@@ -640,6 +646,99 @@ describe("TenantHome — the cell card", () => {
     const card = screen.getByRole("region", { name: "Your cell" });
     expect(pill.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(card.compareDocumentPosition(running) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows the member cluster, tenant count, and free slots beside the pill", async () => {
+    mockListClusters.mockResolvedValue([
+      { name: "core", core: true },
+      { name: "member-a", core: false },
+    ]);
+    mockGetTenantCell.mockResolvedValue({
+      state: "placed",
+      cell: "cell-a",
+      cluster: "member-a",
+      namespace: "varroa-system",
+      freeSlots: 4,
+      otherTenantCount: 2,
+      canOpenCell: false,
+    });
+    renderPage("/pipelines/payments");
+
+    await screen.findByRole("button", { name: "Placed · cell-a" });
+    const meta = await screen.findByTestId("tenant-cell-meta");
+    await waitFor(() => expect(within(meta).getByText("member cluster member-a")).toBeInTheDocument());
+    expect(meta).toHaveTextContent("2 other tenants");
+    expect(meta).toHaveTextContent("4 free slots");
+  });
+
+  it("shows no member chip for a core-placed tenant", async () => {
+    mockGetTenantCell.mockResolvedValue({
+      state: "placed",
+      cell: "cell-a",
+      cluster: "core",
+      freeSlots: 1,
+      canOpenCell: false,
+    });
+    renderPage("/pipelines/payments");
+
+    const meta = await screen.findByTestId("tenant-cell-meta");
+    expect(within(meta).queryByText(/member cluster/)).not.toBeInTheDocument();
+    expect(meta).toHaveTextContent("1 free slot");
+  });
+
+  it("links Open cell only when the caller may open the cell", async () => {
+    mockGetTenantCell.mockResolvedValue({
+      state: "placed",
+      cell: "cell-a",
+      cluster: "core",
+      namespace: "varroa-system",
+      canOpenCell: true,
+    });
+    renderPage("/pipelines/payments");
+
+    const link = await screen.findByRole("link", { name: "Open cell" });
+    expect(link.getAttribute("href")).toBe("/controllers/core/varroa-system/cell-a?tab=cell");
+  });
+
+  it("omits Open cell when the caller may not open the cell", async () => {
+    mockGetTenantCell.mockResolvedValue({
+      state: "placed",
+      cell: "cell-a",
+      cluster: "core",
+      namespace: "varroa-system",
+      freeSlots: 2,
+      canOpenCell: false,
+    });
+    renderPage("/pipelines/payments");
+
+    await screen.findByTestId("tenant-cell-meta");
+    expect(screen.queryByRole("link", { name: "Open cell" })).not.toBeInTheDocument();
+  });
+
+  it("renders empty Running now, Locks, and Runners as one-line notes", async () => {
+    mockGetTenantCell.mockResolvedValue({ state: "notCellHosted", canOpenCell: false });
+    renderPage("/pipelines/payments");
+
+    expect(await screen.findByText("Nothing is running.")).toBeInTheDocument();
+    expect(await screen.findByText("The tenant holds no lock and waits on none.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("No runners. An operator registers a Runner for this tenant."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the warning message beside the pill", async () => {
+    mockGetTenantCell.mockResolvedValue({
+      state: "placed",
+      cell: "cell-a",
+      cluster: "core",
+      freeSlots: 0,
+      canOpenCell: false,
+      warning: { reason: "TenantCapReached", message: "The cell is at its tenant cap." },
+    });
+    renderPage("/pipelines/payments");
+
+    const meta = await screen.findByTestId("tenant-cell-meta");
+    expect(within(meta).getByText("The cell is at its tenant cap.")).toBeInTheDocument();
   });
 
   it("heads the page with an h1 and the card with an h2", async () => {

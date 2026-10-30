@@ -33,6 +33,8 @@ varroactl activity --controller <name> --follow
 
 `varroactl activity` prints a backfill table, then, with `--follow`, streams new events live. Without the record store the table is empty and `--follow` shows only new events. The feed records lifecycle and audit events; `varroactl logs <namespace>/<name> --follow` gives controller logs.
 
+**Read the activity page.** The `/activity` page folds consecutive repeats of one event into one row that shows `× N`. Select the row to show each event. The dashboard's Recent activity card omits routine local sign-ins. `/activity`, `varroactl activity`, and the MCP `list_activity` tool still list every sign-in.
+
 Four [cell](cells.md) pipelines events reach the feed only through the store, so a live subscriber sees them on its next backfill. They are `build.interrupted` (an interrupted run), `build.scheduled.backstop` (a missed cron build the backstop fires), `build.claim_expired` (an accepted run with no claimed build number), and `build.claim_vetoed` (a refused claim).
 
 The operator publishes one `command.failed` event for each imperative command that fails on a
@@ -42,14 +44,14 @@ status, and the error text. A person's successful cancel, input answer, or repla
 
 ## Read brood health
 
-The dashboard's brood health card summarizes the brood. A bar shows the number of controllers in each phase. Under the bar, the card lists at most eight controllers. Controllers that need attention come first, then controllers with no live mite that are not hibernated. The rest of the brood is on the Controllers page. Each listed row carries:
+The dashboard's brood health card summarizes the brood. A bar shows the number of controllers in each phase. Under the bar, the card lists at most eight controllers. Controllers that need attention come first. A running controller that lost its mite comes next. Live controllers follow, then hibernated and stopped controllers. The rest of the brood is on the Controllers page. Each listed row carries:
 
 | Element | Source |
 |---|---|
 | Connection dot | Whether the mite currently holds a command stream to the gateway. |
 | Phase pill | `status.phase`, plus the needs-attention label when one applies. |
 | `seen <age>` | Age of the last mite heartbeat. A controller no mite has ever reported reads `never seen`. |
-| Health verdict | The mite's last Jenkins health probe: `healthy`, `unhealthy`, or `unreachable`. |
+| Health verdict | The mite's last Jenkins health probe for a running controller: `healthy`, `unhealthy`, or `unreachable`. A hibernated controller reads `asleep`. A stopped controller reads `stopped`. |
 | `Jenkins <version>` | The running Jenkins version. Absent until a mite reports one. |
 
 Every element is a reported fact. The card holds no history: use the activity feed above for a timeline, and [Troubleshooting](troubleshooting.md) for a controller that reads `never seen`.

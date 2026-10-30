@@ -100,6 +100,7 @@ func (s *Server) serveRunStream(w http.ResponseWriter, r *http.Request, keys []s
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
 
 	ping := time.NewTicker(30 * time.Second)
 	defer ping.Stop()

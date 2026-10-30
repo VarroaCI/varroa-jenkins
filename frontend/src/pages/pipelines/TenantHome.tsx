@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getTenant, getTenantCell, listFleetLocks, listPipelines, listRunners, tenantRunStreamUrl } from "../../api/client";
@@ -18,8 +18,10 @@ import {
 } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
 import { age } from "../../components/activityTimeline.util";
+import { useClusters, coreOf } from "../../hooks/useClusters";
+import { controllerRoute } from "../../routing";
 import { holderOf, holdsLock } from "../../lib/fleetLocks";
-import type { FleetLock, RunNotification, RunnerEntry, RunningRun } from "../../types";
+import type { FleetLock, RunNotification, RunnerEntry, RunningRun, TenantCell } from "../../types";
 import JobTree, { formatDuration } from "./JobTree";
 import { breakablePath } from "./breakablePath";
 import TenantCellCard, { CELL_STATE_LABELS } from "./TenantCellCard";
@@ -58,6 +60,55 @@ const PILL_CLASS: Record<keyof typeof CELL_STATE_LABELS, string> = {
 
 function pillClassName(state: keyof typeof CELL_STATE_LABELS): string {
   return PILL_CLASS[state];
+}
+
+/**
+ * CellMeta names what the pill does not: a member cluster, the other tenants
+ * on the cell, the free slots, a warning, and a link to the cell. It shows
+ * nothing for a tenant with no cell.
+ */
+function CellMeta({ cell, coreName }: { cell: TenantCell; coreName?: string }) {
+  const parts: ReactNode[] = [];
+  if (cell.cluster && coreName !== undefined && cell.cluster !== coreName) {
+    parts.push(
+      <span key="member" className={styles.memberChip}>
+        member cluster {cell.cluster}
+      </span>,
+    );
+  }
+  if (cell.otherTenantCount !== undefined) {
+    const n = cell.otherTenantCount;
+    parts.push(`${n} other tenant${n === 1 ? "" : "s"}`);
+  }
+  if (cell.freeSlots !== undefined) {
+    const n = cell.freeSlots;
+    parts.push(`${n} free slot${n === 1 ? "" : "s"}`);
+  }
+  if (cell.warning) {
+    parts.push(
+      <span key="warning" className={styles.cellWarn} title={cell.warning.reason}>
+        {cell.warning.message}
+      </span>,
+    );
+  }
+  if (cell.canOpenCell && cell.cluster && cell.namespace && cell.cell) {
+    parts.push(
+      <Link key="open" to={`${controllerRoute(cell.cluster, cell.namespace, cell.cell)}?tab=cell`}>
+        Open cell
+      </Link>,
+    );
+  }
+  if (parts.length === 0) return null;
+  return (
+    <span className={styles.cellMeta} data-testid="tenant-cell-meta">
+      {parts.map((part, i) => (
+        <Fragment key={i}>
+          {i > 0 && " · "}
+          {part}
+        </Fragment>
+      ))}
+    </span>
+  );
 }
 
 /**
@@ -290,6 +341,8 @@ export default function TenantHome() {
     refetchInterval: 30_000,
   });
   const [cellOpen, setCellOpen] = useState(false);
+  const { data: clusters } = useClusters();
+  const core = coreOf(clusters);
 
   const tree = useMemo(
     () => buildJobTree(data?.items ?? [], data?.runningNow ?? [], data?.tenantFolder ?? ""),
@@ -378,16 +431,19 @@ export default function TenantHome() {
       {/* A failed refetch keeps the last data, so the isError test hides
           the pill then, as TenantCellCard hides its own card. */}
       {cellQuery.data && !cellQuery.isError && cellQuery.data.state !== "notCellHosted" && (
-        <button
-          type="button"
-          className={pillClassName(cellQuery.data.state)}
-          aria-expanded={cellOpen}
-          aria-controls="tenant-cell-disclosure"
-          onClick={() => setCellOpen((v) => !v)}
-        >
-          {CELL_STATE_LABELS[cellQuery.data.state]}
-          {cellQuery.data.cell ? ` · ${cellQuery.data.cell}` : ""}
-        </button>
+        <div className={styles.cellRow}>
+          <button
+            type="button"
+            className={pillClassName(cellQuery.data.state)}
+            aria-expanded={cellOpen}
+            aria-controls="tenant-cell-disclosure"
+            onClick={() => setCellOpen((v) => !v)}
+          >
+            {CELL_STATE_LABELS[cellQuery.data.state]}
+            {cellQuery.data.cell ? ` · ${cellQuery.data.cell}` : ""}
+          </button>
+          {cellQuery.data.state !== "unplaced" && <CellMeta cell={cellQuery.data} coreName={core?.name} />}
+        </div>
       )}
     </div>
   );
@@ -444,7 +500,7 @@ export default function TenantHome() {
         </p>
       )}
       {data.runningNow.length === 0 ? (
-        <div className={styles.empty}>Nothing is running.</div>
+        <div className={styles.emptyLine}>Nothing is running.</div>
       ) : (
         <div className={styles.tileGrid}>
           {data.runningNow.map((run) => (
@@ -490,11 +546,11 @@ export default function TenantHome() {
 
       <div className={styles.sectionTitle}>Locks</div>
       {locksQuery.isLoading ? (
-        <div className={styles.loading}>Loading locks…</div>
+        <div className={styles.emptyLine}>Loading locks…</div>
       ) : locksQuery.isError ? (
-        <div className={styles.empty}>Unable to load locks.</div>
+        <div className={styles.emptyLine}>Unable to load locks.</div>
       ) : lockItems.length === 0 ? (
-        <div className={styles.empty}>The tenant holds no lock and waits on none.</div>
+        <div className={styles.emptyLine}>The tenant holds no lock and waits on none.</div>
       ) : (
         <Card>
           <div className={styles.tableScroll}>
@@ -519,11 +575,11 @@ export default function TenantHome() {
 
       <div className={styles.sectionTitle}>Runners</div>
       {runnersQuery.isLoading ? (
-        <div className={styles.loading}>Loading runners…</div>
+        <div className={styles.emptyLine}>Loading runners…</div>
       ) : runnersQuery.isError ? (
-        <div className={styles.empty}>Unable to load runners.</div>
+        <div className={styles.emptyLine}>Unable to load runners.</div>
       ) : !runnersQuery.data || runnersQuery.data.length === 0 ? (
-        <div className={styles.empty}>No runners registered for this tenant yet.</div>
+        <div className={styles.emptyLine}>No runners. An operator registers a Runner for this tenant.</div>
       ) : (
         <Card>
           <div className={styles.tableScroll}>

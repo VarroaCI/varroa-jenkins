@@ -57,12 +57,24 @@
 
 /* ---- Filter bar (matching Controllers pattern) ---- */
 
+/* Seven fields sit on a four-column grid, so each label stays above its control. */
 .filterBar {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+  align-items: end;
   margin-bottom: 16px;
-  flex-wrap: wrap;
+}
+
+.filterBar .clearAll {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+@media (max-width: 719.98px) {
+  .filterBar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .filterField { display: grid; gap: 4px; color: var(--text-2); font-size: 11px; font-weight: 650; text-transform: uppercase; }
 .filterField select, .filterField input { min-height: 34px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); padding: 5px 9px; text-transform: none; }
@@ -409,11 +421,6 @@
 /* ---- Responsive ---- */
 
 @media (max-width: 768px) {
-  .filterBar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
   .searchBox {
     max-width: 100%;
     margin-left: 0;

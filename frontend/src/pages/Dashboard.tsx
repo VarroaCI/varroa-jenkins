@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { useControllers, useControllerFanoutFailures } from "../hooks/useControllers";
 import { useClusters, coreOf } from "../hooks/useClusters";
 import { ClusterFanoutNotice } from "../components/ClusterFanoutNotice";
-import { age, activityTypeMeta } from "../components/activityTimeline.util";
+import { age, activityTypeMeta, activitySubject, isRoutineSignIn } from "../components/activityTimeline.util";
 import { bffFetch } from "../hooks/useApi";
 import { getUpdateCenterStatus } from "../api/client";
 import type { ActivityEvent, UpdateCenterStatus } from "../types";
@@ -37,11 +37,22 @@ function phaseCounts(cs: ControllerListItem[]): { phase: string; count: number }
 }
 
 // lookRank orders controllers that need a look first. Attention comes first,
-// then a controller with no live mite that is not hibernated.
+// then a running controller that lost its mite. Live controllers come before
+// the ones that are asleep or stopped, which need no look.
 function lookRank(c: ControllerListItem): number {
   if (c.attention) return 0;
-  if (!c.miteConnected && c.phase !== "Hibernated") return 1;
+  const parked = c.phase === "Hibernated" || c.phase === "Stopped";
+  if (!c.miteConnected && !parked) return 1;
+  if (parked) return 3;
   return 2;
+}
+
+// healthText names the health of a row. A parked controller reads as its
+// state, not as an unreachable mite.
+function healthText(c: ControllerListItem): string | undefined {
+  if (c.phase === "Hibernated") return "asleep";
+  if (c.phase === "Stopped") return "stopped";
+  return c.jenkinsHealth;
 }
 
 function needsLookFirst(a: ControllerListItem, b: ControllerListItem): number {
@@ -250,7 +261,7 @@ function HealthBar({ controller }: { controller: ControllerListItem }) {
       </div>
       <div className={styles.healthMeta}>
         <span>{controller.lastSeen ? `seen ${age(controller.lastSeen)}` : "never seen"}</span>
-        {controller.jenkinsHealth && <span>{controller.jenkinsHealth}</span>}
+        {healthText(controller) && <span>{healthText(controller)}</span>}
         {controller.jenkinsVersion && <span>Jenkins {controller.jenkinsVersion}</span>}
       </div>
     </div>
@@ -262,9 +273,11 @@ function ActivityFeed() {
   const core = coreOf(clusters);
   const { data: events = [] } = useQuery({
     queryKey: ["activity"],
-    queryFn: () => bffFetch<{items: ActivityEvent[]}>("/activity").then(r => r.items),
+    queryFn: () => bffFetch<{items: ActivityEvent[]}>("/activity?limit=250").then(r => r.items),
     refetchInterval: 10_000,
   });
+  // Routine local sign-ins are audit rows, not news. The activity page lists them.
+  const shown = events.filter((e) => !isRoutineSignIn(e)).slice(0, 5);
 
   return (
     <Card
@@ -276,8 +289,9 @@ function ActivityFeed() {
       }
     >
       <div className={styles.activityList}>
-        {events.slice(0, 5).map((e, i) => {
+        {shown.map((e, i) => {
           const { icon, style } = activityTypeMeta(e);
+          const { subject, message } = activitySubject(e);
           return (
             <div key={i} className={styles.activityItem}>
               <div className={styles.activityIcon} data-style={style}>
@@ -285,10 +299,17 @@ function ActivityFeed() {
               </div>
               <div className={styles.activityContent}>
                 <div className={styles.activityTitle}>
-                  <b>{e.controller || "system"}</b> {e.message}
+                  {subject && (
+                    <>
+                      <b>{subject}</b>{" "}
+                    </>
+                  )}
+                  {message}
                 </div>
                 <div className={styles.activityMeta}>
-                  {e.cluster && e.cluster !== core?.name ? `${e.cluster}/` : ""}{e.namespace && `ns/${e.namespace} · `}{new Date(e.timestamp).toLocaleTimeString()}
+                  {e.cluster && e.cluster !== core?.name ? `${e.cluster}/` : ""}
+                  {e.namespace && `ns/${e.namespace} · `}
+                  <span title={new Date(e.timestamp).toLocaleString()}>{age(e.timestamp)}</span>
                 </div>
               </div>
             </div>
@@ -297,6 +318,11 @@ function ActivityFeed() {
         {events.length === 0 && (
           <div className={styles.activityEmpty}>
             No activity yet. Events will appear when mites connect or phases change.
+          </div>
+        )}
+        {events.length > 0 && shown.length === 0 && (
+          <div className={styles.activityEmpty}>
+            The latest events are routine sign-ins. View all lists them.
           </div>
         )}
       </div>

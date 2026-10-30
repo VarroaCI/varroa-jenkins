@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { FleetRunRow } from "../../types";
-import { runGlyph, runHref, runSecondLine, runTiming } from "./runRowText";
+import { runGlyph } from "./runGlyph";
+import { displayActor } from "./runActor";
+import { runHref, runSecondLine, runTiming } from "./runRowText";
 
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 
@@ -38,6 +40,17 @@ describe("runGlyph", () => {
     ["an unknown result", row({ result: undefined }), "other"],
   ])("%s", (_name, r, want) => {
     expect(runGlyph(r)).toBe(want);
+  });
+});
+
+describe("displayActor", () => {
+  it.each([
+    ["an empty actor", "", undefined],
+    ["the unknown placeholder", "unknown", undefined],
+    ["a missing actor", undefined, undefined],
+    ["a named actor", "alice", "alice"],
+  ])("%s", (_name, actor, want) => {
+    expect(displayActor(actor)).toBe(want);
   });
 });
 

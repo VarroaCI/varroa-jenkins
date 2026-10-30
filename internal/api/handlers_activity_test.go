@@ -417,6 +417,34 @@ func TestHandleActivityStream_DropsNonActivityRecords(t *testing.T) {
 	}
 }
 
+// TestHandleActivityStream_FlushesHeadersBeforeFirstEvent proves the stream
+// opens with a 200 and a flush before any event, so the client sees it open.
+func TestHandleActivityStream_FlushesHeadersBeforeFirstEvent(t *testing.T) {
+	ch := make(chan sse.Record)
+	close(ch)
+
+	srv := NewServer(&Dependencies{
+		Authorizer:  testAuthorizer(true, ""),
+		Broadcaster: &fakeActivitySource{ch: ch},
+		Logger:      slog.Default(),
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/activity/stream", nil).
+		WithContext(authContext(&auth.Claims{Subject: "test-user"}))
+	w := httptest.NewRecorder()
+
+	srv.handleActivityStream(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if !w.Flushed {
+		t.Errorf("headers were not flushed before the stream ended")
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+}
+
 func TestActivityFilter_AcceptsMCPSource(t *testing.T) {
 	for _, src := range []string{"operator", "mite", "jenkins", "user", "api", "mcp", "assistant"} {
 		t.Run(src, func(t *testing.T) {

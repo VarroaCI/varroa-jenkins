@@ -1,0 +1,28 @@
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.sm {
+  width: 1.1rem;
+  height: 1.1rem;
+  font-size: 0.65rem;
+}
+
+.success { color: var(--ok-text); background: var(--ok-soft); }
+.failure { color: var(--bad-text); background: var(--bad-soft); }
+.unstable { color: var(--warn-text); background: var(--warn-soft); }
+.aborted { color: var(--text-2); background: var(--surface-3); }
+.interrupted { color: var(--warn-text); background: var(--warn-soft); }
+.running { color: var(--info-text); background: var(--info-soft); }
+.queued { color: var(--idle-text); background: var(--idle-soft); }
+.waiting { color: var(--honey); background: var(--honey-soft); }
+.other { color: var(--text-2); background: var(--surface-3); }

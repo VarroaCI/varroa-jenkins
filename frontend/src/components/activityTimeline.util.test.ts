@@ -19,6 +19,8 @@ import {
   SOURCE_LABELS,
   GROUP_MAX,
   MAX_BUFFER,
+  activitySubject,
+  isRoutineSignIn,
 } from "./activityTimeline.util";
 import type { ActivityEvent } from "../types";
 
@@ -532,3 +534,82 @@ describe("activityTypeMeta", () => {
   });
 });
 
+describe("groupEvents control repeats", () => {
+  const sec = (n: number) => {
+    const d = new Date("2024-01-01T00:00:00Z");
+    d.setUTCSeconds(d.getUTCSeconds() + n);
+    return d.toISOString();
+  };
+  const login = (n: number, actor = "local:bob") =>
+    makeEvent({
+      timestamp: sec(n),
+      type: "auth.local.login",
+      source: "user",
+      actor,
+      message: "signed in with a local service account",
+      controller: undefined,
+    });
+
+  it("folds consecutive control events with the same type and actor into one repeat row", () => {
+    const rows = groupEvents([login(3), login(2), login(1)]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind).toBe("repeat");
+    if (rows[0].kind !== "repeat") return;
+    expect(rows[0].members).toHaveLength(3);
+  });
+
+  it("does not fold control events whose messages differ", () => {
+    const fail = (n: number, message: string) =>
+      makeEvent({ timestamp: sec(n), type: "command.failed", source: "operator", actor: "local:bob", message });
+    const rows = groupEvents([fail(2, "job a: 500"), fail(1, "job b: 403")]);
+    expect(rows.map((r) => r.kind)).toEqual(["event", "event"]);
+  });
+
+  it("does not fold control events from different actors", () => {
+    const rows = groupEvents([login(2, "local:bob"), login(1, "local:ann")]);
+    expect(rows.map((r) => r.kind)).toEqual(["event", "event"]);
+  });
+
+  it("a build row breaks a control repeat run", () => {
+    const build = makeEvent({ timestamp: sec(5), source: "jenkins", buildNumber: 1, namespace: "ns", controller: "ctrlA" });
+    const rows = groupEvents([login(6), login(5.5), build, login(4), login(3)]);
+    expect(rows.map((r) => r.kind)).toEqual(["repeat", "event", "repeat"]);
+  });
+
+  it("a single control event stays an event row", () => {
+    const rows = groupEvents([login(1)]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind).toBe("event");
+  });
+});
+
+describe("activitySubject", () => {
+  it("leads with the controller when one is set", () => {
+    const e = makeEvent({ controller: "ctrl", actor: "local:bob", message: "deployed" });
+    expect(activitySubject(e)).toEqual({ subject: "ctrl", message: "deployed" });
+  });
+
+  it("leads with the actor when the message does not start with it", () => {
+    const e = makeEvent({ actor: "local:bob", message: "deployed X" });
+    expect(activitySubject(e)).toEqual({ subject: "local:bob", message: "deployed X" });
+  });
+
+  it("names no subject when the message already starts with the actor", () => {
+    const e = makeEvent({ actor: "local:bob", message: "local:bob signed in" });
+    expect(activitySubject(e)).toEqual({ message: "local:bob signed in" });
+  });
+});
+
+describe("isRoutineSignIn", () => {
+  it("is true for an informational local sign-in", () => {
+    expect(isRoutineSignIn(makeEvent({ type: "auth.local.login", severity: "info" }))).toBe(true);
+  });
+
+  it("is false for a local sign-in that carries a warning", () => {
+    expect(isRoutineSignIn(makeEvent({ type: "auth.local.login", severity: "warning" }))).toBe(false);
+  });
+
+  it("is false for a failed sign-in", () => {
+    expect(isRoutineSignIn(makeEvent({ type: "auth.local.login_failed" }))).toBe(false);
+  });
+});
