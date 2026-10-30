@@ -63,6 +63,17 @@ func newTestDispatcher(pool *pgxpool.Pool, srv *httptest.Server, now time.Time) 
 	return d
 }
 
+// stampRunIntentIncarnation sets the incarnation "uid-a" that the claim of
+// runID stored. A test claim has no placement fence, so the intent keeps an
+// empty incarnation; a live claim copies the placement's incarnation instead.
+func stampRunIntentIncarnation(t *testing.T, db *sql.DB, runID uuid.UUID) {
+	t.Helper()
+	if _, err := db.Exec(`UPDATE varroa.run_intents SET incarnation = 'uid-a' WHERE run_id = $1`,
+		runID); err != nil {
+		t.Fatalf("stamp run intent incarnation: %v", err)
+	}
+}
+
 // seedWebhookRun grants one run of testTenant, stores a tenant webhook that
 // points at url, and applies its owner run.completed. It returns the run id.
 func seedWebhookRun(t *testing.T, pool *pgxpool.Pool, db *sql.DB, intentKey, url string) uuid.UUID {
@@ -75,7 +86,9 @@ func seedWebhookRun(t *testing.T, pool *pgxpool.Pool, db *sql.DB, intentKey, url
 func seedWebhookRunWith(t *testing.T, pool *pgxpool.Pool, db *sql.DB, intentKey, url string, payload RunCompletedPayload) uuid.UUID {
 	t.Helper()
 	runID := seedGrantedIntent(t, pool, intentKey)
+	stampRunIntentIncarnation(t, db, runID)
 	seedTenantPlacement(t, db, testTenant, testNamespace, "cell-a", 0, "pod-a", "", nil)
+	stampWebhookIncarnation(t, db)
 	if url != "" {
 		if _, err := db.Exec(`
 			UPDATE varroa.tenant_placements SET notification_webhook = $1::jsonb

@@ -181,6 +181,8 @@ claimed it. When you delete a Tenant and create a new one with the same name,
 the record store drops any pending delivery of the old Tenant. The new Tenant's
 receiver gets no deliveries for the old Tenant's runs.
 
+A run that a cell claimed before the record store knew the Tenant incarnation sends no delivery. Its delivery row has the state `dropped` and names the cause in `last_error`.
+
 Finished delivery rows stay for seven days, then the maintenance round
 deletes them.
 

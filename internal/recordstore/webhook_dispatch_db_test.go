@@ -29,10 +29,12 @@ func TestWebhookDispatch_TwoDispatchersNeverDoubleSend(t *testing.T) {
 	`, `{"url":"`+srv.URL+`","key":"whsec-test"}`, testCluster, testTenant); err != nil {
 		t.Fatalf("store tenant webhook: %v", err)
 	}
+	stampWebhookIncarnation(t, db)
 	const rows = 5
 	for i := 0; i < rows; i++ {
 		key := fmt.Sprintf("manual:webhook-two-%d", i)
 		runID := seedGrantedIntent(t, pool, key)
+		stampRunIntentIncarnation(t, db, runID)
 		env := newTestEnvelope(t, runID, key, KindRunCompleted,
 			RunCompletedPayload{Result: strPtr("SUCCESS")})
 		if _, err := NewIngester(pool, nil, nil).Apply(context.Background(), env); err != nil {
@@ -63,6 +65,47 @@ func TestWebhookDispatch_TwoDispatchersNeverDoubleSend(t *testing.T) {
 			t.Fatalf("delivery %s was sent twice", id)
 		}
 		seen[id] = true
+	}
+}
+
+// TestWebhookDispatch_EmptyIncarnationNeverSent asserts that a run whose claim
+// stored an empty incarnation sends nothing, even after the placement gains a
+// real incarnation. The enqueue writes its row dropped, so the dispatcher
+// never leases it and keeps the enqueue reason.
+func TestWebhookDispatch_EmptyIncarnationNeverSent(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	rec, srv := newWebhookReceiver(t, http.StatusNoContent)
+	seedSyntheticWebhookPlacement(t, db, srv.URL, "")
+	intentKey := "manual:webhook-empty-never-sent"
+	runID := seedGrantedIntent(t, pool, intentKey)
+
+	g := NewIngester(pool, nil, nil)
+	g.SetWebhooks("https://varroa.example.test", nil)
+	env := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{Result: strPtr("SUCCESS")})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE varroa.tenant_placements SET incarnation = 'uid-a' WHERE cluster = $1 AND tenant = $2`,
+		testCluster, testTenant); err != nil {
+		t.Fatalf("stamp placement incarnation: %v", err)
+	}
+
+	newTestDispatcher(pool, srv, time.Now()).round(context.Background())
+	if rec.count() != 0 {
+		t.Fatalf("receiver got %d requests, want 0", rec.count())
+	}
+	if state, _ := webhookState(t, db, runID); state != "dropped" {
+		t.Fatalf("state = %q, want dropped", state)
+	}
+	var lastErr string
+	if err := db.QueryRow(`SELECT COALESCE(last_error, '') FROM varroa.webhook_deliveries
+		WHERE run_id = $1 AND delivery_key = $2`, runID, webhookKeyCompleted).Scan(&lastErr); err != nil {
+		t.Fatalf("read last_error: %v", err)
+	}
+	if lastErr != webhookErrNoIncarnation {
+		t.Fatalf("last_error = %q, want the enqueue reason %q", lastErr, webhookErrNoIncarnation)
 	}
 }
 

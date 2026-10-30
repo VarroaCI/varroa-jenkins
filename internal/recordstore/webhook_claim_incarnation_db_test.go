@@ -66,3 +66,43 @@ func TestRunCompleted_StampsTheClaimIncarnation(t *testing.T) {
 		t.Fatalf("state = %q, want dropped", state)
 	}
 }
+
+// TestRunCompleted_EmptyClaimIncarnationWritesDroppedRow asserts that an owner
+// completion whose claim stored no incarnation writes its row dropped, with
+// the enqueue reason, and that the dispatcher never sends it.
+func TestRunCompleted_EmptyClaimIncarnationWritesDroppedRow(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	rec, srv := newWebhookReceiver(t, http.StatusNoContent)
+	seedSyntheticWebhookPlacement(t, db, srv.URL, "")
+	intentKey := "manual:webhook-empty-claim"
+	runID := seedGrantedIntent(t, pool, intentKey)
+
+	g := NewIngester(pool, nil, nil)
+	g.SetWebhooks("https://varroa.example.test", nil)
+	env := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{Result: strPtr("SUCCESS")})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	if n := webhookRowCount(t, db, runID); n != 1 {
+		t.Fatalf("rows = %d, want 1", n)
+	}
+	if state, _ := webhookState(t, db, runID); state != "dropped" {
+		t.Fatalf("state = %q, want dropped", state)
+	}
+	var incarnation, lastErr string
+	if err := db.QueryRow(`SELECT incarnation, COALESCE(last_error, '') FROM varroa.webhook_deliveries
+		WHERE run_id = $1 AND delivery_key = $2`, runID, webhookKeyCompleted).Scan(&incarnation, &lastErr); err != nil {
+		t.Fatalf("read dropped row: %v", err)
+	}
+	if incarnation != "" || lastErr != webhookErrNoIncarnation {
+		t.Fatalf("incarnation = %q, last_error = %q, want empty and %q", incarnation, lastErr, webhookErrNoIncarnation)
+	}
+
+	newTestDispatcher(pool, srv, time.Now()).round(context.Background())
+	if rec.count() != 0 {
+		t.Fatalf("receiver got %d requests, want 0", rec.count())
+	}
+}

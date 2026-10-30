@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -23,6 +24,10 @@ const webhookKeyCompleted = "completed"
 // The full key is the prefix plus the interrupted reason, so each mark of
 // one run owns one row.
 const webhookKeyInterruptedPrefix = "interrupted:"
+
+// webhookErrNoIncarnation is the last_error of a delivery that the enqueue
+// writes as dropped, because the run's claim stored no tenant incarnation.
+const webhookErrNoIncarnation = "the run's claim stored no tenant incarnation"
 
 // WebhookPayload is the JSON body of one completion webhook delivery.
 // The recorder encodes it once, at enqueue time. The stored bytes are the
@@ -72,6 +77,29 @@ func tenantHasWebhook(ctx context.Context, tx pgx.Tx, cluster, tenant string) (b
 	return true, nil
 }
 
+// insertDroppedWebhookDelivery writes one outbox row already in the state
+// dropped. The enqueue uses it when the run's claim stored an empty
+// incarnation. The dispatcher sends only to the incarnation the claim
+// stored, and an empty value cannot prove that the receiver belongs to the
+// run's tenant. The dispatcher selects only pending rows, so it never
+// compares an empty incarnation. The row stays as a durable trace.
+func insertDroppedWebhookDelivery(ctx context.Context, tx pgx.Tx, deliveryID, runID uuid.UUID,
+	cluster, tenant, key string, body []byte) error {
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO varroa.webhook_deliveries (delivery_id, run_id, cluster, tenant, incarnation, body, delivery_key, state, last_error)
+		VALUES ($1, $2, $3, $4, '', $5, $6, 'dropped', $7)
+		ON CONFLICT (run_id, delivery_key) DO NOTHING
+	`, deliveryID, runID, cluster, tenant, body, key, webhookErrNoIncarnation)
+	if err != nil {
+		return fmt.Errorf("insert dropped webhook delivery: %w", err)
+	}
+	if tag.RowsAffected() == 1 {
+		slog.Default().Warn("webhook delivery dropped at enqueue: the claim stored no tenant incarnation",
+			"cluster", cluster, "tenant", tenant, "run", runID, "key", key)
+	}
+	return nil
+}
+
 // insertWebhookDelivery writes one outbox row. It answers false when a row
 // with the same run_id and delivery_key already exists.
 func insertWebhookDelivery(ctx context.Context, tx pgx.Tx, deliveryID, runID uuid.UUID,
@@ -102,8 +130,10 @@ func webhookRunURL(dashboardURL, tenant, jobPath, runID string) string {
 
 // enqueueWebhookDelivery writes one outbox row for the owner run.completed
 // that intent describes. It runs in the transaction of that terminal
-// write, so a rolled-back completion leaves no row. It answers false, and
-// writes nothing, when the tenant declares no webhook. The insert
+// write, so a rolled-back completion leaves no row. It answers false when
+// the tenant declares no webhook, and it writes nothing then. It also
+// answers false when the intent holds an empty incarnation; that case
+// writes one row already dropped, with webhookErrNoIncarnation. The insert
 // conflicts on (run_id, delivery_key), so a redelivered completion
 // enqueues nothing.
 //
@@ -174,10 +204,22 @@ func enqueueWebhookDelivery(ctx context.Context, tx pgx.Tx, intent *intentRow, p
 		return false, fmt.Errorf("encode webhook payload: %w", err)
 	}
 
-	inserted, err := insertWebhookDelivery(ctx, tx, deliveryID, intent.runID, intent.cluster, intent.tenant,
-		intent.incarnation, webhookKeyCompleted, encoded)
-	if err != nil || !inserted {
-		return false, err
+	// A row with an empty incarnation is written dropped, so the
+	// dispatcher never reads it as pending. It sends nothing, and the
+	// caller gets false.
+	sent := true
+	if intent.incarnation == "" {
+		if err := insertDroppedWebhookDelivery(ctx, tx, deliveryID, intent.runID, intent.cluster, intent.tenant,
+			webhookKeyCompleted, encoded); err != nil {
+			return false, err
+		}
+		sent = false
+	} else {
+		inserted, err := insertWebhookDelivery(ctx, tx, deliveryID, intent.runID, intent.cluster, intent.tenant,
+			intent.incarnation, webhookKeyCompleted, encoded)
+		if err != nil || !inserted {
+			return false, err
+		}
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE varroa.webhook_deliveries
@@ -186,14 +228,15 @@ func enqueueWebhookDelivery(ctx context.Context, tx pgx.Tx, intent *intentRow, p
 	`, intent.runID, webhookKeyInterruptedPrefix+"%"); err != nil {
 		return false, fmt.Errorf("drop superseded synthetic delivery: %w", err)
 	}
-	return true, nil
+	return sent, nil
 }
 
 // enqueueInterruptedWebhookDelivery writes one synthetic outbox row for
 // the run that markInterruptedTx has just ended with reason. It runs in
 // that transaction. It answers false, and writes nothing, when the tenant
 // declares no webhook or when no run_intents row exists: a run that no
-// cell claimed has no owning incarnation, so it sends nothing.
+// cell claimed has no owning incarnation, so it sends nothing. When the
+// intent holds an empty incarnation, it writes one row already dropped.
 func enqueueInterruptedWebhookDelivery(ctx context.Context, tx pgx.Tx, run runInterruptCandidate,
 	reason string, now time.Time, dashboardURL string) (bool, error) {
 	ok, err := tenantHasWebhook(ctx, tx, run.cluster, run.tenant)
@@ -257,6 +300,11 @@ func enqueueInterruptedWebhookDelivery(ctx context.Context, tx pgx.Tx, run runIn
 		return false, fmt.Errorf("encode synthetic webhook payload: %w", err)
 	}
 
+	key := webhookKeyInterruptedPrefix + reason
+	if incarnation == "" {
+		return false, insertDroppedWebhookDelivery(ctx, tx, deliveryID, run.runID, run.cluster, run.tenant,
+			key, encoded)
+	}
 	return insertWebhookDelivery(ctx, tx, deliveryID, run.runID, run.cluster, run.tenant,
-		incarnation, webhookKeyInterruptedPrefix+reason, encoded)
+		incarnation, key, encoded)
 }
