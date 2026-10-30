@@ -17898,7 +17898,7 @@ paths:
   /api/v1/pipelines/{tenant}/lint:
     post:
       description: |
-        Resolves {tenant} onto its slot-0 cell on the core cluster and sends the Jenkinsfile text to the cell's declarative linter. The route writes no state and publishes no command. It never wakes a cell: a hibernated or stopped cell answers 409. A cell-hosted tenant also runs the Varroa cell script rules, which report with source varroa. The linter checks declarative syntax only. A lint failure is data in a 200 answer, not a transport error.
+        Resolves {tenant} onto its slot-0 cell and sends the Jenkinsfile text to the cell's declarative linter. A member-placed tenant is linted by its member cluster's operator. The route writes no state and publishes no command. It never wakes a cell: a hibernated or stopped cell answers 409. A cell-hosted tenant also runs the Varroa cell script rules, which report with source varroa. The linter checks declarative syntax only. A lint failure is data in a 200 answer, not a transport error.
       operationId: lintJenkinsfile
       parameters:
       - $ref: '#/components/parameters/components_parameters_tenant'

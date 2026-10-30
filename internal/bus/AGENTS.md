@@ -53,6 +53,7 @@ control plane's async transport — no other package talks to NATS directly.
   `operator.<cluster>.cells.grants` takes `CellGrantsRequest` (tenant names)
   and answers `CellGrantsResponse`, the grants and member roles each tenant
   holds on that member, read from the member operator's own RBAC state),
+  `operator.<cluster>.cells.lint` (takes `CellLintRequest`, answers `CellLintResponse`; the member operator lints one of its own cells),
   `builds.<cluster>.<ns>.<cell>` (build event ingest into the
   `varroa_builds` stream), `varroa.ledger.claim` (core NATS request-reply
   build-number claim, queue group `recorder`),

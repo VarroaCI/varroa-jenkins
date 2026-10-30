@@ -1,7 +1,8 @@
 // Package api: the Jenkinsfile lint surface. This file implements
-// POST /pipelines/{tenant}/lint. It sends the text to the tenant's slot-0
-// cell, where Jenkins answers its declarative linter. The route writes no
-// state and never wakes a cell.
+// POST /pipelines/{tenant}/lint. A tenant on the local cluster is linted by
+// the BFF through its cell's declarative linter. A tenant on a member
+// cluster is linted by that cluster's operator, which calls its own cell's
+// linter (cells.lint). The route writes no state and never wakes a cell.
 package api
 
 import (
@@ -11,15 +12,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/jenkins/declarativelint"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items/lint"
 )
 
@@ -32,29 +32,13 @@ const jenkinsfileLintMaxText = 256 << 10
 // jenkinsfileLintTokenTTL bounds the operator token of one lint call.
 const jenkinsfileLintTokenTTL = 60 * time.Second
 
-// jenkinsfileLintReplyMax bounds the linter reply that the route reads.
-const jenkinsfileLintReplyMax = 1 << 20
-
-// jenkinsfileLintHTTPClient calls the cell linter.
-var jenkinsfileLintHTTPClient = &http.Client{Timeout: 20 * time.Second}
-
-// linterLocation extracts the line and column that the declarative linter
-// writes into its message text.
-var linterLocation = regexp.MustCompile(`@ line (\d+), column (\d+)\.`)
-
 // jenkinsfileLintRequest is the POST /pipelines/{tenant}/lint body.
 type jenkinsfileLintRequest struct {
 	Jenkinsfile string `json:"jenkinsfile"`
 }
 
 // jenkinsfileLintErrorJSON is one finding of a Jenkinsfile lint.
-type jenkinsfileLintErrorJSON struct {
-	Source  string `json:"source"`
-	Rule    string `json:"rule,omitempty"`
-	Line    int    `json:"line,omitempty"`
-	Column  int    `json:"column,omitempty"`
-	Message string `json:"message"`
-}
+type jenkinsfileLintErrorJSON = declarativelint.Finding
 
 // JenkinsfileLintResult is the POST /pipelines/{tenant}/lint answer.
 type JenkinsfileLintResult struct {
@@ -124,16 +108,14 @@ func (s *Server) LintJenkinsfile(ctx context.Context, claims *auth.Claims, tenan
 	if !s.canReadPipeline(claims, ref, "") {
 		return JenkinsfileLintResult{}, &ServiceError{Status: http.StatusNotFound, Message: "tenant not found"}
 	}
-	if ref.Cluster != "" && s.deps.Brood != nil && ref.Cluster != s.deps.Brood.LocalCluster() {
-		return JenkinsfileLintResult{}, &ServiceError{Status: http.StatusConflict,
-			Message: fmt.Sprintf("lint reaches only a cell on the core cluster; tenant %q runs on cluster %q", tenant, ref.Cluster)}
-	}
-	if s.deps.JenkinsTokenSigner == nil {
+
+	local := s.isLocalCluster(ref.Cluster)
+	if local && s.deps.JenkinsTokenSigner == nil {
 		return JenkinsfileLintResult{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "jenkins token signer unavailable"}
 	}
 
 	cr, err := s.cellController(ctx, ref.Cluster, ref.Namespace, ref.Controller)
-	if err == nil && cr == nil && s.deps.Store != nil {
+	if err == nil && cr == nil && local && s.deps.Store != nil {
 		cr, err = crdstore.Get[v1alpha1.Controller](ctx, s.deps.Store, ref.Controller, ref.Namespace)
 	}
 	if err != nil || cr == nil {
@@ -143,22 +125,18 @@ func (s *Server) LintJenkinsfile(ctx context.Context, claims *auth.Claims, tenan
 		return JenkinsfileLintResult{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "read tenant cell failed"}
 	}
 
-	switch cr.Status.Phase {
-	case v1alpha1.ControllerPhaseHibernated:
-		return JenkinsfileLintResult{}, &ServiceError{Status: http.StatusConflict,
-			Message: fmt.Sprintf("cell %s is hibernated; start a run to wake it, then lint again", cr.Name)}
-	case v1alpha1.ControllerPhaseStopped:
-		return JenkinsfileLintResult{}, &ServiceError{Status: http.StatusConflict, Message: fmt.Sprintf("cell %s is stopped", cr.Name)}
-	case v1alpha1.ControllerPhaseConnected, v1alpha1.ControllerPhaseRunning:
-	default:
-		return JenkinsfileLintResult{}, &ServiceError{Status: http.StatusServiceUnavailable,
-			Message: fmt.Sprintf("cell %s is not ready (phase %s)", cr.Name, cr.Status.Phase)}
+	if refusal := lintPhaseRefusal(cr.Name, cr.Status.Phase); refusal != nil {
+		return JenkinsfileLintResult{}, refusal
 	}
 
-	errs, err := s.callCellLinter(ctx, cr, text)
-	if err != nil {
-		s.deps.Logger.Error("cell linter", "cell", cr.Name, "error", err)
-		return JenkinsfileLintResult{}, &ServiceError{Status: http.StatusBadGateway, Message: err.Error()}
+	var errs []jenkinsfileLintErrorJSON
+	if local {
+		errs, serr = s.lintOnLocalCell(ctx, cr, text)
+	} else {
+		errs, serr = s.lintOnMember(ctx, ref.Cluster, cr, text)
+	}
+	if serr != nil {
+		return JenkinsfileLintResult{}, serr
 	}
 
 	if v1alpha1.IsCell(cr) {
@@ -169,96 +147,81 @@ func (s *Server) LintJenkinsfile(ctx context.Context, claims *auth.Claims, tenan
 	return JenkinsfileLintResult{Valid: len(errs) == 0, Cell: cr.Name, Namespace: cr.Namespace, Errors: errs}, nil
 }
 
-// callCellLinter posts text to the cell's declarative linter with an
-// operator token and parses the reply.
-func (s *Server) callCellLinter(ctx context.Context, cr *v1alpha1.Controller, text string) ([]jenkinsfileLintErrorJSON, error) {
+// lintPhaseRefusal returns the refusal for a cell that cannot lint, or nil
+// for a Connected or Running cell. A lint never wakes a cell.
+func lintPhaseRefusal(name string, phase v1alpha1.ControllerPhase) *ServiceError {
+	switch phase {
+	case v1alpha1.ControllerPhaseHibernated:
+		return &ServiceError{Status: http.StatusConflict,
+			Message: fmt.Sprintf("cell %s is hibernated; start a run to wake it, then lint again", name)}
+	case v1alpha1.ControllerPhaseStopped:
+		return &ServiceError{Status: http.StatusConflict, Message: fmt.Sprintf("cell %s is stopped", name)}
+	case v1alpha1.ControllerPhaseConnected, v1alpha1.ControllerPhaseRunning:
+		return nil
+	default:
+		return &ServiceError{Status: http.StatusServiceUnavailable,
+			Message: fmt.Sprintf("cell %s is not ready (phase %s)", name, phase)}
+	}
+}
+
+// lintOnLocalCell lints text on a cell of the local cluster. The BFF signs
+// the operator token and calls the cell's linter.
+func (s *Server) lintOnLocalCell(ctx context.Context, cr *v1alpha1.Controller, text string) ([]jenkinsfileLintErrorJSON, *ServiceError) {
 	token, err := s.deps.JenkinsTokenSigner.GenerateOperatorJenkinsToken(cr.Name, cr.Namespace, jenkinsfileLintTokenTTL)
 	if err != nil {
-		return nil, fmt.Errorf("mint operator jenkins token: %w", err)
+		s.deps.Logger.Error("mint lint token", "cell", cr.Name, "error", err)
+		return nil, &ServiceError{Status: http.StatusBadGateway, Message: "mint operator jenkins token failed"}
 	}
-
-	form := url.Values{"jenkinsfile": {text}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		s.cellServiceURL(cr)+"/pipeline-model-converter/validateJenkinsfile", strings.NewReader(form.Encode()))
+	errs, err := declarativelint.Validate(ctx, declarativelint.HTTPClient, s.cellServiceURL(cr), token, text)
 	if err != nil {
-		return nil, fmt.Errorf("build linter request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := jenkinsfileLintHTTPClient.Do(req)
-	if err != nil {
-		// The client message stays generic. The transport detail goes to the log only.
-		s.deps.Logger.Error("cell linter transport", "cell", cr.Name, "error", err)
-		return nil, fmt.Errorf("the cell linter is unreachable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("the cell linter answered status %d", resp.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, jenkinsfileLintReplyMax))
-	if err != nil {
-		return nil, fmt.Errorf("read the cell linter reply: %w", err)
-	}
-	return parseLinterReply(raw)
-}
-
-// linterReply is the declarative linter's JSON envelope.
-type linterReply struct {
-	Status string `json:"status"`
-	Data   struct {
-		Result string `json:"result"`
-		Errors []struct {
-			Error json.RawMessage `json:"error"`
-		} `json:"errors"`
-	} `json:"data"`
-}
-
-// parseLinterReply turns the linter's JSON envelope into findings. An
-// unknown envelope is an error, so a changed linter cannot pass as valid.
-func parseLinterReply(body []byte) ([]jenkinsfileLintErrorJSON, error) {
-	var reply linterReply
-	if err := json.Unmarshal(body, &reply); err != nil {
-		return nil, fmt.Errorf("the cell linter reply is not JSON")
-	}
-	if reply.Status != "ok" {
-		return nil, fmt.Errorf("the cell linter reported status %q", reply.Status)
-	}
-	out := []jenkinsfileLintErrorJSON{}
-	switch reply.Data.Result {
-	case "success":
-		return out, nil
-	case "failure":
-	default:
-		return nil, fmt.Errorf("the cell linter reported result %q", reply.Data.Result)
-	}
-	for _, e := range reply.Data.Errors {
-		for _, msg := range linterMessages(e.Error) {
-			f := jenkinsfileLintErrorJSON{Source: "jenkins", Message: strings.TrimSpace(msg)}
-			if m := linterLocation.FindStringSubmatch(msg); m != nil {
-				f.Line, _ = strconv.Atoi(m[1])
-				f.Column, _ = strconv.Atoi(m[2])
-			}
-			out = append(out, f)
+		cause := err
+		var unreachable *declarativelint.UnreachableError
+		if errors.As(err, &unreachable) {
+			cause = unreachable.Err
 		}
+		s.deps.Logger.Error("cell linter", "cell", cr.Name, "error", cause)
+		return nil, &ServiceError{Status: http.StatusBadGateway, Message: err.Error()}
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("the cell linter reported failure without an error message")
-	}
-	return out, nil
+	return errs, nil
 }
 
-// linterMessages decodes one error field, which is a string or a list of
-// strings.
-func linterMessages(raw json.RawMessage) []string {
-	var one string
-	if err := json.Unmarshal(raw, &one); err == nil {
-		return []string{one}
+// lintOnMember sends text to the operator of a member cluster, which lints
+// on its own cell. The member answers a phase refusal and a linter failure
+// as data, so each maps to its status here.
+func (s *Server) lintOnMember(ctx context.Context, cluster string, cr *v1alpha1.Controller, text string) ([]jenkinsfileLintErrorJSON, *ServiceError) {
+	if s.deps.ConfigBrood == nil {
+		return nil, &ServiceError{Status: http.StatusBadGateway, Message: "cluster " + cluster + " unreachable"}
 	}
-	var many []string
-	if err := json.Unmarshal(raw, &many); err == nil {
-		return many
+	reply, err := s.deps.ConfigBrood.CellLint(ctx, cluster, bus.CellLintRequest{
+		Namespace: cr.Namespace, Cell: cr.Name, Jenkinsfile: text,
+	})
+	if err != nil {
+		var unreachable *ErrClusterUnreachable
+		var brood *BroodError
+		switch {
+		case errors.As(err, &unreachable):
+			return nil, &ServiceError{Status: http.StatusBadGateway, Message: "cluster " + cluster + " unreachable"}
+		case errors.As(err, &brood) && brood.Code == bus.CodeNotFound:
+			return nil, &ServiceError{Status: http.StatusServiceUnavailable, Message: "read tenant cell failed"}
+		}
+		s.deps.Logger.Error("member cell lint", "cluster", cluster, "cell", cr.Name, "error", err)
+		return nil, &ServiceError{Status: http.StatusInternalServerError, Message: "lint on cluster " + cluster + " failed"}
 	}
-	return nil
+	if reply.Phase != "" {
+		if refusal := lintPhaseRefusal(cr.Name, v1alpha1.ControllerPhase(reply.Phase)); refusal != nil {
+			return nil, refusal
+		}
+		return nil, &ServiceError{Status: http.StatusBadGateway,
+			Message: fmt.Sprintf("cluster %s answered phase %q for a lint", cluster, reply.Phase)}
+	}
+	if reply.LinterError != "" {
+		return nil, &ServiceError{Status: http.StatusBadGateway, Message: reply.LinterError}
+	}
+	errs := make([]jenkinsfileLintErrorJSON, 0, len(reply.Errors))
+	for _, f := range reply.Errors {
+		errs = append(errs, jenkinsfileLintErrorJSON{
+			Source: f.Source, Rule: f.Rule, Line: f.Line, Column: f.Column, Message: f.Message,
+		})
+	}
+	return errs, nil
 }

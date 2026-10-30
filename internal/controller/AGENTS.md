@@ -525,6 +525,7 @@ sections describe.
   already reported any parse error on the bundle itself. Called from
   `config_crud.go`'s preview/validate NATS replies onto
   `bus.BundleComposePreview.PipelineTemplates`.
+- **Cell lint reply.** `config_crud_celllint.go` answers `cells.lint`. It lints one of this cluster's own cells through `ConfigCRUD.Linter` (`JenkinsCellLinter`, which mints a 60s operator token). It never wakes a cell: a cell that is not Connected or Running answers its phase and the linter is not called.
 - **Cell grants reply.** `config_crud_cellgrants.go` answers `cells.grants`.
   It runs `TenantGrantSourcesTruncated` and `TenantMemberRoles` on the
   cluster's own RBAC resolver (`ConfigCRUD.Grants`) for each requested tenant,

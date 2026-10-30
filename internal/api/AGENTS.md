@@ -581,7 +581,7 @@ federation, activity persistence, and SSE fanout.
   unparsable key answers `400`. A job with no stored case answers an empty `items` list,
   never `404`: the case rows hold no job inventory. `limit` defaults to 50 and is clamped
   at 200.
-- **Jenkinsfile lint** (`handlers_pipelines_lint.go`) — `POST /pipelines/{tenant}/lint` resolves the tenant through `TenantResolver` and the tenant read check, refuses a member-placed tenant with 409, and refuses a hibernated or stopped cell with 409 (it never wakes a cell). It posts the text to the slot-0 cell's `pipeline-model-converter/validateJenkinsfile` with an operator token, parses the reply with `parseLinterReply`, and adds the cell rules (`lint.CellRules`) with `source: varroa` for a cell-hosted tenant. `Server.LintJenkinsfile` is the one service; the MCP tool calls it.
+- **Jenkinsfile lint** (`handlers_pipelines_lint.go`) — `POST /pipelines/{tenant}/lint` resolves the tenant through `TenantResolver` and the tenant read check, and refuses a hibernated or stopped cell with 409 (it never wakes a cell). A local cell's text goes to `declarativelint.Validate` with an operator token. A member-placed tenant goes to `ConfigBrood.CellLint` (`configbrood_celllint.go`, `cells.lint`), and the member operator lints its own cell. The member's phase and linter-error replies map to 409 and 502. The cell rules (`lint.CellRules`) add `source: varroa` findings for a cell-hosted tenant on either path. `Server.LintJenkinsfile` is the one service; the MCP tool calls it.
 - **Marker lint** (`handlers_pipelines_markers.go`, design D13) — `POST
   /pipelines/{tenant}/markers/validate` resolves the tenant's delivered
   templates through the same `TenantResolver`/authorization seam as every

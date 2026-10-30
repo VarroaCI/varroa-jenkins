@@ -155,17 +155,6 @@ func TestLintJenkinsfile_CellPhaseRefusals(t *testing.T) {
 	}
 }
 
-// TestLintJenkinsfile_MemberClusterAnswers409 asserts a tenant placed on
-// another cluster is refused, because only a core-cluster cell is linted.
-func TestLintJenkinsfile_MemberClusterAnswers409(t *testing.T) {
-	fx := newLintFixture(t, v1alpha1.ControllerPhaseConnected, lintSuccessReply, http.StatusOK)
-	seedTenant(t, fx.client.crdStore, tenantCellObject("east", v1alpha1.TenantReasonTenantPlaced))
-	_, serr := lintCall(t, fx, lintPlainTextBody)
-	if serr == nil || serr.Status != http.StatusConflict {
-		t.Fatalf("serr = %+v, want 409", serr)
-	}
-}
-
 // TestLintJenkinsfile_RequestLimits asserts an empty text answers 400 and
 // a text over the cap answers 413.
 func TestLintJenkinsfile_RequestLimits(t *testing.T) {
@@ -204,50 +193,5 @@ func TestLintJenkinsfile_HandlerRejectsOversizeBody(t *testing.T) {
 	fx.srv.handleLintJenkinsfile(rec, req)
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413", rec.Code)
-	}
-}
-
-// TestParseLinterReply asserts both error shapes parse, and that an
-// unknown envelope is an error.
-func TestParseLinterReply(t *testing.T) {
-	tests := []struct {
-		name    string
-		body    string
-		want    int
-		wantErr bool
-	}{
-		{"success", `{"status":"ok","data":{"result":"success"}}`, 0, false},
-		{"string error", `{"status":"ok","data":{"result":"failure","errors":[{"error":"x @ line 2, column 9."}]}}`, 1, false},
-		{"list error", `{"status":"ok","data":{"result":"failure","errors":[{"error":["a","b"]}]}}`, 2, false},
-		{"failure without messages", `{"status":"ok","data":{"result":"failure"}}`, 0, true},
-		{"bad status", `{"status":"fail"}`, 0, true},
-		{"bad result", `{"status":"ok","data":{"result":"maybe"}}`, 0, true},
-		{"not json", `<html>`, 0, true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseLinterReply([]byte(tc.body))
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
-			}
-			if err == nil && len(got) != tc.want {
-				t.Errorf("findings = %d, want %d", len(got), tc.want)
-			}
-			if err == nil && got == nil {
-				t.Error("findings is nil, want an empty slice")
-			}
-		})
-	}
-}
-
-// TestParseLinterReply_LocationFromMessage asserts line and column come from
-// the message text.
-func TestParseLinterReply_LocationFromMessage(t *testing.T) {
-	got, err := parseLinterReply([]byte(lintFailureReply))
-	if err != nil || len(got) != 1 {
-		t.Fatalf("got %+v, err %v", got, err)
-	}
-	if got[0].Line != 3 || got[0].Column != 5 {
-		t.Errorf("line/column = %d/%d, want 3/5", got[0].Line, got[0].Column)
 	}
 }

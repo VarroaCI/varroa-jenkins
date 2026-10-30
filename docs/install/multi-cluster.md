@@ -124,6 +124,7 @@ Controllers on member clusters have these constraints:
 | Embedded Jenkins | Not offered; open Jenkins through the member's own ingress |
 | Brood operations | Cross-cluster, with `cluster/namespace/name` selection |
 | Bundle deploy targets | Core only |
+| Jenkinsfile lint | Served for cells on every cluster |
 
 ## Drain or remove a member
 

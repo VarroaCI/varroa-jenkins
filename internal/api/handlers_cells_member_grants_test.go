@@ -23,6 +23,10 @@ type memberGrantsBrood struct {
 	err     error
 }
 
+func (f *memberGrantsBrood) CellLint(context.Context, string, bus.CellLintRequest) (bus.CellLintResponse, error) {
+	return bus.CellLintResponse{}, errNoCellPools
+}
+
 func (f *memberGrantsBrood) CellGrants(_ context.Context, cluster string, tenants []string) ([]bus.CellTenantGrants, error) {
 	f.calls++
 	f.cluster = cluster

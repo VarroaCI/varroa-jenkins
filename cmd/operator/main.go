@@ -856,6 +856,9 @@ func main() {
 	broodSchedules := controller.NewCommandBroodSchedules(mgr.GetClient(), operatorNamespace, logger)
 	configCrud := controller.NewConfigCRUD(clientsetClient, clientsetClient, composer, operatorNamespace, logger.With("component", "config_crud"))
 	configCrud.Grants = rbacResolver
+	if miteTokenSigner != nil {
+		configCrud.Linter = &controller.JenkinsCellLinter{Signer: miteTokenSigner, ServiceURL: runners.CellServiceURL}
+	}
 	forgeAnswerer := forgeops.New(clientsetClient, clientsetClient, forge.NewHTTPClient(), logger.With("component", "forgeops"))
 	reconciler.SetRepoGoneProber(forgeAnswerer)
 	if err := mgr.Add(&operatorCommandRunner{
@@ -1798,6 +1801,11 @@ const serialResponder = 1
 // waits for a free slot.
 const composeConcurrency = 4
 
+// cellLintConcurrency limits the cells.lint requests that run at a time. One
+// lint can wait 20 seconds on Jenkins, so a single slot would queue every
+// other lint behind it.
+const cellLintConcurrency = 4
+
 // commandResponder is one request-reply subject of the operator command
 // runner. A limit above serialResponder serves the subject through
 // ServeRequestsConcurrently with that number of slots.
@@ -2033,6 +2041,7 @@ func (r *operatorCommandRunner) commandResponders(ctx context.Context) []command
 		{"cellpools.get", bus.OperatorCellPoolsSubject(r.cluster, "get"), r.configCrud.HandleCellPoolsGet, serialResponder},
 		{"cellpools.scale", bus.OperatorCellPoolsSubject(r.cluster, "scale"), r.configCrud.HandleCellPoolsScale, serialResponder},
 		{"cells.grants", bus.OperatorCellsSubject(r.cluster, "grants"), r.configCrud.HandleCellGrants, serialResponder},
+		{"cells.lint", bus.OperatorCellsSubject(r.cluster, "lint"), r.configCrud.HandleCellLint, cellLintConcurrency},
 		// Namespace discovery (F4 add-cluster-namespace-discovery).
 		{"namespaces.list", bus.OperatorNamespacesSubject(r.cluster), r.crud.HandleNamespacesList, serialResponder},
 	}

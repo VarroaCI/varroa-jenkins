@@ -96,6 +96,12 @@ type ConfigBrood interface {
 	// one cell. It refuses the local cluster.
 	CellGrants(ctx context.Context, cluster string, tenants []string) ([]bus.CellTenantGrants, error)
 
+	// --- Cell lint (member clusters only) ---
+	// CellLint asks a member's operator to lint text on one of its cells.
+	// It refuses the local cluster. A reply with Phase or LinterError set
+	// returns with a nil error, so the caller maps it to a status.
+	CellLint(ctx context.Context, cluster string, req bus.CellLintRequest) (bus.CellLintResponse, error)
+
 	// --- Member-placed Tenant bundles (member clusters only) ---
 	// GetTenantBundleContent reads a Tenant that only a member cluster holds.
 	// It refuses the local cluster, whose Tenants the caller reads on its own store.
