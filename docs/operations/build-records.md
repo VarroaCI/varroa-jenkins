@@ -341,6 +341,18 @@ In `cnpg` mode the chart also renders a policy for the Postgres pods, admitting 
 BFF, and the gateway on port 5432, and the CloudNativePG operator on port 8000 from the namespace
 `networkPolicy.recordStoreCNPGOperatorNamespaceSelector` names (default `cnpg-system`).
 
+## When the database is unreachable
+
+A connect to the record store is bounded. Each BFF read is bounded too.
+
+- A connect attempt stops after 5 seconds. A connection string that sets its own `connect_timeout` keeps that value.
+- Each read in the BFF stops after 15 seconds. The gateway and the recorder do not bound their reads after connect.
+- The BFF starts and stays ready while the database is down. Its startup schema check stops after 10 seconds.
+- Pipelines reads answer 503 with the code `record_store_unreachable`. The page shows "Pipeline data is unreachable" with a Retry button. A 503 without that code means the store is off or its schema is too old.
+- The recorder fails at startup and restarts until the database returns. A restart is the correct response.
+
+Build history returns when the database answers again. No operator action is needed for the BFF.
+
 ## Remove the database
 
 Disabling `recordStore.enabled` does not delete the database. The chart marks the `Cluster` and

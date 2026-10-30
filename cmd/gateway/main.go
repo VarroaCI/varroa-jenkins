@@ -37,6 +37,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/logging"
 	mitesrv "github.com/varroaci/varroa-jenkins/internal/mite"
+	"github.com/varroaci/varroa-jenkins/internal/pgdial"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -232,7 +233,7 @@ func main() {
 	recordStoreDSN := os.Getenv("VARROA_RECORDSTORE_DSN")
 	var recordStorePool *pgxpool.Pool
 	if recordStoreDSN != "" {
-		p, err := pgxpool.New(context.Background(), recordStoreDSN)
+		p, err := pgdial.NewPool(context.Background(), recordStoreDSN)
 		if err != nil {
 			logger.Error("failed to open record store pool", "error", err)
 			os.Exit(1)

@@ -291,6 +291,17 @@ describe("TenantHome", () => {
       expect(screen.getByText("Pipeline data is off")).toBeInTheDocument();
     });
   });
+
+  it("explains an unreachable record store on a 503 with the unreachable code", async () => {
+    mockListPipelines.mockRejectedValue(
+      new ApiError(503, "record store unreachable", { error: "record store unreachable", code: "record_store_unreachable" }),
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Pipeline data is unreachable")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Pipeline data is off")).not.toBeInTheDocument();
+  });
 });
 
 describe("TenantHome — the folder tree", () => {

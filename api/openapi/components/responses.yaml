@@ -75,8 +75,8 @@ ClusterUnreachable:
 ServiceUnavailable:
   description: >
     The upstream data source is temporarily unavailable (search sources,
-    or the build record store when it is disabled or its schema is too
-    old).
+    or the build record store when it is disabled, its schema is too
+    old, or unreachable (code `record_store_unreachable`)).
   content:
     application/json:
       schema:

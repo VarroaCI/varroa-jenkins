@@ -1,11 +1,11 @@
 import { Link, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getPipelineJob, getTestCaseHistory } from "../../api/client";
-import { ApiError } from "../../hooks/useApi";
+import { ApiError, isRecordStoreUnreachable } from "../../hooks/useApi";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { Card } from "../../components/Card";
 import { age } from "../../components/activityTimeline.util";
-import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
+import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage, RecordStoreUnreachablePage } from "../../components/RecoveryState";
 import { formatDuration } from "./JobTree";
 import JobBreadcrumbs from "./JobBreadcrumbs";
 import { relativeJob, testCaseTitle } from "./pageTitles";
@@ -84,6 +84,7 @@ export default function TestCaseHistory() {
   const err = history.error;
   if (err instanceof ApiError && err.status === 403) return <ForbiddenPage />;
   if (err instanceof ApiError && err.status === 404) return <NotFoundPage />;
+  if (isRecordStoreUnreachable(err)) return <RecordStoreUnreachablePage onRetry={() => void history.refetch()} />;
   if (err instanceof ApiError && err.status === 503) return <RecordStoreDisabledPage />;
   if (err) return <GenericErrorPage onRetry={() => void history.refetch()} />;
   if (!tenant || !job || !caseKey || !history.data) return <NotFoundPage />;

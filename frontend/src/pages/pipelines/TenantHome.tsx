@@ -3,7 +3,7 @@ import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getTenant, getTenantCell, listFleetLocks, listPipelines, listRunners, tenantRunStreamUrl } from "../../api/client";
 import type { TenantEntry } from "../../api/client";
-import { ApiError } from "../../hooks/useApi";
+import { ApiError, isRecordStoreUnreachable } from "../../hooks/useApi";
 import { canAccessTenantPipeline, usePermissions } from "../../hooks/usePermissions";
 import { useAssistant } from "../../components/assistant/AssistantProvider";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
@@ -14,6 +14,7 @@ import {
   NoPipelinesPage,
   NotFoundPage,
   RecordStoreDisabledPage,
+  RecordStoreUnreachablePage,
 } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
 import { age } from "../../components/activityTimeline.util";
@@ -166,7 +167,7 @@ export default function TenantHome() {
   const { tenant } = useParams<{ tenant: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["pipelines", tenant],
     queryFn: () => listPipelines(tenant!),
     enabled: !!tenant,
@@ -348,6 +349,7 @@ export default function TenantHome() {
   }
 
   if (error instanceof ApiError && error.status === 403) return <ForbiddenPage />;
+  if (isRecordStoreUnreachable(error)) return <RecordStoreUnreachablePage onRetry={() => void refetch()} />;
   if (error instanceof ApiError && error.status === 503) return <RecordStoreDisabledPage />;
 
   // The page head and the cell disclosure are the same on every branch that

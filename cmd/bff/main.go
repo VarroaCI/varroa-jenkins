@@ -37,7 +37,6 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -734,22 +733,18 @@ func main() {
 	// one value. The BFF only reports the state; the operator reads the URL.
 	apiDeps.JenkinsUpstream = controller.ClassifyJenkinsUpstream(controller.JenkinsUpstreamURLFromEnv(os.LookupEnv))
 	if dsn := os.Getenv("VARROA_RECORDSTORE_DSN"); dsn != "" {
-		rsPool, err := pgxpool.New(context.Background(), dsn)
+		activityRetentionDays := 0
+		if raw := os.Getenv("VARROA_ACTIVITY_RETENTION_DAYS"); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil {
+				activityRetentionDays = n
+			} else {
+				logger.Warn("VARROA_ACTIVITY_RETENTION_DAYS is not a whole day count; activity cursors will never expire", "value", raw, "error", err)
+			}
+		}
+		reader, rsPool, err := openRecordStoreReader(ctx, dsn, activityRetentionDays, logger)
 		if err != nil {
 			logger.Error("failed to open record store pool", "error", err)
 		} else {
-			activityRetentionDays := 0
-			if raw := os.Getenv("VARROA_ACTIVITY_RETENTION_DAYS"); raw != "" {
-				if n, err := strconv.Atoi(raw); err == nil {
-					activityRetentionDays = n
-				} else {
-					logger.Warn("VARROA_ACTIVITY_RETENTION_DAYS is not a whole day count; activity cursors will never expire", "value", raw, "error", err)
-				}
-			}
-			reader := recordstore.NewReader(rsPool, activityRetentionDays)
-			if _, err := reader.SchemaVersion(context.Background()); err != nil {
-				logger.Warn("record store schema is older than this BFF requires; record-store reads will return an error", "error", err)
-			}
 			apiDeps.RecordStore = reader
 			apiDeps.Backfill = recordstore.NewActivityBackfill(reader)
 			// The force release goes to the recorder, which owns every

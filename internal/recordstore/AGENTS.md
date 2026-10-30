@@ -1468,7 +1468,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   the record tables; `NewReader` wraps a `*pgxpool.Pool`. Every method
   calls `checkSchema` first and returns `ErrSchemaTooOld` when the
   applied `varroa.goose_db_version` is below `minGooseSchemaVersion`, or
-  unreadable. `ListRuns` pages by keyset on `(created_at DESC, run_id
+  unreadable. A connect failure or a deadline returns `ErrUnavailable`
+  instead; `isUnreachable` decides it. The BFF always wraps the reader
+  with `WithTimeout` (`reader_timeout.go`), which bounds each call by
+  `DefaultReadTimeout` and maps a deadline or an unreachable database to
+  `ErrUnavailable`. Callers map `ErrUnavailable` to 503 with code
+  `record_store_unreachable`, never to "not configured". `ListRuns` pages by keyset on `(created_at DESC, run_id
   DESC)`, never `OFFSET`; its `cause` filter joins `run_intents` instead
   of matching `runs.cause`, because `runs.cause` holds the free-form
   Jenkins `Cause` object and `run_intents.cause` holds the plain-text

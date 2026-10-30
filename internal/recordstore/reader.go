@@ -5,11 +5,13 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -22,10 +24,14 @@ const minGooseSchemaVersion = 1
 const defaultRunPageLimit = 50
 
 // ErrSchemaTooOld means the record store's applied schema version is
-// below this Reader's compiled minimum, or the version could not be
-// read at all. A missing goose_db_version table and a database error
-// both count, because both mean the reader cannot trust the store.
+// below this Reader's compiled minimum, or the version table is missing
+// or unreadable for a reason other than the database being unreachable.
 var ErrSchemaTooOld = errors.New("record store schema is older than this reader requires")
+
+// ErrUnavailable means the record store did not answer: a connect failure
+// or a deadline. It is never a schema problem. The store may return, so a
+// caller answers "unreachable" and retries, not "not configured".
+var ErrUnavailable = errors.New("record store unreachable")
 
 // ErrRunNotFound means GetRun found no run_intents row for the given
 // run id.
@@ -246,20 +252,42 @@ func NewReader(pool *pgxpool.Pool, activityRetentionDays ...int) Reader {
 // varroa.goose_db_version. It returns ErrSchemaTooOld, wrapped with the
 // observed version, when that version is below minGooseSchemaVersion. It
 // returns ErrSchemaTooOld, wrapped with the underlying failure, when the
-// version table is missing or the database returns any other error,
-// because both mean this Reader cannot trust the store.
+// version table is missing or unreadable. It returns ErrUnavailable,
+// wrapped with the underlying failure, when the database did not answer.
 func (r *pgReader) SchemaVersion(ctx context.Context) (int64, error) {
 	var version int64
 	err := r.pool.QueryRow(ctx, `
 		SELECT COALESCE(MAX(version_id), 0) FROM varroa.goose_db_version WHERE is_applied
 	`).Scan(&version)
 	if err != nil {
+		// The caller's own context ended the call. The store may be healthy,
+		// so the error is neither a schema problem nor unreachable.
+		if ctx.Err() != nil {
+			return 0, fmt.Errorf("read schema version: %w", err)
+		}
+		if isUnreachable(err) {
+			return 0, fmt.Errorf("%w: read schema version: %w", ErrUnavailable, err)
+		}
 		return 0, fmt.Errorf("%w: read schema version: %v", ErrSchemaTooOld, err) //nolint:errorlint // %v, not %w: the wrapped ErrSchemaTooOld is the one sentinel callers match on
 	}
 	if version < minGooseSchemaVersion {
 		return 0, fmt.Errorf("%w: applied version %d is below %d", ErrSchemaTooOld, version, minGooseSchemaVersion)
 	}
 	return version, nil
+}
+
+// isUnreachable reports whether err means the database did not answer: a
+// deadline, a timeout, a failed connect, or a network error.
+func isUnreachable(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || pgconn.Timeout(err) {
+		return true
+	}
+	var connectErr *pgconn.ConnectError
+	if errors.As(err, &connectErr) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 // checkSchema returns SchemaVersion's error unchanged. Every Reader

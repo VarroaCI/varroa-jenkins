@@ -12,7 +12,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/varroaci/varroa-jenkins/internal/agent"
+	"github.com/varroaci/varroa-jenkins/internal/pgdial"
 )
+
+// openCheckTimeout bounds the schema check that Open runs on a fresh pool.
+// A silent database fails here instead of holding the caller for the
+// kernel's connect timeout.
+const openCheckTimeout = 10 * time.Second
 
 // Postgres is the agent store on the record-store database. It connects as
 // the varroa_client role, which holds INSERT and UPDATE on the agent tables.
@@ -24,9 +30,10 @@ type Postgres struct {
 var _ Store = (*Postgres)(nil)
 
 // Open connects to the record-store database and checks its schema version.
-// It closes the pool and returns the error when the schema is too old.
+// It closes the pool and returns the error when the schema is too old or
+// the database does not answer within openCheckTimeout.
 func Open(ctx context.Context, dsn string, o Options) (*Postgres, error) {
-	cfg, err := pgxpool.ParseConfig(dsn)
+	cfg, err := pgdial.PoolConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse agent store dsn: %w", err)
 	}
@@ -38,7 +45,9 @@ func Open(ctx context.Context, dsn string, o Options) (*Postgres, error) {
 		return nil, fmt.Errorf("open agent store pool: %w", err)
 	}
 	p := &Postgres{pool: pool, o: o}
-	if err := p.CheckSchema(ctx); err != nil {
+	checkCtx, cancel := context.WithTimeout(ctx, openCheckTimeout)
+	defer cancel()
+	if err := p.CheckSchema(checkCtx); err != nil {
 		pool.Close()
 		return nil, err
 	}

@@ -42,3 +42,9 @@ export const GenericErrorPage =({ onRetry }: { onRetry?: () => void }) => <Recov
  * page states that pipeline data is off rather than reading as a failure.
  */
 export const RecordStoreDisabledPage = () => <RecoveryState kind="disabled" title="Pipeline data is off" message="The record store is not configured for this cluster, so build history is not available." />;
+
+/**
+ * Explains a 503 with the record_store_unreachable code: the store is
+ * configured but did not answer. Retry asks again once it returns.
+ */
+export const RecordStoreUnreachablePage = ({ onRetry }: { onRetry?: () => void }) => <RecoveryState kind="error" title="Pipeline data is unreachable" message="Varroa cannot reach the record store. Build history returns when the database is back." onRetry={onRetry} />;
