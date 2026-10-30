@@ -34,6 +34,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   slot-0 coordinate of every `tenant_placements` row of one tenant, one per
   cluster. It is the core BFF's only view of a Tenant that a member cluster
   places, because that Tenant lives on the member's API server.
+- **`Reader.TenantBadgeToken`** (`reader_placements.go`) answers the
+  `badge_token` of one placement row, or `""` for a missing row or a NULL column.
+  No other reader selects `badge_token`. The BFF calls it only for a member-placed badge.
   `Reader.ListAllTenantPlacements` answers the same coordinate plus the
   generation for every row of every tenant; the BFF's `GET /pipelines`
   landing list reads it. A generation-0 row names a torn-down tenant.
@@ -251,6 +254,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   run. Neither table has a foreign key to `runs` or partitioning.
   `00043_run_quality_dropped.sql` adds the dropped counts: `run_coverage.reports_dropped`
   and `metrics_dropped`, and `run_warnings.reports_dropped`. Each defaults to zero.
+  `00044_tenant_placements_badge_token.sql` adds `tenant_placements.badge_token`, NULL while
+  the tenant's badge is off. It sits beside `notification_webhook`, never in `policy`.
   `00017_run_test_cases.sql` adds the build-record table `run_test_cases`,
   one row per reported failed or skipped case, keyed
   `(run_id, suite, class_name, name)`. It carries `cluster`, `tenant`, and

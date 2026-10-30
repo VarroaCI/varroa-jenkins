@@ -276,8 +276,9 @@ count. The colours are:
 - Blue: a build runs, and no completed build exists.
 
 A multibranch job shows its `main` branch by default. Type a branch name in the **Branch** field of
-the card to show that branch. Badges are off by default. See
-[Anonymous build badges](../operations/multi-tenancy.md#anonymous-build-badges).
+the card to show that branch. Badges are off by default. A tenant on a member cluster serves its
+badge the same way. A change to the switch or the token reaches the dashboard on the next operator
+tick. See [Anonymous build badges](../operations/multi-tenancy.md#anonymous-build-badges).
 
 ## Lint a Jenkinsfile
 

@@ -360,7 +360,10 @@ federation, activity persistence, and SSE fanout.
   serves `GET /badges/{tenant}/{token}/{file}.svg` at the host root. It answers an SVG only when
   `spec.pipelines.badge.enabled` is true and the token matches `status.pipelines.badgeToken`
   in constant time. Every refusal answers the same `404 not found` body with `no-store`. The
-  door reads the record store only. It never calls Jenkins. `handleGetJobBadge` answers the
+  door reads the record store only. It never calls Jenkins. A tenant the local API server
+  does not hold is served from its member placement row: `memberBadgeTarget` takes the single
+  live row of the tenant and checks the token through `RecordStore.TenantBadgeToken`.
+  `badgeTokenOf` reads the same token for a member-placed tenant. `handleGetJobBadge` answers the
   job page's `{enabled, path}` state. `renderBadgeSVG` writes no external reference, so the
   SVG holds no `href`.
 - The door consumes three GitHub re-run events itself (`handlers_tenant_rerun.go`):

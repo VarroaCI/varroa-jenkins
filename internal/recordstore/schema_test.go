@@ -282,6 +282,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"agent_namespace", "text", false},
 		{"retired_incarnations", "jsonb", false},
 		{"notification_webhook", "jsonb", true},
+		{"badge_token", "text", true},
 	},
 	"run_waits": {
 		{"run_id", "uuid", false},

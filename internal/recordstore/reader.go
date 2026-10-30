@@ -196,6 +196,11 @@ type Reader interface {
 	// recorder, so this is the core's only view of a Tenant placed there.
 	ListTenantPlacements(ctx context.Context, tenant string) ([]TenantPlacement, error)
 
+	// TenantBadgeToken answers the badge token that a placement row holds for
+	// one tenant on one cluster. It answers "" with a nil error for a missing
+	// row or a NULL column. The BFF calls it only for a member-placed badge.
+	TenantBadgeToken(ctx context.Context, cluster, tenant string) (string, error)
+
 	// ListAllTenantPlacements answers the slot-0 coordinate of every
 	// placement row of every tenant, ordered by tenant, then by cluster.
 	// The core BFF lists member-placed tenants on the pipelines landing

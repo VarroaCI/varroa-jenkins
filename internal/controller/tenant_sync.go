@@ -151,6 +151,7 @@ func NewNATSSyncAnnouncer(conn *bus.Conn) cells.Announcer {
 		payload, err := json.Marshal(recordstore.TenantSyncRequest{
 			Kind:                recordstore.TenantSyncKindAnnounce,
 			NotificationWebhook: notification,
+			BadgeToken:          req.Policy.BadgeToken,
 			Cluster:             req.Cluster,
 			Tenant:              req.Tenant,
 			Incarnation:         req.Incarnation,

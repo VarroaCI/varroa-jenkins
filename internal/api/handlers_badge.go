@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -58,40 +60,56 @@ func (s *Server) HandleJobBadge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	tm, err := crdstore.Get[v1alpha1.Tenant](ctx, s.deps.Store, r.PathValue("tenant"), "")
-	if err != nil {
-		writeBadgeNotFound(w)
-		return
-	}
-	if p := tm.Spec.Pipelines; p == nil || p.Badge == nil || !p.Badge.Enabled {
-		writeBadgeNotFound(w)
-		return
-	}
-	if tm.Status.Pipelines == nil || tm.Status.Pipelines.BadgeToken == "" ||
-		!constantTimeEqual(r.PathValue("token"), tm.Status.Pipelines.BadgeToken) {
+	tenant := r.PathValue("tenant")
+	token := r.PathValue("token")
+	label := badgeLabel(rel)
+
+	// A tenant that this cluster holds is served from its own CRD. A tenant
+	// placed on a member cluster is served from its placement row, and only
+	// when the row holds the same token.
+	var ref TenantRef
+	tm, err := crdstore.Get[v1alpha1.Tenant](ctx, s.deps.Store, tenant, "")
+	switch {
+	case err == nil:
+		if p := tm.Spec.Pipelines; p == nil || p.Badge == nil || !p.Badge.Enabled {
+			writeBadgeNotFound(w)
+			return
+		}
+		if tm.Status.Pipelines == nil || tm.Status.Pipelines.BadgeToken == "" ||
+			!constantTimeEqual(token, tm.Status.Pipelines.BadgeToken) {
+			writeBadgeNotFound(w)
+			return
+		}
+		pl := tm.Status.Placement
+		if pl == nil || pl.Cell == "" {
+			// A tenant with no placement has no record store rows to read.
+			msg, color := badgeStateForRuns(nil, nil)
+			s.writeBadge(w, renderBadgeSVG(label, msg, color), true)
+			return
+		}
+		ref = TenantRef{
+			Cluster:    pl.Cluster,
+			Namespace:  pl.CellNamespace,
+			Controller: pl.Cell,
+			Tenant:     tm.Name,
+			TenantName: tm.Name,
+			Folder:     tm.Name,
+		}
+	case apierrors.IsNotFound(err):
+		var ok bool
+		ref, ok = s.memberBadgeTarget(ctx, tenant, token)
+		if !ok {
+			writeBadgeNotFound(w)
+			return
+		}
+	default:
 		writeBadgeNotFound(w)
 		return
 	}
 
-	label := badgeLabel(rel)
-	pl := tm.Status.Placement
-	if pl == nil || pl.Cell == "" {
-		// A tenant with no placement has no record store rows to read.
-		msg, color := badgeStateForRuns(nil, nil)
-		s.writeBadge(w, renderBadgeSVG(label, msg, color), true)
-		return
-	}
-	ref := TenantRef{
-		Cluster:    pl.Cluster,
-		Namespace:  pl.CellNamespace,
-		Controller: pl.Cell,
-		Tenant:     tm.Name,
-		TenantName: tm.Name,
-		Folder:     tm.Name,
-	}
 	// The folder prefix is added here, so the badge reads only jobs of this
 	// tenant folder.
-	jobPath := tm.Name + "/" + rel
+	jobPath := ref.Folder + "/" + rel
 
 	if r.URL.Query().Has("branch") {
 		head, found, herr := s.badgeBranchHead(ctx, ref, jobPath, r.URL.Query().Get("branch"))
@@ -264,12 +282,66 @@ func (s *Server) handleGetJobBadge(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, out)
 }
 
+// memberBadgeTarget resolves the badge door for a tenant that this cluster
+// does not hold. It reads the single live placement row of the tenant on a
+// member cluster, then the token that row stores. It answers false when no
+// single live row exists, when the stored token is empty, and when the URL
+// token differs from it.
+func (s *Server) memberBadgeTarget(ctx context.Context, tenant, token string) (TenantRef, bool) {
+	if s.deps.RecordStore == nil {
+		return TenantRef{}, false
+	}
+	rows, err := s.deps.RecordStore.ListTenantPlacements(ctx, tenant)
+	if err != nil {
+		s.deps.Logger.Warn("badge placement lookup failed", "tenant", tenant, "error", err)
+		return TenantRef{}, false
+	}
+	var live []recordstore.TenantPlacement
+	for _, row := range rows {
+		if livePlacementRow(row, s.localCluster()) {
+			live = append(live, row)
+		}
+	}
+	if len(live) != 1 {
+		return TenantRef{}, false
+	}
+	row := live[0]
+	stored, err := s.deps.RecordStore.TenantBadgeToken(ctx, row.Cluster, tenant)
+	if err != nil {
+		s.deps.Logger.Warn("badge token read failed", "cluster", row.Cluster, "tenant", tenant, "error", err)
+		return TenantRef{}, false
+	}
+	if stored == "" || !constantTimeEqual(token, stored) {
+		return TenantRef{}, false
+	}
+	return TenantRef{
+		Cluster:    row.Cluster,
+		Namespace:  row.Namespace,
+		Controller: row.Cell,
+		Tenant:     tenant,
+		TenantName: tenant,
+		Folder:     tenant,
+	}, true
+}
+
 // badgeTokenOf returns the badge token of a folder-owned pipelines tenant when
-// its switch is on. It answers false for a synthetic tenant, a tenant the
-// local API server does not hold, and a tenant with the switch off.
+// its switch is on. A tenant on a member cluster answers the token its
+// placement row stores. It answers false for a synthetic tenant, and for a
+// local tenant that the local API server does not hold or whose switch is off.
 func (s *Server) badgeTokenOf(ctx context.Context, ref TenantRef) (string, bool) {
 	if ref.Folder == "" || strings.Contains(ref.Tenant, "/") {
 		return "", false
+	}
+	if !s.isLocalCluster(ref.Cluster) {
+		if s.deps.RecordStore == nil {
+			return "", false
+		}
+		tok, err := s.deps.RecordStore.TenantBadgeToken(ctx, ref.Cluster, ref.TenantName)
+		if err != nil {
+			s.deps.Logger.Warn("badge token read failed", "cluster", ref.Cluster, "tenant", ref.TenantName, "error", err)
+			return "", false
+		}
+		return tok, tok != ""
 	}
 	tm, err := crdstore.Get[v1alpha1.Tenant](ctx, s.deps.Store, ref.TenantName, "")
 	if err != nil {

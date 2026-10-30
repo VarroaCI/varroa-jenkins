@@ -667,7 +667,7 @@ func performMove(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status
 	// because this is the one tick that still knows its identity. A
 	// rolled pod of a cell that stays a candidate is reported through
 	// cellPreviousInstances, on this path and on the moveNone path.
-	policy := syncPolicyFor(in, tenant)
+	policy := syncPolicyFor(in, tenant, status)
 	agentNamespace := tenantAgentNamespace(tenant)
 	var dead []DeadInstance
 	if wasPlaced && oldCell == nil {
@@ -867,14 +867,26 @@ func sendAnnounce(ctx context.Context, in Inputs, req AnnounceRequest) (Announce
 
 // syncPolicyFor builds the announce policy of one tenant: the seven
 // pipelines settings and the export grants, plus the resolved webhook the
-// caller read from the tenant's Secret.
-func syncPolicyFor(in Inputs, tenant *v1alpha1.Tenant) SyncPolicy {
+// caller read from the tenant's Secret. status is the working status: the
+// badge token is minted into it before the announce is built.
+func syncPolicyFor(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus) SyncPolicy {
 	policy := SyncPolicyFromPipelines(tenant.Spec.Pipelines)
 	policy.Webhook = in.Webhook
+	policy.BadgeToken = badgeTokenFor(tenant.Spec.Pipelines, status)
 	if pool := effectiveOwner(in.Pools, ResolvedPoolName(tenant.Spec.Pipelines)); pool != nil {
 		policy.CellMaxRuns = pool.MaxRunsPerTenant
 	}
 	return policy
+}
+
+// badgeTokenFor returns the badge token that the announce carries. It answers
+// the token only while the badge switch is on, and "" otherwise, so the
+// record store clears the stored token when the switch goes off.
+func badgeTokenFor(p *v1alpha1.TenantPipelinesSpec, status *v1alpha1.TenantStatus) string {
+	if p == nil || p.Badge == nil || !p.Badge.Enabled || status == nil || status.Pipelines == nil {
+		return ""
+	}
+	return status.Pipelines.BadgeToken
 }
 
 // maybeReannounce sends the same-generation announcement (tenant-placement
@@ -884,7 +896,7 @@ func syncPolicyFor(in Inputs, tenant *v1alpha1.Tenant) SyncPolicy {
 // or the resync window elapsed. cell is the tenant's current, unchanged
 // binding (moveNone): status.Placement already names it.
 func maybeReannounce(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, cell CellCandidate, nowT time.Time, out *Outcome) {
-	policy := syncPolicyFor(in, tenant)
+	policy := syncPolicyFor(in, tenant, status)
 	agentNamespace := tenantAgentNamespace(tenant)
 	rehydratedInstance, pendingJobs := currentRehydrationState(in, cell)
 

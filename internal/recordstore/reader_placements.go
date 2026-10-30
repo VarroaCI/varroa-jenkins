@@ -33,6 +33,28 @@ func (r *pgReader) ListTenantPlacements(ctx context.Context, tenant string) ([]T
 	`, tenant)
 }
 
+// TenantBadgeToken answers the badge token of the live placement row of tenant
+// on cluster. A row that names no cell, or sits at generation 0 after a
+// teardown, answers "", like a missing row or a NULL column, with a nil error.
+func (r *pgReader) TenantBadgeToken(ctx context.Context, cluster, tenant string) (string, error) {
+	if err := r.checkSchema(ctx); err != nil {
+		return "", err
+	}
+	var token string
+	err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(badge_token, '')
+		FROM varroa.tenant_placements
+		WHERE cluster = $1 AND tenant = $2 AND cell <> '' AND generation > 0
+	`, cluster, tenant).Scan(&token)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read tenant badge token: %w", err)
+	}
+	return token, nil
+}
+
 // ListAllTenantPlacements answers the slot-0 coordinate of every placement
 // row of every tenant, ordered by tenant, then by cluster.
 func (r *pgReader) ListAllTenantPlacements(ctx context.Context) ([]TenantPlacement, error) {
