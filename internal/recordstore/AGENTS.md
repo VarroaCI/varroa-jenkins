@@ -322,6 +322,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   and the tenant sync responder to every mark. The completion body carries
   `rejected_signature` only for a `FAILURE` result that names one; a
   synthetic body never carries it.
+  A run whose intent holds an empty incarnation gets its row written as `dropped` with `last_error` `webhookErrNoIncarnation`, and a Warn log; the dispatcher never compares an empty incarnation.
 - **Grants, not a migration** (`grants.go`) — `EnsureGrants` grants role
   `varroa_client` its read privileges when that role exists, and is a
   no-op otherwise. It never creates a role. CloudNativePG creates the role

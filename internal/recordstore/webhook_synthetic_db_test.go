@@ -58,10 +58,11 @@ func TestMarkInterrupted_EnqueuesSyntheticDelivery(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
-	seedSyntheticWebhookPlacement(t, db, "https://hooks.example.test/r", "")
+	seedSyntheticWebhookPlacement(t, db, "https://hooks.example.test/r", "uid-a")
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	c := fetchRunningCandidate(t, pool, runID)
 
+	stampRunIntentIncarnation(t, db, runID)
 	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now(), "")
 	if err != nil || !changed {
 		t.Fatalf("markInterrupted: changed=%v err=%v", changed, err)
@@ -104,7 +105,7 @@ func TestMarkInterrupted_SkippedMarkEnqueuesNothing(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
-	seedSyntheticWebhookPlacement(t, db, "https://hooks.example.test/r", "")
+	seedSyntheticWebhookPlacement(t, db, "https://hooks.example.test/r", "uid-a")
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	c := fetchRunningCandidate(t, pool, runID)
 
@@ -125,7 +126,7 @@ func TestMarkInterrupted_UnclaimedQueuedRunEnqueuesNothing(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
-	seedSyntheticWebhookPlacement(t, db, "https://hooks.example.test/r", "")
+	seedSyntheticWebhookPlacement(t, db, "https://hooks.example.test/r", "uid-a")
 	req := newTestClaimRequest("manual:"+newTestUUIDv7String(), 0)
 	runID := seedOlderRun(t, db, req, time.Minute)
 	c := fetchRunningCandidate(t, pool, runID)
@@ -145,10 +146,11 @@ func TestRunCompleted_SupersedesSyntheticDelivery(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
-	seedSyntheticWebhookPlacement(t, db, "https://hooks.example.test/r", "")
+	seedSyntheticWebhookPlacement(t, db, "https://hooks.example.test/r", "uid-a")
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := startRunForFinalize(t, pool, intentKey)
 	c := fetchRunningCandidate(t, pool, runID)
+	stampRunIntentIncarnation(t, db, runID)
 	if changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now(), ""); err != nil || !changed {
 		t.Fatalf("markInterrupted: changed=%v err=%v", changed, err)
 	}
@@ -177,13 +179,79 @@ func TestRunCompleted_SupersedesSyntheticDelivery(t *testing.T) {
 	}
 }
 
+// TestMarkInterrupted_EmptyClaimIncarnationWritesDroppedRow asserts that a
+// synthetic end of a run whose claim stored no incarnation writes its row
+// dropped, with the enqueue reason.
+func TestMarkInterrupted_EmptyClaimIncarnationWritesDroppedRow(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	seedSyntheticWebhookPlacement(t, db, "https://hooks.example.test/r", "")
+	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
+	c := fetchRunningCandidate(t, pool, runID)
+
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now(), "")
+	if err != nil || !changed {
+		t.Fatalf("markInterrupted: changed=%v err=%v", changed, err)
+	}
+
+	key := webhookKeyInterruptedPrefix + ReasonNoHeartbeat
+	if state, _ := webhookStateFor(t, db, runID, key); state != "dropped" {
+		t.Fatalf("state = %q, want dropped", state)
+	}
+	var lastErr string
+	if err := db.QueryRow(`SELECT COALESCE(last_error, '') FROM varroa.webhook_deliveries
+		WHERE run_id = $1 AND delivery_key = $2`, runID, key).Scan(&lastErr); err != nil {
+		t.Fatalf("read dropped row: %v", err)
+	}
+	if lastErr != webhookErrNoIncarnation {
+		t.Fatalf("last_error = %q, want %q", lastErr, webhookErrNoIncarnation)
+	}
+	if n := webhookRowCount(t, db, runID); n != 1 {
+		t.Fatalf("rows = %d, want 1", n)
+	}
+}
+
+// TestRunCompleted_EmptyIncarnationStillSupersedesSynthetic asserts that a
+// completion of a run whose claim stored no incarnation leaves the synthetic
+// row and its own row both dropped.
+func TestRunCompleted_EmptyIncarnationStillSupersedesSynthetic(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	seedSyntheticWebhookPlacement(t, db, "https://hooks.example.test/r", "")
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := startRunForFinalize(t, pool, intentKey)
+	c := fetchRunningCandidate(t, pool, runID)
+	if changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now(), ""); err != nil || !changed {
+		t.Fatalf("markInterrupted: changed=%v err=%v", changed, err)
+	}
+
+	g := NewIngester(pool, nil, nil)
+	g.SetWebhooks("https://varroa.example.test", nil)
+	env := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{Result: strPtr("SUCCESS")})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	if state, _ := webhookStateFor(t, db, runID, webhookKeyInterruptedPrefix+ReasonNoHeartbeat); state != "dropped" {
+		t.Fatalf("synthetic state = %q, want dropped", state)
+	}
+	if state, _ := webhookState(t, db, runID); state != "dropped" {
+		t.Fatalf("completed state = %q, want dropped", state)
+	}
+	if n := webhookRowCount(t, db, runID); n != 2 {
+		t.Fatalf("rows = %d, want 2", n)
+	}
+}
+
 // TestRunCompleted_RedeliveryAfterSyntheticAddsNothing asserts a redelivered
 // completion adds no row after a synthetic end.
 func TestRunCompleted_RedeliveryAfterSyntheticAddsNothing(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
-	seedSyntheticWebhookPlacement(t, db, "https://hooks.example.test/r", "")
+	seedSyntheticWebhookPlacement(t, db, "https://hooks.example.test/r", "uid-a")
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := startRunForFinalize(t, pool, intentKey)
 	c := fetchRunningCandidate(t, pool, runID)
@@ -256,6 +324,7 @@ func TestEndStaleMarkedIntent_EnqueuesStartLostDelivery(t *testing.T) {
 
 	pool, db := setupLedgerPool(t)
 	runID := seedStaleMarkedRun(t, db, ClaimExpiryAge+time.Minute, `{}`)
+	stampRunIntentIncarnation(t, db, runID)
 	setSyntheticWebhook(t, db, "https://hooks.example.test/r", "uid-a")
 	if _, err := db.Exec(`UPDATE varroa.run_intents SET incarnation = 'uid-a' WHERE run_id = $1`, runID); err != nil {
 		t.Fatalf("stamp intent incarnation: %v", err)
@@ -311,7 +380,8 @@ func TestStartLostThenSweepMark_EnqueuesTwoSyntheticRows(t *testing.T) {
 
 	pool, db := setupLedgerPool(t)
 	runID := seedStaleMarkedRun(t, db, ClaimExpiryAge+time.Minute, `{}`)
-	setSyntheticWebhook(t, db, "https://hooks.example.test/r", "")
+	stampRunIntentIncarnation(t, db, runID)
+	setSyntheticWebhook(t, db, "https://hooks.example.test/r", "uid-a")
 
 	now := time.Now().UTC()
 	candidates, err := selectStaleMarkedIntents(context.Background(), pool, now.Add(-ClaimExpiryAge), markedLostBatch)
