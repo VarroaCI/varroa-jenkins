@@ -8,6 +8,8 @@ package pgdial
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"net"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -60,6 +62,21 @@ func OpenDB(dsn string) (*sql.DB, error) {
 		return nil, err
 	}
 	return stdlib.OpenDB(*cfg), nil
+}
+
+// IsUnreachable reports whether err means the database did not answer: a
+// deadline, a timeout, a failed connect, or a network error. The caller
+// checks its own context before it calls this function.
+func IsUnreachable(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || pgconn.Timeout(err) {
+		return true
+	}
+	var connectErr *pgconn.ConnectError
+	if errors.As(err, &connectErr) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 // applyDefault sets DefaultConnectTimeout as the connect timeout when the

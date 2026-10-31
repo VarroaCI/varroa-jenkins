@@ -15,8 +15,9 @@ import (
 )
 
 // FromPool returns a store on an existing pool, such as the one the Tenant agent
-// runner already holds. It checks the schema, as Open does. The caller owns the
-// pool and closes it.
+// runner already holds. It checks the schema at once, so the runner fails fast
+// when the schema is too old or the database does not answer. The caller owns
+// the pool and closes it.
 func FromPool(ctx context.Context, pool *pgxpool.Pool, o Options) (*Postgres, error) {
 	p := &Postgres{pool: pool, o: o}
 	if err := p.CheckSchema(ctx); err != nil {
@@ -66,6 +67,9 @@ func createSessionTx(ctx context.Context, tx pgx.Tx, s agent.Session, evs []agen
 func (p *Postgres) CreateUnderLock(ctx context.Context, lockKey string,
 	fn func(ctx context.Context, tx pgx.Tx) (agent.Session, []agent.EventInput, bool, error),
 ) (agent.Session, []agent.Event, bool, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return agent.Session{}, nil, false, err
+	}
 	var out agent.Session
 	var evs []agent.Event
 	created := false
@@ -103,6 +107,9 @@ func (p *Postgres) CreateUnderLock(ctx context.Context, lockKey string,
 // in one transaction. It holds the same guard as AppendEvent: the session must
 // be running under owner.
 func (p *Postgres) SetInstructionsSHA(ctx context.Context, id uuid.UUID, owner, sha string, ev agent.EventInput) error {
+	if err := p.requireSchema(ctx); err != nil {
+		return err
+	}
 	evs, err := normalizeEvents([]agent.EventInput{ev})
 	if err != nil {
 		return err
@@ -123,6 +130,9 @@ func (p *Postgres) SetInstructionsSHA(ctx context.Context, id uuid.UUID, owner, 
 // scope, keyed namespace/name. A nil grant removes the entry. Only the key
 // named here changes; the other settings keys stay as they are.
 func (p *Postgres) PutTenantAgentUnattended(ctx context.Context, key string, grant *agent.UnattendedGrant, by string) error {
+	if err := p.requireSchema(ctx); err != nil {
+		return err
+	}
 	now := p.now()
 	var tag pgconn.CommandTag
 	var err error

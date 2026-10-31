@@ -30,6 +30,9 @@ WHERE scope = $1`
 // GetSettings returns one scope's settings. A user scope with no row gives
 // the defaults with Stored false.
 func (p *Postgres) GetSettings(ctx context.Context, scope string) (agent.Settings, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return agent.Settings{}, err
+	}
 	if !scopeValid(scope) {
 		return agent.Settings{}, fmt.Errorf("%w: scope %q", ErrInvalid, scope)
 	}
@@ -122,6 +125,9 @@ func decodeSettingsJSON(raw []byte, scope string, st *agent.Settings) error {
 
 // PutSettings applies a patch to one scope and returns the stored result.
 func (p *Postgres) PutSettings(ctx context.Context, scope string, patch SettingsPatch, by string) (agent.Settings, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return agent.Settings{}, err
+	}
 	if !scopeValid(scope) {
 		return agent.Settings{}, fmt.Errorf("%w: scope %q", ErrInvalid, scope)
 	}

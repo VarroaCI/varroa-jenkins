@@ -124,6 +124,27 @@ export function ProfileAssistantTab() {
   const progressMax = Math.max(1, budget);
   const progressNow = Math.min(progressMax, Math.max(0, used));
 
+  // The form shows no values until the settings arrive. A save before then
+  // would write the defaults over the stored settings. A retry after a failed
+  // read clears isError while the data is still missing, so the guard tests
+  // the data, not the error.
+  if (me.data === undefined) {
+    return (
+      <div className={styles.stack}>
+        <Card title="Assistant">
+          {me.isError ? (
+            <p role="alert">Your assistant settings cannot load right now. Retry when the record store answers.</p>
+          ) : (
+            <p role="status">Loading assistant settings…</p>
+          )}
+          {me.isError && (
+            <Button variant="ghost" disabled={me.isFetching} onClick={() => void me.refetch()}>Retry</Button>
+          )}
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.stack}>
       {explained && (

@@ -26,10 +26,16 @@ func (s *Server) PipelinesOverview(ctx context.Context, claims *auth.Claims, now
 	if s.deps.RecordStore == nil {
 		return PipelinesOverview{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}, nil
 	}
-	readable, _, err := s.readablePipelineTenants(ctx, claims)
+	walk, err := s.readablePipelineTenants(ctx, claims)
 	if err != nil {
 		return PipelinesOverview{}, nil, err
 	}
+	// A degraded placement read stops the overview here. The run read would
+	// pay a second connect timeout against the same store.
+	if walk.Degraded != nil {
+		return PipelinesOverview{}, nil, walk.Degraded
+	}
+	readable := walk.Items
 	scopes, names := s.runScopes(claims, readable)
 	ov, err := s.deps.RecordStore.RunsOverview(ctx, recordstore.RunsOverviewQuery{Scopes: scopes, Now: now})
 	if err != nil {

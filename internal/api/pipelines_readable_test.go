@@ -37,10 +37,11 @@ func TestReadablePipelineTenantsPlacement(t *testing.T) {
 		pipelinesTenant("pay", true, "core", "cell-ns", "c1"),
 		pipelinesTenant("idle", true, "", "", ""),
 		nsTenant("payments", "team-pay"))
-	got, _, err := srv.readablePipelineTenants(context.Background(), resolverClaims)
+	walk, err := srv.readablePipelineTenants(context.Background(), resolverClaims)
 	if err != nil {
 		t.Fatalf("readablePipelineTenants: %v", err)
 	}
+	got := walk.Items
 	want := map[string]struct {
 		placement string
 		refs      int
@@ -68,10 +69,11 @@ func TestReadablePipelineTenantsFanOutKeepsEveryReadableController(t *testing.T)
 	srv := readableServer(t, globalPipelinesAuthorizer(),
 		[]*v1alpha1.Controller{controllerIn("svc-a", "team-pay"), controllerIn("svc-b", "team-pay")},
 		nsTenant("payments", "team-pay"))
-	got, _, err := srv.readablePipelineTenants(context.Background(), resolverClaims)
+	walk, err := srv.readablePipelineTenants(context.Background(), resolverClaims)
 	if err != nil {
 		t.Fatalf("readablePipelineTenants: %v", err)
 	}
+	got := walk.Items
 	if len(got) != 1 || len(got[0].Refs) != 2 {
 		t.Fatalf("got %+v; want one tenant with two refs", got)
 	}

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/varroaci/varroa-jenkins/internal/agent"
 )
 
 // TestPostgresContract runs the shared contract against the Postgres store.
@@ -60,21 +62,40 @@ func TestDaySpendUsesPrincipalIndex(t *testing.T) {
 	}
 }
 
-// TestOpenRefusesSchema37 asserts that Open refuses a schema below the minimum.
-func TestOpenRefusesSchema37(t *testing.T) {
+// TestSchemaGateRefusesSchema37UntilMigrated asserts that the schema gate
+// refuses a schema below the minimum, lets a migrated schema through, and
+// keeps the pass when the schema is lowered again.
+func TestSchemaGateRefusesSchema37UntilMigrated(t *testing.T) {
 	t.Parallel()
-	dsn := freshDSN(t)
 	ctx := context.Background()
-	p, err := Open(ctx, dsn, Options{})
+	p, err := Open(ctx, freshDSN(t), Options{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if _, err := p.pool.Exec(ctx, "DELETE FROM varroa.goose_db_version WHERE version_id >= 38"); err != nil {
-		t.Fatalf("lower schema: %v", err)
+	t.Cleanup(p.Close)
+	setApplied := func(applied bool) {
+		t.Helper()
+		if _, err := p.pool.Exec(ctx, "UPDATE varroa.goose_db_version SET is_applied = $1 WHERE version_id >= 38", applied); err != nil {
+			t.Fatalf("set applied for version 38 and up: %v", err)
+		}
 	}
-	p.Close()
-	if _, err := Open(ctx, dsn, Options{}); !errors.Is(err, ErrSchemaTooOld) {
-		t.Fatalf("Open at 37 = %v, want ErrSchemaTooOld", err)
+
+	setApplied(false)
+	if _, err := p.GetSettings(ctx, agent.ScopeGlobal); !errors.Is(err, ErrSchemaTooOld) {
+		t.Fatalf("GetSettings at 37 = %v, want ErrSchemaTooOld", err)
+	}
+	if err := p.CheckSchema(ctx); !errors.Is(err, ErrSchemaTooOld) {
+		t.Fatalf("CheckSchema at 37 = %v, want ErrSchemaTooOld", err)
+	}
+
+	setApplied(true)
+	if _, err := p.GetSettings(ctx, agent.ScopeGlobal); err != nil {
+		t.Fatalf("GetSettings after migration: %v", err)
+	}
+
+	setApplied(false)
+	if _, err := p.GetSettings(ctx, agent.ScopeGlobal); err != nil {
+		t.Fatalf("GetSettings after a pass, with the schema lowered again: %v", err)
 	}
 }
 

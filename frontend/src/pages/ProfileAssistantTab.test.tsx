@@ -62,6 +62,25 @@ describe("ProfileAssistantTab", () => {
     expect(await screen.findByText("model is not offered")).toBeTruthy();
   });
 
+  it("holds the form while the settings read fails, so a save cannot write defaults", async () => {
+    vi.mocked(client.getMyAssistant).mockRejectedValue(new ApiError(503, "unavailable", { code: "assistant_disabled" }));
+    renderTab();
+    expect(await screen.findByText(/cannot load right now/)).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: "Assistant on" })).toBeNull();
+    expect(client.putMyAssistant).not.toHaveBeenCalled();
+  });
+
+  it("keeps the form hidden while a retry of the settings read is pending", async () => {
+    vi.mocked(client.getMyAssistant)
+      .mockRejectedValueOnce(new ApiError(503, "unavailable", { code: "assistant_disabled" }))
+      .mockReturnValue(new Promise(() => {}));
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Loading assistant settings…")).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: "Assistant on" })).toBeNull();
+    expect(client.putMyAssistant).not.toHaveBeenCalled();
+  });
+
   it("states the spend today", async () => {
     renderTab();
     expect(await screen.findByText("0 of 100000 tokens used today (UTC)")).toBeTruthy();

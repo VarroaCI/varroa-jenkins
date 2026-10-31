@@ -51,36 +51,44 @@ func (s *Server) handleListPipelineTenants(w http.ResponseWriter, r *http.Reques
 // resolver opens the local Tenant first for that name. One name placed on two
 // other clusters answers one row for each cluster.
 func (s *Server) listPipelineTenants(ctx context.Context, claims *auth.Claims) (pipelineTenantListJSON, error) {
-	readable, recordStore, err := s.readablePipelineTenants(ctx, claims)
+	walk, err := s.readablePipelineTenants(ctx, claims)
 	if err != nil {
 		return pipelineTenantListJSON{}, err
 	}
-	items := make([]pipelineTenantJSON, 0, len(readable))
-	for _, t := range readable {
+	items := make([]pipelineTenantJSON, 0, len(walk.Items))
+	for _, t := range walk.Items {
 		items = append(items, t.Row)
 	}
-	return pipelineTenantListJSON{Items: items, RecordStore: recordStore}, nil
+	return pipelineTenantListJSON{Items: items, RecordStore: s.deps.RecordStore != nil && walk.Degraded == nil}, nil
 }
 
-// allTenantPlacements reads every placement row. It reports false, with
-// no error, when the record store is off, its schema is too old, or it
-// is unreachable: the landing page then lists the local Tenants alone.
-func (s *Server) allTenantPlacements(ctx context.Context) ([]recordstore.TenantPlacement, bool, error) {
+// placementRead is one read of every placement row. Degraded is set when the
+// record store did not answer, or its schema is too old. The caller then has
+// no placement rows, and lists the local Tenants alone.
+type placementRead struct {
+	Rows     []recordstore.TenantPlacement
+	Degraded error
+}
+
+// allTenantPlacements reads every placement row. It answers a degraded read
+// when the record store is unreachable or its schema is too old. It answers an
+// empty read, with no error, when the record store is off. Any other failure
+// is the returned error.
+func (s *Server) allTenantPlacements(ctx context.Context) (placementRead, error) {
 	if s.deps.RecordStore == nil {
-		return nil, false, nil
+		return placementRead{}, nil
 	}
 	rows, err := s.deps.RecordStore.ListAllTenantPlacements(ctx)
-	if errors.Is(err, recordstore.ErrUnavailable) {
+	switch {
+	case errors.Is(err, recordstore.ErrUnavailable):
 		s.deps.Logger.Warn("record store unreachable; the pipelines landing page lists local Tenants only", "error", err)
-		return nil, false, nil
+		return placementRead{Degraded: err}, nil
+	case errors.Is(err, recordstore.ErrSchemaTooOld):
+		return placementRead{Degraded: err}, nil
+	case err != nil:
+		return placementRead{}, err
 	}
-	if errors.Is(err, recordstore.ErrSchemaTooOld) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	return rows, true, nil
+	return placementRead{Rows: rows}, nil
 }
 
 // localPipelineTenantRow maps a local pipelines Tenant onto its row. A Tenant

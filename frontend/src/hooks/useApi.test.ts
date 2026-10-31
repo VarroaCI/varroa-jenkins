@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, bffFetch, logout } from "./useApi";
+import { ApiError, bffFetch, defaultQueryRetry, logout } from "./useApi";
 
 // Mock BFF_BASE used by the request helper
 vi.mock("../api/client", () => ({ BFF_BASE: "/api/v1" }));
@@ -41,5 +41,22 @@ describe("bffFetch errors", () => {
     await expect(bffFetch("/test")).rejects.toMatchObject({ status: 401 });
     expect(listener).toHaveBeenCalledOnce();
     window.removeEventListener("varroa:unauthorized", listener);
+  });
+});
+
+describe("defaultQueryRetry", () => {
+  it("does not retry a record store that did not answer", () => {
+    const unreachable = new ApiError(503, "unreachable", { code: "record_store_unreachable" });
+    expect(defaultQueryRetry(0, unreachable)).toBe(false);
+  });
+  it("does not retry an assistant that answers disabled", () => {
+    expect(defaultQueryRetry(0, new ApiError(503, "disabled", { code: "assistant_disabled" }))).toBe(false);
+  });
+  it("retries another failure once", () => {
+    expect(defaultQueryRetry(0, new ApiError(503, "unavailable", {}))).toBe(true);
+    expect(defaultQueryRetry(0, new Error("x"))).toBe(true);
+  });
+  it("stops after one retry", () => {
+    expect(defaultQueryRetry(1, new Error("x"))).toBe(false);
   });
 });

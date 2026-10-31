@@ -330,3 +330,38 @@ func TestSchemaVersionDatabaseErrorFails(t *testing.T) {
 		t.Fatalf("SchemaVersion error = %v, want ErrSchemaTooOld", err)
 	}
 }
+
+// TestCheckSchemaRetriesUntilAPassThenKeepsIt asserts a Reader checks the
+// schema again after a failed check, and keeps the result of a passed one.
+func TestCheckSchemaRetriesUntilAPassThenKeepsIt(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	reader := NewReader(pool)
+	ctx := context.Background()
+	since := time.Now().Add(-30 * 24 * time.Hour)
+	setApplied := func(applied bool) {
+		t.Helper()
+		if _, err := db.Exec(`UPDATE varroa.goose_db_version SET is_applied = $1`, applied); err != nil {
+			t.Fatalf("set is_applied: %v", err)
+		}
+	}
+
+	setApplied(false)
+	if _, err := reader.ListJobSummaries(ctx, testCluster, testTenant, since); !errors.Is(err, ErrSchemaTooOld) {
+		t.Fatalf("ListJobSummaries error = %v, want ErrSchemaTooOld", err)
+	}
+
+	setApplied(true)
+	if _, err := reader.ListJobSummaries(ctx, testCluster, testTenant, since); err != nil {
+		t.Fatalf("ListJobSummaries after the schema is restored: %v", err)
+	}
+
+	setApplied(false)
+	if _, err := reader.ListJobSummaries(ctx, testCluster, testTenant, since); err != nil {
+		t.Fatalf("ListJobSummaries after a pass, with the version lowered again: %v", err)
+	}
+	if _, err := reader.SchemaVersion(ctx); !errors.Is(err, ErrSchemaTooOld) {
+		t.Fatalf("SchemaVersion error = %v, want ErrSchemaTooOld", err)
+	}
+}

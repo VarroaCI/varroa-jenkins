@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/varroaci/varroa-jenkins/internal/pgdial"
 )
 
 // DefaultReadTimeout bounds each Reader call the BFF makes. A read that
@@ -47,7 +49,7 @@ func (t *timeoutReader) classify(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return err
 	}
-	if isUnreachable(err) {
+	if pgdial.IsUnreachable(err) {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	return err

@@ -20,7 +20,8 @@ var startupSchemaTimeout = 10 * time.Second
 // openRecordStoreReader opens the record-store pool and the Reader over it.
 // Every read goes through recordstore.WithTimeout. The reader is returned
 // even when the schema check fails: an unreachable store recovers on its
-// own, because each Reader call checks the schema again.
+// own, because each Reader call checks the schema again until a check
+// passes.
 func openRecordStoreReader(ctx context.Context, dsn string, retentionDays int, logger *slog.Logger) (recordstore.Reader, *pgxpool.Pool, error) {
 	pool, err := pgdial.NewPool(ctx, dsn)
 	if err != nil {

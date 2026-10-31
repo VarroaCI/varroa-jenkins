@@ -20,6 +20,9 @@ WHERE principal = $1 AND started_at >= $2 AND started_at < $3`
 
 // ListSessions returns one page of sessions, newest first.
 func (p *Postgres) ListSessions(ctx context.Context, q SessionQuery) (SessionPage, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return SessionPage{}, err
+	}
 	cT, cID, hasCursor, err := decodeCursor(q.Cursor)
 	if err != nil {
 		return SessionPage{}, err
@@ -65,6 +68,9 @@ func (p *Postgres) ListSessions(ctx context.Context, q SessionQuery) (SessionPag
 
 // DaySpend returns the tokens that the principal spent on the current UTC day.
 func (p *Postgres) DaySpend(ctx context.Context, principal string) (int64, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return 0, err
+	}
 	start := startOfDay(p.now())
 	var total int64
 	if err := p.pool.QueryRow(ctx, daySpendSQL, principal, start, start.Add(24*time.Hour)).Scan(&total); err != nil {
@@ -75,6 +81,9 @@ func (p *Postgres) DaySpend(ctx context.Context, principal string) (int64, error
 
 // CountRunning returns the number of running sessions of the principal.
 func (p *Postgres) CountRunning(ctx context.Context, principal string) (int, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return 0, err
+	}
 	var n int
 	if err := p.pool.QueryRow(ctx,
 		`SELECT count(*) FROM varroa.agent_sessions WHERE principal = $1 AND state = 'running'`, principal,

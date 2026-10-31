@@ -138,11 +138,16 @@ func (s *Server) ListFleetRuns(ctx context.Context, claims *auth.Claims, p Fleet
 	if s.deps.RecordStore == nil {
 		return page, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}, nil
 	}
-	readable, _, err := s.readablePipelineTenants(ctx, claims)
+	walk, err := s.readablePipelineTenants(ctx, claims)
 	if err != nil {
 		return page, nil, err
 	}
-	scopes, names := s.runScopes(claims, readable)
+	// A degraded placement read stops the feed here. A run read would pay a
+	// second connect timeout against the same store.
+	if walk.Degraded != nil {
+		return page, nil, walk.Degraded
+	}
+	scopes, names := s.runScopes(claims, walk.Items)
 	wanted := make(map[string]bool, len(p.Tenants))
 	for _, name := range p.Tenants {
 		wanted[name] = true

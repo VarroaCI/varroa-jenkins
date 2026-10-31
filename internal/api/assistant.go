@@ -18,6 +18,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/agent/sealedkey"
 	"github.com/varroaci/varroa-jenkins/internal/agent/store"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/pgdial"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
@@ -183,6 +184,7 @@ func writeAssistantError(s *Server, w http.ResponseWriter, status int, code, msg
 
 // assistantStoreError answers a store error. A missing row is 404, an expired
 // approval is 409 approval_expired, a state conflict is 409 assistant_busy,
+// an old schema or a database that does not answer is 503 assistant_disabled,
 // and anything else is 500.
 func (s *Server) assistantStoreError(w http.ResponseWriter, err error) {
 	switch {
@@ -192,7 +194,8 @@ func (s *Server) assistantStoreError(w http.ResponseWriter, err error) {
 		writeAssistantError(s, w, http.StatusConflict, assistantErrApprovalExpired, "the approval expired")
 	case errors.Is(err, store.ErrConflict):
 		writeAssistantError(s, w, http.StatusConflict, assistantErrBusy, "the session changed; reload and try again")
-	case errors.Is(err, recordstore.ErrUnavailable), errors.Is(err, recordstore.ErrSchemaTooOld), errors.Is(err, store.ErrSchemaTooOld):
+	case errors.Is(err, store.ErrUnavailable), errors.Is(err, recordstore.ErrUnavailable),
+		errors.Is(err, recordstore.ErrSchemaTooOld), errors.Is(err, store.ErrSchemaTooOld), pgdial.IsUnreachable(err):
 		writeAssistantError(s, w, http.StatusServiceUnavailable, assistantErrDisabled, "the assistant store is not ready")
 	default:
 		s.deps.Logger.Error("assistant store", "error", err)
