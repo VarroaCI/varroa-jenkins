@@ -186,6 +186,9 @@ func TestPgBackfillQuery_ExcludeRoutineSignInsFillsLimit(t *testing.T) {
 	if len(page.Items) != 5 {
 		t.Fatalf("got %d items, want the 5 operational events", len(page.Items))
 	}
+	if page.HasMore || page.NextCursor != "" {
+		t.Fatalf("exact-size last page: HasMore %v, NextCursor %q; want no more history", page.HasMore, page.NextCursor)
+	}
 	for i, e := range page.Items {
 		want := fmt.Sprintf("operational %d", 4-i)
 		if e.Message != want {
@@ -268,5 +271,214 @@ func TestPgBackfillRetention(t *testing.T) {
 	mode, days := bf.Retention()
 	if mode != "on" || days != 30 {
 		t.Fatalf("Retention() = (%q, %d), want (\"on\", 30)", mode, days)
+	}
+}
+
+// pagedActivityReader serves ListActivity from pages in order and counts the
+// calls. ActivityRetentionDays returns days and daysErr. Every other Reader
+// method panics through the nil embedded Reader, which the tests never reach.
+type pagedActivityReader struct {
+	Reader
+	pages   []ActivityPage
+	calls   int
+	days    int
+	daysErr error
+}
+
+func (p *pagedActivityReader) ListActivity(_ context.Context, _ ActivityQuery) (ActivityPage, error) {
+	p.calls++
+	if p.calls > len(p.pages) {
+		return ActivityPage{}, nil
+	}
+	return p.pages[p.calls-1], nil
+}
+
+func (p *pagedActivityReader) ActivityRetentionDays(context.Context) (int, error) {
+	return p.days, p.daysErr
+}
+
+// TestPgBackfillQuery_RangeOutsideRetention proves a range start before the
+// retention window answers ErrRangeOutsideRetention without a list call, and
+// that a zero retention sets no bound.
+func TestPgBackfillQuery_RangeOutsideRetention(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	cases := []struct {
+		name    string
+		days    int
+		start   time.Time
+		wantErr error
+		calls   int
+	}{
+		{"start before window", 1, now.Add(-48 * time.Hour), activity.ErrRangeOutsideRetention, 0},
+		{"start inside window", 1, now.Add(-time.Hour), nil, 1},
+		{"zero days sets no bound", 0, now.Add(-48 * time.Hour), nil, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &pagedActivityReader{days: tc.days, pages: []ActivityPage{{}}}
+			bf := NewActivityBackfill(reader)
+			end := now.Add(time.Hour)
+			start := tc.start
+			_, err := bf.Query(context.Background(), activity.Query{Limit: 5, Start: &start, End: &end, Scope: activity.Scope{All: true}})
+			switch {
+			case tc.wantErr == nil && err != nil:
+				t.Fatalf("Query error = %v, want nil", err)
+			case tc.wantErr != nil && !errors.Is(err, tc.wantErr):
+				t.Fatalf("Query error = %v, want %v", err, tc.wantErr)
+			}
+			if reader.calls != tc.calls {
+				t.Fatalf("ListActivity calls = %d, want %d", reader.calls, tc.calls)
+			}
+		})
+	}
+}
+
+// TestPgBackfillQuery_RangeUnreachableStoreAnswersErrUnavailable proves a range
+// read against a store that cannot be reached answers ErrUnavailable, so the
+// BFF gives 503 and not a retention answer.
+func TestPgBackfillQuery_RangeUnreachableStoreAnswersErrUnavailable(t *testing.T) {
+	bf := NewActivityBackfill(WithTimeout(unreachableReader(t), 200*time.Millisecond))
+
+	now := time.Now().UTC()
+	start, end := now.Add(-time.Hour), now.Add(time.Hour)
+	_, err := bf.Query(context.Background(), activity.Query{Limit: 5, Start: &start, End: &end, Scope: activity.Scope{All: true}})
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Query error = %v, want ErrUnavailable", err)
+	}
+}
+
+// TestPgBackfillQuery_HasMoreAtExactFill proves HasMore and NextCursor after
+// accepted reaches limit. A stop with no later authorized row is the last page.
+func TestPgBackfillQuery_HasMoreAtExactFill(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Truncate(time.Second)
+	mkPage := func(n int, hasMore bool) ActivityPage {
+		items := make([]activity.Event, n)
+		for i := range items {
+			items[i] = activity.Event{
+				Timestamp: base.Add(time.Duration(i) * time.Second),
+				Cluster:   "core", Namespace: "ns", Controller: "ctrl", Source: "user", Type: "t",
+				Message: fmt.Sprintf("row %d", i),
+			}
+		}
+		return ActivityPage{Items: items, HasMore: hasMore}
+	}
+	accept := func(keep ...int) func(activity.Event) bool {
+		return func(e activity.Event) bool {
+			for _, k := range keep {
+				if e.Message == fmt.Sprintf("row %d", k) {
+					return true
+				}
+			}
+			return false
+		}
+	}
+
+	t.Run("exact size, no more rows", func(t *testing.T) {
+		bf := NewActivityBackfill(&pagedActivityReader{pages: []ActivityPage{mkPage(3, false)}})
+		page, err := bf.Query(context.Background(), activity.Query{Limit: 3, Scope: activity.Scope{All: true}})
+		if err != nil {
+			t.Fatalf("Query: %v", err)
+		}
+		if len(page.Items) != 3 || page.HasMore || page.NextCursor != "" {
+			t.Fatalf("got %d items, HasMore %v, NextCursor %q; want 3, false, empty", len(page.Items), page.HasMore, page.NextCursor)
+		}
+	})
+
+	t.Run("mid-batch fill, rest rejected, no more rows", func(t *testing.T) {
+		bf := NewActivityBackfill(&pagedActivityReader{pages: []ActivityPage{mkPage(5, false)}})
+		page, err := bf.Query(context.Background(), activity.Query{Limit: 3, Scope: activity.Scope{All: true}, Authorize: accept(0, 1, 2)})
+		if err != nil {
+			t.Fatalf("Query: %v", err)
+		}
+		if len(page.Items) != 3 || page.HasMore || page.NextCursor != "" {
+			t.Fatalf("got %d items, HasMore %v, NextCursor %q; want 3, false, empty", len(page.Items), page.HasMore, page.NextCursor)
+		}
+	})
+
+	t.Run("mid-batch fill, later row accepted", func(t *testing.T) {
+		bf := NewActivityBackfill(&pagedActivityReader{pages: []ActivityPage{mkPage(5, false)}})
+		q := activity.Query{Limit: 3, Scope: activity.Scope{All: true}, Authorize: accept(0, 1, 2, 4)}
+		page, err := bf.Query(context.Background(), q)
+		if err != nil {
+			t.Fatalf("Query: %v", err)
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			t.Fatalf("HasMore %v, NextCursor %q; want true and a cursor", page.HasMore, page.NextCursor)
+		}
+		cur, err := decodeActivityCursor(page.NextCursor, activityFilterKey(ActivityQuery{Scope: q.Scope}), "backward")
+		if err != nil {
+			t.Fatalf("decode cursor: %v", err)
+		}
+		third := mkPage(5, false).Items[2]
+		if !cur.TS.Equal(third.Timestamp) || cur.EventKey != activity.EventKey(third) {
+			t.Fatalf("cursor anchors on %v/%q, want the third accepted row %v/%q", cur.TS, cur.EventKey, third.Timestamp, activity.EventKey(third))
+		}
+	})
+
+	t.Run("batch end fill, source reports more", func(t *testing.T) {
+		bf := NewActivityBackfill(&pagedActivityReader{pages: []ActivityPage{mkPage(3, true)}})
+		page, err := bf.Query(context.Background(), activity.Query{Limit: 3, Scope: activity.Scope{All: true}})
+		if err != nil {
+			t.Fatalf("Query: %v", err)
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			t.Fatalf("HasMore %v, NextCursor %q; want true and a cursor", page.HasMore, page.NextCursor)
+		}
+	})
+}
+
+// TestPgBackfillQuery_ExactSizeLastPageHasNoMore proves a page that holds
+// every row of the store reports no more history. A paged read stops at the
+// last row and carries no cursor.
+func TestPgBackfillQuery_ExactSizeLastPageHasNoMore(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Truncate(time.Second)
+	events := make([]activity.Event, 5)
+	for i := range events {
+		events[i] = activity.Event{
+			Timestamp: base.Add(time.Duration(i) * time.Second),
+			Cluster:   "core", Namespace: "ns", Controller: "ctrl", Source: "operator", Type: "t",
+			Message: fmt.Sprintf("row %d", i),
+		}
+	}
+	bf := NewActivityBackfill(NewReader(seedActivityEvents(t, events), 30))
+	ctx := context.Background()
+	all := activity.Scope{All: true}
+
+	backward, err := bf.Query(ctx, activity.Query{Limit: 5, Scope: all})
+	if err != nil {
+		t.Fatalf("backward Query: %v", err)
+	}
+	if len(backward.Items) != 5 || backward.HasMore || backward.NextCursor != "" {
+		t.Fatalf("backward: %d items, HasMore %v, NextCursor %q; want 5, false, empty", len(backward.Items), backward.HasMore, backward.NextCursor)
+	}
+
+	start, end := base.Add(-time.Minute), base.Add(time.Minute)
+	forward, err := bf.Query(ctx, activity.Query{Limit: 5, Start: &start, End: &end, Scope: all})
+	if err != nil {
+		t.Fatalf("forward Query: %v", err)
+	}
+	if len(forward.Items) != 5 || forward.HasMore || forward.NextCursor != "" {
+		t.Fatalf("forward: %d items, HasMore %v, NextCursor %q; want 5, false, empty", len(forward.Items), forward.HasMore, forward.NextCursor)
+	}
+
+	first, err := bf.Query(ctx, activity.Query{Limit: 4, Start: &start, End: &end, Scope: all})
+	if err != nil {
+		t.Fatalf("forward page 1: %v", err)
+	}
+	if len(first.Items) != 4 || !first.HasMore || first.NextCursor == "" {
+		t.Fatalf("forward page 1: %d items, HasMore %v, NextCursor %q; want 4, true, cursor", len(first.Items), first.HasMore, first.NextCursor)
+	}
+	second, err := bf.Query(ctx, activity.Query{Limit: 4, Start: &start, End: &end, Scope: all, Cursor: first.NextCursor})
+	if err != nil {
+		t.Fatalf("forward page 2: %v", err)
+	}
+	if len(second.Items) != 1 || second.HasMore || second.NextCursor != "" {
+		t.Fatalf("forward page 2: %d items, HasMore %v, NextCursor %q; want 1, false, empty", len(second.Items), second.HasMore, second.NextCursor)
 	}
 }

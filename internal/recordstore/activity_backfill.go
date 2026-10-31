@@ -3,6 +3,7 @@ package recordstore
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 )
@@ -32,9 +33,9 @@ func NewActivityBackfill(reader Reader) activity.Backfill {
 }
 
 // Retention reports ("on", days), where days comes from
-// Reader.ActivityRetentionDays. A schema-too-old reader degrades to
-// ("off", 0) rather than returning an error the Backfill interface has no
-// room for; both readers already treat "off" as an empty, harmless page.
+// Reader.ActivityRetentionDays. A failed read reports ("off", 0). Only the
+// deny-by-default page of GET /activity reads it. Query reads the days
+// itself and returns the error.
 func (b *pgBackfill) Retention() (string, int) {
 	days, err := b.reader.ActivityRetentionDays(context.Background())
 	if err != nil {
@@ -76,14 +77,19 @@ func (b *pgBackfill) Recent(ctx context.Context, scope string, limit int) ([]act
 // exist — up to maxActivityBatches.
 //
 // Every item ListActivity returns is a "scanned candidate" whether or not
-// Authorize accepts it. When the batch loop stops mid-batch because
-// accepted reached limit, NextCursor anchors on that exact accepted
-// candidate — never on the batch's own trailing cursor, which would skip
-// over every candidate between the stopping point and the batch's end.
+// Authorize accepts it. When accepted reaches limit mid-batch, NextCursor
+// anchors on that accepted candidate. The batch's own trailing cursor would
+// skip every candidate after the stopping point. HasMore is then true only
+// when a later row of the batch passes Authorize or ListActivity reports more
+// rows. Otherwise the page is the last one and carries no cursor.
 // When a whole batch is consumed without filling limit, NextCursor is
 // that batch's own cursor (ListActivity already anchors it on the
 // limit-th kept row, so continuing from it re-scans nothing this call
 // already processed).
+//
+// Query reads the retention days first and returns a read error at once,
+// so an unreachable store answers ErrUnavailable. A range Start before the
+// retention window returns activity.ErrRangeOutsideRetention.
 func (b *pgBackfill) Query(ctx context.Context, q activity.Query) (activity.Page, error) {
 	limit := q.Limit
 	if limit <= 0 {
@@ -91,6 +97,15 @@ func (b *pgBackfill) Query(ctx context.Context, q activity.Query) (activity.Page
 	}
 	if limit > 250 {
 		limit = 250
+	}
+
+	days, err := b.reader.ActivityRetentionDays(ctx)
+	if err != nil {
+		return activity.Page{}, err
+	}
+	// Zero days set no bound, the same rule as the cursor expiry check.
+	if q.Start != nil && days > 0 && q.Start.Before(time.Now().Add(-time.Duration(days)*24*time.Hour)) {
+		return activity.Page{}, activity.ErrRangeOutsideRetention
 	}
 
 	rq := ActivityQuery{
@@ -116,17 +131,21 @@ func (b *pgBackfill) Query(ctx context.Context, q activity.Query) (activity.Page
 		}
 
 		filled := false
-		for _, e := range page.Items {
-			candidate := encodeActivityCursor(activityCursor{Direction: direction, Filters: filters, TS: e.Timestamp, EventKey: activity.EventKey(e)})
-			if q.Authorize == nil || q.Authorize(e) {
-				accepted = append(accepted, e)
+		for i, e := range page.Items {
+			if q.Authorize != nil && !q.Authorize(e) {
+				continue
 			}
-			if len(accepted) >= limit {
-				nextCursor = candidate
-				hasMore = true
-				filled = true
-				break
+			accepted = append(accepted, e)
+			if len(accepted) < limit {
+				continue
 			}
+			filled = true
+			hasMore = page.HasMore || anyAuthorized(page.Items[i+1:], q.Authorize)
+			nextCursor = ""
+			if hasMore {
+				nextCursor = encodeActivityCursor(activityCursor{Direction: direction, Filters: filters, TS: e.Timestamp, EventKey: activity.EventKey(e)})
+			}
+			break
 		}
 		if filled {
 			break
@@ -141,10 +160,20 @@ func (b *pgBackfill) Query(ctx context.Context, q activity.Query) (activity.Page
 		rq.Cursor = page.NextCursor
 	}
 
-	mode, days := b.Retention()
-	result := activity.Page{Items: accepted, RetentionMode: mode, RetentionDays: days, HasMore: hasMore}
+	result := activity.Page{Items: accepted, RetentionMode: "on", RetentionDays: days, HasMore: hasMore}
 	if hasMore {
 		result.NextCursor = nextCursor
 	}
 	return result, nil
+}
+
+// anyAuthorized reports whether authorize accepts one or more of events.
+// A nil authorize accepts every event.
+func anyAuthorized(events []activity.Event, authorize func(activity.Event) bool) bool {
+	for _, e := range events {
+		if authorize == nil || authorize(e) {
+			return true
+		}
+	}
+	return false
 }
