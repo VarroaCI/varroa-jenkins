@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/api/sse"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
 // --------------------------------------------------------------------------
@@ -453,5 +455,136 @@ func TestActivityFilter_AcceptsMCPSource(t *testing.T) {
 				t.Errorf("source=%s rejected: %v", src, err)
 			}
 		})
+	}
+}
+
+// TestHandleActivity_ExcludeRoutineSignIns proves the flag drops each routine
+// local sign-in and keeps break-glass, failed, and other events.
+func TestHandleActivity_ExcludeRoutineSignIns(t *testing.T) {
+	at := time.Now()
+	events := []activity.Event{
+		{Timestamp: at, Namespace: "ns", Controller: "c1", Type: "auth.local.login", Source: "user", Severity: "info", Message: "routine"},
+		{Timestamp: at, Namespace: "ns", Controller: "c1", Type: "auth.local.login", Source: "user", Severity: "warning", Message: "break-glass"},
+		{Timestamp: at, Namespace: "ns", Controller: "c1", Type: "auth.local.login_failed", Source: "user", Severity: "warning", Message: "failed"},
+		{Timestamp: at, Type: "settings.updated", Source: "user", Severity: "info", Message: "settings"},
+	}
+	srv := NewServer(&Dependencies{
+		Backfill:   &fakeBackfill{events: events},
+		Authorizer: testAuthorizer(true, ""),
+		Logger:     slog.Default(),
+	})
+
+	get := func(t *testing.T, target string) []activity.Event {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req = req.WithContext(contextWithClaims(req.Context(), &auth.Claims{Subject: "test-user"}))
+		w := httptest.NewRecorder()
+		srv.handleActivity(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d: %s", target, w.Code, w.Body.String())
+		}
+		var envelope struct {
+			Items []activity.Event `json:"items"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return envelope.Items
+	}
+
+	if got := get(t, "/activity"); len(got) != 4 {
+		t.Fatalf("without the flag: expected 4 events, got %d: %+v", len(got), got)
+	}
+	got := get(t, "/activity?excludeRoutineSignIns=true")
+	if len(got) != 3 {
+		t.Fatalf("with the flag: expected 3 events, got %d: %+v", len(got), got)
+	}
+	for _, e := range got {
+		if e.Type == "auth.local.login" && e.Severity != "warning" {
+			t.Errorf("routine sign-in leaked through the flag: %+v", e)
+		}
+	}
+}
+
+// TestHandleActivityStream_ExcludeRoutineSignIns proves the live stream applies
+// the same flag as the backfill: a routine sign-in is not sent.
+func TestHandleActivityStream_ExcludeRoutineSignIns(t *testing.T) {
+	ch := make(chan sse.Record, 2)
+	ch <- sse.Record{Event: "activity", Data: activity.Event{Type: "auth.local.login", Source: "user", Severity: "info", Namespace: "ns", Controller: "c1", Message: "routine", Timestamp: time.Now()}}
+	ch <- sse.Record{Event: "activity", Data: activity.Event{Type: "auth.local.login", Source: "user", Severity: "warning", Namespace: "ns", Controller: "c1", Message: "break-glass", Timestamp: time.Now()}}
+	close(ch)
+
+	srv := NewServer(&Dependencies{
+		Authorizer:  testAuthorizer(true, ""),
+		Broadcaster: &fakeActivitySource{ch: ch},
+		Logger:      slog.Default(),
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/activity/stream?excludeRoutineSignIns=true", nil).
+		WithContext(authContext(&auth.Claims{Subject: "test-user"}))
+	w := httptest.NewRecorder()
+
+	srv.handleActivityStream(w, req)
+
+	body := w.Body.String()
+	if n := strings.Count(body, "event: activity\n"); n != 1 {
+		t.Fatalf("expected exactly one activity frame, got %d: %s", n, body)
+	}
+	if !strings.Contains(body, "break-glass") {
+		t.Errorf("expected the break-glass frame, got: %s", body)
+	}
+	if strings.Contains(body, "routine") {
+		t.Errorf("routine sign-in reached the stream: %s", body)
+	}
+}
+
+func TestActivityFilter_ExcludeRoutineSignInsValues(t *testing.T) {
+	tests := []struct {
+		raw     string
+		want    bool
+		wantErr bool
+	}{
+		{"", false, false},
+		{"false", false, false},
+		{"true", true, false},
+		{"yes", false, true},
+	}
+	for _, tt := range tests {
+		t.Run("value="+tt.raw, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/activity?excludeRoutineSignIns="+tt.raw, nil)
+			q, err := parseActivityQuery(req, nil)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if q.ExcludeRoutineSignIns != tt.want {
+				t.Errorf("ExcludeRoutineSignIns = %v, want %v", q.ExcludeRoutineSignIns, tt.want)
+			}
+		})
+	}
+}
+
+// TestHandleActivity_RecordStoreUnreachable proves a backfill that cannot reach
+// the record store answers 503 with the record_store_unreachable code, the
+// answer the pipelines reads give.
+func TestHandleActivity_RecordStoreUnreachable(t *testing.T) {
+	srv := NewServer(&Dependencies{
+		Backfill:   &fakeBackfill{err: fmt.Errorf("list activity: %w", recordstore.ErrUnavailable)},
+		Authorizer: testAuthorizer(true, ""),
+		Logger:     slog.Default(),
+	})
+	req := httptest.NewRequest(http.MethodGet, "/activity", nil)
+	req = req.WithContext(contextWithClaims(req.Context(), &auth.Claims{Subject: "test-user"}))
+	w := httptest.NewRecorder()
+
+	srv.handleActivity(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != codeRecordStoreUnreachable {
+		t.Errorf("code = %q, want %q", body["code"], codeRecordStoreUnreachable)
 	}
 }

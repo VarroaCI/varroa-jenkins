@@ -44,7 +44,9 @@ compact summaries. Pass `verbose: true` where supported, or call the matching
 
 `list_activity` returns complete events and accepts `limit`. The default is 50
 and the maximum is 200. It returns an empty list when the record store is not
-wired.
+wired. It returns a tool error when the record store does not answer. Set
+`excludeRoutineSignIns` to `true` to leave out routine local sign-ins.
+Break-glass and failed sign-ins stay.
 
 `search` returns a kind-tagged envelope across seven result kinds:
 controller, namespace, group, catalogitem, job, run, and activity. Each kind

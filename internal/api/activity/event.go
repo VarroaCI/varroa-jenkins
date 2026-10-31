@@ -53,3 +53,15 @@ func (e *Event) Normalize() {
 		}
 	}
 }
+
+// LocalSignInType is the activity type of a successful local sign-in.
+const LocalSignInType = "auth.local.login"
+
+// IsRoutineSignIn reports whether e is a routine local sign-in: a sign-in
+// below warning severity. A break-glass sign-in carries warning severity, so
+// it is never routine. The SQL form in recordstore.ListActivity must match
+// this rule. Call it after Normalize, which leaves only info, warning, or
+// error, so "not warning and not error" means info.
+func IsRoutineSignIn(e Event) bool {
+	return e.Type == LocalSignInType && e.Severity != "warning" && e.Severity != "error"
+}

@@ -20,7 +20,6 @@ import {
   GROUP_MAX,
   MAX_BUFFER,
   activitySubject,
-  isRoutineSignIn,
 } from "./activityTimeline.util";
 import type { ActivityEvent } from "../types";
 
@@ -597,19 +596,5 @@ describe("activitySubject", () => {
   it("names no subject when the message already starts with the actor", () => {
     const e = makeEvent({ actor: "local:bob", message: "local:bob signed in" });
     expect(activitySubject(e)).toEqual({ message: "local:bob signed in" });
-  });
-});
-
-describe("isRoutineSignIn", () => {
-  it("is true for an informational local sign-in", () => {
-    expect(isRoutineSignIn(makeEvent({ type: "auth.local.login", severity: "info" }))).toBe(true);
-  });
-
-  it("is false for a local sign-in that carries a warning", () => {
-    expect(isRoutineSignIn(makeEvent({ type: "auth.local.login", severity: "warning" }))).toBe(false);
-  });
-
-  it("is false for a failed sign-in", () => {
-    expect(isRoutineSignIn(makeEvent({ type: "auth.local.login_failed" }))).toBe(false);
   });
 });

@@ -16,6 +16,7 @@
       - {name: end, in: query, schema: {type: string, format: date-time}}
       - {name: cursor, in: query, schema: {type: string}}
       - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 250, default: 100}}
+      - {name: excludeRoutineSignIns, in: query, description: 'true leaves out each routine local sign-in, an auth.local.login event below warning severity.', schema: {type: boolean, default: false}}
     responses:
       "200":
         description: Activity history page.
@@ -40,6 +41,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "410":
         description: Cursor has aged out of retention.
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
 
 /api/v1/activity/stream:
   get:
@@ -56,6 +59,7 @@
       - {name: severity, in: query, schema: {type: string}}
       - {name: actor, in: query, schema: {type: string}}
       - {name: type, in: query, schema: {type: string}}
+      - {name: excludeRoutineSignIns, in: query, description: 'true leaves out each routine local sign-in, an auth.local.login event below warning severity.', schema: {type: boolean, default: false}}
     responses:
       "200":
         description: 'SSE event stream (event: activity, data = ActivityEvent).'

@@ -2597,6 +2597,10 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 			s.writeJSONError(w, http.StatusGone, err.Error())
 			return
 		}
+		if errors.Is(err, recordstore.ErrUnavailable) {
+			s.writeRecordStoreUnreachable(w)
+			return
+		}
 		s.deps.Logger.Error("activity backfill failed", "error", err)
 		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load activity"})
 		return
@@ -2649,6 +2653,13 @@ func parseActivityQuery(r *http.Request, backfill activity.Backfill) (activity.Q
 	}
 	if !valid(q.Source, "operator", "mite", "jenkins", "user", "api", "mcp", "assistant", "tenant_agent") || !valid(q.Severity, "info", "warning", "error") {
 		return q, fmt.Errorf("invalid activity filter")
+	}
+	switch v.Get("excludeRoutineSignIns") {
+	case "", "false":
+	case "true":
+		q.ExcludeRoutineSignIns = true
+	default:
+		return q, fmt.Errorf("excludeRoutineSignIns must be true or false")
 	}
 	return q, nil
 }

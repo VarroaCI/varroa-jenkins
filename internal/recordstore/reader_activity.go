@@ -21,12 +21,15 @@ const (
 
 // ActivityQuery is ListActivity's filter, scope, and paging input. Every
 // filter but Start and End is an exact match; Start and End bound the
-// timestamp range. Scope is D5's SQL-pushed-down read scope — a sound
-// superset of what the caller may read. The caller applies the
-// authoritative per-event predicate afterward; ListActivity does not.
+// timestamp range. ExcludeRoutineSignIns is the one exclusion: it leaves
+// out each routine local sign-in. Scope is D5's SQL-pushed-down read
+// scope — a sound superset of what the caller may read. The caller
+// applies the authoritative per-event predicate afterward; ListActivity
+// does not.
 type ActivityQuery struct {
 	Cluster, Controller, Namespace, Source, Severity, Actor, Type string
 	Start, End                                                    *time.Time
+	ExcludeRoutineSignIns                                         bool
 	Limit                                                         int
 	Cursor                                                        string
 	Scope                                                         activity.Scope
@@ -52,9 +55,10 @@ type activityCursor struct {
 	EventKey  string    `json:"eventKey"`
 }
 
-// activityFilterKey fingerprints the nine filters ListActivity accepts
-// plus the scope, so a cursor minted for one query cannot silently resume
-// a differently filtered or differently scoped one.
+// activityFilterKey fingerprints the nine filters ListActivity accepts,
+// the routine sign-in exclusion when it is set, and the scope, so a cursor
+// minted for one query cannot silently resume a differently filtered or
+// differently scoped one. An unset exclusion adds nothing to the key.
 func activityFilterKey(q ActivityQuery) string {
 	start, end := "", ""
 	if q.Start != nil {
@@ -63,10 +67,14 @@ func activityFilterKey(q ActivityQuery) string {
 	if q.End != nil {
 		end = q.End.UTC().Format(time.RFC3339Nano)
 	}
-	return strings.Join([]string{
+	parts := []string{
 		start, end, q.Cluster, q.Controller, q.Namespace, q.Source, q.Severity, q.Actor, q.Type,
 		fmt.Sprintf("%v|%v|%v", q.Scope.All, q.Scope.Global, q.Scope.Namespaces),
-	}, "\x1f")
+	}
+	if q.ExcludeRoutineSignIns {
+		parts = append(parts, "excludeRoutineSignIns")
+	}
+	return strings.Join(parts, "\x1f")
 }
 
 func encodeActivityCursor(c activityCursor) string {
@@ -136,6 +144,12 @@ func (r *pgReader) ListActivity(ctx context.Context, q ActivityQuery) (ActivityP
 	}
 	if q.Type != "" {
 		addEq("type", q.Type)
+	}
+	if q.ExcludeRoutineSignIns {
+		// The SQL form of activity.IsRoutineSignIn. The severity column holds
+		// the normalized severity, so a warning or error row is never routine.
+		args = append(args, activity.LocalSignInType)
+		clauses = append(clauses, fmt.Sprintf("NOT (type = $%d AND severity NOT IN ('warning', 'error'))", len(args)))
 	}
 	if q.Start != nil {
 		args = append(args, *q.Start)

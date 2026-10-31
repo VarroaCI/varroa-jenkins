@@ -3,6 +3,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -10,6 +11,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
 // =============================================================================
@@ -25,6 +27,7 @@ func registerActivitySearchMetaTools(mcpServer *server.MCPServer, deps *api.Depe
 			"flat; every field is returned."),
 		mcp.WithString("controller", mcp.Description("Optional controller name filter")),
 		mcp.WithNumber("limit", mcp.Description("Maximum number of events to return (default 50, max 200)")),
+		mcp.WithBoolean("excludeRoutineSignIns", mcp.Description("Set true to leave out routine local sign-ins: auth.local.login events below warning severity. Break-glass and failed sign-ins stay.")),
 		withListOutput(activityListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, activityTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -54,13 +57,17 @@ func registerActivitySearchMetaTools(mcpServer *server.MCPServer, deps *api.Depe
 		if err != nil {
 			return mcp.NewToolResultError("authentication required"), nil
 		}
-		query := activity.Query{Controller: controller, Limit: limit}
+		exclude, _ := boolArg(args, "excludeRoutineSignIns")
+		query := activity.Query{Controller: controller, Limit: limit, ExcludeRoutineSignIns: exclude}
 		query.Scope = activity.ScopeFromPermissions(deps.Authorizer.EffectivePermissions(claims), deps.Authorizer.CanReadGlobalActivity(claims))
 		query.Authorize = func(e activity.Event) bool {
 			return deps.Authorizer.CanReadActivityEvent(claims, e)
 		}
 		page, qerr := deps.Backfill.Query(ctx, query)
 		if qerr != nil {
+			if errors.Is(qerr, recordstore.ErrUnavailable) {
+				return mcp.NewToolResultError("record store unreachable: activity is not available"), nil
+			}
 			return mcp.NewToolResultError("failed to load activity: " + qerr.Error()), nil
 		}
 		return resultJSON(page.Items)

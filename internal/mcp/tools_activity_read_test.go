@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -102,6 +104,51 @@ func TestListActivityControllerFilter(t *testing.T) {
 	events := callListActivity(t, deps, map[string]interface{}{"controller": "auditboi"})
 	if len(events) != 1 || events[0].Controller != "auditboi" {
 		t.Fatalf("expected only auditboi events, got %+v", events)
+	}
+}
+
+func TestListActivityExcludeRoutineSignIns(t *testing.T) {
+	deps := backfillDeps(
+		activity.Event{Type: "auth.local.login", Severity: "info", Source: "user", Controller: "auditboi", Namespace: "varroa", Message: "routine"},
+		activity.Event{Type: "controller.created", Severity: "info", Controller: "auditboi", Namespace: "varroa", Message: "created"},
+	)
+	if events := callListActivity(t, deps, map[string]interface{}{}); len(events) != 2 {
+		t.Fatalf("without the flag: expected 2 events, got %d", len(events))
+	}
+	events := callListActivity(t, deps, map[string]interface{}{"excludeRoutineSignIns": true})
+	if len(events) != 1 || events[0].Type != "controller.created" {
+		t.Fatalf("with the flag: expected only controller.created, got %+v", events)
+	}
+}
+
+// unreachableBackfill answers every read as a record store that did not reply.
+type unreachableBackfill struct{}
+
+func (unreachableBackfill) Recent(context.Context, string, int) ([]activity.Event, error) {
+	return nil, fmt.Errorf("recent: %w", recordstore.ErrUnavailable)
+}
+
+func (unreachableBackfill) Retention() (string, int) { return "off", 0 }
+
+func (unreachableBackfill) Query(context.Context, activity.Query) (activity.Page, error) {
+	return activity.Page{}, fmt.Errorf("list activity: %w", recordstore.ErrUnavailable)
+}
+
+func TestListActivityRecordStoreUnreachable(t *testing.T) {
+	deps := newTestDeps()
+	deps.Backfill = unreachableBackfill{}
+	deps.Authorizer = guardAuthorizer()
+	handler := NewHandler(deps)
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name":      "list_activity",
+		"arguments": map[string]interface{}{},
+	}, guardClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError {
+		t.Fatalf("expected a tool error, got %v", tr.Content)
+	}
+	if len(tr.Content) == 0 || !strings.Contains(tr.Content[0].Text, "record store unreachable") {
+		t.Fatalf("expected the unreachable message, got %v", tr.Content)
 	}
 }
 

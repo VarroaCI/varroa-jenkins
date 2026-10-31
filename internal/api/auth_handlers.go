@@ -81,7 +81,7 @@ func (s *Server) auditLocalLogin(username string, purpose v1alpha1.UserPurpose, 
 	}
 	actor := auth.LocalSubjectPrefix + username
 	e := activity.Event{
-		Type:     "auth.local.login",
+		Type:     activity.LocalSignInType,
 		Source:   "user",
 		Severity: "info",
 		Actor:    actor,

@@ -37,7 +37,8 @@ vi.mock("@tanstack/react-virtual", () => ({
 // ── Other mocks ────────────────────────────────────────────────────────────
 
 const mockBffFetch = vi.fn();
-vi.mock("../hooks/useApi", () => ({
+vi.mock("../hooks/useApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hooks/useApi")>()),
   bffFetch: (...args: unknown[]) => mockBffFetch(...args),
   getToken: () => null,
 }));

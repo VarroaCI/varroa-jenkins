@@ -97,6 +97,7 @@ func (b *pgBackfill) Query(ctx context.Context, q activity.Query) (activity.Page
 		Cluster: q.Cluster, Controller: q.Controller, Namespace: q.Namespace,
 		Source: q.Source, Severity: q.Severity, Actor: q.Actor, Type: q.Type,
 		Start: q.Start, End: q.End, Limit: limit, Cursor: q.Cursor, Scope: q.Scope,
+		ExcludeRoutineSignIns: q.ExcludeRoutineSignIns,
 	}
 	direction := "backward"
 	if q.Start != nil {
