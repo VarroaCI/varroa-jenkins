@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.9.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.8.0...v0.9.0) (2026-10-31)
+
+
+### Features
+
+* **api:** lint a Jenkinsfile for a member-placed tenant ([6aca3dd](https://github.com/VarroaCI/varroa-jenkins/commit/6aca3dd7e3726be408cf21c157d69f6272091c46))
+* **api:** serve run quality and job quality trend ([5ef5615](https://github.com/VarroaCI/varroa-jenkins/commit/5ef5615e09b95a4da738d1bda051bcfb701528e7))
+* **api:** serve the build badge for member-placed pipelines tenants ([1b7d67c](https://github.com/VarroaCI/varroa-jenkins/commit/1b7d67cf49106fc1cbbe92f733b84ad40baf468e))
+* **frontend:** replace the pipelines tenant list with the command center ([7bff0ec](https://github.com/VarroaCI/varroa-jenkins/commit/7bff0ecce532fb6c1512f41d917dd4b1503a9283))
+* **frontend:** show quality and quality trend cards ([fe16f67](https://github.com/VarroaCI/varroa-jenkins/commit/fe16f67940e65530536f7ab3ed5b942d4c391c5f))
+* **pipelines:** group the build log by stage and fold agent manifests ([8743953](https://github.com/VarroaCI/varroa-jenkins/commit/8743953575467947773e55561876bf63066ad6eb))
+* **plugin:** export coverage and warnings summaries on the completed event ([7339d58](https://github.com/VarroaCI/varroa-jenkins/commit/7339d58fe03f57913b0402b63abc086a24a0afe9))
+* **pluginlock:** pin coverage and warnings-ng in the core set ([fa792b9](https://github.com/VarroaCI/varroa-jenkins/commit/fa792b9f671d983748eeca40993580621abe779c))
+* **recordstore:** store run coverage and warnings summaries ([123d33f](https://github.com/VarroaCI/varroa-jenkins/commit/123d33fb5630ab2c55e0d990c2d4a4b80fdd11bf))
+
+
+### Bug Fixes
+
+* **cells:** name an unreachable record store on the cell surfaces ([870e35e](https://github.com/VarroaCI/varroa-jenkins/commit/870e35ec8948dfa61d16592b49554bf05ea62421))
+* **frontend:** clarify tenant home, activity feed, and dashboard health ([4ea0a2c](https://github.com/VarroaCI/varroa-jenkins/commit/4ea0a2c09df7e3c4900e36134eff242008db20fb))
+* **frontend:** give wide tables one scroll cue at phone width ([f202c36](https://github.com/VarroaCI/varroa-jenkins/commit/f202c363f9a47820eee98aa2b8e20e039c3b938e))
+* **frontend:** hold the assistant drawer to the viewport and use shared controls ([53677a7](https://github.com/VarroaCI/varroa-jenkins/commit/53677a73ece9711df4487007f9d946efc8acd32b))
+* **frontend:** keep accent text and the log pane legible in dark ([9475d48](https://github.com/VarroaCI/varroa-jenkins/commit/9475d488537411785851cabdf7e08b569317784f))
+* **frontend:** show cluster-wide grants once and flag unready cell pools ([dd5f064](https://github.com/VarroaCI/varroa-jenkins/commit/dd5f0647e575eed85187f822cb95bb69fe64f3d5))
+* **frontend:** show the area sub-nav as a strip at phone width ([0bb7aa8](https://github.com/VarroaCI/varroa-jenkins/commit/0bb7aa8b4333c648c309c0321262e72fc420db3a))
+* **frontend:** show the username for a local account with no name ([e90287a](https://github.com/VarroaCI/varroa-jenkins/commit/e90287a9b411032f2535fc1b80a561709e0ed4ef))
+* **frontend:** stretch the mid-width assistant drawer to the window bottom ([4167d58](https://github.com/VarroaCI/varroa-jenkins/commit/4167d583ee4b87b9720c8c4b81c207255e1b0231))
+* **frontend:** tidy the job page, charts, filters, and multibranch card ([0fb5d26](https://github.com/VarroaCI/varroa-jenkins/commit/0fb5d26e3887e125ba0f391872b7a65bde22477d))
+* **pipelines:** keep a stage run across lines with no stage ([2e4c1fb](https://github.com/VarroaCI/varroa-jenkins/commit/2e4c1fb345b7a00c0f9b7724834b73f5b405ba42))
+* **pipelines:** tidy command center rows and fix the overview pass rate ([559e63c](https://github.com/VarroaCI/varroa-jenkins/commit/559e63cff7304fcb305e63fc626bea06a088a4a0))
+* **plugin:** clear the 44 SpotBugs findings and run SpotBugs in verify ([8a9881b](https://github.com/VarroaCI/varroa-jenkins/commit/8a9881bac61e7da39268c4acbe507e186dac7159))
+* **recordstore:** bound record-store waits when Postgres is unreachable ([b0ecf47](https://github.com/VarroaCI/varroa-jenkins/commit/b0ecf4797223dbcf6d7d0c80384d6a3f3e497e82))
+* **recordstore:** keep the assistant on and answer outages fast ([d2bb996](https://github.com/VarroaCI/varroa-jenkins/commit/d2bb996233d65673ba6e2fe293ef1f08bccd49b3))
+* **recordstore:** write an empty-incarnation webhook delivery as dropped ([9eb5824](https://github.com/VarroaCI/varroa-jenkins/commit/9eb582415b56de9cb098694e788867a9ad094636))
+* **run-digest:** hide agent pod manifests and gate the first-error control ([bb503c4](https://github.com/VarroaCI/varroa-jenkins/commit/bb503c443ddb317fd5ce23f665237b03d6202620))
+* **run-quality:** count the reports and metrics a run does not keep ([ba81bcf](https://github.com/VarroaCI/varroa-jenkins/commit/ba81bcf32515f9546b3f41ecc5e87d53206c890c))
+
 ## [0.8.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.7.0...v0.8.0) (2026-10-26)
 
 
