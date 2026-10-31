@@ -128,6 +128,23 @@
   font-size: 0.8125rem;
 }
 
+/*
+ * The commit subject takes its own line below the build. It breaks at any
+ * character and stops at two lines, so a long subject never widens the
+ * table past its minimum width.
+ */
+.commitSubject {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  max-width: 32ch;
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}
+
 .pendingBadge {
   margin-left: 0.5rem;
   padding: 0.05rem 0.4rem;

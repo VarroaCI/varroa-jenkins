@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
@@ -52,12 +51,11 @@ func upstreamLabel(run recordstore.Run) string {
 	return label
 }
 
-// fleetRunTitle answers the first line of the newest commit message of a run.
-// A run with no commit message answers its job path.
+// fleetRunTitle answers the newest commit subject of a run. A run with no
+// commit subject answers its job path.
 func fleetRunTitle(run recordstore.Run) string {
-	message := latestChangeMessage(run.Changes)
-	if line, _, _ := strings.Cut(message, "\n"); strings.TrimSpace(line) != "" {
-		return strings.TrimSpace(line)
+	if subject := latestChangeSubject(run.Changes); subject != "" {
+		return subject
 	}
 	return run.JobPath
 }

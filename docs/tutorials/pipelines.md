@@ -82,8 +82,8 @@ names the run's top-level stage in progress. A running build with no stage in pr
 `Starting`, and a build that has not started reads `Queued`.
 
 **Pipelines** holds the tenant's folder tree. A job row carries its health, its last build, its
-branch, its last eight build durations, and when it last ran. The last build shows a status glyph
-and the actor. **Queue wait** shows the job's
+branch, its last eight build durations, and when it last ran. The last build shows a status glyph,
+the actor, and the commit subject, cut to two lines. **Queue wait** shows the job's
 median wait from queue entry to start over the last 30 days. Health is a weather glyph. A job
 that never finished a counted build shows no glyph and an empty last build. See
 [Read a job's health](#read-a-jobs-health).

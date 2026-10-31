@@ -176,15 +176,22 @@ function JobRow({ tenant, node, item }: { tenant: string; node: JobTreeNode; ite
       </td>
       <td>
         {item.lastBuild ? (
-          <span className={styles.lastBuildCell}>
-            <RunGlyphMark size="sm" run={item.lastBuild} />
-            <Link to={runHref(tenant, item.jobPath, item.lastBuild.runId)}>
-              #{item.lastBuild.buildNumber ?? "—"}
-            </Link>
-            {displayActor(item.lastBuild.actor) && (
-              <span className={styles.actor}>by {displayActor(item.lastBuild.actor)}</span>
+          <>
+            <span className={styles.lastBuildCell}>
+              <RunGlyphMark size="sm" run={item.lastBuild} />
+              <Link to={runHref(tenant, item.jobPath, item.lastBuild.runId)}>
+                #{item.lastBuild.buildNumber ?? "—"}
+              </Link>
+              {displayActor(item.lastBuild.actor) && (
+                <span className={styles.actor}>by {displayActor(item.lastBuild.actor)}</span>
+              )}
+            </span>
+            {item.lastBuild.changeSummary && (
+              <span className={styles.commitSubject} title={item.lastBuild.changeSummary}>
+                {item.lastBuild.changeSummary}
+              </span>
             )}
-          </span>
+          </>
         ) : (
           <span className={styles.dim}>—</span>
         )}

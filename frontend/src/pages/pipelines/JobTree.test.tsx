@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import JobTree from "./JobTree";
 import type { JobTreeNode } from "./jobTree";
+import styles from "./JobTree.module.css";
 import { createPipelineSummary } from "../../test/factories";
 
 // multibranchNode is a folder-relative multibranch item with no built
@@ -106,7 +107,7 @@ function renderRows(rows: JobTreeNode[]) {
   );
 }
 
-function jobWithLastBuild(actor: string) {
+function jobWithLastBuild(actor: string, changeSummary?: string) {
   const node = jobNode("acme/app-a", false);
   return {
     ...node,
@@ -118,6 +119,7 @@ function jobWithLastBuild(actor: string) {
         result: "FAILURE",
         buildNumber: 7,
         actor,
+        changeSummary,
       },
     }),
   } as unknown as JobTreeNode;
@@ -133,6 +135,19 @@ describe("JobTree last build cell", () => {
   it("hides an unknown actor", () => {
     renderRows([jobWithLastBuild("unknown")]);
     expect(screen.queryByText(/^by /)).not.toBeInTheDocument();
+  });
+
+  it("shows the commit subject below the actor", () => {
+    renderRows([jobWithLastBuild("alice", "fix the cache key")]);
+    const subject = screen.getByText("fix the cache key");
+    expect(subject).toHaveAttribute("title", "fix the cache key");
+    expect(subject).toHaveClass(styles.commitSubject);
+    expect(screen.getByText("by alice")).toBeInTheDocument();
+  });
+
+  it("shows no commit subject when the last build has none", () => {
+    renderRows([jobWithLastBuild("alice")]);
+    expect(document.querySelector(`.${styles.commitSubject}`)).toBeNull();
   });
 });
 

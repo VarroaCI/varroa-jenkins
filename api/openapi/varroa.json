@@ -2788,6 +2788,10 @@
           "changeRequest": {
             "$ref": "#/components/schemas/components_schemas_ChangeRequest"
           },
+          "changeSummary": {
+            "description": "The subject of the newest commit of the run. Absent until the run records its change list, and for a run with no change.",
+            "type": "string"
+          },
           "cluster": {
             "description": "The cluster that holds the run.",
             "type": "string"
@@ -5286,6 +5290,10 @@
           "changeRequest": {
             "$ref": "#/components/schemas/components_schemas_ChangeRequest"
           },
+          "changeSummary": {
+            "description": "The subject of the newest commit of the run. Absent until the run records its change list, and for a run with no change.\n",
+            "type": "string"
+          },
           "durationMs": {
             "format": "int64",
             "type": "integer"
@@ -5525,7 +5533,7 @@
             "$ref": "#/components/schemas/components_schemas_ChangeRequest"
           },
           "changeSummary": {
-            "description": "The last commit's short message.",
+            "description": "The subject of the newest commit of the run.",
             "type": "string"
           },
           "currentStage": {
@@ -11344,6 +11352,10 @@
           "changeRequest": {
             "$ref": "#/components/schemas/components_schemas_ChangeRequest"
           },
+          "changeSummary": {
+            "description": "The subject of the newest commit of the run. Absent until the run records its change list, and for a run with no change.",
+            "type": "string"
+          },
           "cluster": {
             "description": "The cluster that holds the run.",
             "type": "string"
@@ -15495,6 +15507,10 @@
           "changeRequest": {
             "$ref": "#/components/schemas/components_schemas_ChangeRequest"
           },
+          "changeSummary": {
+            "description": "The subject of the newest commit of the run. Absent until the run records its change list, and for a run with no change.\n",
+            "type": "string"
+          },
           "durationMs": {
             "format": "int64",
             "type": "integer"
@@ -15981,7 +15997,7 @@
             "$ref": "#/components/schemas/components_schemas_ChangeRequest"
           },
           "changeSummary": {
-            "description": "The last commit's short message.",
+            "description": "The subject of the newest commit of the run.",
             "type": "string"
           },
           "currentStage": {

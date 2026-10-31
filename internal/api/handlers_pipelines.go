@@ -53,10 +53,13 @@ type runSummaryJSON struct {
 	SCMForge      string             `json:"scmForge,omitempty"`
 	TriggerSource string             `json:"triggerSource,omitempty"`
 	ChangeRequest *changeRequestJSON `json:"changeRequest,omitempty"`
-	QueuedAt      *time.Time         `json:"queuedAt,omitempty"`
-	StartedAt     *time.Time         `json:"startedAt,omitempty"`
-	EndedAt       *time.Time         `json:"endedAt,omitempty"`
-	DurationMs    int64              `json:"durationMs,omitempty"`
+	// ChangeSummary is the subject of the run's newest commit. It is absent
+	// until the run records its change list, and for a run with no change.
+	ChangeSummary string     `json:"changeSummary,omitempty"`
+	QueuedAt      *time.Time `json:"queuedAt,omitempty"`
+	StartedAt     *time.Time `json:"startedAt,omitempty"`
+	EndedAt       *time.Time `json:"endedAt,omitempty"`
+	DurationMs    int64      `json:"durationMs,omitempty"`
 }
 
 type runningRunJSON struct {
@@ -369,6 +372,7 @@ func buildRunSummary(run recordstore.Run) runSummaryJSON {
 	o := runOriginOf(run.Payload)
 	s.SCMURL, s.SCMForge, s.TriggerSource = o.SCMURL, o.SCMForge, o.TriggerSource
 	s.ChangeRequest = changeRequestOf(run.Payload)
+	s.ChangeSummary = latestChangeSubject(run.Changes)
 	s.QueuedAt = run.QueuedAt
 	s.StartedAt = run.StartedAt
 	s.EndedAt = run.EndedAt
@@ -425,6 +429,14 @@ func latestChangeMessage(raw json.RawMessage) string {
 	return entries[len(entries)-1].Message
 }
 
+// latestChangeSubject returns the first line of the newest commit message,
+// with surrounding white space removed. Every changeSummary field and the
+// fleet title read it, so the surfaces show the same text.
+func latestChangeSubject(raw json.RawMessage) string {
+	line, _, _ := strings.Cut(latestChangeMessage(raw), "\n")
+	return strings.TrimSpace(line)
+}
+
 // buildPipelineSummary converts one job's record-store summary into the
 // Pipelines table row.
 func buildPipelineSummary(js recordstore.JobSummary) pipelineSummaryJSON {
@@ -453,9 +465,8 @@ func averageInt64(vs []int64) int64 {
 // trendMs is the job's duration trend, when known, for typicalDurationMs.
 // currentStage is the run's stage in progress. It is empty when the run
 // holds no such stage, and the tile then names the run's own state.
-// ChangeSummary reads runs.changes, which the gateway fills only at the
-// completed phase, so a QUEUED or RUNNING row has no entry yet and the
-// tile shows no change summary until the build finishes.
+// ChangeSummary is the newest commit subject. A run.source event or the
+// completed event fills runs.changes, so a queued run has none.
 func buildRunningRun(run recordstore.Run, trendMs []int64, currentStage string) runningRunJSON {
 	out := runningRunJSON{RunID: run.RunID, JobPath: run.JobPath, Status: run.Status}
 	if run.BuildNumber != nil {
@@ -469,7 +480,7 @@ func buildRunningRun(run recordstore.Run, trendMs []int64, currentStage string) 
 	}
 	out.CurrentStage = currentStage
 	out.ChangeRequest = changeRequestOf(run.Payload)
-	out.ChangeSummary = latestChangeMessage(run.Changes)
+	out.ChangeSummary = latestChangeSubject(run.Changes)
 	out.QueuedAt = run.QueuedAt
 	out.StartedAt = run.StartedAt
 	out.TypicalDurationMs = averageInt64(trendMs)
