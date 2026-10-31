@@ -230,16 +230,31 @@ func (s *Server) handleGetMyAssistant(w http.ResponseWriter, r *http.Request) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
-	s.writeJSON(w, http.StatusOK, s.myAssistantJSON(r, rt, claims))
+	body, err := s.myAssistantJSON(r, rt, claims)
+	if err != nil {
+		s.assistantStoreError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, body)
 }
 
 // myAssistantJSON builds the caller's assistant view: the settings, the key
-// state, the level per provider, and the day spend.
-func (s *Server) myAssistantJSON(r *http.Request, rt *AssistantRuntime, claims *auth.Claims) map[string]any {
+// state, the level per provider, and the day spend. A failed store read
+// returns its error. The view never holds the defaults of a read that failed.
+func (s *Server) myAssistantJSON(r *http.Request, rt *AssistantRuntime, claims *auth.Claims) (map[string]any, error) {
 	ctx := r.Context()
-	user, _ := rt.Store.GetSettings(ctx, agent.UserScope(claims.Subject))
-	global, _ := rt.Store.GetSettings(ctx, agent.ScopeGlobal)
-	day, _ := rt.Store.DaySpend(ctx, claims.Subject)
+	user, err := rt.Store.GetSettings(ctx, agent.UserScope(claims.Subject))
+	if err != nil {
+		return nil, err
+	}
+	global, err := rt.Store.GetSettings(ctx, agent.ScopeGlobal)
+	if err != nil {
+		return nil, err
+	}
+	day, err := rt.Store.DaySpend(ctx, claims.Subject)
+	if err != nil {
+		return nil, err
+	}
 
 	levels := map[string]string{}
 	for _, e := range rt.Config.Providers {
@@ -267,7 +282,7 @@ func (s *Server) myAssistantJSON(r *http.Request, rt *AssistantRuntime, claims *
 		"effectiveLevels": levels,
 		"dayTokens":       day,
 		"dayBudget":       rt.Config.Budgets.UserDay,
-	}
+	}, nil
 }
 
 // effectiveUserLevel returns the user's data level, or logs when none is set.
@@ -328,7 +343,12 @@ func (s *Server) handlePutMyAssistant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = user
-	s.writeJSON(w, http.StatusOK, s.myAssistantJSON(r, rt, claims))
+	body, err := s.myAssistantJSON(r, rt, claims)
+	if err != nil {
+		s.assistantStoreError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, body)
 }
 
 // assistantKeyRequest is the body of PUT /me/assistant/key.

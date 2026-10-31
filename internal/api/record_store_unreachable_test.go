@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -101,11 +102,14 @@ func TestResolveTenantUnreachable503(t *testing.T) {
 
 func TestAllTenantPlacementsUnreachableDegrades(t *testing.T) {
 	srv := newUnreachableTestServer(nil)
-	rows, ok, err := srv.allTenantPlacements(context.Background())
+	read, err := srv.allTenantPlacements(context.Background())
 	if err != nil {
-		t.Fatalf("allTenantPlacements error = %v, want nil (degrade to local Tenants)", err)
+		t.Fatalf("allTenantPlacements error = %v, want nil (a degraded read, not a failure)", err)
 	}
-	if ok || rows != nil {
-		t.Fatalf("allTenantPlacements = (%v, %v), want (nil, false)", rows, ok)
+	if read.Rows != nil {
+		t.Fatalf("allTenantPlacements rows = %v, want none", read.Rows)
+	}
+	if !errors.Is(read.Degraded, recordstore.ErrUnavailable) {
+		t.Fatalf("allTenantPlacements Degraded = %v, want ErrUnavailable", read.Degraded)
 	}
 }

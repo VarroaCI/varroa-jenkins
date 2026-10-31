@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -44,6 +45,38 @@ func getFleetRuns(t *testing.T, srv *Server, rawQuery string) *httptest.Response
 	rec := httptest.NewRecorder()
 	srv.handleListFleetRuns(rec, req)
 	return rec
+}
+
+// TestListFleetRunsStopsWhenPlacementsFail asserts that a degraded placement
+// read stops the fleet run feed before its run read. The client gets the
+// store's 503, with the code the store's failure carries.
+func TestListFleetRunsStopsWhenPlacementsFail(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		code string
+	}{
+		{"unreachable", fmt.Errorf("%w: x", recordstore.ErrUnavailable), codeRecordStoreUnreachable},
+		{"schema too old", fmt.Errorf("%w: x", recordstore.ErrSchemaTooOld), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &fakeRecordReader{placementsErr: tt.err}
+			srv := fleetServer(t, globalPipelinesAuthorizer(), reader, pipelinesTenant("pay", true, "core", "ns", "c1"))
+			rec := getFleetRuns(t, srv, "")
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, want 503; body = %s", rec.Code, rec.Body)
+			}
+			var body map[string]string
+			decodeBody(t, rec, &body)
+			if body["code"] != tt.code {
+				t.Fatalf("code = %q, want %q; body = %s", body["code"], tt.code, rec.Body)
+			}
+			if len(reader.acrossQueries) != 0 {
+				t.Fatalf("ListRunsAcross calls = %d, want none", len(reader.acrossQueries))
+			}
+		})
+	}
 }
 
 // decodeFleetPage decodes a 200 body and fails on any other status.

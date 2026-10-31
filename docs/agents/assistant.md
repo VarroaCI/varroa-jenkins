@@ -9,7 +9,7 @@ The assistant is off by default. An operator turns it on with the chart.
 ## Configure the assistant
 
 The assistant needs the record store. Its session tables live in the record
-store database.
+store database. When the record store does not answer, the assistant stays on. Its calls answer 503 until the store answers again. A restart is not necessary.
 
 Set these values to turn it on:
 
@@ -195,7 +195,7 @@ with `session_key_missing`.
 | `provider_error` | Error event | The provider call failed. Check the provider and its key. |
 | `session_key_missing` | Error event | The user key cookie is missing. Store the key again. |
 | `lease_lost` | Error event | Another replica stopped the run. Send a new message. |
-| `assistant_disabled` | HTTP 503 | The assistant is off. |
+| `assistant_disabled` | HTTP 503 | The assistant is off, or its store is not ready. Retry when the record store answers. |
 | `assistant_key_unavailable` | HTTP 503 or 409 | No key is available for the provider. |
 | `assistant_off` | HTTP 409 | The caller turned the assistant off. |
 | `assistant_busy` | HTTP 409 or 429 | Too many sessions run, or the session changed. |

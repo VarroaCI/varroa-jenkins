@@ -5,18 +5,20 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"net"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/varroaci/varroa-jenkins/internal/pgdial"
 )
 
 // minGooseSchemaVersion is the lowest applied goose migration version
-// this Reader accepts. Every method returns ErrSchemaTooOld below it.
+// this Reader accepts. Every method returns ErrSchemaTooOld below it until
+// a check passes.
 const minGooseSchemaVersion = 1
 
 // defaultRunPageLimit is ListRuns' page size when the caller gives no
@@ -235,6 +237,10 @@ type pgReader struct {
 	// window, from VARROA_ACTIVITY_RETENTION_DAYS. It bounds how old an
 	// incoming ListActivity cursor may be before ErrCursorExpired.
 	activityRetentionDays int
+	// schemaOK is true after one schema check passes. Migrations only go
+	// up, so it stays true for the life of the Reader. A failed check
+	// never sets it.
+	schemaOK atomic.Bool
 }
 
 // NewReader returns a Reader over pool. activityRetentionDays is the BFF's
@@ -265,7 +271,7 @@ func (r *pgReader) SchemaVersion(ctx context.Context) (int64, error) {
 		if ctx.Err() != nil {
 			return 0, fmt.Errorf("read schema version: %w", err)
 		}
-		if isUnreachable(err) {
+		if pgdial.IsUnreachable(err) {
 			return 0, fmt.Errorf("%w: read schema version: %w", ErrUnavailable, err)
 		}
 		return 0, fmt.Errorf("%w: read schema version: %v", ErrSchemaTooOld, err) //nolint:errorlint // %v, not %w: the wrapped ErrSchemaTooOld is the one sentinel callers match on
@@ -273,26 +279,17 @@ func (r *pgReader) SchemaVersion(ctx context.Context) (int64, error) {
 	if version < minGooseSchemaVersion {
 		return 0, fmt.Errorf("%w: applied version %d is below %d", ErrSchemaTooOld, version, minGooseSchemaVersion)
 	}
+	r.schemaOK.Store(true)
 	return version, nil
 }
 
-// isUnreachable reports whether err means the database did not answer: a
-// deadline, a timeout, a failed connect, or a network error.
-func isUnreachable(err error) bool {
-	if errors.Is(err, context.DeadlineExceeded) || pgconn.Timeout(err) {
-		return true
-	}
-	var connectErr *pgconn.ConnectError
-	if errors.As(err, &connectErr) {
-		return true
-	}
-	var netErr net.Error
-	return errors.As(err, &netErr)
-}
-
-// checkSchema returns SchemaVersion's error unchanged. Every Reader
+// checkSchema returns nil at once after one schema check has passed. Until
+// then it runs SchemaVersion and returns that error unchanged. Every Reader
 // method but SchemaVersion itself calls this first.
 func (r *pgReader) checkSchema(ctx context.Context) error {
+	if r.schemaOK.Load() {
+		return nil
+	}
 	_, err := r.SchemaVersion(ctx)
 	return err
 }

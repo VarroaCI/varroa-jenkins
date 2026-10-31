@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,23 +16,22 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/pgdial"
 )
 
-// openCheckTimeout bounds the schema check that Open runs on a fresh pool.
-// A silent database fails here instead of holding the caller for the
-// kernel's connect timeout.
-const openCheckTimeout = 10 * time.Second
-
 // Postgres is the agent store on the record-store database. It connects as
 // the varroa_client role, which holds INSERT and UPDATE on the agent tables.
 type Postgres struct {
 	pool *pgxpool.Pool
 	o    Options
+	// schemaOK is true after one schema check passes. Migrations only go
+	// up, so it stays true for the life of the store. A failed check never
+	// sets it.
+	schemaOK atomic.Bool
 }
 
 var _ Store = (*Postgres)(nil)
 
-// Open connects to the record-store database and checks its schema version.
-// It closes the pool and returns the error when the schema is too old or
-// the database does not answer within openCheckTimeout.
+// Open returns a store on a new pool for the record-store database. The pool
+// is lazy: Open does not connect, and it fails only when dsn cannot build a
+// pool. Each database method checks the schema before its first query.
 func Open(ctx context.Context, dsn string, o Options) (*Postgres, error) {
 	cfg, err := pgdial.PoolConfig(dsn)
 	if err != nil {
@@ -44,27 +44,44 @@ func Open(ctx context.Context, dsn string, o Options) (*Postgres, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open agent store pool: %w", err)
 	}
-	p := &Postgres{pool: pool, o: o}
-	checkCtx, cancel := context.WithTimeout(ctx, openCheckTimeout)
-	defer cancel()
-	if err := p.CheckSchema(checkCtx); err != nil {
-		pool.Close()
-		return nil, err
-	}
-	return p, nil
+	return &Postgres{pool: pool, o: o}, nil
 }
 
-// CheckSchema reads the applied schema version and refuses a version below
-// MinSchemaVersion.
+// CheckSchema reads the applied schema version. It refuses a version below
+// MinSchemaVersion with ErrSchemaTooOld. It answers ErrUnavailable when the
+// database does not answer. A passed check is kept, so the methods of the
+// store skip the check after it.
 func (p *Postgres) CheckSchema(ctx context.Context) error {
 	var version int64
 	err := p.pool.QueryRow(ctx,
 		`SELECT COALESCE(MAX(version_id), 0) FROM varroa.goose_db_version WHERE is_applied`,
 	).Scan(&version)
 	if err != nil {
+		// The caller's own context ended the call. The store may be healthy,
+		// so the error is neither a schema problem nor unreachable.
+		if ctx.Err() != nil {
+			return fmt.Errorf("read schema version: %w", err)
+		}
+		if pgdial.IsUnreachable(err) {
+			return fmt.Errorf("%w: read schema version: %w", ErrUnavailable, err)
+		}
 		return fmt.Errorf("%w: read schema version: %v", ErrSchemaTooOld, err) //nolint:errorlint // the sentinel is the one caller-visible error
 	}
-	return checkSchemaVersion(version)
+	if err := checkSchemaVersion(version); err != nil {
+		return err
+	}
+	p.schemaOK.Store(true)
+	return nil
+}
+
+// requireSchema returns nil at once after one schema check has passed. Until
+// then it runs CheckSchema and returns its error. Each database method of
+// Postgres calls it before its first query.
+func (p *Postgres) requireSchema(ctx context.Context) error {
+	if p.schemaOK.Load() {
+		return nil
+	}
+	return p.CheckSchema(ctx)
 }
 
 // Close closes the pool.
@@ -197,6 +214,9 @@ func readSession(ctx context.Context, q rowQuerier, id uuid.UUID) (agent.Session
 
 // CreateSession inserts a session row and its events in one transaction.
 func (p *Postgres) CreateSession(ctx context.Context, s agent.Session, events []agent.EventInput) (agent.Session, []agent.Event, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return agent.Session{}, nil, err
+	}
 	now := p.now()
 	s, err := fillSession(s, now)
 	if err != nil {
@@ -220,11 +240,17 @@ func (p *Postgres) CreateSession(ctx context.Context, s agent.Session, events []
 
 // GetSession returns one session.
 func (p *Postgres) GetSession(ctx context.Context, id uuid.UUID) (agent.Session, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return agent.Session{}, err
+	}
 	return readSession(ctx, p.pool, id)
 }
 
 // TakeLease starts or resumes a session under owner.
 func (p *Postgres) TakeLease(ctx context.Context, id uuid.UUID, owner string, from []agent.SessionState) (agent.Session, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return agent.Session{}, err
+	}
 	if len(from) == 0 {
 		return agent.Session{}, fmt.Errorf("%w: take lease needs a from state", ErrInvalid)
 	}
@@ -258,6 +284,9 @@ func (p *Postgres) TakeLease(ctx context.Context, id uuid.UUID, owner string, fr
 
 // RenewLease extends the lease of a running session held by owner.
 func (p *Postgres) RenewLease(ctx context.Context, id uuid.UUID, owner string) error {
+	if err := p.requireSchema(ctx); err != nil {
+		return err
+	}
 	tag, err := p.pool.Exec(ctx, `
 		UPDATE varroa.agent_sessions SET lease_expires_at = $3
 		WHERE id = $1 AND state = 'running' AND lease_owner = $2 AND lease_expires_at > $4`,
@@ -274,6 +303,9 @@ func (p *Postgres) RenewLease(ctx context.Context, id uuid.UUID, owner string) e
 
 // ClearLease parks a running session that owner holds.
 func (p *Postgres) ClearLease(ctx context.Context, id uuid.UUID, owner string, events []agent.EventInput) ([]agent.Event, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return nil, err
+	}
 	evs, err := normalizeEvents(events)
 	if err != nil {
 		return nil, err
@@ -298,6 +330,9 @@ func (p *Postgres) ClearLease(ctx context.Context, id uuid.UUID, owner string, e
 
 // RecordStep adds one provider call to a running session held by owner.
 func (p *Postgres) RecordStep(ctx context.Context, id uuid.UUID, owner string, prompt, completion int64) (agent.Session, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return agent.Session{}, err
+	}
 	var out agent.Session
 	err := pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
 		if err := guardTx(ctx, tx, id, Guard{States: []agent.SessionState{agent.StateRunning}, LeaseOwner: owner}); err != nil {
@@ -319,6 +354,9 @@ func (p *Postgres) RecordStep(ctx context.Context, id uuid.UUID, owner string, p
 // EndSession ends a session with a final state and clears its lease. It
 // denies every pending approval of the session in the same transaction.
 func (p *Postgres) EndSession(ctx context.Context, id uuid.UUID, in EndInput) ([]agent.Event, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return nil, err
+	}
 	if !endable(in.State) {
 		return nil, fmt.Errorf("%w: end state %q", ErrInvalid, in.State)
 	}
@@ -362,6 +400,9 @@ func (p *Postgres) EndSession(ctx context.Context, id uuid.UUID, in EndInput) ([
 
 // AppendEvent appends events to a session when the guard passes.
 func (p *Postgres) AppendEvent(ctx context.Context, id uuid.UUID, g Guard, events ...agent.EventInput) ([]agent.Event, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return nil, err
+	}
 	evs, err := normalizeEvents(events)
 	if err != nil {
 		return nil, err
@@ -381,6 +422,9 @@ func (p *Postgres) AppendEvent(ctx context.Context, id uuid.UUID, g Guard, event
 
 // Events returns the events of a session after the sequence number.
 func (p *Postgres) Events(ctx context.Context, id uuid.UUID, after, limit int) ([]agent.Event, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return nil, err
+	}
 	limit = clampLimit(limit, 500, 1000)
 	rows, err := p.pool.Query(ctx, `
 		SELECT seq, type, payload, created_at FROM varroa.agent_session_events

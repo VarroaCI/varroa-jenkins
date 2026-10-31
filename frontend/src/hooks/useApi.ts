@@ -50,6 +50,24 @@ export function isRecordStoreUnreachable(e: unknown): boolean {
   return e instanceof ApiError && e.status === 503 && e.code === "record_store_unreachable";
 }
 
+/**
+ * isAssistantDisabled reports the assistant's 503. It means the assistant is
+ * off, or its store does not answer. A retry changes neither state.
+ */
+export function isAssistantDisabled(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 503 && e.code === "assistant_disabled";
+}
+
+/**
+ * defaultQueryRetry is the app query client's retry rule. It retries a failed
+ * read once. It never retries a record store that did not answer, or an
+ * assistant that answers disabled, because a retry waits a second connect
+ * timeout before the page shows the unreachable state.
+ */
+export function defaultQueryRetry(failureCount: number, error: unknown): boolean {
+  return failureCount < 1 && !isRecordStoreUnreachable(error) && !isAssistantDisabled(error);
+}
+
 function getToken(): string | null {
   try { return localStorage.getItem("varroa_id_token"); } catch { return null; }
 }

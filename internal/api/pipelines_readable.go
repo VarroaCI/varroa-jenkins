@@ -31,11 +31,20 @@ type readableTenant struct {
 	Refs      []TenantRef
 }
 
+// readableResult is the answer of the readable walk. Degraded is the
+// ErrUnavailable or ErrSchemaTooOld of the placement read that the walk
+// absorbed. The walk then holds the local rows alone. GET /pipelines lists
+// those rows. A run read stops with Degraded, because a second read pays a
+// second connect timeout.
+type readableResult struct {
+	Items    []readableTenant
+	Degraded error
+}
+
 // readablePipelineTenants answers the pipelines tenants the caller may read,
 // in name order. It is the one walk that GET /pipelines, the fleet run read,
-// and the overview all use. The bool reports whether the record store
-// answered the placement rows.
-func (s *Server) readablePipelineTenants(ctx context.Context, claims *auth.Claims) ([]readableTenant, bool, error) {
+// the overview, and the event stream all use.
+func (s *Server) readablePipelineTenants(ctx context.Context, claims *auth.Claims) (readableResult, error) {
 	local := ""
 	if s.deps.Brood != nil {
 		local = s.deps.Brood.LocalCluster()
@@ -47,7 +56,7 @@ func (s *Server) readablePipelineTenants(ctx context.Context, claims *auth.Claim
 	if s.deps.Store != nil {
 		tenants, err := crdstore.List[v1alpha1.Tenant](ctx, s.deps.Store, "", "")
 		if err != nil {
-			return nil, false, err
+			return readableResult{}, err
 		}
 		for _, tenant := range tenants {
 			localNames[tenant.Name] = true
@@ -61,11 +70,11 @@ func (s *Server) readablePipelineTenants(ctx context.Context, claims *auth.Claim
 		}
 	}
 
-	placements, recordStore, err := s.allTenantPlacements(ctx)
+	placements, err := s.allTenantPlacements(ctx)
 	if err != nil {
-		return nil, false, err
+		return readableResult{}, err
 	}
-	for _, row := range placements {
+	for _, row := range placements.Rows {
 		if localNames[row.Tenant] || strings.Contains(row.Tenant, "/") || !livePlacementRow(row, local) {
 			continue
 		}
@@ -98,7 +107,7 @@ func (s *Server) readablePipelineTenants(ctx context.Context, claims *auth.Claim
 		}
 		return items[i].Row.Cluster < items[j].Row.Cluster
 	})
-	return items, recordStore, nil
+	return readableResult{Items: items, Degraded: placements.Degraded}, nil
 }
 
 // pipelineCandidate wraps a row of a local or member pipelines tenant. A placed

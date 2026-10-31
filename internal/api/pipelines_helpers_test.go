@@ -29,8 +29,10 @@ type fakeRecordReader struct {
 
 	schemaTooOld bool
 
-	// placements answers ListAllTenantPlacements.
-	placements []recordstore.TenantPlacement
+	// placements answers ListAllTenantPlacements. placementsErr, when set,
+	// answers it instead.
+	placements    []recordstore.TenantPlacement
+	placementsErr error
 	// acrossQueries records each ListRunsAcross query in call order.
 	// acrossPages answers the calls in order; a call past the end answers an empty page.
 	acrossQueries []recordstore.RunsAcrossQuery
@@ -661,6 +663,9 @@ func (f *fakeRecordReader) JobQualityTrend(_ context.Context, _, _, _ string, ru
 
 // ListAllTenantPlacements answers the fake's placement rows.
 func (f *fakeRecordReader) ListAllTenantPlacements(context.Context) ([]recordstore.TenantPlacement, error) {
+	if f.placementsErr != nil {
+		return nil, f.placementsErr
+	}
 	return f.placements, nil
 }
 

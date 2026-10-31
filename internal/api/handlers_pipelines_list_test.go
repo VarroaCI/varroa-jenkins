@@ -179,6 +179,13 @@ func TestListPipelineTenants_RecordStoreOffAnswersLocalRows(t *testing.T) {
 		t.Error("recordStore = true with a schema too old, want false")
 	}
 	assertPipelineTenants(t, old.Items, want)
+
+	unreachable := getPipelineTenants(t, resolverAuthorizer("pay"),
+		&fakeAllPlacementReader{err: fmt.Errorf("%w: x", recordstore.ErrUnavailable)}, tenant)
+	if unreachable.RecordStore {
+		t.Error("recordStore = true with the record store unreachable, want false")
+	}
+	assertPipelineTenants(t, unreachable.Items, want)
 }
 
 func TestListPipelineTenants_SkipsLocalEmptyAndTornDownRows(t *testing.T) {

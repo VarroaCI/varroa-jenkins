@@ -2,6 +2,8 @@ package pgdial
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -91,5 +93,40 @@ func TestNewPoolSilentServerFailsFast(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("Ping took %v, want under 2s", elapsed)
+	}
+}
+
+func TestIsUnreachable(t *testing.T) {
+	pool, err := NewPool(context.Background(), testDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer pingCancel()
+	pingErr := pool.Ping(pingCtx)
+	if pingErr == nil {
+		t.Fatal("Ping against a closed port succeeded")
+	}
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"deadline", context.DeadlineExceeded, true},
+		{"wrapped deadline", fmt.Errorf("read: %w", context.DeadlineExceeded), true},
+		{"net error", &net.OpError{Op: "dial", Err: errors.New("refused")}, true},
+		{"ping failure", pingErr, true},
+		{"canceled", context.Canceled, false},
+		{"plain", errors.New("x"), false},
+		{"pg error", &pgconn.PgError{Code: "42P01"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsUnreachable(tt.err); got != tt.want {
+				t.Fatalf("IsUnreachable(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }

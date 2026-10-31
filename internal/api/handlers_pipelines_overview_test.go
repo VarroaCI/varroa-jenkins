@@ -2,12 +2,32 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
+
+// TestPipelinesOverviewStopsWhenPlacementsFail asserts that a degraded
+// placement read stops the overview before its run read. The store error
+// returns to the caller, and no service error is set.
+func TestPipelinesOverviewStopsWhenPlacementsFail(t *testing.T) {
+	reader := &fakeRecordReader{placementsErr: fmt.Errorf("%w: x", recordstore.ErrUnavailable)}
+	srv := fleetServer(t, globalPipelinesAuthorizer(), reader, pipelinesTenant("pay", true, "core", "ns", "c1"))
+	_, serr, err := srv.PipelinesOverview(context.Background(), resolverClaims, time.Now().UTC())
+	if serr != nil {
+		t.Fatalf("service error = %+v, want none", serr)
+	}
+	if !errors.Is(err, recordstore.ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+	if len(reader.overviewQueries) != 0 {
+		t.Fatalf("RunsOverview calls = %d, want none", len(reader.overviewQueries))
+	}
+}
 
 // overviewFor answers the overview of srv at now, for the caller in claims.
 func overviewFor(t *testing.T, srv *Server) PipelinesOverview {

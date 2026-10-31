@@ -66,12 +66,12 @@ func (s *Server) handleFleetRunStream(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	claims := auth.ClaimsFromContext(ctx)
-	readable, _, err := s.readablePipelineTenants(ctx, claims)
+	walk, err := s.readablePipelineTenants(ctx, claims)
 	if s.handleReaderError(w, err, "list pipelines tenants") {
 		return
 	}
 	var refs []TenantRef
-	for _, t := range readable {
+	for _, t := range walk.Items {
 		refs = append(refs, t.Refs...)
 	}
 	keys := runStreamKeys(refs)

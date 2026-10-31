@@ -63,6 +63,22 @@ func TestSchemaVersionUnreachableIsErrUnavailable(t *testing.T) {
 	}
 }
 
+// TestCheckSchemaDoesNotKeepAFailure asserts a failed schema check leaves the
+// Reader unchecked, so the next call runs the check again.
+func TestCheckSchemaDoesNotKeepAFailure(t *testing.T) {
+	t.Parallel()
+
+	r := unreachableReader(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if _, err := r.ListJobSummaries(ctx, testCluster, testTenant, time.Now().Add(-30*24*time.Hour)); err == nil {
+		t.Fatal("ListJobSummaries against a silent server succeeded")
+	}
+	if r.(*pgReader).schemaOK.Load() {
+		t.Fatal("schemaOK is true after a failed schema check")
+	}
+}
+
 // zeroArgs builds the arguments of one Reader method call: a background
 // context, and the zero value of every other parameter. A method that
 // validates an argument before it reaches the database gets a valid value

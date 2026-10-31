@@ -45,12 +45,18 @@ func readApproval(ctx context.Context, q rowQuerier, id uuid.UUID) (agent.Approv
 
 // GetApproval returns one approval.
 func (p *Postgres) GetApproval(ctx context.Context, id uuid.UUID) (agent.Approval, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return agent.Approval{}, err
+	}
 	return readApproval(ctx, p.pool, id)
 }
 
 // CreateApprovals stores approval requests of a running session held by
 // owner, and appends events.
 func (p *Postgres) CreateApprovals(ctx context.Context, sessionID uuid.UUID, owner string, approvals []agent.Approval, events []agent.EventInput) ([]agent.Approval, []agent.Event, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return nil, nil, err
+	}
 	evs, err := normalizeEvents(events)
 	if err != nil {
 		return nil, nil, err
@@ -107,6 +113,9 @@ func nonEmptyJSON(b []byte) []byte {
 
 // ResolveApproval resolves one pending approval for the owner.
 func (p *Postgres) ResolveApproval(ctx context.Context, id uuid.UUID, r Resolution) (ResolveResult, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return ResolveResult{}, err
+	}
 	if err := resolutionValid(r.State); err != nil {
 		return ResolveResult{}, err
 	}
@@ -184,6 +193,9 @@ func (p *Postgres) ResolveApproval(ctx context.Context, id uuid.UUID, r Resoluti
 
 // ListApprovals returns one page of approvals, newest first.
 func (p *Postgres) ListApprovals(ctx context.Context, q ApprovalQuery) (ApprovalPage, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return ApprovalPage{}, err
+	}
 	cT, cID, hasCursor, err := decodeCursor(q.Cursor)
 	if err != nil {
 		return ApprovalPage{}, err
@@ -233,6 +245,9 @@ func (p *Postgres) ListApprovals(ctx context.Context, q ApprovalQuery) (Approval
 // transaction. It reads only the approvals of waiting sessions, so an approval
 // of an ended session never fills the batch. It returns the sessions it ended.
 func (p *Postgres) ExpireDue(ctx context.Context) ([]SweptSession, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return nil, err
+	}
 	now := p.now()
 	rows, err := p.pool.Query(ctx, `
 		SELECT DISTINCT a.session_id FROM varroa.agent_approvals a
@@ -370,6 +385,9 @@ func expireApprovals(ctx context.Context, tx pgx.Tx, sid uuid.UUID, now time.Tim
 // SweepLeases fails the sessions whose lease expired, and the waiting sessions
 // that lost their resume. It returns the sessions it failed.
 func (p *Postgres) SweepLeases(ctx context.Context) ([]SweptSession, error) {
+	if err := p.requireSchema(ctx); err != nil {
+		return nil, err
+	}
 	now := p.now()
 	cut := now.Add(-LostResumeAfter)
 	const lostResumeCond = `

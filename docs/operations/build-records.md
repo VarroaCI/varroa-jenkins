@@ -348,7 +348,9 @@ A connect to the record store is bounded. Each BFF read is bounded too.
 - A connect attempt stops after 5 seconds. A connection string that sets its own `connect_timeout` keeps that value.
 - Each read in the BFF stops after 15 seconds. The gateway and the recorder do not bound their reads after connect.
 - The BFF starts and stays ready while the database is down. Its startup schema check stops after 10 seconds.
-- Pipelines reads answer 503 with the code `record_store_unreachable`. The page shows "Pipeline data is unreachable" with a Retry button. A 503 without that code means the store is off or its schema is too old.
+- The assistant stays on while the database is down. Its calls answer 503 `assistant_disabled` until the database returns. A BFF restart is not necessary.
+- The BFF keeps each schema check that passes for its life. A database restored to an older schema needs a BFF restart.
+- Pipelines reads answer 503 with the code `record_store_unreachable`. The page shows "Pipeline data is unreachable" with a Retry button. A 503 without that code means the store is off or its schema is too old. A read answers after one connect timeout. The page does not retry the read on its own.
 - The Cells page and the Cell tab mark each record count as not available and show Retry. A store that is off shows no Retry; enable `recordStore` instead.
 - The tenant home Locks card shows the same Retry state.
 - The recorder fails at startup and restarts until the database returns. A restart is the correct response.

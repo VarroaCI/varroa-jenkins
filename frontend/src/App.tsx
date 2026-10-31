@@ -6,6 +6,7 @@ import { ThemeProvider } from "./context/ThemeContext";
 import { AuthProvider } from "./context/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { ToastProvider } from "./components/Toast";
+import { defaultQueryRetry } from "./hooks/useApi";
 import Layout from "./components/Layout";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Dashboard from "./pages/Dashboard";
@@ -74,7 +75,7 @@ import SettingsIndex from "./pages/SettingsIndex";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: defaultQueryRetry,
       staleTime: 10_000,
     },
   },

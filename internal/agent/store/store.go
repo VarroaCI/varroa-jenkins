@@ -34,10 +34,13 @@ const (
 // Sentinel errors. Callers match them with errors.Is.
 var (
 	ErrSchemaTooOld = errors.New("agent store: schema is too old")
-	ErrNotFound     = errors.New("agent store: not found")
-	ErrConflict     = errors.New("agent store: conflict")
-	ErrExpired      = errors.New("agent store: approval expired")
-	ErrInvalid      = errors.New("agent store: invalid input")
+	// ErrUnavailable means the database did not answer. The caller answers
+	// 503 and retries.
+	ErrUnavailable = errors.New("agent store: unreachable")
+	ErrNotFound    = errors.New("agent store: not found")
+	ErrConflict    = errors.New("agent store: conflict")
+	ErrExpired     = errors.New("agent store: approval expired")
+	ErrInvalid     = errors.New("agent store: invalid input")
 )
 
 // checkSchemaVersion refuses a record-store schema below MinSchemaVersion.
