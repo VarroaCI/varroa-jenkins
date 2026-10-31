@@ -33,6 +33,7 @@ function run(over: Partial<FleetRunRow> = {}): FleetRunRow {
     result: "FAILURE",
     cluster: "core",
     tenant: "pay",
+    tenantFolder: "pay",
     jobPath: "pay/api",
     buildNumber: 7,
     actor: "nate",
@@ -173,5 +174,67 @@ describe("RunFeed", () => {
     const table = screen.getByRole("table");
     expect(within(table).getByRole("columnheader", { name: /Duration/ })).toHaveAttribute("aria-sort", "none");
     expect(within(table).getByRole("columnheader", { name: "Branch" })).not.toHaveAttribute("aria-sort");
+  });
+});
+
+/** cronRun builds one finished cron run of pay/api, numbered n, with no commit subject. */
+function cronRun(n: number): FleetRunRow {
+  return run({
+    runId: `cron-${n}`,
+    buildNumber: n,
+    title: "pay/api",
+    actor: "timer",
+    trigger: { kind: "cron", label: "Cron" },
+    branch: undefined,
+    canWrite: false,
+  });
+}
+
+describe("RunFeed folds", () => {
+  beforeEach(() => {
+    mockListFleetRuns.mockReset();
+  });
+
+  it("folds consecutive cron runs of one job, and expands them on a click", async () => {
+    const user = userEvent.setup();
+    mockListFleetRuns.mockResolvedValue(page([cronRun(3), cronRun(2), cronRun(1)]));
+    renderFeed();
+    const toggle = await screen.findByRole("button", { name: "api × 3" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("link", { name: "api #3" })).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("link", { name: "api #3" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "api #1" })).toBeInTheDocument();
+  });
+
+  it("keeps one run as a row, with no fold button", async () => {
+    mockListFleetRuns.mockResolvedValue(page([cronRun(1)]));
+    renderFeed();
+    expect(await screen.findByRole("link", { name: "api #1" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /×/ })).not.toBeInTheDocument();
+  });
+
+  it("lists every run without a fold under a job filter", async () => {
+    mockListFleetRuns.mockResolvedValue(page([cronRun(3), cronRun(2), cronRun(1)]));
+    renderFeed(parseFeedQuery(new URLSearchParams("job=pay/api")));
+    expect(await screen.findByRole("link", { name: "api #3" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /×/ })).not.toBeInTheDocument();
+  });
+
+  it("lists every run without a fold under the duration sort", async () => {
+    mockListFleetRuns.mockResolvedValue(page([cronRun(3), cronRun(2), cronRun(1)]));
+    renderFeed(parseFeedQuery(new URLSearchParams("sort=duration&order=desc")));
+    expect(await screen.findByRole("link", { name: "api #3" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /×/ })).not.toBeInTheDocument();
+  });
+
+  it("labels an unknown actor No actor and a timer actor schedule in the Actor filter", async () => {
+    mockListFleetRuns.mockResolvedValue(page([run({ actor: "unknown" }), cronRun(1)]));
+    renderFeed();
+    await screen.findByRole("link", { name: "api #1" });
+    const select = screen.getByLabelText("Actor");
+    expect(within(select).getByRole("option", { name: "No actor" })).toHaveAttribute("value", "unknown");
+    expect(within(select).getByRole("option", { name: "schedule" })).toHaveAttribute("value", "timer");
   });
 });

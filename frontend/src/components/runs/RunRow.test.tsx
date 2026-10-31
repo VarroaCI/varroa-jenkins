@@ -14,6 +14,7 @@ function row(over: Partial<FleetRunRow> = {}): FleetRunRow {
     result: "SUCCESS",
     cluster: "core",
     tenant: "pay",
+    tenantFolder: "pay",
     jobPath: "pay/api",
     buildNumber: 42,
     actor: "nate",
@@ -46,6 +47,16 @@ describe("RunRow", () => {
       "href",
       "/pipelines/pay/pay%2Fapi/0192f",
     );
+  });
+
+  it("links a run with no commit subject by its job and build number", () => {
+    renderRow(row({ title: "pay/api" }));
+    expect(screen.getByRole("link", { name: "api #42" })).toBeInTheDocument();
+  });
+
+  it("shows no actor text for an unknown actor", () => {
+    renderRow(row({ actor: "unknown" }));
+    expect(screen.queryByText("unknown")).not.toBeInTheDocument();
   });
 
   it("names the state in the status cell", () => {

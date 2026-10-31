@@ -2099,6 +2099,10 @@ components:
           description: The rail and URL name of the tenant. A controller tenant reads
             namespace/controller.
           type: string
+        tenantFolder:
+          description: The tenant's Jenkins folder prefix of jobPath. Empty for a
+            root-hosted tenant.
+          type: string
         title:
           description: The first line of the newest commit message, else the job path.
           type: string
@@ -2133,6 +2137,7 @@ components:
       - status
       - cluster
       - tenant
+      - tenantFolder
       - title
       - trigger
       - pendingInput
@@ -2954,7 +2959,9 @@ components:
           format: int64
           type: integer
         passRate:
-          description: Passed divided by finished. Absent when no run has finished.
+          description: The share of counted finished runs whose result is SUCCESS.
+            An INTERRUPTED or NOT_BUILT run is not counted. Absent when the window
+            holds no counted run.
           type: number
         passed:
           format: int64
@@ -8555,6 +8562,10 @@ components:
           description: The rail and URL name of the tenant. A controller tenant reads
             namespace/controller.
           type: string
+        tenantFolder:
+          description: The tenant's Jenkins folder prefix of jobPath. Empty for a
+            root-hosted tenant.
+          type: string
         title:
           description: The first line of the newest commit message, else the job path.
           type: string
@@ -8589,6 +8600,7 @@ components:
       - status
       - cluster
       - tenant
+      - tenantFolder
       - title
       - trigger
       - pendingInput
@@ -10220,7 +10232,9 @@ components:
           format: int64
           type: integer
         passRate:
-          description: Passed divided by finished. Absent when no run has finished.
+          description: The share of counted finished runs whose result is SUCCESS.
+            An INTERRUPTED or NOT_BUILT run is not counted. Absent when the window
+            holds no counted run.
           type: number
         passed:
           format: int64

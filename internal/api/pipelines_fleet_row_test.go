@@ -82,6 +82,9 @@ func TestBuildFleetRunRowDerivedFields(t *testing.T) {
 	if row.Tenant != rail || row.Cluster != "core" || !row.CanWrite {
 		t.Errorf("tenant/cluster/canWrite = %q/%q/%v; want %q/core/true", row.Tenant, row.Cluster, row.CanWrite, rail)
 	}
+	if row.TenantFolder != "pay" {
+		t.Errorf("tenantFolder = %q; want pay", row.TenantFolder)
+	}
 
 	completed := running
 	completed.Status = "COMPLETED"
@@ -103,5 +106,25 @@ func TestBuildFleetRunRowDerivedFields(t *testing.T) {
 	}
 	if row.CanWrite {
 		t.Error("canWrite = true; want false")
+	}
+}
+
+func TestBuildFleetRunRowTenantFolder(t *testing.T) {
+	cases := []struct {
+		name   string
+		tenant string
+		want   string
+	}{
+		{"plain tenant names its own folder", "pay", "pay"},
+		{"controller tenant has no folder", "ns/ctrl", ""},
+		{"empty tenant has no folder", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			run := recordstore.Run{Cluster: "core", Tenant: tc.tenant, JobPath: "pay/api", Status: "COMPLETED"}
+			if got := buildFleetRunRow(run, tc.tenant, false).TenantFolder; got != tc.want {
+				t.Errorf("tenantFolder = %q; want %q", got, tc.want)
+			}
+		})
 	}
 }

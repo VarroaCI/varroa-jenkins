@@ -20,10 +20,12 @@ type RunsOverviewQuery struct {
 
 // RunsOverviewTotals holds the aggregate counts of the overview window.
 // The window is the 24 hours before Now. The live counts have no time bound.
+// Finished counts every run with a result. Counted counts the finished runs
+// that count toward a pass rate. INTERRUPTED and NOT_BUILT runs do not count.
 type RunsOverviewTotals struct {
-	Runs24h, RunsPrior24h, Finished, Passed, Failed, Interrupted int64
-	Running, Queued                                              int64
-	MedianQueueWaitMs, MedianDurationMs, P90DurationMs           *int64
+	Runs24h, RunsPrior24h, Finished, Counted, Passed, Failed, Interrupted int64
+	Running, Queued                                                       int64
+	MedianQueueWaitMs, MedianDurationMs, P90DurationMs                    *int64
 }
 
 // RecentResult is one recent run of a scope. Result is empty while the run
@@ -103,6 +105,7 @@ func (r *pgReader) RunsOverview(ctx context.Context, q RunsOverviewQuery) (RunsO
 		(SELECT count(*) FROM win),
 		(SELECT count(*) FROM scoped runs WHERE runs.created_at >= $2 AND runs.created_at < $3),
 		(SELECT count(*) FROM win WHERE win.result IS NOT NULL),
+		(SELECT count(*) FROM win WHERE ` + countedResultSQL + `),
 		(SELECT count(*) FROM win WHERE win.result = 'SUCCESS'),
 		(SELECT count(*) FROM win WHERE win.result = 'FAILURE'),
 		(SELECT count(*) FROM win WHERE win.result = 'INTERRUPTED'),
@@ -115,7 +118,7 @@ func (r *pgReader) RunsOverview(ctx context.Context, q RunsOverviewQuery) (RunsO
 			FROM win WHERE win.queued_at IS NOT NULL AND win.started_at IS NOT NULL)`
 	t := out.Totals
 	if err := r.pool.QueryRow(ctx, totalsSQL, bounds...).Scan(
-		&t.Runs24h, &t.RunsPrior24h, &t.Finished, &t.Passed, &t.Failed, &t.Interrupted,
+		&t.Runs24h, &t.RunsPrior24h, &t.Finished, &t.Counted, &t.Passed, &t.Failed, &t.Interrupted,
 		&t.Running, &t.Queued, &t.MedianDurationMs, &t.P90DurationMs, &t.MedianQueueWaitMs,
 	); err != nil {
 		return RunsOverview{}, fmt.Errorf("read runs overview totals: %w", err)

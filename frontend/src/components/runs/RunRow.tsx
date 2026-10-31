@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { MoreVertical } from "lucide-react";
 import type { FleetRunRow } from "../../types";
 import { age } from "../activityTimeline.util";
-import { runHref, runSecondLine, runTiming } from "./runRowText";
+import { runActorText, runHref, runSecondLine, runTiming, runTitle } from "./runRowText";
 import { RunGlyphMark } from "./RunGlyphMark";
 import styles from "./RunRow.module.css";
 
@@ -14,13 +14,15 @@ export interface RunRowProps {
   localCluster?: string;
   onRerun: (r: FleetRunRow) => void;
   onCancel: (r: FleetRunRow) => void;
+  /** True for a run that a fold row holds. The row indents its run cell. */
+  nested?: boolean;
 }
 
 /**
  * RunRow renders one run of the fleet feed as one table row. Its kebab
  * holds Open, and the write actions only when the BFF reports canWrite.
  */
-export function RunRow({ run, now, localCluster, onRerun, onCancel }: RunRowProps) {
+export function RunRow({ run, now, localCluster, onRerun, onCancel, nested = false }: RunRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const href = runHref(run.tenant, run.jobPath ?? "", run.runId);
   const started = run.startedAt ?? run.queuedAt ?? run.createdAt;
@@ -33,13 +35,13 @@ export function RunRow({ run, now, localCluster, onRerun, onCancel }: RunRowProp
   };
 
   return (
-    <tr className={styles.row}>
+    <tr className={nested ? `${styles.row} ${styles.nested}` : styles.row}>
       <td className={styles.statusCell}>
         <RunGlyphMark run={run} />
       </td>
       <td className={styles.runCell}>
         <Link to={href} className={styles.title}>
-          {run.title}
+          {runTitle(run)}
         </Link>
         <div className={styles.second}>{runSecondLine(run)}</div>
       </td>
@@ -49,7 +51,7 @@ export function RunRow({ run, now, localCluster, onRerun, onCancel }: RunRowProp
           <span className={styles.chip}>{run.cluster}</span>
         )}
       </td>
-      <td className={styles.actorCell}>{run.actor ?? ""}</td>
+      <td className={styles.actorCell}>{runActorText(run) ?? ""}</td>
       <td className={styles.branchCell}>{run.branch ? <span className={styles.chip}>{run.branch}</span> : null}</td>
       <td className={styles.startedCell}>{age(started, { now })}</td>
       <td className={styles.durationCell}>
@@ -58,7 +60,7 @@ export function RunRow({ run, now, localCluster, onRerun, onCancel }: RunRowProp
           <button
             type="button"
             className={styles.kebab}
-            aria-label={`Actions for ${run.title}`}
+            aria-label={`Actions for ${runTitle(run)}`}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((open) => !open)}

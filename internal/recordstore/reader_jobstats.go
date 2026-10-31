@@ -33,13 +33,14 @@ type JobWindowStats struct {
 // column is set. A run reaches "result" exactly when Jenkins has
 // resolved its outcome, which excludes a queued, running, or
 // duplicate-superseded run. PassRate divides the SUCCESS runs by the
-// counted runs. A counted run has a result other than INTERRUPTED and
-// NOT_BUILT: those two results say the build did not finish, so they
-// are not a pass or a fail. "UNSTABLE" and every other counted result
-// count against the rate, because the card answers "did the pipeline
-// work", not "did it merely finish". SlowestStage compares each stage name's median duration
-// across the window's runs, not its single slowest run: a median
-// resists one outlier run inflating a stage that usually runs fast.
+// counted runs. A run counts when countedResultSQL holds, which is the
+// SQL form of CountsTowardPassRate. INTERRUPTED and NOT_BUILT do not
+// count, because those results say the build did not finish. UNSTABLE
+// and every other counted result count against the rate, because the
+// card answers "did the pipeline work", not "did it merely finish".
+// SlowestStage compares each stage name's median duration across the
+// window's runs, not its single slowest run: a median resists one
+// outlier run inflating a stage that usually runs fast.
 //
 // A run that records no build counts in no value here: a run whose
 // result is TRIGGER_FAILED, or a run whose payload still holds
@@ -72,7 +73,7 @@ func (r *pgReader) JobWindowStats(ctx context.Context, cluster, tenant, jobPath 
 		)
 		SELECT
 			(SELECT count(*) FROM window_runs) AS builds,
-			(SELECT count(*) FROM window_runs WHERE result IS NOT NULL AND result NOT IN ('INTERRUPTED', 'NOT_BUILT')) AS counted,
+			(SELECT count(*) FROM window_runs WHERE `+countedResultSQL+`) AS counted,
 			(SELECT count(*) FROM window_runs WHERE result = 'SUCCESS') AS passed,
 			(SELECT ROUND(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms)::numeric)::bigint
 			   FROM window_runs WHERE duration_ms IS NOT NULL) AS median_duration_ms,

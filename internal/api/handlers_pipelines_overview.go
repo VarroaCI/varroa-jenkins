@@ -126,7 +126,8 @@ func (s *Server) PipelinesOverview(ctx context.Context, claims *auth.Claims, now
 }
 
 // overviewTotals maps the store totals onto the response, and derives the pass
-// rate. The pass rate is nil when no run of the window has finished.
+// rate. The rate divides the passed runs by the counted runs, which leave out
+// INTERRUPTED and NOT_BUILT. The rate is nil when no run of the window counts.
 func overviewTotals(t recordstore.RunsOverviewTotals) PipelinesOverviewTotals {
 	out := PipelinesOverviewTotals{
 		Runs24h:           t.Runs24h,
@@ -141,8 +142,8 @@ func overviewTotals(t recordstore.RunsOverviewTotals) PipelinesOverviewTotals {
 		MedianDurationMs:  t.MedianDurationMs,
 		P90DurationMs:     t.P90DurationMs,
 	}
-	if t.Finished > 0 {
-		rate := float64(t.Passed) / float64(t.Finished)
+	if t.Counted > 0 {
+		rate := float64(t.Passed) / float64(t.Counted)
 		out.PassRate = &rate
 	}
 	return out

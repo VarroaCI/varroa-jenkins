@@ -63,17 +63,19 @@ func TestPipelinesOverviewRailOrderAndGrouping(t *testing.T) {
 }
 
 func TestPipelinesOverviewPassRate(t *testing.T) {
-	reader := &fakeRecordReader{overviewTotals: recordstore.RunsOverviewTotals{Passed: 2, Finished: 4}}
+	// Two of the four counted runs passed. Finished runs that do not count stay out of the rate.
+	reader := &fakeRecordReader{overviewTotals: recordstore.RunsOverviewTotals{Passed: 2, Counted: 4, Finished: 6}}
 	srv := fleetServer(t, globalPipelinesAuthorizer(), reader, pipelinesTenant("pay", true, "core", "ns", "c1"))
 	out := overviewFor(t, srv)
 	if out.Totals.PassRate == nil || *out.Totals.PassRate != 0.5 {
 		t.Fatalf("passRate = %v; want 0.5", out.Totals.PassRate)
 	}
 
-	reader.overviewTotals = recordstore.RunsOverviewTotals{}
+	// Every finished run is interrupted, so no run counts and the rate is absent.
+	reader.overviewTotals = recordstore.RunsOverviewTotals{Finished: 3, Interrupted: 3, Counted: 0}
 	out = overviewFor(t, srv)
 	if out.Totals.PassRate != nil {
-		t.Fatalf("passRate = %v; want nil when nothing finished", *out.Totals.PassRate)
+		t.Fatalf("passRate = %v; want nil when no run counts", *out.Totals.PassRate)
 	}
 }
 

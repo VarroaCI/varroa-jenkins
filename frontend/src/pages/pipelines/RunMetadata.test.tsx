@@ -59,6 +59,14 @@ describe("RunMetadata", () => {
     expect(screen.getByText("alice")).toHaveAttribute("title", "Triggered by a schedule");
   });
 
+  it("shows no actor for the unknown placeholder, and reads timer as schedule", () => {
+    const { unmount } = renderMeta({ ...baseRun, actor: "unknown" });
+    expect(screen.queryByText("unknown")).not.toBeInTheDocument();
+    unmount();
+    renderMeta({ ...baseRun, actor: "timer" });
+    expect(screen.getByText("schedule")).toBeInTheDocument();
+  });
+
   it("shows the queue wait above five seconds only", () => {
     renderMeta({ ...baseRun, queuedAt: "2026-10-11T10:00:00Z" });
     expect(screen.getByText(/Waited .* in queue/)).toBeInTheDocument();

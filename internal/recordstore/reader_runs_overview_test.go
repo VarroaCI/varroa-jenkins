@@ -58,6 +58,9 @@ func TestRunsOverviewCountsWindowAndPrior(t *testing.T) {
 		t.Errorf("finished/passed/failed/interrupted = %d/%d/%d/%d; want 3/1/1/1",
 			tot.Finished, tot.Passed, tot.Failed, tot.Interrupted)
 	}
+	if tot.Counted != 2 {
+		t.Errorf("counted = %d; want 2: the interrupted run does not count", tot.Counted)
+	}
 	if tot.MedianDurationMs == nil || *tot.MedianDurationMs != 2000 {
 		t.Errorf("median duration = %v; want 2000", tot.MedianDurationMs)
 	}
@@ -66,6 +69,30 @@ func TestRunsOverviewCountsWindowAndPrior(t *testing.T) {
 	}
 	if tot.MedianQueueWaitMs == nil || *tot.MedianQueueWaitMs != 300 {
 		t.Errorf("median queue wait = %v; want 300", tot.MedianQueueWaitMs)
+	}
+}
+
+func TestRunsOverviewCountedSkipsInterruptedAndNotBuilt(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	r := NewReader(pool)
+	now := time.Now().UTC()
+	success, unstable, interrupted, notBuilt := "SUCCESS", "UNSTABLE", "INTERRUPTED", "NOT_BUILT"
+	for i, result := range []*string{&success, &success, &unstable, &interrupted, &notBuilt} {
+		seedAcrossRun(t, db, "pay", "pay/build", now.Add(-time.Duration(i+1)*time.Hour), "COMPLETED", result)
+	}
+
+	out, err := r.RunsOverview(context.Background(), RunsOverviewQuery{
+		Scopes: []RunScope{{Cluster: "core", Tenant: "pay"}},
+		Now:    now,
+	})
+	if err != nil {
+		t.Fatalf("RunsOverview: %v", err)
+	}
+	tot := out.Totals
+	if tot.Finished != 5 || tot.Passed != 2 || tot.Counted != 3 {
+		t.Errorf("finished/passed/counted = %d/%d/%d; want 5/2/3", tot.Finished, tot.Passed, tot.Counted)
 	}
 }
 

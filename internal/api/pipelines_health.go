@@ -68,20 +68,15 @@ func healthBucketOf(score int) string {
 	}
 }
 
-// countsForHealth reports whether a finished run counts toward a job's
-// health. An interrupted run and a run that was not built say nothing
-// about the job's code or its tests, so neither counts.
-func countsForHealth(result string) bool {
-	return result != "INTERRUPTED" && result != "NOT_BUILT"
-}
-
 // computeJobHealth scores the runs of the health window. SUCCESS passes.
-// FAILURE, UNSTABLE, and ABORTED fail. A job with no counted run is
-// unknown and has no score.
+// FAILURE, UNSTABLE, and ABORTED fail. A run counts when
+// recordstore.CountsTowardPassRate accepts its result. An INTERRUPTED or
+// NOT_BUILT run does not count, because it says nothing about the job's code
+// or tests. A job with no counted run is unknown and has no score.
 func computeJobHealth(runs []recordstore.HealthRun) JobHealthJSON {
 	out := JobHealthJSON{Bucket: "unknown", Window: recordstore.JobHealthWindow}
 	for _, run := range runs {
-		if !countsForHealth(run.Result) {
+		if !recordstore.CountsTowardPassRate(run.Result) {
 			continue
 		}
 		out.Counted++

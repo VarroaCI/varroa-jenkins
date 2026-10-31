@@ -146,6 +146,31 @@
   outline: none;
 }
 
+/* A run that a fold row holds is indented under the fold. */
+.nested .runCell {
+  padding-left: 32px;
+}
+
+/* The fold toggle reads as the run title and keeps the keyboard focus ring. */
+.foldToggle {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: break-word;
+}
+
+.foldToggle:hover {
+  color: var(--accent-strong);
+  text-decoration: underline;
+}
+
 @media (max-width: 639.98px) {
   .row {
     display: grid;

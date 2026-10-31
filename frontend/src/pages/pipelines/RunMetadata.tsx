@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getRun } from "../../api/client";
+import { displayActor } from "../../components/runs/runActor";
 import type { ChangeRequest, RunDetail } from "../../types";
 import { formatDuration } from "./JobTree";
 import { libraryHref } from "./forgeLink";
@@ -42,9 +43,9 @@ export function RunMetadata({ run, tenant, job }: RunMetadataProps) {
             <span>{run.branch}</span>
           ))}
         {run.scmRevision && <RevisionLink revision={run.scmRevision} repoUrl={run.scmUrl} forge={run.scmForge} length={8} />}
-        {run.actor && (
+        {displayActor(run.actor) && (
           <span title={run.triggerSource ? `Triggered by ${TRIGGER_LABEL[run.triggerSource]}` : undefined}>
-            {run.actor}
+            {displayActor(run.actor)}
           </span>
         )}
         {run.cause && <span>{run.cause}</span>}

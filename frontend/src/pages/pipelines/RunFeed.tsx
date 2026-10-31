@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cancelRun, listFleetRuns, rerunRun } from "../../api/client";
 import { FilterBar, FilterSelect, SearchBox, type FilterOption } from "../../components/FilterBar";
 import { SortableHeader, nextSort, type SortOrder } from "../../components/SortableHeader";
 import { RunRow } from "../../components/runs/RunRow";
+import { RunFoldRow } from "../../components/runs/RunFoldRow";
+import { foldRuns, type FeedItem } from "../../components/runs/runFold";
+import { displayActor } from "../../components/runs/runActor";
 import { RecoveryState } from "../../components/RecoveryState";
 import { Button } from "../../components/Button";
 import { useToast } from "../../components/Toast";
@@ -17,7 +20,7 @@ import {
   writeFeedQuery,
   type FeedQuery,
 } from "./feedQuery";
-import { feedParams } from "./feedLive";
+import { feedParams, isDefaultSort } from "./feedLive";
 import styles from "./RunFeed.module.css";
 import tableStyles from "../tables.module.css";
 
@@ -113,6 +116,22 @@ export function RunFeed({ query, onQuery, tenants, localCluster, live, onNewPipe
 
   const rows = useMemo<FleetRunRow[]>(() => feed.data?.pages.flatMap((p) => p.items) ?? [], [feed.data]);
 
+  // Consecutive runs of one job fold into one row under the default sort. A job
+  // filter turns the fold off, so that view lists every run.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const foldOn = isDefaultSort(query) && query.job === "";
+  const items = useMemo<FeedItem[]>(
+    () => (foldOn ? foldRuns(rows) : rows.map((run) => ({ kind: "run" as const, run }))),
+    [rows, foldOn],
+  );
+  const toggleFold = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   const rerun = useMutation({
     mutationFn: (r: FleetRunRow) => rerunRun(r.runId),
     onSuccess: () => {
@@ -157,7 +176,7 @@ export function RunFeed({ query, onQuery, tenants, localCluster, live, onNewPipe
   const actorOptions = distinctWith(
     rows.map((r) => r.actor),
     query.actor,
-  );
+  ).map((o) => ({ ...o, label: displayActor(o.value) ?? "No actor" }));
   const tenantOptions: FilterOption[] = tenants.map((t) => ({ value: t, label: t }));
 
   const onHeader = (key: FleetRunSort) => {
@@ -297,16 +316,40 @@ export function RunFeed({ query, onQuery, tenants, localCluster, live, onNewPipe
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <RunRow
-                  key={r.runId}
-                  run={r}
-                  now={now}
-                  localCluster={localCluster}
-                  onRerun={(run) => rerun.mutate(run)}
-                  onCancel={(run) => cancel.mutate(run)}
-                />
-              ))}
+              {items.map((item) =>
+                item.kind === "run" ? (
+                  <RunRow
+                    key={item.run.runId}
+                    run={item.run}
+                    now={now}
+                    localCluster={localCluster}
+                    onRerun={(run) => rerun.mutate(run)}
+                    onCancel={(run) => cancel.mutate(run)}
+                  />
+                ) : (
+                  <Fragment key={item.id}>
+                    <RunFoldRow
+                      runs={item.runs}
+                      now={now}
+                      localCluster={localCluster}
+                      expanded={expanded.has(item.id)}
+                      onToggle={() => toggleFold(item.id)}
+                    />
+                    {expanded.has(item.id) &&
+                      item.runs.map((run) => (
+                        <RunRow
+                          key={run.runId}
+                          run={run}
+                          now={now}
+                          localCluster={localCluster}
+                          nested
+                          onRerun={(r) => rerun.mutate(r)}
+                          onCancel={(r) => cancel.mutate(r)}
+                        />
+                      ))}
+                  </Fragment>
+                ),
+              )}
             </tbody>
           </table>
         </div>
