@@ -235,8 +235,13 @@
   font-size: 12.5px;
 }
 
-.poolNotReady {
-  box-shadow: inset 3px 0 0 var(--warn);
+/*
+ * The rail sits on the Card root, and the card body padding keeps it clear of
+ * the text. The doubled class outranks the Card box-shadow, so the order in
+ * which the stylesheets load does not decide the rail.
+ */
+.poolNotReady.poolNotReady {
+  box-shadow: inset 3px 0 0 var(--warn), var(--shadow-sm);
 }
 
 .warnValue {

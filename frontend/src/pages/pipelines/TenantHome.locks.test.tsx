@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../../test/render-utils";
 import { createFleetLock } from "../../test/factories";
+import { ApiError } from "../../hooks/useApi";
 import type { RunNotification } from "../../types";
 import TenantHome from "./TenantHome";
 
@@ -142,6 +143,22 @@ describe("TenantHome — the Locks card", () => {
     renderPage();
 
     await waitFor(() => expect(screen.getByText("held elsewhere")).toBeInTheDocument());
+  });
+
+  it("offers Retry for an unreachable record store instead of the generic failure", async () => {
+    mockListFleetLocks.mockRejectedValue(
+      new ApiError(503, "record store unreachable", {
+        error: "record store unreachable",
+        code: "record_store_unreachable",
+      }),
+    );
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText(/did not answer/)).toBeInTheDocument());
+    expect(screen.queryByText("Unable to load locks.")).not.toBeInTheDocument();
+    await waitFor(() => expect(mockListFleetLocks).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(mockListFleetLocks).toHaveBeenCalledTimes(2));
   });
 
   it("states that the tenant holds no lock and waits on none", async () => {

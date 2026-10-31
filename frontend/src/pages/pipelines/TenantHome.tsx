@@ -16,6 +16,7 @@ import {
   RecordStoreDisabledPage,
   RecordStoreUnreachablePage,
 } from "../../components/RecoveryState";
+import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { age } from "../../components/activityTimeline.util";
 import { useClusters, coreOf } from "../../hooks/useClusters";
@@ -547,6 +548,13 @@ export default function TenantHome() {
       <div className={styles.sectionTitle}>Locks</div>
       {locksQuery.isLoading ? (
         <div className={styles.emptyLine}>Loading locks…</div>
+      ) : isRecordStoreUnreachable(locksQuery.error) ? (
+        <div className={styles.emptyLine}>
+          The build record store did not answer, so the locks are not available.{" "}
+          <Button size="sm" variant="ghost" onClick={() => void locksQuery.refetch()}>
+            Retry
+          </Button>
+        </div>
       ) : locksQuery.isError ? (
         <div className={styles.emptyLine}>Unable to load locks.</div>
       ) : lockItems.length === 0 ? (

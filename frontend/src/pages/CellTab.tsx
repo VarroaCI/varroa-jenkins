@@ -7,7 +7,7 @@ import { age } from "../components/activityTimeline.util";
 import { useCellGrants, useCellPool, useCellUsage } from "../hooks/useCells";
 import { useAuth } from "../context/AuthContext";
 import { canAccessTenantPipeline, canDoGlobal } from "../hooks/usePermissions";
-import { ApiError } from "../hooks/useApi";
+import { ApiError, isRecordStoreUnreachable } from "../hooks/useApi";
 import type {
   CellSignatureRequester,
   ControllerDetail,
@@ -36,6 +36,9 @@ export function CellTab({ ctrl, cluster, namespace, name, active }: CellTabProps
   const poolName = usage.data?.cellPool;
   const pool = useCellPool(poolName, active && canReadPools, cluster);
   const grants = useCellGrants(namespace, name, active, cluster);
+  // The query keeps the last data after a failed refetch. A failed read shows
+  // no count, so the panels take no data while an error is set.
+  const usageData = usage.error ? undefined : usage.data;
 
   const cell = ctrl.cell;
   const tenants = cell?.tenants ?? [];
@@ -45,14 +48,20 @@ export function CellTab({ ctrl, cluster, namespace, name, active }: CellTabProps
     <div className={styles.tab}>
       <TopologyPanel
         cell={cell}
-        usage={usage.data}
+        usage={usageData}
         pool={pool.data}
         canReadPools={canReadPools}
         tenants={tenants}
         applied={applied}
         permissions={permissions}
       />
-      <CapacityPanel usage={usage.data} pool={pool.data} canReadPools={canReadPools} />
+      <CapacityPanel
+        usage={usageData}
+        usageError={usage.error}
+        onRetry={() => void usage.refetch()}
+        pool={pool.data}
+        canReadPools={canReadPools}
+      />
       <ScriptApprovalsPanel cell={cell} permissions={permissions} />
       <PermissionsPanel
         tenants={tenants}
@@ -300,17 +309,36 @@ function poolSignaturesLine(pool?: CellPool): string {
   return count === 0 ? "None" : String(count);
 }
 
+/** The reason a usage read gave no counts. */
+type UsageProblem = "unreachable" | "disabled" | "failed";
+
+/**
+ * usageProblem names why a usage read gave no counts. A store that is off
+ * and a store that did not answer need different actions.
+ */
+function usageProblem(error: unknown): UsageProblem | null {
+  if (!error) return null;
+  if (isRecordStoreUnreachable(error)) return "unreachable";
+  if (error instanceof ApiError && error.status === 503) return "disabled";
+  return "failed";
+}
+
 function CapacityPanel({
   usage,
+  usageError,
+  onRetry,
   pool,
   canReadPools,
 }: {
   usage?: CellUsage;
+  usageError: unknown;
+  onRetry: () => void;
   pool?: CellPool;
   canReadPools: boolean;
 }) {
   const poolCap = pool?.spec.maxTenantsPerCell;
   const capsDiffer = canReadPools && poolCap != null && usage != null && poolCap !== usage.maxTenants;
+  const problem = usageProblem(usageError);
 
   return (
     <Card>
@@ -326,6 +354,9 @@ function CapacityPanel({
                 <span title={usage.queueLengthAt ? `Read at ${usage.queueLengthAt}` : undefined}>
                   {usage.queueLength}
                 </span>
+              ) : problem ? (
+                // A failed read does not show whether a gauge exists, so the row shows only the dash.
+                <span className={styles.muted}>{DASH}</span>
               ) : (
                 <span className={styles.muted}>
                   {DASH} <small>no gauge: the mite gauges cover the local cluster only</small>
@@ -348,7 +379,18 @@ function CapacityPanel({
         two numbers can differ.
         {usage?.windowStart ? ` The 24-hour window starts at ${usage.windowStart}.` : ""}
       </p>
-      {!usage || usage.tenants.length === 0 ? (
+      {problem === "unreachable" ? (
+        <div className={styles.empty}>
+          The build record store did not answer, so these counts are not available.{" "}
+          <Button size="sm" variant="ghost" onClick={onRetry}>
+            Retry
+          </Button>
+        </div>
+      ) : problem === "disabled" ? (
+        <p className={styles.empty}>The build record store is disabled, so these counts are not available.</p>
+      ) : problem === "failed" ? (
+        <p className={styles.empty}>The cell usage read failed, so these counts are not available.</p>
+      ) : !usage || usage.tenants.length === 0 ? (
         <p className={styles.empty}>No tenant has run a build in the window.</p>
       ) : (
         <div className={styles.tableScroll}>

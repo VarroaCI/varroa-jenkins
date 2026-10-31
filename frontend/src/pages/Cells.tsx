@@ -51,6 +51,9 @@ export default function Cells() {
     clusters.length > 0 &&
     usage.covered.size === 0 &&
     usage.recordStoreDisabled.size === clusters.length;
+  // A store that did not answer keeps the four columns. Each row reads not
+  // available, and the notice offers Retry.
+  const usageUnreachable = usage.recordStoreUnreachable.size > 0;
 
   return (
     <div className={styles.page}>
@@ -68,6 +71,15 @@ export default function Cells() {
         <div className={styles.notice}>
           The build record store is disabled, so this page states no tenant fill, queue, run, or
           failure count. Enable <code>recordStore</code> to see them.
+        </div>
+      )}
+      {usageUnreachable && (
+        <div className={styles.notice}>
+          The build record store did not answer for one or more clusters. Their rows show no tenant
+          fill, queue, run, or failure count. The page tries the read again every 15 seconds.{" "}
+          <Button size="sm" variant="ghost" onClick={usage.refetch}>
+            Retry
+          </Button>
         </div>
       )}
       {pools.error && !(pools.error instanceof ApiError && pools.error.status === 503) && (
@@ -130,8 +142,7 @@ function PoolBlock({
   const readyText = ready ? `${ready.status}${ready.reason ? ` (${ready.reason})` : ""}` : DASH;
 
   return (
-    <Card>
-      <div className={notReady ? styles.poolNotReady : undefined}>
+    <Card className={notReady ? styles.poolNotReady : undefined}>
       <div className={styles.poolHead}>
         <div>
           <h2 className={styles.poolName}>
@@ -208,7 +219,6 @@ function PoolBlock({
           </table>
         </div>
       )}
-      </div>
     </Card>
   );
 }

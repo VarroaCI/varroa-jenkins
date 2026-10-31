@@ -1,5 +1,5 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { ApiError } from "./useApi";
+import { ApiError, isRecordStoreUnreachable } from "./useApi";
 import type { CellUsage } from "../types";
 import { getCellGrants, getCellPool, getCellPools, getCellUsage, listCellUsage } from "../api/client";
 
@@ -81,12 +81,23 @@ export function useCellGrants(namespace: string | undefined, name: string | unde
  * covered names the clusters whose read answered. A cell whose cluster is
  * absent from it has no usage data at all, which is not the same state as a
  * count of zero.
+ *
+ * recordStoreDisabled names the clusters whose read answered 503 with no
+ * code: the store is off or its schema is too old. recordStoreUnreachable
+ * names the clusters whose read answered 503 with the code
+ * record_store_unreachable. The two states need different actions, so a
+ * cluster sits in one set only.
  */
 export interface CellUsageIndex {
   rows: Map<string, CellUsage>;
   covered: Set<string>;
+  /** clusters whose read answered 503 with no code: the store is off or its schema is too old */
   recordStoreDisabled: Set<string>;
+  /** clusters whose read answered 503 with the code record_store_unreachable */
+  recordStoreUnreachable: Set<string>;
   isLoading: boolean;
+  /** reads every cluster again */
+  refetch: () => void;
 }
 
 /** cellUsageKey builds the index key of one cell. */
@@ -116,11 +127,17 @@ export function useCellUsageIndex(clusters: string[]): CellUsageIndex {
   const rows = new Map<string, CellUsage>();
   const covered = new Set<string>();
   const recordStoreDisabled = new Set<string>();
+  const recordStoreUnreachable = new Set<string>();
   let isLoading = false;
 
   results.forEach((result, i) => {
     const cluster = clusters[i];
     if (result.isLoading) isLoading = true;
+    // A store that did not answer is not a store that is off, so this check comes first.
+    if (isRecordStoreUnreachable(result.error)) {
+      recordStoreUnreachable.add(cluster);
+      return;
+    }
     if (result.error instanceof ApiError && result.error.status === 503) {
       recordStoreDisabled.add(cluster);
       return;
@@ -132,5 +149,9 @@ export function useCellUsageIndex(clusters: string[]): CellUsageIndex {
     }
   });
 
-  return { rows, covered, recordStoreDisabled, isLoading };
+  const refetch = () => {
+    for (const result of results) void result.refetch();
+  };
+
+  return { rows, covered, recordStoreDisabled, recordStoreUnreachable, isLoading, refetch };
 }
