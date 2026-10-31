@@ -6,11 +6,10 @@ a React/TypeScript frontend, a Helm chart, and a Jenkins auth plugin under `plug
 
 ## Code review guidance
 
-- **Greenfield — no legacy.** This project has no external userbase. Never request
-  backward compatibility, deprecation paths, migration flags, or dual-shape responses.
-  A breaking contract change is correct as long as every in-repo consumer (frontend,
-  mite, charts, MCP tools, docs) is updated in the same PR — flag *missed consumers*,
-  not the break itself.
+- **A contract change updates every consumer.** A change to an API path, payload
+  shape, CRD field, or CLI flag must update every in-repo consumer (frontend, mite,
+  charts, MCP tools, generated client, docs) in the same PR. A missed consumer is a
+  valid finding.
 - **Do not comment on generated code:** `internal/mite/proto/mitev1/`, `pkg/client/`,
   `charts/varroa/crds/`, and `internal/controller/pluginlock/seed/` are all generated.
   `api/v1alpha1/zz_generated.deepcopy.go` is hand-written; a missing deep copy of a
