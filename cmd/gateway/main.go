@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -23,7 +24,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -31,6 +31,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/apikey"
+	"github.com/varroaci/varroa-jenkins/internal/bootsecret"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/ca"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
@@ -121,47 +122,17 @@ func main() {
 	busConn.SetReplicas(jetStreamReplicasFromEnv())
 	logger.Info("connected to NATS bus", "url", busConn.NATSConn().ConnectedUrl(), "jetStreamReplicas", busConn.Replicas())
 
-	// --- CA: load from varroa-ca Secret (created by the operator). ---
-	// The gateway verifies mite client certs and issues new mite certs, so it
-	// needs the SAME CA as the operator. The operator creates the varroa-ca
-	// Secret at startup; on a fresh install the gateway can race ahead of it, so
-	// we WAIT for the Secret rather than mint an ephemeral CA. An ephemeral CA
-	// would silently split-brain the control plane — every mite's mTLS then
-	// fails against the operator-signed identity until a manual gateway restart,
-	// which is exactly what blocks hive-cluster recovery after a reinstall.
+	// --- CA: the gateway needs the operator's CA to verify mite certs. ---
 	operatorNamespace := controller.ResolveOperatorNamespace(logger)
-
-	var certAuth *ca.CA
-	if k8sClient := newK8sClientset(); k8sClient != nil {
-		var err error
-		certAuth, err = waitForCASecret(context.Background(), k8sClient, operatorNamespace,
-			caSecretWaitTimeout, caSecretPollInterval, logger)
-		if err != nil {
-			logger.Error("failed to load CA from Secret", "error", err)
-			os.Exit(1)
-		}
-		if certAuth != nil {
-			logger.Info("loaded existing CA from Secret", "namespace", operatorNamespace)
-		}
+	var k8sClient kubernetes.Interface
+	if cs := newK8sClientset(); cs != nil {
+		k8sClient = cs // assign only a non-nil pointer: a nil *Clientset in an interface is not nil
 	}
-	if certAuth == nil {
-		// No Secret after waiting. Refuse to run with an ephemeral CA by default
-		// (it would break every mite's mTLS); allow an explicit opt-in for local
-		// dev / tests where the gateway runs without an operator.
-		if os.Getenv("VARROA_ALLOW_EPHEMERAL_CA") != "true" {
-			logger.Error("varroa-ca Secret not found after waiting; refusing to start with an "+
-				"ephemeral CA (would split-brain the CA and break mite mTLS). Set "+
-				"VARROA_ALLOW_EPHEMERAL_CA=true to override for local/dev without an operator.",
-				"namespace", operatorNamespace, "waited", caSecretWaitTimeout.String())
-			os.Exit(1)
-		}
-		var err error
-		certAuth, err = ca.NewCA()
-		if err != nil {
-			logger.Error("failed to create CA", "error", err)
-			os.Exit(1)
-		}
-		logger.Warn("using ephemeral CA (VARROA_ALLOW_EPHEMERAL_CA=true; no varroa-ca Secret found)")
+	certAuth, err := loadGatewayCA(context.Background(), k8sClient, operatorNamespace,
+		os.Getenv("VARROA_ALLOW_EPHEMERAL_CA") == "true", caSecretWaitTimeout, caSecretPollInterval, logger)
+	if err != nil {
+		logger.Error("failed to load the CA", "namespace", operatorNamespace, "error", err)
+		os.Exit(1)
 	}
 
 	// --- Token signer (shared with operator via CA private key) ---
@@ -386,41 +357,60 @@ func jetStreamReplicasFromEnv() int {
 	return n
 }
 
-// newK8sClientset creates a Kubernetes clientset from in-cluster config or
-// kubeconfig. Returns nil if no cluster is reachable (development mode).
 const (
 	caSecretName         = "varroa-ca"
 	caSecretWaitTimeout  = 3 * time.Minute
 	caSecretPollInterval = 3 * time.Second
 )
 
-// waitForCASecret polls for the operator-created varroa-ca Secret and loads the
-// shared internal CA from it. On a fresh install the operator creates this
-// Secret at startup and the gateway may start first, so we wait for it instead
-// of minting an ephemeral CA (which would split-brain the CA and break every
-// mite's mTLS until a manual gateway restart). Returns (nil, nil) if the Secret
-// never becomes available within timeout, leaving the fallback decision to the
-// caller.
+// waitForCASecret reads the operator-created varroa-ca Secret until it exists
+// with both keys, or until timeout. It returns an error that wraps
+// bootsecret.ErrNotFound when the last answer was not-found. A read error is
+// never absence. The gateway never writes the Secret.
 func waitForCASecret(ctx context.Context, k8s kubernetes.Interface, namespace string, timeout, poll time.Duration, logger *slog.Logger) (*ca.CA, error) {
-	deadline := time.Now().Add(timeout)
-	for {
-		secret, err := k8s.CoreV1().Secrets(namespace).Get(ctx, caSecretName, metav1.GetOptions{})
-		if err == nil && len(secret.Data["tls.crt"]) > 0 && len(secret.Data["tls.key"]) > 0 {
-			return ca.LoadCA(secret.Data["tls.crt"], secret.Data["tls.key"])
-		}
-		if time.Now().After(deadline) {
-			return nil, nil
-		}
-		logger.Info("waiting for varroa-ca Secret (created by operator)",
-			"namespace", namespace, "secret", caSecretName)
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(poll):
-		}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	data, err := bootsecret.Wait(ctx, k8s,
+		bootsecret.Ref{Namespace: namespace, Name: caSecretName, Keys: []string{"tls.crt", "tls.key"}},
+		bootsecret.Options{Poll: poll, Logger: logger})
+	if err != nil {
+		return nil, err
 	}
+	return ca.LoadCA(data["tls.crt"], data["tls.key"])
 }
 
+// loadGatewayCA returns the operator's CA. It mints an ephemeral CA only when
+// the Secret is confirmed absent and allowEphemeral is set. A read error never
+// mints, even with allowEphemeral.
+func loadGatewayCA(ctx context.Context, k8s kubernetes.Interface, namespace string, allowEphemeral bool,
+	timeout, poll time.Duration, logger *slog.Logger) (*ca.CA, error) {
+	const refuse = "refusing to start with an ephemeral CA, which splits the CA and breaks mite mTLS; " +
+		"set VARROA_ALLOW_EPHEMERAL_CA=true only for local work without an operator"
+	if k8s != nil {
+		authority, err := waitForCASecret(ctx, k8s, namespace, timeout, poll, logger)
+		if err == nil {
+			logger.Info("loaded existing CA from Secret", "namespace", namespace)
+			return authority, nil
+		}
+		if !errors.Is(err, bootsecret.ErrNotFound) {
+			return nil, err
+		}
+		if !allowEphemeral {
+			return nil, fmt.Errorf("%w; %s", err, refuse)
+		}
+	} else if !allowEphemeral {
+		return nil, fmt.Errorf("no Kubernetes client; %s", refuse)
+	}
+	authority, err := ca.NewCA()
+	if err != nil {
+		return nil, fmt.Errorf("create ephemeral CA: %w", err)
+	}
+	logger.Warn("using ephemeral CA (VARROA_ALLOW_EPHEMERAL_CA=true; no varroa-ca Secret found)")
+	return authority, nil
+}
+
+// newK8sClientset creates a Kubernetes clientset from in-cluster config or
+// kubeconfig. Returns nil if no cluster is reachable (development mode).
 func newK8sClientset() *kubernetes.Clientset {
 	config, err := rest.InClusterConfig()
 	if err != nil {
