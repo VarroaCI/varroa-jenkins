@@ -22,6 +22,7 @@ import { Button } from "../Button";
 import { age } from "../activityTimeline.util";
 import { TranscriptView } from "./TranscriptView";
 import { TranscriptStream } from "./TranscriptStream";
+import { unechoedPending, type PendingMessage } from "./activity";
 import styles from "./AssistantDrawer.module.css";
 import type { AssistantSession, AssistantSessionState } from "../../types/assistant";
 
@@ -36,6 +37,7 @@ export default function AssistantDrawer() {
   const [refusal, setRefusal] = useState("");
   const [showList, setShowList] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<PendingMessage | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const narrow = useNarrowViewport();
 
@@ -67,26 +69,37 @@ export default function AssistantDrawer() {
   const state = model.state ?? session?.state ?? null;
   const running = state === "running" || state === "waiting_approval";
   const completed = state === "completed";
-  const canSend = !busy && (!sid || completed);
+  const shownPending = unechoedPending(model, pending);
+  // A send waits for the replay to fold, so afterSeq is the stream's last seq.
+  const canSend = !busy && !shownPending && (!sid || (completed && model.live));
 
   const send = async () => {
-    const text = composer.trim();
+    if (!canSend) return;
+    const raw = composer;
+    const text = raw.trim();
     if (!text) return;
     setRefusal("");
     setBusy(true);
+    setPending({ text, afterSeq: model.lastSeq, sending: true });
+    setComposer("");
+    const sent = () => setPending((p) => (p ? { ...p, sending: false } : p));
+    const fail = (message: string) => {
+      setPending(null);
+      setComposer((c) => (c === "" ? raw : c));
+      setRefusal(message);
+    };
     try {
       if (!sid) {
         const r = await a.startSession({ context: ctx, message: text });
-        if (r.ok) setComposer("");
-        else setRefusal(r.text);
+        if (r.ok) sent();
+        else fail(r.text);
       } else {
         await postAssistantMessage(sid, { message: text });
-        setComposer("");
+        sent();
         void queryClient.invalidateQueries({ queryKey: ["assistant-session", sid] });
-        a.openSession(sid);
       }
     } catch (err) {
-      setRefusal(err instanceof ApiError && err.status === 409
+      fail(err instanceof ApiError && err.status === 409
         ? "This conversation cannot continue. Start a new conversation."
         : "The message was not sent.");
     } finally {
@@ -157,7 +170,7 @@ export default function AssistantDrawer() {
       <header className={styles.header}>
         <span className={styles.chip} title={contextLabel(ctx)}>{contextLabel(ctx)}</span>
         {sid && ctxDiffers && (
-          <Button variant="ghost" size="sm" className={styles.headerBtn} onClick={a.newConversation}>
+          <Button variant="ghost" size="sm" className={styles.headerBtn} onClick={() => { setPending(null); a.newConversation(); }}>
             <MessageSquarePlus size={14} aria-hidden="true" />
             New conversation for this page
           </Button>
@@ -204,7 +217,7 @@ export default function AssistantDrawer() {
                 type="button"
                 className={styles.sessionRow}
                 aria-current={s.id === sid ? "true" : undefined}
-                onClick={() => a.openSession(s.id)}
+                onClick={() => { setPending(null); a.openSession(s.id); }}
               >
                 <span>{contextLabel(s.context)}</span>
                 <span className={styles.sessionMeta}>
@@ -226,12 +239,17 @@ export default function AssistantDrawer() {
         />
       )}
 
-      <TranscriptView model={model} approvalActions={(id) => (
-        <>
-          <Button size="sm" variant="primary" onClick={() => void decide(id, true)}>Approve</Button>
-          <Button size="sm" onClick={() => void decide(id, false)}>Deny</Button>
-        </>
-      )} />
+      <TranscriptView
+        model={model}
+        sessionState={session?.state ?? null}
+        pending={shownPending}
+        approvalActions={(id) => (
+          <>
+            <Button size="sm" variant="primary" onClick={() => void decide(id, true)}>Approve</Button>
+            <Button size="sm" onClick={() => void decide(id, false)}>Deny</Button>
+          </>
+        )}
+      />
 
       {refusal && <p role="alert" className={styles.error}>{refusal}</p>}
 
@@ -250,7 +268,7 @@ export default function AssistantDrawer() {
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              void send();
+              if (canSend) void send();
             }
           }}
         />

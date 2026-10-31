@@ -93,6 +93,29 @@ describe("follow-up turns", () => {
   });
 });
 
+describe("live and parked state", () => {
+  it("starts not live and keeps live across frames", () => {
+    let m = emptyModel();
+    expect(m.live).toBe(false);
+    m = { ...m, live: true };
+    m = applyEvent(m, frame(1, "user", { text: "x" }));
+    expect(m.live).toBe(true);
+  });
+
+  it("clears the parked state when the last pending approval resolves", () => {
+    let m = applyEvent(emptyModel(), frame(1, "user", { text: "fix it" }));
+    m = applyEvent(m, frame(2, "tool_call", { call_id: "c1", name: "restart_run", arguments: {}, class: "write" }));
+    m = applyEvent(m, frame(3, "approval_requested", { approval_id: "a1", call_id: "c1", tool: "restart_run", target_kind: "run", target_ref: "r1" }));
+    m = applyEvent(m, frame(4, "tool_call", { call_id: "c2", name: "restart_run", arguments: {}, class: "write" }));
+    m = applyEvent(m, frame(5, "approval_requested", { approval_id: "a2", call_id: "c2", tool: "restart_run", target_kind: "run", target_ref: "r2" }));
+    m = applyEvent(m, frame(6, "done", { state: "waiting_approval" }));
+    m = applyEvent(m, frame(7, "approval_resolved", { approval_id: "a1", state: "approved" }));
+    expect(m.state).toBe("waiting_approval");
+    m = applyEvent(m, frame(8, "approval_resolved", { approval_id: "a2", state: "approved" }));
+    expect(m.state).toBeNull();
+  });
+});
+
 describe("callDurationMs", () => {
   it("measures call to result and is null without a result", () => {
     const base: CallView = { callId: "c", name: "n", arguments: {}, class: "read", createdAt: "2026-10-18T10:00:00Z" };

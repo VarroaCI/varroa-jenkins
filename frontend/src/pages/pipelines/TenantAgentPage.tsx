@@ -163,7 +163,7 @@ function FullTranscript({ sessionId }: { sessionId: string }) {
   return (
     <div className={styles.transcript}>
       <TranscriptStream sessionId={sessionId} resumeFrom={0} onModel={setModel} onDone={() => undefined} />
-      <TranscriptView model={model} />
+      <TranscriptView model={model} sessionState={detail.data?.session.state ?? null} />
       {detail.data && <p className={styles.meta}>State: {detail.data.session.state}</p>}
     </div>
   );

@@ -47,11 +47,13 @@ export interface TranscriptModel {
   state: AssistantSessionState | null;
   stop: string;
   usageEstimated: boolean;
+  /** live is true once the stream has replayed the stored events. Text that arrives after it is new. */
+  live: boolean;
 }
 
 /** emptyModel returns the state before any frame arrives. */
 export function emptyModel(): TranscriptModel {
-  return { rows: [], turns: {}, calls: {}, approvals: {}, lastSeq: 0, state: null, stop: "", usageEstimated: false };
+  return { rows: [], turns: {}, calls: {}, approvals: {}, lastSeq: 0, state: null, stop: "", usageEstimated: false, live: false };
 }
 
 function str(v: unknown): string {
@@ -148,6 +150,10 @@ export function applyEvent(model: TranscriptModel, frame: AssistantFrame): Trans
             resolvedAt: createdAt,
           },
         };
+      }
+      // A resolved approval resumes the session, so the parked state is stale.
+      if (next.state === "waiting_approval" && !Object.values(next.calls).some((c) => c.approval?.state === "pending")) {
+        next.state = null;
       }
       break;
     }
