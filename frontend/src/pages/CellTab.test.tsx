@@ -292,6 +292,67 @@ describe("Capacity and usage panel", () => {
     expect(screen.getByText(/come from the build records/)).toBeInTheDocument();
     expect(screen.getByText(/2026-09-11T00:00:00Z/)).toBeInTheDocument();
   });
+
+  it("states an unreachable record store with Retry and no empty-window line", () => {
+    const mockRefetch = vi.fn();
+    mockUseCellUsage.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new ApiError(503, "record store unreachable", {
+        error: "record store unreachable",
+        code: "record_store_unreachable",
+      }),
+      refetch: mockRefetch,
+    });
+    renderTab();
+    expect(screen.getByText(/did not answer/)).toBeInTheDocument();
+    expect(screen.queryByText("No tenant has run a build in the window.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("states a disabled record store on a 503 with no code", () => {
+    mockUseCellUsage.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new ApiError(503, "record store not configured", { error: "record store not configured" }),
+      refetch: vi.fn(),
+    });
+    renderTab();
+    expect(screen.getByText(/is disabled/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  it("states a failed usage read instead of an empty window", () => {
+    mockUseCellUsage.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new ApiError(500, "cell usage read failed"),
+      refetch: vi.fn(),
+    });
+    renderTab();
+    expect(screen.getByText(/read failed/)).toBeInTheDocument();
+    expect(screen.queryByText("No tenant has run a build in the window.")).not.toBeInTheDocument();
+  });
+
+  it("drops old counts when a refetch fails", () => {
+    mockUseCellUsage.mockReturnValue({
+      data: makeUsage(),
+      isLoading: false,
+      error: new ApiError(503, "record store unreachable", {
+        error: "record store unreachable",
+        code: "record_store_unreachable",
+      }),
+      refetch: vi.fn(),
+    });
+    renderTab();
+    const cap = screen.getByText("Tenant cap").parentElement as HTMLElement;
+    expect(within(cap).getByText("—")).toBeInTheDocument();
+    expect(within(cap).queryByText("10")).not.toBeInTheDocument();
+    // A failed read has no gauge, so the queue row names no gauge cause.
+    expect(screen.queryByText(/no gauge/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Running now")).not.toBeInTheDocument();
+  });
 });
 
 describe("Permissions panel", () => {

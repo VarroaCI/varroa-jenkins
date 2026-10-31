@@ -28,6 +28,8 @@ type fakeCellReader struct {
 	recordstore.Reader
 
 	schemaTooOld bool
+	// unreachable makes every read fail as a store that did not answer.
+	unreachable bool
 	// usage is keyed by "<cluster>/<namespace>/<cell>".
 	usage map[string]recordstore.CellUsage
 	// tenantUsage is keyed by "<cluster>/<namespace>/<cell>/<tenant>" and
@@ -55,6 +57,9 @@ func (f *fakeCellReader) CellUsage(ctx context.Context, cluster, namespace, cell
 }
 
 func (f *fakeCellReader) CellUsageMany(_ context.Context, cluster, namespace string, cellNames []string) (map[string]recordstore.CellUsage, error) {
+	if f.unreachable {
+		return nil, fmt.Errorf("%w: read cell usage: connection refused", recordstore.ErrUnavailable)
+	}
 	if f.schemaTooOld {
 		return nil, recordstore.ErrSchemaTooOld
 	}
@@ -73,6 +78,9 @@ func (f *fakeCellReader) CellUsageMany(_ context.Context, cluster, namespace str
 }
 
 func (f *fakeCellReader) CellTenantUsage(_ context.Context, cluster, namespace, cell, tenant string) ([]recordstore.CellJobUsage, error) {
+	if f.unreachable {
+		return nil, fmt.Errorf("%w: read cell usage: connection refused", recordstore.ErrUnavailable)
+	}
 	if f.schemaTooOld {
 		return nil, recordstore.ErrSchemaTooOld
 	}
@@ -260,8 +268,20 @@ func TestCellUsageDeniesWithoutAuthorizer(t *testing.T) {
 	}
 }
 
-// TestCellUsageWithoutRecordStore asserts both paths answer 503 when the
-// record store is absent.
+// errorBodyCode returns the code field of a JSON error body, or "" when
+// the body carries none.
+func errorBodyCode(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode error body: %v (body %s)", err, rec.Body.String())
+	}
+	return body["code"]
+}
+
+// TestCellUsageWithoutRecordStore asserts both paths answer 503 with no
+// code when the record store is absent. A store that is off is not a
+// store that did not answer.
 func TestCellUsageWithoutRecordStore(t *testing.T) {
 	srv := cellsTestServer(twoCellClient(), cellReadAuthorizer("ns-a"), nil)
 
@@ -270,15 +290,21 @@ func TestCellUsageWithoutRecordStore(t *testing.T) {
 	if single.Code != http.StatusServiceUnavailable {
 		t.Errorf("single status = %d, want 503", single.Code)
 	}
+	if got := errorBodyCode(t, single); got != "" {
+		t.Errorf("single code = %q, want none", got)
+	}
 
 	list := doCellRequest(t, srv.handleListCellUsage, "/cells/usage", nil, cellUserClaims)
 	if list.Code != http.StatusServiceUnavailable {
 		t.Errorf("list status = %d, want 503", list.Code)
 	}
+	if got := errorBodyCode(t, list); got != "" {
+		t.Errorf("list code = %q, want none", got)
+	}
 }
 
-// TestCellUsageWithAnOldSchema asserts both paths answer 503 when the
-// reader reports an old schema.
+// TestCellUsageWithAnOldSchema asserts both paths answer 503 with no code
+// when the reader reports an old schema.
 func TestCellUsageWithAnOldSchema(t *testing.T) {
 	reader := newFakeCellReader()
 	reader.schemaTooOld = true
@@ -289,10 +315,42 @@ func TestCellUsageWithAnOldSchema(t *testing.T) {
 	if single.Code != http.StatusServiceUnavailable {
 		t.Errorf("single status = %d, want 503", single.Code)
 	}
+	if got := errorBodyCode(t, single); got != "" {
+		t.Errorf("single code = %q, want none", got)
+	}
 
 	list := doCellRequest(t, srv.handleListCellUsage, "/cells/usage", nil, cellUserClaims)
 	if list.Code != http.StatusServiceUnavailable {
 		t.Errorf("list status = %d, want 503", list.Code)
+	}
+	if got := errorBodyCode(t, list); got != "" {
+		t.Errorf("list code = %q, want none", got)
+	}
+}
+
+// TestCellUsageUnreachableCarriesTheCode asserts both paths answer 503 with
+// the unreachable code when the store does not answer. The page tells this
+// case apart from a store that is off, so the code must reach the body.
+func TestCellUsageUnreachableCarriesTheCode(t *testing.T) {
+	reader := newFakeCellReader()
+	reader.unreachable = true
+	srv := cellsTestServer(twoCellClient(), cellReadAuthorizer("ns-a"), reader)
+
+	single := doCellRequest(t, srv.handleCellUsage, "/cells/ns-a/cell-a/usage",
+		map[string]string{"namespace": "ns-a", "name": "cell-a"}, cellUserClaims)
+	if single.Code != http.StatusServiceUnavailable {
+		t.Errorf("single status = %d, want 503", single.Code)
+	}
+	if got := errorBodyCode(t, single); got != codeRecordStoreUnreachable {
+		t.Errorf("single code = %q, want %q", got, codeRecordStoreUnreachable)
+	}
+
+	list := doCellRequest(t, srv.handleListCellUsage, "/cells/usage", nil, cellUserClaims)
+	if list.Code != http.StatusServiceUnavailable {
+		t.Errorf("list status = %d, want 503", list.Code)
+	}
+	if got := errorBodyCode(t, list); got != codeRecordStoreUnreachable {
+		t.Errorf("list code = %q, want %q", got, codeRecordStoreUnreachable)
 	}
 }
 

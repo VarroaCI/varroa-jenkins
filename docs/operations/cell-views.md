@@ -36,6 +36,8 @@ A tenant links to its pipelines page only for a caller who may read that tenant.
 
 The panel renders the cell usage read: the tenant cap, the free slots, the queue length, and the per-tenant counts with their totals. The counts come from the build records, while the page header reports the Jenkins instance, so the two can differ.
 
+When the usage read fails, the panel names the cause in place of the counts. An unreachable record store gets a Retry button.
+
 ### Permissions
 
 The panel lists one block for each tenant, with the subjects, the pipelines verbs, and the job globs of each grant, plus the tenant's generated Jenkins item role and its folder pattern. The panel also lists the generated member roles of each tenant, with the folder pattern, the subjects, and the permissions of each role. It edits no binding, and a link opens the Access page. A tenant that no binding and no Tenant membership reaches says so. Cluster-wide bindings reach every tenant, so the panel lists them once, above the tenant blocks. Each tenant block lists only the grants that reach that tenant alone.
@@ -90,7 +92,8 @@ The operator sets `status.cell.evacuate` when a cell stays unready past twice it
 |---|---|
 | Cluster-wide `cellpools:read` | The `/cells` route and its navigation row do not render |
 | `controllers:read` on a cell | That cell has no row, and the page says it lists readable cells only |
-| The build record store | The batch read answers `503`, and the table drops its four usage columns |
+| The build record store, when it is off | The batch read answers `503` with no code, and the table drops its four usage columns |
+| The build record store, when it does not answer | The batch read answers `503` with the code `record_store_unreachable`. The table keeps its columns and marks the counts of that cluster "not available". A notice offers Retry |
 | An answer from a member cluster | The page names that cluster and the error, and shows no block for its pools |
 | Cluster-wide `rolebindings:read` | The Permissions panel names the missing verb and lists no grant |
 

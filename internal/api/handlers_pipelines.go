@@ -1772,7 +1772,7 @@ func (s *Server) handleListTenantFleetLocks(w http.ResponseWriter, r *http.Reque
 	claims := auth.ClaimsFromContext(r.Context())
 	rows, serr := s.ListFleetLocks(r.Context(), claims, r.PathValue("tenant"))
 	if serr != nil {
-		s.writeJSONError(w, serr.Status, serr.Message)
+		s.writeServiceError(w, serr)
 		return
 	}
 	s.writeJSON(w, http.StatusOK, itemsEnvelope(rows))

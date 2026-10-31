@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -310,6 +311,29 @@ func TestHandleListAllFleetLocks_GroupsHolderAcrossClusters(t *testing.T) {
 	}
 	if items[0].Name != items[1].Name {
 		t.Errorf("names = %q and %q, want one lock name", items[0].Name, items[1].Name)
+	}
+}
+
+// TestHandleListTenantFleetLocks_UnreachableCarriesTheCode asserts a store
+// that does not answer gives 503 with the unreachable code. The Locks card
+// tells that case apart from a store that is off, so the code must reach
+// the body.
+func TestHandleListTenantFleetLocks_UnreachableCarriesTheCode(t *testing.T) {
+	client := lockTenantClient(t)
+	reader := newFakeRecordReader()
+	reader.locksErr = fmt.Errorf("%w: list fleet locks: connection refused", recordstore.ErrUnavailable)
+	srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, "ns-a/ctrl-a"), reader, nil)
+
+	rec := doPipelinesRequest(t, srv.handleListTenantFleetLocks, "/pipelines/ops/locks", map[string]string{"tenant": "ops"})
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["code"] != codeRecordStoreUnreachable {
+		t.Fatalf("code = %q, want %q (body %s)", body["code"], codeRecordStoreUnreachable, rec.Body.String())
 	}
 }
 

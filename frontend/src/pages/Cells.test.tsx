@@ -23,16 +23,25 @@ vi.mock("../hooks/useCells", () => ({
   useCellGrants: vi.fn(),
 }));
 
+const mockRefetchUsage = vi.fn();
+
 // usageIndex builds the shape useCellUsageIndex returns: rows keyed
 // cluster/namespace/name, plus the set of clusters whose read answered.
-function usageIndex(rows: CellUsage[], covered: string[], disabled: string[] = []) {
+function usageIndex(
+  rows: CellUsage[],
+  covered: string[],
+  disabled: string[] = [],
+  unreachable: string[] = [],
+) {
   const map = new Map<string, CellUsage>();
   for (const row of rows) map.set(`${row.cluster}/${row.namespace}/${row.name}`, row);
   return {
     rows: map,
     covered: new Set(covered),
     recordStoreDisabled: new Set(disabled),
+    recordStoreUnreachable: new Set(unreachable),
     isLoading: false,
+    refetch: mockRefetchUsage,
   };
 }
 
@@ -205,11 +214,24 @@ describe("Degraded modes", () => {
     mockUseCellUsageIndex.mockReturnValue(usageIndex([], [], ["core"]));
     renderPage();
     expect(screen.getByText(/build record store is disabled/)).toBeInTheDocument();
+    expect(screen.queryByText(/did not answer/)).not.toBeInTheDocument();
     expect(screen.queryByText("Tenants / cap")).not.toBeInTheDocument();
     expect(screen.queryByText("Queue")).not.toBeInTheDocument();
     expect(screen.queryByText("Runs 24 h")).not.toBeInTheDocument();
     expect(screen.queryByText("Failures 24 h")).not.toBeInTheDocument();
     expect(screen.getByText("Age")).toBeInTheDocument();
+  });
+
+  it("keeps the usage columns and offers Retry when the record store does not answer", async () => {
+    mockUseCellUsageIndex.mockReturnValue(usageIndex([], [], [], ["core"]));
+    renderPage();
+    expect(screen.getByText(/did not answer/)).toBeInTheDocument();
+    expect(screen.queryByText(/is disabled/)).not.toBeInTheDocument();
+    expect(screen.getByText("Tenants / cap")).toBeInTheDocument();
+    const row = screen.getByRole("link", { name: "cell-a" }).closest("tr") as HTMLElement;
+    expect(within(row).getAllByText("not available").length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockRefetchUsage).toHaveBeenCalledTimes(1);
   });
 
   it("renders an em dash for a remote cell's queue, never a zero", () => {
@@ -599,27 +621,30 @@ describe("Pools on more than one cluster", () => {
   });
 });
 
+// notReadyPool is a pool whose PoolReady is False: its profile does not exist.
+function notReadyPool(): CellPool {
+  return pool({
+    status: {
+      warmCells: 0,
+      placedCells: 0,
+      unreadyCells: 0,
+      freeTenantSlots: 0,
+      conditions: [
+        {
+          type: "PoolReady",
+          status: "False",
+          reason: "ProfileMissing",
+          message: 'the JenkinsVersionProfile "x" does not exist',
+        },
+      ],
+    },
+  });
+}
+
 describe("Pool readiness and the cap wording", () => {
   it("flags a pool whose PoolReady is not True", () => {
     mockUseCellPools.mockReturnValue({
-      data: poolList([
-        pool({
-          status: {
-            warmCells: 0,
-            placedCells: 0,
-            unreadyCells: 0,
-            freeTenantSlots: 0,
-            conditions: [
-              {
-                type: "PoolReady",
-                status: "False",
-                reason: "ProfileMissing",
-                message: 'the JenkinsVersionProfile "x" does not exist',
-              },
-            ],
-          },
-        }),
-      ]),
+      data: poolList([notReadyPool()]),
       isLoading: false,
       error: null,
     });
@@ -633,6 +658,21 @@ describe("Pool readiness and the cap wording", () => {
   it("shows no warning for a ready pool", () => {
     renderPage();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("draws the not-ready rail on the card root, clear of the text", () => {
+    mockUseCellPools.mockReturnValue({ data: poolList([notReadyPool()]), isLoading: false, error: null });
+    renderPage();
+    const block = screen.getByRole("status").closest("[class*='poolNotReady']") as HTMLElement;
+    expect(block).not.toBeNull();
+    expect(block.className).toMatch(/card/);
+    // The first child of the card root is the body that carries the padding.
+    expect(block.firstElementChild?.className).toMatch(/cardBody/);
+  });
+
+  it("draws no rail for a ready pool", () => {
+    renderPage();
+    expect(document.querySelector("[class*='poolNotReady']")).toBeNull();
   });
 
   it("states No limit for an unset max cells", () => {
