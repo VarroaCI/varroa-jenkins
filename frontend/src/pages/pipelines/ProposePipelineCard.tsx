@@ -44,6 +44,7 @@ export const PROPOSE_ERROR_LABELS: Record<string, string> = {
   not_found: "The repository or the tenant was not found.",
   invalid_request: "The request was not valid.",
   internal: "The proposal failed inside Varroa.",
+  record_store_unreachable: "The record store does not answer. Try again when it answers.",
 };
 
 const POLL_MS = 3000;

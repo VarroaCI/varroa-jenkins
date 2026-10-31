@@ -127,6 +127,14 @@ describe("ProposePipelineCard", () => {
     expect(await screen.findByText("No operator received the check. Wait, then try again.")).toBeInTheDocument();
   });
 
+  it("names a record store that does not answer", async () => {
+    mockPropose.mockRejectedValue(new ApiError(503, "unreachable", { error: "record store unreachable", code: "record_store_unreachable" }));
+    renderCard();
+    fireEvent.change((await screen.findByLabelText("Repository URL")), { target: { value: "https://git.example.org/acme/payments" } });
+    fireEvent.click(screen.getByRole("button", { name: "Propose" }));
+    expect(await screen.findByText("The record store does not answer. Try again when it answers.")).toBeInTheDocument();
+  });
+
   it("shows the reading state of a running session", async () => {
     mockList.mockResolvedValue({ items: [{ id: "s-1" }], nextCursor: null });
     mockGet.mockResolvedValue(detail("running"));

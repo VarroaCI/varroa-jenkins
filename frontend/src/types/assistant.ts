@@ -23,7 +23,8 @@ export type AssistantErrorCode =
   | "prompt_not_startable"
   | "kill_switch"
   | "approval_expired"
-  | "tenant_agent_session";
+  | "tenant_agent_session"
+  | "record_store_unreachable";
 
 /** The codes a note refusal carries. */
 export type RunNoteErrorCode = "note_too_long" | "note_session_invalid";

@@ -269,6 +269,20 @@ func TestProposePipeline_DisabledAnswers503(t *testing.T) {
 	}
 }
 
+// TestProposePipeline_StoreOutageAnswersUnreachable asserts that a proposal
+// answers 503 record_store_unreachable while the store does not answer, and
+// that it writes no session row.
+func TestProposePipeline_StoreOutageAnswersUnreachable(t *testing.T) {
+	f := newProposeFixture(t)
+	f.rt.Store = unreachableAssistantStore{f.rt.Store}
+	f.router = NewRouter(f.deps)
+	rec := f.do(t, f.writerClaims(), http.MethodPost, "/pipelines/payments/propose", map[string]any{"repo": proposeRepo})
+	assertErrorCode(t, rec, http.StatusServiceUnavailable, codeRecordStoreUnreachable)
+	if n := f.sessionCount(t); n != 0 {
+		t.Fatalf("session rows = %d, want 0", n)
+	}
+}
+
 // TestProposePipeline_StartsSessionWithServerContext checks the 201 answer,
 // the server-set context and prompt, the first user text, and the check
 // request, which carries the normalized repo.

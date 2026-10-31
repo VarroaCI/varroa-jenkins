@@ -60,6 +60,7 @@ const (
 	ComponentsSchemasAssistantErrorCodeAssistantOff            ComponentsSchemasAssistantErrorCode = "assistant_off"
 	ComponentsSchemasAssistantErrorCodeKillSwitch              ComponentsSchemasAssistantErrorCode = "kill_switch"
 	ComponentsSchemasAssistantErrorCodePromptNotStartable      ComponentsSchemasAssistantErrorCode = "prompt_not_startable"
+	ComponentsSchemasAssistantErrorCodeRecordStoreUnreachable  ComponentsSchemasAssistantErrorCode = "record_store_unreachable"
 	ComponentsSchemasAssistantErrorCodeTenantAgentSession      ComponentsSchemasAssistantErrorCode = "tenant_agent_session"
 )
 
@@ -598,24 +599,25 @@ const (
 
 // Defines values for ComponentsSchemasProposePipelineErrorCode.
 const (
-	ComponentsSchemasProposePipelineErrorCodeAssistantBusy        ComponentsSchemasProposePipelineErrorCode = "assistant_busy"
-	ComponentsSchemasProposePipelineErrorCodeAssistantDisabled    ComponentsSchemasProposePipelineErrorCode = "assistant_disabled"
-	ComponentsSchemasProposePipelineErrorCodeAssistantOff         ComponentsSchemasProposePipelineErrorCode = "assistant_off"
-	ComponentsSchemasProposePipelineErrorCodeDataSharingTooLow    ComponentsSchemasProposePipelineErrorCode = "data_sharing_too_low"
-	ComponentsSchemasProposePipelineErrorCodeForgeAuthFailed      ComponentsSchemasProposePipelineErrorCode = "forge_auth_failed"
-	ComponentsSchemasProposePipelineErrorCodeForgeUnreachable     ComponentsSchemasProposePipelineErrorCode = "forge_unreachable"
-	ComponentsSchemasProposePipelineErrorCodeForgeUnsupported     ComponentsSchemasProposePipelineErrorCode = "forge_unsupported"
-	ComponentsSchemasProposePipelineErrorCodeForgeWriteDenied     ComponentsSchemasProposePipelineErrorCode = "forge_write_denied"
-	ComponentsSchemasProposePipelineErrorCodeInternal             ComponentsSchemasProposePipelineErrorCode = "internal"
-	ComponentsSchemasProposePipelineErrorCodeInvalidRequest       ComponentsSchemasProposePipelineErrorCode = "invalid_request"
-	ComponentsSchemasProposePipelineErrorCodeJenkinsfileExists    ComponentsSchemasProposePipelineErrorCode = "jenkinsfile_exists"
-	ComponentsSchemasProposePipelineErrorCodeKillSwitch           ComponentsSchemasProposePipelineErrorCode = "kill_switch"
-	ComponentsSchemasProposePipelineErrorCodeNoMatchingCredential ComponentsSchemasProposePipelineErrorCode = "no_matching_credential"
-	ComponentsSchemasProposePipelineErrorCodeNotFound             ComponentsSchemasProposePipelineErrorCode = "not_found"
-	ComponentsSchemasProposePipelineErrorCodeOperatorTimeout      ComponentsSchemasProposePipelineErrorCode = "operator_timeout"
-	ComponentsSchemasProposePipelineErrorCodeOperatorUnavailable  ComponentsSchemasProposePipelineErrorCode = "operator_unavailable"
-	ComponentsSchemasProposePipelineErrorCodeProposalBranchExists ComponentsSchemasProposePipelineErrorCode = "proposal_branch_exists"
-	ComponentsSchemasProposePipelineErrorCodeRepoUrlInvalid       ComponentsSchemasProposePipelineErrorCode = "repo_url_invalid"
+	ComponentsSchemasProposePipelineErrorCodeAssistantBusy          ComponentsSchemasProposePipelineErrorCode = "assistant_busy"
+	ComponentsSchemasProposePipelineErrorCodeAssistantDisabled      ComponentsSchemasProposePipelineErrorCode = "assistant_disabled"
+	ComponentsSchemasProposePipelineErrorCodeAssistantOff           ComponentsSchemasProposePipelineErrorCode = "assistant_off"
+	ComponentsSchemasProposePipelineErrorCodeDataSharingTooLow      ComponentsSchemasProposePipelineErrorCode = "data_sharing_too_low"
+	ComponentsSchemasProposePipelineErrorCodeForgeAuthFailed        ComponentsSchemasProposePipelineErrorCode = "forge_auth_failed"
+	ComponentsSchemasProposePipelineErrorCodeForgeUnreachable       ComponentsSchemasProposePipelineErrorCode = "forge_unreachable"
+	ComponentsSchemasProposePipelineErrorCodeForgeUnsupported       ComponentsSchemasProposePipelineErrorCode = "forge_unsupported"
+	ComponentsSchemasProposePipelineErrorCodeForgeWriteDenied       ComponentsSchemasProposePipelineErrorCode = "forge_write_denied"
+	ComponentsSchemasProposePipelineErrorCodeInternal               ComponentsSchemasProposePipelineErrorCode = "internal"
+	ComponentsSchemasProposePipelineErrorCodeInvalidRequest         ComponentsSchemasProposePipelineErrorCode = "invalid_request"
+	ComponentsSchemasProposePipelineErrorCodeJenkinsfileExists      ComponentsSchemasProposePipelineErrorCode = "jenkinsfile_exists"
+	ComponentsSchemasProposePipelineErrorCodeKillSwitch             ComponentsSchemasProposePipelineErrorCode = "kill_switch"
+	ComponentsSchemasProposePipelineErrorCodeNoMatchingCredential   ComponentsSchemasProposePipelineErrorCode = "no_matching_credential"
+	ComponentsSchemasProposePipelineErrorCodeNotFound               ComponentsSchemasProposePipelineErrorCode = "not_found"
+	ComponentsSchemasProposePipelineErrorCodeOperatorTimeout        ComponentsSchemasProposePipelineErrorCode = "operator_timeout"
+	ComponentsSchemasProposePipelineErrorCodeOperatorUnavailable    ComponentsSchemasProposePipelineErrorCode = "operator_unavailable"
+	ComponentsSchemasProposePipelineErrorCodeProposalBranchExists   ComponentsSchemasProposePipelineErrorCode = "proposal_branch_exists"
+	ComponentsSchemasProposePipelineErrorCodeRecordStoreUnreachable ComponentsSchemasProposePipelineErrorCode = "record_store_unreachable"
+	ComponentsSchemasProposePipelineErrorCodeRepoUrlInvalid         ComponentsSchemasProposePipelineErrorCode = "repo_url_invalid"
 )
 
 // Defines values for ComponentsSchemasProposePipelineResponseForge.
@@ -1096,7 +1098,7 @@ type ComponentsSchemasAssistantDenyRequest struct {
 	Reason *string `json:"reason,omitempty"`
 }
 
-// ComponentsSchemasAssistantError An assistant refusal. The code names the cause, and error gives the text.
+// ComponentsSchemasAssistantError An assistant refusal. The code names the cause, and error gives the text. A 503 with record_store_unreachable means the record store did not answer, and a retry can succeed. A 503 with assistant_disabled means the assistant is off, or the record store schema is too old.
 type ComponentsSchemasAssistantError struct {
 	Code  ComponentsSchemasAssistantErrorCode `json:"code"`
 	Error string                              `json:"error"`
@@ -24480,6 +24482,7 @@ type GetMyAssistantResponse struct {
 	JSON200      *ComponentsSchemasMyAssistant
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
+	JSON503      *ComponentsSchemasAssistantError
 }
 
 // Status returns HTTPResponse.Status
@@ -34607,6 +34610,13 @@ func ParseGetMyAssistantResponse(rsp *http.Response) (*GetMyAssistantResponse, e
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
