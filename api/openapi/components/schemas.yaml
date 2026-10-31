@@ -8064,6 +8064,7 @@ FleetRunRow:
   - status
   - cluster
   - tenant
+  - tenantFolder
   - title
   - trigger
   - pendingInput
@@ -8144,6 +8145,9 @@ FleetRunRow:
     tenant:
       type: string
       description: The rail and URL name of the tenant. A controller tenant reads namespace/controller.
+    tenantFolder:
+      type: string
+      description: The tenant's Jenkins folder prefix of jobPath. Empty for a root-hosted tenant.
     title:
       type: string
       description: The first line of the newest commit message, else the job path.
@@ -8239,7 +8243,7 @@ PipelinesOverviewTotals:
     queued: {type: integer, format: int64}
     passRate:
       type: number
-      description: Passed divided by finished. Absent when no run has finished.
+      description: The share of counted finished runs whose result is SUCCESS. An INTERRUPTED or NOT_BUILT run is not counted. Absent when the window holds no counted run.
     medianQueueWaitMs: {type: integer, format: int64}
     medianDurationMs: {type: integer, format: int64}
     p90DurationMs: {type: integer, format: int64}

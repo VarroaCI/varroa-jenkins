@@ -3032,6 +3032,9 @@ type ComponentsSchemasFleetRunRow struct {
 	// Tenant The rail and URL name of the tenant. A controller tenant reads namespace/controller.
 	Tenant string `json:"tenant"`
 
+	// TenantFolder The tenant's Jenkins folder prefix of jobPath. Empty for a root-hosted tenant.
+	TenantFolder string `json:"tenantFolder"`
+
 	// Title The first line of the newest commit message, else the job path.
 	Title string `json:"title"`
 
@@ -3973,7 +3976,7 @@ type ComponentsSchemasPipelinesOverviewTotals struct {
 	MedianQueueWaitMs *int64 `json:"medianQueueWaitMs,omitempty"`
 	P90DurationMs     *int64 `json:"p90DurationMs,omitempty"`
 
-	// PassRate Passed divided by finished. Absent when no run has finished.
+	// PassRate The share of counted finished runs whose result is SUCCESS. An INTERRUPTED or NOT_BUILT run is not counted. Absent when the window holds no counted run.
 	PassRate *float32 `json:"passRate,omitempty"`
 	Passed   int64    `json:"passed"`
 	Queued   int64    `json:"queued"`

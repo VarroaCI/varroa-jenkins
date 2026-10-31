@@ -112,6 +112,7 @@ function run(over: Partial<FleetRunRow> = {}): FleetRunRow {
     result: "SUCCESS",
     cluster: "core",
     tenant: "pay",
+    tenantFolder: "pay",
     jobPath: "pay/api",
     buildNumber: 3,
     actor: "nate",

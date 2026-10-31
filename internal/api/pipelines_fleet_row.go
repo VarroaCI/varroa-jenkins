@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/varroaci/varroa-jenkins/internal/rbac"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
@@ -80,6 +81,9 @@ func buildFleetRunRow(run recordstore.Run, railName string, canWrite bool) Fleet
 		if json.Unmarshal(run.Inputs, &inputs) == nil && len(inputs) > 0 {
 			row.PendingInput = true
 		}
+	}
+	if parsed, err := rbac.ParseTenant(run.Tenant); err == nil {
+		row.TenantFolder = parsed.Folder
 	}
 	if run.QueuedAt != nil && run.StartedAt != nil {
 		wait := run.StartedAt.Sub(*run.QueuedAt).Milliseconds()

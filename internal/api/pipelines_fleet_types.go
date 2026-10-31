@@ -25,6 +25,7 @@ type FleetRunRow struct {
 	runSummaryJSON
 	Cluster           string            `json:"cluster"`
 	Tenant            string            `json:"tenant"` // rail and URL name
+	TenantFolder      string            `json:"tenantFolder"`
 	Title             string            `json:"title"`
 	Trigger           FleetRunTrigger   `json:"trigger"`
 	PendingInput      bool              `json:"pendingInput"`
@@ -64,7 +65,8 @@ type RecentRunResult struct {
 }
 
 // PipelinesOverviewTotals holds the counts of the overview window. PassRate
-// is nil when no run of the window has finished.
+// is the share of counted finished runs that passed. It is nil when the
+// window holds no counted run.
 type PipelinesOverviewTotals struct {
 	Runs24h           int64    `json:"runs24h"`
 	RunsPrior24h      int64    `json:"runsPrior24h"`

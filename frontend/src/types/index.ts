@@ -2788,6 +2788,8 @@ export type FleetRunSort = "started" | "duration" | "tenant" | "job" | "status" 
 export interface FleetRunRow extends RunSummary {
   cluster: string;
   tenant: string;
+  /** The tenant's Jenkins folder prefix of jobPath. Empty for a root-hosted tenant. */
+  tenantFolder: string;
   title: string;
   trigger: { kind: FleetTriggerKind; label: string };
   pendingInput: boolean;

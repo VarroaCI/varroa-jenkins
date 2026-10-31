@@ -19,6 +19,10 @@ The tenant rail selects one tenant. Select a column header to sort the feed. The
 
 Each row menu offers **Open**. **Re-run** and **Cancel** appear only when you can write the tenant.
 
+A row names its job below its tenant. A run with no commit subject shows its job and build number as its title. A cron, SCM, or upstream run shows its trigger and no actor. The pass rate does not count interrupted or not-built runs.
+
+Consecutive finished runs of one job fold into one row, such as **cron-probe × 40**. The runs must share a branch, a trigger, an actor, and a result. Select the row to show its runs. Folding applies under the default sort with no job filter. A run with a commit subject does not fold.
+
 On a phone, the rail becomes a row of chips.
 
 ## Open a tenant

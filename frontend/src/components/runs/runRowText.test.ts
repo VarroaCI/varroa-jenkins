@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { FleetRunRow } from "../../types";
 import { runGlyph } from "./runGlyph";
-import { displayActor } from "./runActor";
-import { runHref, runSecondLine, runTiming } from "./runRowText";
+import { displayActor, isMachineActor } from "./runActor";
+import { runActorText, runHref, runJobName, runSecondLine, runTitle, runTiming } from "./runRowText";
 
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 
@@ -13,6 +13,7 @@ function row(over: Partial<FleetRunRow> = {}): FleetRunRow {
     result: "SUCCESS",
     cluster: "core",
     tenant: "pay",
+    tenantFolder: "pay",
     jobPath: "pay/api",
     buildNumber: 42,
     actor: "nate",
@@ -48,9 +49,27 @@ describe("displayActor", () => {
     ["an empty actor", "", undefined],
     ["the unknown placeholder", "unknown", undefined],
     ["a missing actor", undefined, undefined],
+    ["the timer actor", "timer", "schedule"],
     ["a named actor", "alice", "alice"],
   ])("%s", (_name, actor, want) => {
     expect(displayActor(actor)).toBe(want);
+  });
+});
+
+describe("isMachineActor and runActorText", () => {
+  it.each([
+    ["a timer actor", "timer", true],
+    ["an scm actor", "scm", true],
+    ["an upstream actor", "upstream:pay/build", true],
+    ["a person", "alice", false],
+    ["no actor", undefined, false],
+  ])("%s", (_name, actor, want) => {
+    expect(isMachineActor(actor)).toBe(want);
+  });
+
+  it("hides a machine actor on the row, and shows a person", () => {
+    expect(runActorText(row({ actor: "timer" }))).toBeUndefined();
+    expect(runActorText(row({ actor: "alice" }))).toBe("alice");
   });
 });
 
@@ -86,13 +105,48 @@ describe("runTiming", () => {
   });
 });
 
+describe("runJobName and runTitle", () => {
+  it("strips the tenant folder from the job path", () => {
+    expect(runJobName(row())).toBe("api");
+  });
+
+  it("keeps the whole job path for a root-hosted tenant", () => {
+    expect(runJobName(row({ tenantFolder: "" }))).toBe("pay/api");
+  });
+
+  it("keeps the commit subject as the title", () => {
+    expect(runTitle(row())).toBe("Fix the parser");
+  });
+
+  it("titles a run with no commit subject by its job and build number", () => {
+    expect(runTitle(row({ title: "pay/api" }))).toBe("api #42");
+  });
+});
+
 describe("runSecondLine", () => {
   it("names the tenant, the job, the build, the trigger, and the actor", () => {
-    expect(runSecondLine(row())).toBe("pay / pay/api #42: Push by nate");
+    expect(runSecondLine(row())).toBe("pay / api #42: Push by nate");
   });
 
   it("omits the actor when none is recorded", () => {
-    expect(runSecondLine(row({ actor: undefined }))).toBe("pay / pay/api #42: Push");
+    expect(runSecondLine(row({ actor: undefined }))).toBe("pay / api #42: Push");
+  });
+
+  it("keeps the whole job path for a root-hosted tenant", () => {
+    expect(runSecondLine(row({ tenantFolder: "" }))).toBe("pay / pay/api #42: Push by nate");
+  });
+
+  it("names the tenant and the trigger once when the title names the job", () => {
+    expect(runSecondLine(row({ title: "pay/api", actor: undefined, trigger: { kind: "cron", label: "Cron" } }))).toBe(
+      "pay: Cron",
+    );
+  });
+
+  it("shows no actor for an unknown or machine actor", () => {
+    expect(runSecondLine(row({ actor: "unknown" }))).toBe("pay / api #42: Push");
+    expect(runSecondLine(row({ actor: "timer" }))).toBe("pay / api #42: Push");
+    expect(runSecondLine(row({ actor: "scm" }))).toBe("pay / api #42: Push");
+    expect(runSecondLine(row({ actor: "upstream:pay/build" }))).toBe("pay / api #42: Push");
   });
 });
 
