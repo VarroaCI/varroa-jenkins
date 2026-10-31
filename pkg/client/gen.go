@@ -6147,6 +6147,9 @@ type ListActivityParams struct {
 	End        *time.Time                  `form:"end,omitempty" json:"end,omitempty"`
 	Cursor     *string                     `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit      *int                        `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// ExcludeRoutineSignIns true leaves out each routine local sign-in, an auth.local.login event below warning severity.
+	ExcludeRoutineSignIns *bool `form:"excludeRoutineSignIns,omitempty" json:"excludeRoutineSignIns,omitempty"`
 }
 
 // ListActivityParamsSource defines parameters for ListActivity.
@@ -11328,6 +11331,22 @@ func NewListActivityRequest(server string, params *ListActivityParams) (*http.Re
 		if params.Limit != nil {
 
 			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.ExcludeRoutineSignIns != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "excludeRoutineSignIns", runtime.ParamLocationQuery, *params.ExcludeRoutineSignIns); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
@@ -21459,6 +21478,7 @@ type ListActivityResponse struct {
 		RetentionMode ListActivity200RetentionMode     `json:"retentionMode"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
+	JSON503 *ComponentsResponsesServiceUnavailable
 }
 type ListActivity200RetentionMode string
 
@@ -28964,6 +28984,13 @@ func ParseListActivityResponse(rsp *http.Response) (*ListActivityResponse, error
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 

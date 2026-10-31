@@ -14095,6 +14095,13 @@ paths:
           maximum: 250
           minimum: 1
           type: integer
+      - description: true leaves out each routine local sign-in, an auth.local.login
+          event below warning severity.
+        in: query
+        name: excludeRoutineSignIns
+        schema:
+          default: false
+          type: boolean
       responses:
         "200":
           content:
@@ -14129,6 +14136,8 @@ paths:
           $ref: '#/components/responses/components_responses_Unauthorized'
         "410":
           description: Cursor has aged out of retention.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
       summary: Returns authorized, filtered activity history with cursor pagination.
       tags:
       - activity
@@ -14165,6 +14174,13 @@ paths:
         name: type
         schema:
           type: string
+      - description: true leaves out each routine local sign-in, an auth.local.login
+          event below warning severity.
+        in: query
+        name: excludeRoutineSignIns
+        schema:
+          default: false
+          type: boolean
       responses:
         "200":
           content:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +86,66 @@ func TestListActivity_FilterMapping(t *testing.T) {
 }
 
 func tPtr(t time.Time) *time.Time { return &t }
+
+// TestListActivity_ExcludeRoutineSignIns proves the SQL exclusion drops each
+// routine local sign-in and keeps a break-glass sign-in, a failed sign-in,
+// and every other event.
+func TestListActivity_ExcludeRoutineSignIns(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Truncate(time.Second)
+	events := []activity.Event{
+		{Timestamp: base, Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "user", Type: "auth.local.login", Severity: "info", Message: "routine"},
+		{Timestamp: base.Add(time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "user", Type: "auth.local.login", Severity: "warning", Message: "break-glass"},
+		{Timestamp: base.Add(2 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "user", Type: "auth.local.login_failed", Severity: "warning", Message: "failed"},
+		{Timestamp: base.Add(3 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "api", Type: "settings.updated", Severity: "info", Message: "settings"},
+		{Timestamp: base.Add(4 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "user", Type: "auth.local.login", Severity: "error", Message: "error sign-in"},
+	}
+	pool := seedActivityEvents(t, events)
+	r := NewReader(pool)
+	ctx := context.Background()
+
+	all, err := r.ListActivity(ctx, ActivityQuery{Scope: activity.Scope{All: true}})
+	if err != nil {
+		t.Fatalf("ListActivity without the flag: %v", err)
+	}
+	if len(all.Items) != 5 {
+		t.Fatalf("without the flag: got %d items, want 5", len(all.Items))
+	}
+
+	page, err := r.ListActivity(ctx, ActivityQuery{ExcludeRoutineSignIns: true, Scope: activity.Scope{All: true}})
+	if err != nil {
+		t.Fatalf("ListActivity with the flag: %v", err)
+	}
+	if len(page.Items) != 4 {
+		t.Fatalf("with the flag: got %d items, want 4: %+v", len(page.Items), page.Items)
+	}
+	for _, e := range page.Items {
+		if e.Message == "routine" {
+			t.Fatalf("routine sign-in reached the page: %+v", e)
+		}
+	}
+}
+
+// TestActivityFilterKey_ExcludeRoutineSignIns proves the cursor fingerprint
+// holds the flag only when it is set. A cursor from the unflagged query must
+// not resume the flagged one, and an unset flag leaves the key unchanged.
+func TestActivityFilterKey_ExcludeRoutineSignIns(t *testing.T) {
+	t.Parallel()
+
+	unset := ActivityQuery{Scope: activity.Scope{All: true}}
+	set := unset
+	set.ExcludeRoutineSignIns = true
+
+	if activityFilterKey(unset) == activityFilterKey(set) {
+		t.Fatal("the flagged and unflagged queries share a cursor fingerprint")
+	}
+	// Nine empty filter fields, then the scope: true|false|[] for All.
+	wantUnset := strings.Repeat("\x1f", 9) + "true|false|[]"
+	if got := activityFilterKey(unset); got != wantUnset {
+		t.Fatalf("unset flag changed the key: got %q, want %q", got, wantUnset)
+	}
+}
 
 // TestListActivity_ScopePushdown proves the Scope field is pushed into
 // SQL: a Namespaces-scoped query never returns a row outside it, and never

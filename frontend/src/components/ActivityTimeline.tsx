@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useActivityFeed } from "../hooks/useActivityFeed";
 import { useClusters, coreOf } from "../hooks/useClusters";
+import { isRecordStoreUnreachable } from "../hooks/useApi";
 import { controllerRoute } from "../routing";
 import {
   type Lane,
@@ -537,8 +538,19 @@ export default function ActivityTimeline({
         </div>
       )}
 
-      {/* Error state */}
-      {error && !isLoading && (
+      {/* Error state: the record store did not answer, or any other failure */}
+      {error && !isLoading && isRecordStoreUnreachable(error) && (
+        <div className={styles.errorBanner} role="alert">
+          The build record store did not answer, so activity is not available.
+          <button
+            className={styles.retryBtn}
+            onClick={() => window.location.reload()}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {error && !isLoading && !isRecordStoreUnreachable(error) && (
         <div className={styles.errorBanner}>
           Failed to load activity:{" "}
           {error instanceof Error ? error.message : "Connection error"}

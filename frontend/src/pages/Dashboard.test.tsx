@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import Dashboard from "./Dashboard";
 import { renderWithProviders } from "../test/render-utils";
 import { createControllerListItem } from "../test/factories";
@@ -17,7 +18,8 @@ vi.mock("../hooks/useClusters", async (importOriginal) => ({
   useClusters: () => mockUseClusters(),
 }));
 
-vi.mock("../hooks/useApi", () => ({
+vi.mock("../hooks/useApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hooks/useApi")>()),
   bffFetch: vi.fn().mockResolvedValue({items: []}),
 }));
 
@@ -333,28 +335,37 @@ describe("Dashboard", () => {
       vi.mocked(useApi.bffFetch).mockResolvedValue({ items: [] });
     });
 
-    it("omits routine sign-ins from Recent activity", async () => {
+    it("asks the server to leave out routine sign-ins", async () => {
       mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null });
       serveActivity([
-        { timestamp: new Date().toISOString(), type: "auth.local.login", source: "user", message: "local:ui-probe signed in", severity: "info" },
         { timestamp: new Date().toISOString(), type: "pipeline.run_requested", source: "user", message: "started build 4", actor: "local:bob" },
       ]);
       renderWithProviders(<Dashboard />);
 
       expect(await screen.findByText("started build 4")).toBeInTheDocument();
-      expect(screen.queryByText(/signed in/)).not.toBeInTheDocument();
+      expect(useApi.bffFetch).toHaveBeenCalledWith("/activity?limit=5&excludeRoutineSignIns=true");
     });
 
-    it("says only routine sign-ins happened when nothing else is recent", async () => {
+    it("says the record store did not answer, and Retry asks again", async () => {
       mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null });
-      serveActivity([
-        { timestamp: new Date().toISOString(), type: "auth.local.login", source: "user", message: "local:ui-probe signed in", severity: "info" },
-      ]);
+      vi.mocked(useApi.bffFetch).mockImplementation((path: string) =>
+        path.startsWith("/activity")
+          ? Promise.reject(new useApi.ApiError(503, "record store unreachable", { error: "record store unreachable", code: "record_store_unreachable" }))
+          : Promise.resolve({ items: [] }),
+      );
       renderWithProviders(<Dashboard />);
 
       expect(
-        await screen.findByText("The latest events are routine sign-ins. View all lists them."),
+        await screen.findByText("The build record store did not answer, so activity is not available."),
       ).toBeInTheDocument();
+      expect(screen.queryByText(/No activity yet/)).not.toBeInTheDocument();
+
+      const before = vi.mocked(useApi.bffFetch).mock.calls.filter(([p]) => String(p).startsWith("/activity")).length;
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() => {
+        const after = vi.mocked(useApi.bffFetch).mock.calls.filter(([p]) => String(p).startsWith("/activity")).length;
+        expect(after).toBeGreaterThan(before);
+      });
     });
 
     it("shows the actor, not 'system', for an event with no controller", async () => {

@@ -140,14 +140,6 @@ export function repeatKey(e: ActivityEvent): string {
 }
 
 /**
- * isRoutineSignIn is true for a local sign-in that succeeded. The dashboard
- * feed omits these; the activity page still lists them.
- */
-export function isRoutineSignIn(e: ActivityEvent): boolean {
-  return e.type === "auth.local.login" && e.severity !== "warning";
-}
-
-/**
  * activitySubject answers the bold lead of an activity row. A controller
  * leads; otherwise the actor leads, unless the message already starts with it.
  */

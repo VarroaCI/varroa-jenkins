@@ -1,11 +1,15 @@
+import fs from "fs";
+import path from "path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
+import { ApiError } from "../hooks/useApi";
 
-// Mock useApi bffFetch
+// Mock useApi bffFetch. ApiError and isRecordStoreUnreachable stay real.
 const mockBffFetch = vi.fn();
-vi.mock("../hooks/useApi", () => ({
+vi.mock("../hooks/useApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hooks/useApi")>()),
   bffFetch: (...args: unknown[]) => mockBffFetch(...args),
   getToken: () => null,
 }));
@@ -179,5 +183,27 @@ describe("Activity page", () => {
         expect.arrayContaining(["ns1", "ns2"]),
       );
     });
+  });
+
+  it("says the record store did not answer, and offers Retry", async () => {
+    mockBffFetch.mockImplementation((url: string) =>
+      url.startsWith("/activity")
+        ? Promise.reject(new ApiError(503, "record store unreachable", { error: "record store unreachable", code: "record_store_unreachable" }))
+        : Promise.resolve({ items: [] }),
+    );
+    renderActivity();
+
+    expect(
+      await screen.findByText("The build record store did not answer, so activity is not available."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByText(/Failed to load activity/)).not.toBeInTheDocument();
+  });
+
+  it("keeps each filter inside its grid column", () => {
+    const css = fs.readFileSync(path.join(__dirname, "Activity.module.css"), "utf-8");
+    expect(css).toMatch(/\.filterField \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
+    expect(css).toMatch(/\.filterField \{[^}]*min-width: 0/);
+    expect(css).toMatch(/\.filterField select, \.filterField input \{[^}]*width: 100%/);
   });
 });

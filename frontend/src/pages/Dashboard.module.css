@@ -196,6 +196,35 @@
   line-height: 1.6;
 }
 
+.activityUnavailable {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  font-size: 13px;
+}
+
+.activityRetry {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: 1px solid var(--bad);
+  background: transparent;
+  color: var(--bad-text);
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.activityRetry:hover {
+  background: var(--bad);
+  color: #fff;
+}
+
 /* Cluster health strip */
 .clusterStrip {
   display: flex;

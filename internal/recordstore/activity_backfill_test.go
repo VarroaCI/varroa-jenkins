@@ -2,6 +2,8 @@ package recordstore
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -148,6 +150,81 @@ func TestPgBackfillQuery_ScopeAdmitsPredicateRejects(t *testing.T) {
 	}
 	if len(page.Items) != 1 || page.Items[0].Controller != "ctrl-x" {
 		t.Fatalf("expected only ctrl-x, got %+v", page.Items)
+	}
+}
+
+// TestPgBackfillQuery_ExcludeRoutineSignInsFillsLimit proves the exclusion
+// reaches the SQL. Routine sign-ins newer than the operational events must
+// not fill the page, so the page holds the operational events and no more.
+func TestPgBackfillQuery_ExcludeRoutineSignInsFillsLimit(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Truncate(time.Second)
+	var events []activity.Event
+	for i := 0; i < 5; i++ {
+		events = append(events, activity.Event{
+			Timestamp: base.Add(time.Duration(i) * time.Second),
+			Cluster:   "core", Namespace: "ns", Controller: "ctrl", Source: "operator",
+			Type: "controller.phase", Severity: "info", Message: fmt.Sprintf("operational %d", i),
+		})
+	}
+	for i := 0; i < 40; i++ {
+		events = append(events, activity.Event{
+			Timestamp: base.Add(time.Duration(10+i) * time.Second),
+			Cluster:   "core", Source: "user", Type: "auth.local.login", Severity: "info",
+			Message: fmt.Sprintf("routine %d", i),
+		})
+	}
+	pool := seedActivityEvents(t, events)
+	bf := NewActivityBackfill(NewReader(pool))
+	ctx := context.Background()
+
+	page, err := bf.Query(ctx, activity.Query{Limit: 5, ExcludeRoutineSignIns: true, Scope: activity.Scope{All: true}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(page.Items) != 5 {
+		t.Fatalf("got %d items, want the 5 operational events", len(page.Items))
+	}
+	for i, e := range page.Items {
+		want := fmt.Sprintf("operational %d", 4-i)
+		if e.Message != want {
+			t.Fatalf("item %d = %q, want %q (newest first)", i, e.Message, want)
+		}
+	}
+	// A paged read with a cursor returns the next operational events, not a repeat.
+	first, err := bf.Query(ctx, activity.Query{Limit: 3, ExcludeRoutineSignIns: true, Scope: activity.Scope{All: true}})
+	if err != nil {
+		t.Fatalf("Query page 1: %v", err)
+	}
+	if len(first.Items) != 3 || !first.HasMore {
+		t.Fatalf("page 1: got %d items, HasMore %v; want 3 and true", len(first.Items), first.HasMore)
+	}
+	second, err := bf.Query(ctx, activity.Query{Limit: 3, ExcludeRoutineSignIns: true, Scope: activity.Scope{All: true}, Cursor: first.NextCursor})
+	if err != nil {
+		t.Fatalf("Query page 2: %v", err)
+	}
+	if len(second.Items) != 2 {
+		t.Fatalf("page 2: got %d items, want the remaining 2", len(second.Items))
+	}
+	seen := map[string]bool{}
+	for _, e := range append(first.Items, second.Items...) {
+		if seen[e.Message] {
+			t.Fatalf("event %q repeated across pages", e.Message)
+		}
+		seen[e.Message] = true
+	}
+}
+
+// TestPgBackfillQuery_UnreachableStoreAnswersErrUnavailable proves a read that
+// cannot reach the record store reaches the caller as ErrUnavailable. The BFF
+// answers that error with 503 record_store_unreachable.
+func TestPgBackfillQuery_UnreachableStoreAnswersErrUnavailable(t *testing.T) {
+	bf := NewActivityBackfill(WithTimeout(unreachableReader(t), 200*time.Millisecond))
+
+	_, err := bf.Query(context.Background(), activity.Query{Limit: 5, Scope: activity.Scope{All: true}})
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Query error = %v, want ErrUnavailable", err)
 	}
 }
 

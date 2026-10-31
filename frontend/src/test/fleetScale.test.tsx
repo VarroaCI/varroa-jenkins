@@ -13,7 +13,8 @@ vi.mock("../hooks/useControllers", () => ({
   useControllerFanoutFailures: () => ({ data: [] }),
 }));
 
-vi.mock("../hooks/useApi", () => ({
+vi.mock("../hooks/useApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hooks/useApi")>()),
   bffFetch: vi.fn().mockResolvedValue({ items: [] }),
 }));
 

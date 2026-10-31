@@ -4,8 +4,8 @@ import { Link } from "react-router-dom";
 import { useControllers, useControllerFanoutFailures } from "../hooks/useControllers";
 import { useClusters, coreOf } from "../hooks/useClusters";
 import { ClusterFanoutNotice } from "../components/ClusterFanoutNotice";
-import { age, activityTypeMeta, activitySubject, isRoutineSignIn } from "../components/activityTimeline.util";
-import { bffFetch } from "../hooks/useApi";
+import { age, activityTypeMeta, activitySubject } from "../components/activityTimeline.util";
+import { bffFetch, isRecordStoreUnreachable } from "../hooks/useApi";
 import { getUpdateCenterStatus } from "../api/client";
 import type { ActivityEvent, UpdateCenterStatus } from "../types";
 import { MetricCard } from "../components/MetricCard";
@@ -271,13 +271,13 @@ function HealthBar({ controller }: { controller: ControllerListItem }) {
 function ActivityFeed() {
   const { data: clusters } = useClusters();
   const core = coreOf(clusters);
-  const { data: events = [] } = useQuery({
+  // The server leaves out routine local sign-ins. The activity page lists them.
+  const { data: events = [], error, refetch } = useQuery({
     queryKey: ["activity"],
-    queryFn: () => bffFetch<{items: ActivityEvent[]}>("/activity?limit=250").then(r => r.items),
+    queryFn: () => bffFetch<{items: ActivityEvent[]}>("/activity?limit=5&excludeRoutineSignIns=true").then(r => r.items),
     refetchInterval: 10_000,
   });
-  // Routine local sign-ins are audit rows, not news. The activity page lists them.
-  const shown = events.filter((e) => !isRoutineSignIn(e)).slice(0, 5);
+  const unreachable = isRecordStoreUnreachable(error);
 
   return (
     <Card
@@ -289,7 +289,15 @@ function ActivityFeed() {
       }
     >
       <div className={styles.activityList}>
-        {shown.map((e, i) => {
+        {unreachable && (
+          <div className={styles.activityUnavailable} role="alert">
+            <span>The build record store did not answer, so activity is not available.</span>
+            <button type="button" className={styles.activityRetry} onClick={() => void refetch()}>
+              Retry
+            </button>
+          </div>
+        )}
+        {!unreachable && events.map((e, i) => {
           const { icon, style } = activityTypeMeta(e);
           const { subject, message } = activitySubject(e);
           return (
@@ -315,14 +323,9 @@ function ActivityFeed() {
             </div>
           );
         })}
-        {events.length === 0 && (
+        {!unreachable && events.length === 0 && (
           <div className={styles.activityEmpty}>
             No activity yet. Events will appear when mites connect or phases change.
-          </div>
-        )}
-        {events.length > 0 && shown.length === 0 && (
-          <div className={styles.activityEmpty}>
-            The latest events are routine sign-ins. View all lists them.
           </div>
         )}
       </div>
