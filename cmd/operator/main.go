@@ -45,7 +45,6 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
-	"github.com/varroaci/varroa-jenkins/internal/ca"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 	"github.com/varroaci/varroa-jenkins/internal/controller/forgeops"
@@ -182,71 +181,15 @@ func main() {
 	}
 
 	// --- CA & token signer ---
-	var certAuth *ca.CA
-	caData, err := clientsetClient.GetSecret(context.Background(), "varroa-ca", operatorNamespace)
-	if err == nil && len(caData["tls.crt"]) > 0 && len(caData["tls.key"]) > 0 {
-		certAuth, err = ca.LoadCA(caData["tls.crt"], caData["tls.key"])
-		if err != nil {
-			logger.Error("failed to load CA from Secret", "error", err)
-			os.Exit(1)
-		}
-		logger.Info("loaded existing CA from Secret", "namespace", operatorNamespace)
-	} else {
-		certAuth, err = ca.NewCA()
-		if err != nil {
-			logger.Error("failed to create CA", "error", err)
-			os.Exit(1)
-		}
-		certPEM, keyPEM, err := certAuth.Persist()
-		if err != nil {
-			logger.Error("failed to persist CA", "error", err)
-			os.Exit(1)
-		}
-		if err := clientsetClient.CreateOrUpdateSecret(context.Background(), "varroa-ca", operatorNamespace, map[string][]byte{
-			"tls.crt": certPEM,
-			"tls.key": keyPEM,
-		}); err != nil {
-			logger.Warn("failed to persist CA to Secret", "error", err)
-		} else {
-			logger.Info("CA persisted to Secret", "namespace", operatorNamespace)
-		}
+	// The CA and the mite signing key are read or created at start. A read
+	// error retries and then exits; the operator never replaces a stored key.
+	certAuth, miteTokenSigner, err := loadStartupSecrets(clientsetClient.Clientset(), operatorNamespace, logger)
+	if err != nil {
+		logger.Error("failed to load the startup Secrets; exiting so Kubernetes restarts the operator",
+			"namespace", operatorNamespace, "error", err)
+		os.Exit(1)
 	}
 	tokenSigner := mitesrv.NewTokenSigner(certAuth.BootstrapHMACKey())
-
-	// Create RS256 token signer for mite Jenkins auth JWT.
-	// Persist the keypair in a Secret so it survives operator restarts.
-	var miteTokenSigner *mitesrv.MiteTokenSigner
-	keyData, err := clientsetClient.GetSecret(context.Background(), "varroa-mite-signing-key", operatorNamespace)
-	if err == nil && len(keyData["private-key"]) > 0 {
-		miteTokenSigner, err = mitesrv.NewMiteTokenSignerFromPEM(keyData["private-key"])
-		if err != nil {
-			logger.Error("failed to load mite signing key from Secret", "error", err)
-			os.Exit(1)
-		}
-		logger.Info("loaded existing mite signing key from Secret",
-			"namespace", operatorNamespace,
-			"kid", miteTokenSigner.KID())
-	} else {
-		miteTokenSigner, err = mitesrv.NewMiteTokenSigner()
-		if err != nil {
-			logger.Error("failed to generate mite signing key", "error", err)
-			os.Exit(1)
-		}
-		privPEM, err := miteTokenSigner.PrivateKeyPEM()
-		if err != nil {
-			logger.Error("failed to export mite signing key", "error", err)
-			os.Exit(1)
-		}
-		if err := clientsetClient.CreateOrUpdateSecret(context.Background(), "varroa-mite-signing-key", operatorNamespace, map[string][]byte{
-			"private-key": []byte(privPEM),
-		}); err != nil {
-			logger.Warn("failed to persist mite signing key to Secret", "error", err)
-		} else {
-			logger.Info("mite signing key persisted to Secret",
-				"namespace", operatorNamespace,
-				"kid", miteTokenSigner.KID())
-		}
-	}
 
 	// --- NATS bus ---
 	// Bus credentials: the file path is the production form because it is
