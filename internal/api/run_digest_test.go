@@ -798,3 +798,29 @@ func TestComputeRunDigest_UnstableRunTailDropsTheManifest(t *testing.T) {
 		t.Fatalf("logTail carries manifest lines: %q", got.LogTail)
 	}
 }
+
+// TestComputeRunDigest_FailedStageTailDropsTheManifest proves the
+// failed-stage path drops the agent pod manifest from the log tail. The
+// preamble has no stage, so only the lines of the failed stage reach the
+// tail.
+func TestComputeRunDigest_FailedStageTailDropsTheManifest(t *testing.T) {
+	store := newRunLogTestStore(t)
+	runID := "run-digest-failed-stage-manifest"
+	lines := make([][2]string, 0, 1+len(agentManifestLines))
+	lines = append(lines, [2]string{"", "preamble"})
+	for _, ln := range agentManifestLines {
+		lines = append(lines, [2]string{"boom", ln[1]})
+	}
+	digestLog(t, store, runID, lines)
+
+	run := newDigestRun(runID, "FAILURE")
+	stages := []recordstore.Stage{{RunID: runID, StageID: "boom", Name: "boom", Status: "FAILURE"}}
+	got := computeRunDigest(context.Background(), store, run, stages, runTestCaseRead{})
+	want := "[Pipeline] { (boom)\nRunning on a-1 in /w\nERROR: boom"
+	if got == nil {
+		t.Fatal("digest is absent, want a log tail")
+	}
+	if got.LogTail != want {
+		t.Fatalf("logTail = %q, want %q", got.LogTail, want)
+	}
+}

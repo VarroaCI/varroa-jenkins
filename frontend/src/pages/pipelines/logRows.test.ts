@@ -224,4 +224,53 @@ describe("buildLogRows groups", () => {
     });
     expect(hiddenGroupOfLine(body, EMPTY_GROUP_STATE, 99)).toBeNull();
   });
+
+  it("keeps one run across a line with no stage", () => {
+    const rows = buildLogRows([line(1, "12"), line(2), line(3, "12")], info);
+    expect(rows.map(rowLabel)).toEqual(["H12", "L1", "L2", "L3"]);
+  });
+
+  it("keeps one run across a line whose stage is not known", () => {
+    const rows = buildLogRows([line(1, "12"), line(2, "99"), line(3, "12")], info);
+    expect(rows.map(rowLabel)).toEqual(["H12", "L1", "L2", "L3"]);
+  });
+
+  it("marks a later run continued only after a line of another stage", () => {
+    const body: BodyRow[] = [line(1, "12"), line(2), line(3, "14"), line(4), line(5, "12")];
+    const rows = buildLogRows(body, info);
+    expect(rows.map(rowLabel)).toEqual(["H12", "L1", "L2", "H14", "L3", "L4", "C12", "L5"]);
+  });
+
+  it("keeps a pipeline-level timeout line inside the stage run", () => {
+    const resolve = new Map<string, StageInfo>([["6", { name: "Resolve", status: "FAILURE" }]]);
+    const body: BodyRow[] = [
+      text(8, "[Pipeline] stage"),
+      text(9, "[Pipeline] { (Resolve)", "6"),
+      text(10, "Timeout set to expire in 1 hr 0 min"),
+      text(11, "[Pipeline] node", "6"),
+    ];
+    const rows = buildLogRows(body, resolve);
+    expect(rows.map(rowLabel)).toEqual(["L8", "H6", "L9", "L10", "L11"]);
+  });
+
+  it("keeps one header for a collapsed stage across a line with no stage", () => {
+    const body: BodyRow[] = [line(1, "12"), line(2), line(3, "12")];
+    const state: GroupState = { collapsedStages: new Set(["12"]), expandedFolds: new Set() };
+    const rows = buildLogRows(body, info, state);
+    expect(rows.map(rowLabel)).toEqual(["H12", "L2"]);
+    expect(rows[0]).toMatchObject({ kind: "header", collapsed: true, lineCount: 2 });
+  });
+
+  it("keeps one run across a hidden fold that ends on a line with no stage", () => {
+    const body: BodyRow[] = [
+      text(1, "before", "12"),
+      text(2, MANIFEST_HEADER, "12"),
+      text(3, "---", "12"),
+      text(4, "apiVersion: v1", "12"),
+      text(5, ""),
+      text(6, "after", "12"),
+    ];
+    const rows = buildLogRows(body, info);
+    expect(rows.map(rowLabel)).toEqual(["H12", "L1", "L2", "F3-closed", "L6"]);
+  });
 });
