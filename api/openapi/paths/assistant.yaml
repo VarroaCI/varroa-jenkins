@@ -1,6 +1,7 @@
 # assistant: the agent assistant. Sessions run a provider loop over the
 # caller's own tools. A write tool call parks the session for an approval.
-# Every route answers 503 with AssistantError when the assistant is off.
+# Every route answers 503 with AssistantError when the assistant is off,
+# or with record_store_unreachable when the record store does not answer.
 
 /api/v1/assistant/sessions:
   post:
@@ -431,6 +432,12 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
+      "503":
+        description: The record store did not answer (record_store_unreachable), or its schema is too old (assistant_disabled).
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
   put:
     operationId: putMyAssistant
     tags: [Assistant]
@@ -455,7 +462,7 @@
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
       "503":
-        description: The assistant is not enabled.
+        description: The assistant is not enabled, or the record store did not answer.
         content:
           application/json:
             schema:

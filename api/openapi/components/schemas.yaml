@@ -7312,13 +7312,13 @@ TenantCellMember:
 AssistantError:
   type: object
   required: [error, code]
-  description: An assistant refusal. The code names the cause, and error gives the text.
+  description: An assistant refusal. The code names the cause, and error gives the text. A 503 with record_store_unreachable means the record store did not answer, and a retry can succeed. A 503 with assistant_disabled means the assistant is off, or the record store schema is too old.
   properties:
     error:
       type: string
     code:
       type: string
-      enum: [assistant_disabled, assistant_key_unavailable, assistant_off, assistant_busy, prompt_not_startable, kill_switch, approval_expired, tenant_agent_session]
+      enum: [assistant_disabled, assistant_key_unavailable, assistant_off, assistant_busy, prompt_not_startable, kill_switch, approval_expired, tenant_agent_session, record_store_unreachable]
   additionalProperties: false
 
 ProposePipelineRequest:
@@ -7360,7 +7360,7 @@ ProposePipelineError:
       type: string
     code:
       type: string
-      enum: [assistant_disabled, assistant_off, assistant_busy, kill_switch, repo_url_invalid, data_sharing_too_low, no_matching_credential, forge_unsupported, forge_auth_failed, forge_write_denied, forge_unreachable, operator_timeout, operator_unavailable, jenkinsfile_exists, proposal_branch_exists, not_found, invalid_request, internal]
+      enum: [assistant_disabled, assistant_off, assistant_busy, kill_switch, repo_url_invalid, data_sharing_too_low, no_matching_credential, forge_unsupported, forge_auth_failed, forge_write_denied, forge_unreachable, operator_timeout, operator_unavailable, jenkinsfile_exists, proposal_branch_exists, not_found, invalid_request, internal, record_store_unreachable]
   additionalProperties: false
 
 AssistantSessionContext:

@@ -3132,7 +3132,8 @@ export type ProposePipelineErrorCode =
   | "proposal_branch_exists"
   | "not_found"
   | "invalid_request"
-  | "internal";
+  | "internal"
+  | "record_store_unreachable";
 
 /** A started pipeline proposal. */
 export interface ProposePipelineResponse {

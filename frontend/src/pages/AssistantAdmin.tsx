@@ -9,7 +9,7 @@ import {
   listAssistantProviders,
   putAssistantSettings,
 } from "../api/client";
-import { ApiError } from "../hooks/useApi";
+import { ApiError, isRecordStoreUnreachable } from "../hooks/useApi";
 import { SectionPage } from "../components/SectionPage";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
@@ -58,6 +58,15 @@ export function AssistantAdmin() {
       setError(err instanceof ApiError ? err.serverMessage || "The change was not saved." : "The change was not saved.");
     },
   });
+
+  if (isRecordStoreUnreachable(settings.error)) {
+    return (
+      <SectionPage title="Assistant">
+        <p role="alert">Varroa cannot reach the record store. The assistant settings return when the database answers.</p>
+        <Button onClick={() => void settings.refetch()}>Retry</Button>
+      </SectionPage>
+    );
+  }
 
   if (settings.error instanceof ApiError && settings.error.status === 503) {
     return (

@@ -109,6 +109,17 @@ describe("AssistantAdmin", () => {
     expect(await screen.findByText(/Network policy on\. CIDRs: 192\.168\.1\.99\/32\. Ports: 8082\./)).toBeTruthy();
   });
 
+  it("offers Retry when the record store does not answer", async () => {
+    vi.mocked(client.getAssistantSettings).mockRejectedValueOnce(
+      new ApiError(503, "unreachable", { error: "record store unreachable", code: "record_store_unreachable" }),
+    );
+    renderAdmin();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Varroa cannot reach the record store.");
+    expect(screen.queryByText(/assistant\.enabled turns it on/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("The assistant is running.")).toBeTruthy();
+  });
+
   it("explains a 503 when the assistant is off on the install", async () => {
     vi.mocked(client.getAssistantSettings).mockRejectedValue(new ApiError(503, "off"));
     renderAdmin();

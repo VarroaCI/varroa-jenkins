@@ -669,7 +669,7 @@
       },
       "AssistantError": {
         "additionalProperties": false,
-        "description": "An assistant refusal. The code names the cause, and error gives the text.",
+        "description": "An assistant refusal. The code names the cause, and error gives the text. A 503 with record_store_unreachable means the record store did not answer, and a retry can succeed. A 503 with assistant_disabled means the assistant is off, or the record store schema is too old.",
         "properties": {
           "code": {
             "enum": [
@@ -680,7 +680,8 @@
               "prompt_not_startable",
               "kill_switch",
               "approval_expired",
-              "tenant_agent_session"
+              "tenant_agent_session",
+              "record_store_unreachable"
             ],
             "type": "string"
           },
@@ -6680,7 +6681,7 @@
       },
       "components_schemas_AssistantError": {
         "additionalProperties": false,
-        "description": "An assistant refusal. The code names the cause, and error gives the text.",
+        "description": "An assistant refusal. The code names the cause, and error gives the text. A 503 with record_store_unreachable means the record store did not answer, and a retry can succeed. A 503 with assistant_disabled means the assistant is off, or the record store schema is too old.",
         "properties": {
           "code": {
             "enum": [
@@ -6691,7 +6692,8 @@
               "prompt_not_startable",
               "kill_switch",
               "approval_expired",
-              "tenant_agent_session"
+              "tenant_agent_session",
+              "record_store_unreachable"
             ],
             "type": "string"
           },
@@ -14110,7 +14112,8 @@
               "proposal_branch_exists",
               "not_found",
               "invalid_request",
-              "internal"
+              "internal",
+              "record_store_unreachable"
             ],
             "type": "string"
           },
@@ -24880,6 +24883,16 @@
           },
           "403": {
             "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The record store did not answer (record_store_unreachable), or its schema is too old (assistant_disabled)."
           }
         },
         "summary": "Returns the caller's assistant settings, key state, and day spend.",
@@ -24927,7 +24940,7 @@
                 }
               }
             },
-            "description": "The assistant is not enabled."
+            "description": "The assistant is not enabled, or the record store did not answer."
           }
         },
         "summary": "Changes the caller's provider, model, data level, or enabled flag.",
@@ -26407,7 +26420,7 @@
                 }
               }
             },
-            "description": "The assistant is disabled, its kill switch is set, or no operator received the forge check (operator_unavailable)."
+            "description": "The assistant is disabled, its kill switch is set, the record store did not answer (record_store_unreachable), or no operator received the forge check (operator_unavailable)."
           },
           "504": {
             "content": {

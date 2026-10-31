@@ -3,13 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/varroaci/varroa-jenkins/internal/agent"
 	"github.com/varroaci/varroa-jenkins/internal/agent/store"
 )
 
@@ -98,6 +101,32 @@ func TestBuildAssistant_UnreachableStoreKeepsRuntime(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("buildAssistant took %v, want under 2s", elapsed)
+	}
+}
+
+// TestBuildAssistant_StoreCallsStopAtTheDeadline proves that a store call of
+// the assistant ends at the per-call bound when the database never answers.
+// The test shortens the bound, so it does not run in parallel.
+func TestBuildAssistant_StoreCallsStopAtTheDeadline(t *testing.T) {
+	saved := assistantStoreCallTimeout
+	assistantStoreCallTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { assistantStoreCallTimeout = saved })
+
+	cfg := `{"providers":[],"externalDataSharing":"metadata","budgets":{"session":1,"userDay":1,"tenantDay":1,"steps":1},"approvalExpiry":"1h"}`
+	// connect_timeout is raised so the call ends on the per-call bound, not on
+	// the connect timeout.
+	dsn := strings.Replace(silentRecordStoreDSN(t), "connect_timeout=1", "connect_timeout=30", 1)
+	rt, err := buildAssistant(context.Background(), cfg, dsn, "core", "", nil, quietLogger())
+	if err != nil || rt == nil {
+		t.Fatalf("buildAssistant = %v, %v; want a runtime", rt, err)
+	}
+	start := time.Now()
+	_, err = rt.Store.GetSettings(context.Background(), agent.ScopeGlobal)
+	if !errors.Is(err, store.ErrUnavailable) {
+		t.Fatalf("GetSettings error = %v, want ErrUnavailable", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("GetSettings took %v, want under 2s", elapsed)
 	}
 }
 

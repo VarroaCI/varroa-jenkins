@@ -23,7 +23,7 @@ import (
 // broken assistant config is logged, and the BFF starts without the
 // assistant. A store that does not answer at startup does not turn the
 // assistant off. The store connects on its first call, and the calls answer
-// 503 until it answers.
+// 503 until it answers. Every store call runs under that bound.
 func buildAssistant(ctx context.Context, cfgRaw, dsn, cluster, signingPEM string, publish func(string, []byte) error, logger *slog.Logger) (*api.AssistantRuntime, error) {
 	if cfgRaw == "" {
 		return nil, nil
@@ -56,8 +56,12 @@ func buildAssistant(ctx context.Context, cfgRaw, dsn, cluster, signingPEM string
 		}
 	}
 	go logAssistantStoreState(ctx, startupSchemaTimeout, st, logger)
-	return api.NewAssistantRuntime(cfg, reg, st, sealer, assistantOwner(), cluster, publish, logger), nil
+	return api.NewAssistantRuntime(cfg, reg, store.WithTimeout(st, assistantStoreCallTimeout), sealer, assistantOwner(), cluster, publish, logger), nil
 }
+
+// assistantStoreCallTimeout bounds each assistant store call. A variable so a
+// test can shorten it.
+var assistantStoreCallTimeout = store.DefaultCallTimeout
 
 // logAssistantStoreState checks the store schema once in the background and
 // logs the result. It runs only for the operator's log, so the BFF does not

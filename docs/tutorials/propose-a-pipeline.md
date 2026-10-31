@@ -38,7 +38,8 @@ The proposal route answers these codes.
 
 | Code | Status | Fix |
 |---|---|---|
-| `assistant_disabled` | 503 | Turn on the assistant. If it is on, the record store does not answer. Retry when it answers. |
+| `assistant_disabled` | 503 | Turn on the assistant. |
+| `record_store_unreachable` | 503 | The record store does not answer. Retry when it answers. |
 | `assistant_off` | 409 | Turn on your assistant switch. |
 | `repo_url_invalid` | 400 | Use an `https` URL on port 443. |
 | `data_sharing_too_low` | 409 | Raise the data level. |

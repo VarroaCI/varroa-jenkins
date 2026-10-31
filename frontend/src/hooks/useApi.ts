@@ -52,7 +52,8 @@ export function isRecordStoreUnreachable(e: unknown): boolean {
 
 /**
  * isAssistantDisabled reports the assistant's 503. It means the assistant is
- * off, or its store does not answer. A retry changes neither state.
+ * off, or the record store schema is too old. A store that does not answer
+ * has the code record_store_unreachable.
  */
 export function isAssistantDisabled(e: unknown): boolean {
   return e instanceof ApiError && e.status === 503 && e.code === "assistant_disabled";
@@ -60,9 +61,11 @@ export function isAssistantDisabled(e: unknown): boolean {
 
 /**
  * defaultQueryRetry is the app query client's retry rule. It retries a failed
- * read once. It never retries a record store that did not answer, or an
- * assistant that answers disabled, because a retry waits a second connect
- * timeout before the page shows the unreachable state.
+ * read once.
+ * A record store that did not answer is not retried. A retry waits a second
+ * connect timeout before the page shows the unreachable state.
+ * An assistant that answers disabled is not retried. Its state does not change
+ * on a retry.
  */
 export function defaultQueryRetry(failureCount: number, error: unknown): boolean {
   return failureCount < 1 && !isRecordStoreUnreachable(error) && !isAssistantDisabled(error);

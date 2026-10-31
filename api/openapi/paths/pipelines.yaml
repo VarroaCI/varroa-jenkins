@@ -521,7 +521,7 @@
             schema:
               $ref: '../components/schemas.yaml#/ProposePipelineError'
       "503":
-        description: The assistant is disabled, its kill switch is set, or no operator received the forge check (operator_unavailable).
+        description: The assistant is disabled, its kill switch is set, the record store did not answer (record_store_unreachable), or no operator received the forge check (operator_unavailable).
         content:
           application/json:
             schema:

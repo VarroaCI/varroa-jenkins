@@ -956,6 +956,10 @@ func testLeaseLostDeniesPendingApprovals(t *testing.T, f factory) {
 // pending. The approval expires one minute after the clock reads now.
 func seedOrphan(t *testing.T, s Store, clock *testClock, i int) {
 	t.Helper()
+	// The direct SQL below needs the concrete store, so unwrap a deadline wrapper.
+	if w, ok := s.(*timeoutStore); ok {
+		s = w.inner
+	}
 	ctx := context.Background()
 	sess := startRunning(t, s)
 	id, _ := agent.NewID()

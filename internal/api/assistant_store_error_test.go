@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,9 +14,9 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
-// TestAssistantStoreErrorStatus asserts that a store that does not answer, or
-// a store with an old schema, answers 503 assistant_disabled. Any other store
-// failure stays a 500.
+// TestAssistantStoreErrorStatus asserts that a store that does not answer
+// answers 503 record_store_unreachable, and that a store with an old schema
+// answers 503 assistant_disabled. Any other store failure stays a 500.
 func TestAssistantStoreErrorStatus(t *testing.T) {
 	t.Parallel()
 	s := NewServer(&Dependencies{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
@@ -26,9 +27,10 @@ func TestAssistantStoreErrorStatus(t *testing.T) {
 		status int
 		code   string
 	}{
-		{"agent store unreachable", fmt.Errorf("%w: read schema version: x", store.ErrUnavailable), 503, assistantErrDisabled},
-		{"record store unreachable", fmt.Errorf("%w: read", recordstore.ErrUnavailable), 503, assistantErrDisabled},
-		{"wrapped network error", fmt.Errorf("query: %w", netErr), 503, assistantErrDisabled},
+		{"agent store unreachable", fmt.Errorf("%w: read schema version: x", store.ErrUnavailable), 503, codeRecordStoreUnreachable},
+		{"record store unreachable", fmt.Errorf("%w: read", recordstore.ErrUnavailable), 503, codeRecordStoreUnreachable},
+		{"wrapped network error", fmt.Errorf("query: %w", netErr), 503, codeRecordStoreUnreachable},
+		{"call deadline", fmt.Errorf("%w: ping: %w", store.ErrUnavailable, context.DeadlineExceeded), 503, codeRecordStoreUnreachable},
 		{"agent store schema too old", store.ErrSchemaTooOld, 503, assistantErrDisabled},
 		{"record store schema too old", recordstore.ErrSchemaTooOld, 503, assistantErrDisabled},
 		{"unclassified failure", errors.New("boom"), 500, ""},

@@ -184,8 +184,9 @@ func writeAssistantError(s *Server, w http.ResponseWriter, status int, code, msg
 
 // assistantStoreError answers a store error. A missing row is 404, an expired
 // approval is 409 approval_expired, a state conflict is 409 assistant_busy,
-// an old schema or a database that does not answer is 503 assistant_disabled,
-// and anything else is 500.
+// an old schema is 503 assistant_disabled, a database that does not answer is
+// 503 record_store_unreachable, and anything else is 500. The schema case
+// comes first, so an old schema never reads as an outage.
 func (s *Server) assistantStoreError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -194,9 +195,10 @@ func (s *Server) assistantStoreError(w http.ResponseWriter, err error) {
 		writeAssistantError(s, w, http.StatusConflict, assistantErrApprovalExpired, "the approval expired")
 	case errors.Is(err, store.ErrConflict):
 		writeAssistantError(s, w, http.StatusConflict, assistantErrBusy, "the session changed; reload and try again")
-	case errors.Is(err, store.ErrUnavailable), errors.Is(err, recordstore.ErrUnavailable),
-		errors.Is(err, recordstore.ErrSchemaTooOld), errors.Is(err, store.ErrSchemaTooOld), pgdial.IsUnreachable(err):
-		writeAssistantError(s, w, http.StatusServiceUnavailable, assistantErrDisabled, "the assistant store is not ready")
+	case errors.Is(err, recordstore.ErrSchemaTooOld), errors.Is(err, store.ErrSchemaTooOld):
+		writeAssistantError(s, w, http.StatusServiceUnavailable, assistantErrDisabled, "the record store schema is too old for the assistant")
+	case errors.Is(err, store.ErrUnavailable), errors.Is(err, recordstore.ErrUnavailable), pgdial.IsUnreachable(err):
+		writeAssistantError(s, w, http.StatusServiceUnavailable, codeRecordStoreUnreachable, "record store unreachable")
 	default:
 		s.deps.Logger.Error("assistant store", "error", err)
 		s.writeJSONError(w, http.StatusInternalServerError, "assistant store failed")
