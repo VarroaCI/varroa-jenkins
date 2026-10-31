@@ -449,6 +449,27 @@ describe("Permissions panel", () => {
     expect(screen.getAllByText("all-viewers")).toHaveLength(1);
   });
 
+  it("lists a federated all-tenants copy once in the cluster-wide section", () => {
+    const grants = makeGrants();
+    const copy = {
+      source: "federatedBinding" as const,
+      binding: "varroa-fed-tenant-all-abc",
+      roleRef: "pipelines-writer",
+      subjects: [{ kind: "User", name: "bob" }],
+      verbs: ["write"],
+      federatedFrom: ["fleet-writers"],
+      allTenants: true,
+    };
+    grants.tenants[0].grants.push(copy);
+    grants.tenants[1].grants.push(copy);
+    mockUseCellGrants.mockReturnValue({ data: grants, isLoading: false, error: null });
+    renderTab();
+    expect(screen.getByText("Cluster-wide bindings")).toBeInTheDocument();
+    expect(screen.getAllByText("varroa-fed-tenant-all-abc")).toHaveLength(1);
+    expect(screen.getByText(/A federatedBinding row is a copy of a core binding/)).toBeInTheDocument();
+    expect(screen.getByText(/No grant reaches this tenant alone/)).toBeInTheDocument();
+  });
+
   it("states that only cluster-wide bindings reach a tenant", () => {
     const grants = makeGrants();
     grants.tenants[1].grants.push({

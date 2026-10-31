@@ -2,12 +2,16 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/varroaci/varroa-jenkins/api/openapi"
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
@@ -100,6 +104,63 @@ func TestCellGrantsMemberUnreachableAnswers502(t *testing.T) {
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d: %s", rec.Code, rec.Body.String())
 	}
+}
+
+// TestCellGrantsKeepsTheMemberAllTenantsFlag pins the member flag on a
+// federated all-tenants copy. The reply must validate against the
+// CellGrant schema, so the flag must be in the spec.
+func TestCellGrantsKeepsTheMemberAllTenantsFlag(t *testing.T) {
+	allTenantsCopy := bus.CellGrant{
+		Source:        "federatedBinding",
+		Binding:       "varroa-fed-tenant-all-abc",
+		RoleRef:       "pipelines-writer",
+		Subjects:      []bus.CellGrantSubject{{Kind: "User", Name: "alice"}},
+		Verbs:         []string{"write"},
+		FederatedFrom: []string{"fleet-writers"},
+		AllTenants:    true,
+	}
+	canned := []bus.CellTenantGrants{
+		{Tenant: "acme", ItemRole: "varroa:tenant:acme", Grants: []bus.CellGrant{allTenantsCopy}, MemberRoles: []bus.CellMemberRole{}},
+		{Tenant: "beta", ItemRole: "varroa:tenant:beta", Grants: []bus.CellGrant{allTenantsCopy}, MemberRoles: []bus.CellMemberRole{}},
+	}
+	brood := &memberGrantsBrood{reply: canned}
+	srv := memberCellGrantsServer(brood)
+
+	rec := doCellRequest(t, srv.handleCellGrants, "/cells/ns-a/cell-a/grants?cluster=member-c",
+		map[string]string{"namespace": "ns-a", "name": "cell-a"}, cellOperatorClaims)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"allTenants":true`) {
+		t.Fatalf("body %s lacks allTenants:true", rec.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if err := cellGrantsSchema(t).VisitJSON(body); err != nil {
+		t.Fatalf("body does not match the spec: %v", err)
+	}
+}
+
+// cellGrantsSchema answers the 200 body schema of the cell grants route
+// from the embedded spec.
+func cellGrantsSchema(t *testing.T) *openapi3.Schema {
+	t.Helper()
+	doc, err := (&openapi3.Loader{IsExternalRefsAllowed: false}).LoadFromData(openapi.SpecJSON)
+	if err != nil {
+		t.Fatalf("load spec: %v", err)
+	}
+	item := doc.Paths.Find("/api/v1/cells/{namespace}/{name}/grants")
+	if item == nil || item.Get == nil {
+		t.Fatal("spec has no cell grants operation")
+	}
+	resp := item.Get.Responses.Status(http.StatusOK)
+	if resp == nil || resp.Value == nil {
+		t.Fatal("cell grants operation declares no 200 response")
+	}
+	return resp.Value.Content.Get("application/json").Schema.Value
 }
 
 func TestCellGrantsMemberWithoutConfigBroodAnswers502(t *testing.T) {

@@ -1783,6 +1783,9 @@ type ComponentsSchemasCatalogVariableType string
 
 // ComponentsSchemasCellGrant One grant that reaches a tenant. The jobs field is absent when the grant narrows nothing. An absent jobs and an empty jobs mean different things, so the field is never an empty array.
 type ComponentsSchemasCellGrant struct {
+	// AllTenants True on a federatedBinding row whose copy reaches every tenant of the cell. That copy is the all-tenants copy of a core cluster-wide binding. Every other row omits the field.
+	AllTenants *bool `json:"allTenants,omitempty"`
+
 	// Binding The VarroaRoleBinding name. For the federatedBinding source it names the JenkinsRoleBinding copy on this cell's cluster. Absent for the tenantMembership source.
 	Binding *string `json:"binding,omitempty"`
 

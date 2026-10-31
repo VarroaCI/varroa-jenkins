@@ -6981,6 +6981,12 @@ CellGrant:
       description: The core VarroaRoleBindings of a federated copy.
       items:
         type: string
+    allTenants:
+      type: boolean
+      description: >-
+        True on a federatedBinding row whose copy reaches every tenant of the
+        cell. That copy is the all-tenants copy of a core cluster-wide binding.
+        Every other row omits the field.
   additionalProperties: false
 
 CellMemberRole:

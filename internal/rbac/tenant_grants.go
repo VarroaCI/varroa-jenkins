@@ -18,8 +18,9 @@ const MaxTenantGrants = 50
 
 // Grant sources, in the order TenantGrantSources reports them. A narrowing
 // grant matters more than a cluster-wide one, so the narrowing sources come
-// first. A federated copy narrows or reaches one tenant, so it ranks with
-// the tenant-scoped sources and before the cluster-wide binding.
+// first. A federated copy ranks with the tenant-scoped sources and before
+// the cluster-wide binding. The all-tenants copy uses the same rank, and its
+// AllTenants field marks it.
 const (
 	GrantSourceTenantMembership    = "tenantMembership"
 	GrantSourceTenantScopedBinding = "tenantScopedBinding"
@@ -50,6 +51,10 @@ type TenantGrantSource struct {
 	Verbs         []string
 	Jobs          []string
 	FederatedFrom []string
+	// AllTenants is true for the all-tenants copy of a core cluster-wide
+	// binding. That copy reaches every tenant that a cell hosts. Every other
+	// source leaves it false.
+	AllTenants bool
 }
 
 // TenantItemRoleName returns the generated Jenkins item role name of a
@@ -291,7 +296,7 @@ func VarroaRolePipelinesVerbs(vr *v1alpha1.VarroaRole) []string {
 // federation projection placed on this cluster for one tenant. A copy names
 // the tenant or the all-tenants value. Each copy is a grant with pipelines
 // write. A copy with an unreadable job list is skipped, so the grant fails
-// closed.
+// closed. An all-tenants copy sets AllTenants.
 func (r *Resolver) federatedTenantMemberSources(tenant string) []TenantGrantSource {
 	if r == nil || r.jenkinsRoleBindingIndex == nil {
 		return nil
@@ -324,6 +329,7 @@ func (r *Resolver) federatedTenantMemberSources(tenant string) []TenantGrantSour
 			Verbs:         []string{"write"},
 			Jobs:          jobs,
 			FederatedFrom: federatedFromNames(b.Annotations[AnnotationFederatedBindings]),
+			AllTenants:    annotated == FederatedAllTenants,
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Binding < out[j].Binding })

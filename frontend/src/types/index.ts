@@ -3075,6 +3075,8 @@ export interface CellGrant {
   jobs?: string[];
   /** The core VarroaRoleBindings of a federated copy. */
   federatedFrom?: string[];
+  /** True on a federatedBinding copy that reaches every tenant of the cell. Absent on every other row. */
+  allTenants?: boolean;
 }
 
 /** One generated Jenkins member role of a tenant. */
