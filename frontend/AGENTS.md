@@ -307,7 +307,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   frame arrived (`logDone` in `RunLogViewer.tsx`). The
   viewer derives each stage header from the `stageId` of the lines, not from
   frame order or `startLine`. It places a header before the first line of its
-  stage, and a stage with no lines gets none. A stage selection or a
+  stage, and a stage with no lines gets none. A line with no known stage does not end a run. Only a line of another known stage ends a run. A stage selection or a
   `#stage-<id>` fragment holds as a pending jump until a header of that stage
   or of a descendant exists, the same way `pendingLine` holds. A resolved
   stage jump turns Follow off. The viewer reads the `stages` prop only for the

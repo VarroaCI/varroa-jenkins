@@ -110,11 +110,12 @@ export function agentManifestFolds(body: readonly BodyRow[]): AgentManifestFold[
 }
 
 /**
- * Places a header row before each consecutive run of one stage's lines. A
- * later run of a stage that already has a header gets a continued header.
- * A collapsed stage keeps its headers and hides its lines. An agent
- * manifest that is not expanded hides its lines behind one fold row. A line
- * with no known stage ends the run of the stage before it.
+ * Places a header row before each run of one stage's lines. Only a line of
+ * another known stage ends a run. A line with no known stage stays in the
+ * run around it. A later run of a stage that already has a header gets a
+ * continued header. A collapsed stage keeps its headers and hides its
+ * lines. An agent manifest that is not expanded hides its lines behind one
+ * fold row.
  */
 export function buildLogRows(
   body: readonly BodyRow[],
@@ -152,7 +153,8 @@ export function buildLogRows(
       }
       if (inCollapsed || !expanded) {
         for (let k = fold.start; k < fold.end; k++) {
-          if (body[k].kind === "line") prevStage = stageOf(body[k]);
+          const s = stageOf(body[k]);
+          if (s !== "") prevStage = s;
         }
         i = fold.end;
         continue;
@@ -167,7 +169,7 @@ export function buildLogRows(
     }
     const sid = stageOf(row);
     if (sid === "") {
-      prevStage = "";
+      // A line with no known stage keeps prevStage, so it never splits a run.
       out.push(row);
       continue;
     }

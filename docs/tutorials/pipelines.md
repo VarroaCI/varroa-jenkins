@@ -202,7 +202,7 @@ Open the **Log** tab. The log viewer supports:
   and disabled when the run has ended and its log is complete.
 - A **Raw** link that opens the same log as plain text in a new tab.
 
-A header sits before each run of a stage's lines. Select a header to collapse or expand its stage.
+A header sits before each run of a stage's lines. A line that belongs to no stage does not end a run. Select a header to collapse or expand its stage.
 The agent pod manifest is folded by default. A jump or search that finds a hidden line opens its group.
 
 Select a stage in the stage graph to scroll to its header and expand it. A `#stage-<id>` fragment does
