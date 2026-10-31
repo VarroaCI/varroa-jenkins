@@ -1853,6 +1853,8 @@ export interface RunSummary {
   scmForge?: "github" | "gitlab" | "gitea";
   triggerSource?: TriggerSource;
   changeRequest?: ChangeRequest;
+  /** The subject of the newest commit. Absent until the run records its change list. */
+  changeSummary?: string;
   queuedAt?: string;
   startedAt?: string;
   endedAt?: string;

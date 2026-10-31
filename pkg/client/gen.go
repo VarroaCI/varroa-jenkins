@@ -3004,6 +3004,9 @@ type ComponentsSchemasFleetRunRow struct {
 	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
 	ChangeRequest *ComponentsSchemasChangeRequest `json:"changeRequest,omitempty"`
 
+	// ChangeSummary The subject of the newest commit of the run. Absent until the run records its change list, and for a run with no change.
+	ChangeSummary *string `json:"changeSummary,omitempty"`
+
 	// Cluster The cluster that holds the run.
 	Cluster    string     `json:"cluster"`
 	CreatedAt  time.Time  `json:"createdAt"`
@@ -4771,12 +4774,15 @@ type ComponentsSchemasRunSummary struct {
 
 	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
 	ChangeRequest *ComponentsSchemasChangeRequest `json:"changeRequest,omitempty"`
-	DurationMs    *int64                          `json:"durationMs,omitempty"`
-	EndedAt       *time.Time                      `json:"endedAt,omitempty"`
-	JobPath       *string                         `json:"jobPath,omitempty"`
-	QueuedAt      *time.Time                      `json:"queuedAt,omitempty"`
-	Result        *string                         `json:"result,omitempty"`
-	RunId         string                          `json:"runId"`
+
+	// ChangeSummary The subject of the newest commit of the run. Absent until the run records its change list, and for a run with no change.
+	ChangeSummary *string    `json:"changeSummary,omitempty"`
+	DurationMs    *int64     `json:"durationMs,omitempty"`
+	EndedAt       *time.Time `json:"endedAt,omitempty"`
+	JobPath       *string    `json:"jobPath,omitempty"`
+	QueuedAt      *time.Time `json:"queuedAt,omitempty"`
+	Result        *string    `json:"result,omitempty"`
+	RunId         string     `json:"runId"`
 
 	// ScmForge The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
 	ScmForge    *ComponentsSchemasRunSummaryScmForge `json:"scmForge,omitempty"`
@@ -4983,7 +4989,7 @@ type ComponentsSchemasRunningRun struct {
 	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
 	ChangeRequest *ComponentsSchemasChangeRequest `json:"changeRequest,omitempty"`
 
-	// ChangeSummary The last commit's short message.
+	// ChangeSummary The subject of the newest commit of the run.
 	ChangeSummary *string    `json:"changeSummary,omitempty"`
 	CurrentStage  *string    `json:"currentStage,omitempty"`
 	JobPath       string     `json:"jobPath"`

@@ -4728,6 +4728,11 @@ RunSummary:
         Kind of cause that started the run. Absent when Jenkins reports no cause list.
     changeRequest:
       $ref: '#/ChangeRequest'
+    changeSummary:
+      type: string
+      description: >
+        The subject of the newest commit of the run. Absent until the run
+        records its change list, and for a run with no change.
     queuedAt:
       type: string
       format: date-time
@@ -4770,7 +4775,7 @@ RunningRun:
       $ref: '#/ChangeRequest'
     changeSummary:
       type: string
-      description: The last commit's short message.
+      description: The subject of the newest commit of the run.
     queuedAt:
       type: string
       format: date-time
@@ -8133,6 +8138,9 @@ FleetRunRow:
         '
     changeRequest:
       $ref: '#/ChangeRequest'
+    changeSummary:
+      type: string
+      description: The subject of the newest commit of the run. Absent until the run records its change list, and for a run with no change.
     queuedAt:
       type: string
       format: date-time

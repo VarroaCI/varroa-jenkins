@@ -124,6 +124,109 @@ func TestLatestChangeMessage(t *testing.T) {
 	}
 }
 
+// TestLatestChangeSubject asserts latestChangeSubject returns the first
+// line of the newest commit message, with white space trimmed.
+func TestLatestChangeSubject(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty input yields empty string", "", ""},
+		{"no entries yields empty string", `[]`, ""},
+		{
+			"newest entry is the last array element",
+			`[{"message":"first"},{"message":"second"}]`,
+			"second",
+		},
+		{
+			"newest message keeps its first line only",
+			`[{"message":"older"},{"message":"fix the cache key\n\nlong body"}]`,
+			"fix the cache key",
+		},
+		{
+			"surrounding white space and a CRLF line end are removed",
+			`[{"message":"  tidy docs  \r\nbody"}]`,
+			"tidy docs",
+		},
+		{"a blank first line yields empty string", `[{"message":"\n\nbody"}]`, ""},
+		{"malformed JSON yields empty string", `{not valid`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := latestChangeSubject(json.RawMessage(tc.raw))
+			if got != tc.want {
+				t.Fatalf("latestChangeSubject(%s) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildRunSummaryCarriesChangeSummary asserts the run summary, and the
+// running tile built from it, carry the newest commit subject, and that a
+// run with no change omits the field from its JSON.
+func TestBuildRunSummaryCarriesChangeSummary(t *testing.T) {
+	multi := recordstore.Run{
+		RunID: "run-1", JobPath: "acme/app-a", Status: "COMPLETED",
+		Changes: json.RawMessage(`[{"message":"older"},{"message":"fix the cache key\n\nbody"}]`),
+	}
+	if got := buildRunSummary(multi).ChangeSummary; got != "fix the cache key" {
+		t.Fatalf("buildRunSummary changeSummary = %q; want the newest subject", got)
+	}
+	if got := buildRunningRun(multi, nil, "").ChangeSummary; got != "fix the cache key" {
+		t.Fatalf("buildRunningRun changeSummary = %q; want the newest subject", got)
+	}
+
+	bare := recordstore.Run{RunID: "run-2", JobPath: "acme/app-a", Status: "COMPLETED"}
+	if got := buildRunSummary(bare).ChangeSummary; got != "" {
+		t.Fatalf("run with no changes: changeSummary = %q; want empty", got)
+	}
+	raw, err := json.Marshal(buildRunSummary(bare))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "changeSummary") {
+		t.Fatalf("run with no changes serialized changeSummary: %s", raw)
+	}
+}
+
+// TestHandleListPipelines_LastBuildCarriesChangeSummary asserts a job's
+// lastBuild carries the subject of its newest commit.
+func TestHandleListPipelines_LastBuildCarriesChangeSummary(t *testing.T) {
+	client := newSingleControllerFixture(t)
+	authz := pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a")
+	reader := newFakeRecordReader()
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	lastRun := recordstore.Run{
+		RunID: "run-app-a-1", Cluster: "core", Namespace: "test-ns", Cell: "ctrl-a",
+		Tenant: "test-ns/ctrl-a", JobPath: "acme/app-a", Status: "COMPLETED", CreatedAt: base,
+		Changes: json.RawMessage(`[{"message":"older"},{"message":"fix the cache key\n\nbody"}]`),
+	}
+	reader.jobSummaries["core/test-ns/ctrl-a"] = []recordstore.JobSummary{
+		{JobPath: "acme/app-a", RecentRuns: []recordstore.HealthRun{{Result: "SUCCESS"}}, LastRun: &lastRun},
+	}
+
+	srv := pipelinesTestServer(client, authz, reader, nil)
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"tenant": "ctrl-a"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp pipelineListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, it := range resp.Items {
+		if it.JobPath == "acme/app-a" {
+			if it.LastBuild == nil || it.LastBuild.ChangeSummary != "fix the cache key" {
+				t.Fatalf("lastBuild = %+v; want changeSummary %q", it.LastBuild, "fix the cache key")
+			}
+			return
+		}
+	}
+	t.Fatalf("acme/app-a missing from the list: %+v", resp.Items)
+}
+
 // --- 3.5: GET /pipelines/{tenant} ---
 
 func TestHandleListPipelines_UnionsCatalogAndRecords_TruncatedFlag(t *testing.T) {

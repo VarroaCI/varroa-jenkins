@@ -60,6 +60,22 @@ func TestFleetRunTitle(t *testing.T) {
 	}
 }
 
+func TestBuildFleetRunRowCarriesChangeSummary(t *testing.T) {
+	two, _ := json.Marshal([]map[string]string{
+		{"message": "older subject"},
+		{"message": "fix the cache key\n\nbody"},
+	})
+	row := buildFleetRunRow(recordstore.Run{RunID: "run-1", JobPath: "pay/build", Status: "COMPLETED", Changes: two}, "pay", false)
+	if row.ChangeSummary != "fix the cache key" || row.Title != "fix the cache key" {
+		t.Fatalf("changeSummary = %q, title = %q; want both %q", row.ChangeSummary, row.Title, "fix the cache key")
+	}
+
+	bare := buildFleetRunRow(recordstore.Run{RunID: "run-2", JobPath: "pay/build", Status: "COMPLETED"}, "pay", false)
+	if bare.ChangeSummary != "" || bare.Title != "pay/build" {
+		t.Fatalf("no changes: changeSummary = %q, title = %q; want empty and the job path", bare.ChangeSummary, bare.Title)
+	}
+}
+
 func TestBuildFleetRunRowDerivedFields(t *testing.T) {
 	started := time.Date(2026, 10, 30, 10, 0, 1, 500_000_000, time.UTC)
 	queued := started.Add(-1500 * time.Millisecond)

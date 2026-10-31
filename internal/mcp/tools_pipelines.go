@@ -624,6 +624,7 @@ var runListOutputSchema = listOutputSchema("Fleet run row.", []schemaField{
 	{Name: "cluster", Type: "string", Desc: "Cluster that holds the run."},
 	{Name: "tenant", Type: "string", Desc: "Tenant of the run, as the rail names it."},
 	{Name: "title", Type: "string", Desc: "First line of the newest commit message, else the job path."},
+	{Name: "changeSummary", Type: "string", Desc: "Subject of the newest commit of the run. Absent when the run has no recorded change."},
 	{Name: "buildNumber", Type: "integer", Desc: "Jenkins build number, once assigned."},
 	{Name: "jobPath", Type: "string", Desc: "Full job path."},
 	{Name: "status", Type: "string", Desc: "QUEUED, RUNNING, or COMPLETED."},
