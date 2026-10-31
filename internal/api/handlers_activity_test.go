@@ -451,7 +451,7 @@ func TestActivityFilter_AcceptsMCPSource(t *testing.T) {
 	for _, src := range []string{"operator", "mite", "jenkins", "user", "api", "mcp", "assistant"} {
 		t.Run(src, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/activity?source="+src, nil)
-			if _, err := parseActivityQuery(req, nil); err != nil {
+			if _, err := parseActivityQuery(req); err != nil {
 				t.Errorf("source=%s rejected: %v", src, err)
 			}
 		})
@@ -551,7 +551,7 @@ func TestActivityFilter_ExcludeRoutineSignInsValues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run("value="+tt.raw, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/activity?excludeRoutineSignIns="+tt.raw, nil)
-			q, err := parseActivityQuery(req, nil)
+			q, err := parseActivityQuery(req)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -586,5 +586,126 @@ func TestHandleActivity_RecordStoreUnreachable(t *testing.T) {
 	}
 	if body["code"] != codeRecordStoreUnreachable {
 		t.Errorf("code = %q, want %q", body["code"], codeRecordStoreUnreachable)
+	}
+}
+
+// TestHandleActivityStream_RangeDoesNotReadStore proves a range request on the
+// live stream answers 200 and never reads the record store, so a nil or
+// unreachable backfill cannot fail it.
+func TestHandleActivityStream_RangeDoesNotReadStore(t *testing.T) {
+	now := time.Now().UTC()
+	start := now.Add(-time.Hour).Format(time.RFC3339)
+	end := now.Add(time.Hour).Format(time.RFC3339)
+
+	cases := map[string]activity.Backfill{
+		"nil backfill":         nil,
+		"unreachable backfill": &fakeBackfill{err: fmt.Errorf("x: %w", recordstore.ErrUnavailable)},
+	}
+	for name, backfill := range cases {
+		t.Run(name, func(t *testing.T) {
+			ch := make(chan sse.Record, 1)
+			ch <- sse.Record{Event: "auth.local.login", Data: activity.Event{Type: "auth.local.login", Source: "user", Namespace: "ns", Controller: "c1", Message: "m", Timestamp: now}}
+			close(ch)
+
+			srv := NewServer(&Dependencies{
+				Backfill:    backfill,
+				Authorizer:  testAuthorizer(true, ""),
+				Broadcaster: &fakeActivitySource{ch: ch},
+				Logger:      slog.Default(),
+			})
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/activity/stream?start="+start+"&end="+end, nil).
+				WithContext(authContext(&auth.Claims{Subject: "test-user"}))
+			w := httptest.NewRecorder()
+
+			srv.handleActivityStream(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+			}
+			if n := strings.Count(w.Body.String(), "event: activity\n"); n != 1 {
+				t.Fatalf("expected one activity frame, got %d: %s", n, w.Body.String())
+			}
+		})
+	}
+}
+
+// TestHandleActivity_RangeRecordStoreUnreachable proves a range read on
+// GET /activity answers 503 when the store cannot be reached, not 400.
+func TestHandleActivity_RangeRecordStoreUnreachable(t *testing.T) {
+	now := time.Now().UTC()
+	srv := NewServer(&Dependencies{
+		Backfill:   &fakeBackfill{err: fmt.Errorf("list activity: %w", recordstore.ErrUnavailable)},
+		Authorizer: testAuthorizer(true, ""),
+		Logger:     slog.Default(),
+	})
+	target := "/activity?start=" + now.Add(-time.Hour).Format(time.RFC3339) + "&end=" + now.Add(time.Hour).Format(time.RFC3339)
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req = req.WithContext(contextWithClaims(req.Context(), &auth.Claims{Subject: "test-user"}))
+	w := httptest.NewRecorder()
+
+	srv.handleActivity(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != codeRecordStoreUnreachable {
+		t.Errorf("code = %q, want %q", body["code"], codeRecordStoreUnreachable)
+	}
+}
+
+// TestHandleActivity_RangeOutsideRetention proves a range start before the
+// retention window answers 400 with the retention message.
+func TestHandleActivity_RangeOutsideRetention(t *testing.T) {
+	now := time.Now().UTC()
+	srv := NewServer(&Dependencies{
+		Backfill:   &fakeBackfill{err: activity.ErrRangeOutsideRetention},
+		Authorizer: testAuthorizer(true, ""),
+		Logger:     slog.Default(),
+	})
+	target := "/activity?start=" + now.Add(-48*time.Hour).Format(time.RFC3339) + "&end=" + now.Format(time.RFC3339)
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req = req.WithContext(contextWithClaims(req.Context(), &auth.Claims{Subject: "test-user"}))
+	w := httptest.NewRecorder()
+
+	srv.handleActivity(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["error"] != "start is outside activity retention" {
+		t.Errorf("error = %q, want the retention message", body["error"])
+	}
+}
+
+// TestActivityFilter_RangeBounds proves parseActivityQuery checks only the
+// range syntax: start and end come together, and start is before end.
+func TestActivityFilter_RangeBounds(t *testing.T) {
+	now := time.Now().UTC()
+	ts := func(d time.Duration) string { return now.Add(d).Format(time.RFC3339) }
+	cases := []struct {
+		name    string
+		target  string
+		wantErr bool
+	}{
+		{"start without end", "/activity?start=" + ts(-time.Hour), true},
+		{"start equals end", "/activity?start=" + ts(0) + "&end=" + ts(0), true},
+		{"start after end", "/activity?start=" + ts(time.Hour) + "&end=" + ts(-time.Hour), true},
+		{"valid range", "/activity?start=" + ts(-time.Hour) + "&end=" + ts(time.Hour), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.target, nil)
+			if _, err := parseActivityQuery(req); (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
 	}
 }

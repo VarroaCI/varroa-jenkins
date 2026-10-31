@@ -2579,7 +2579,7 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, http.StatusOK, activity.Page{Items: []activity.Event{}, RetentionMode: mode, RetentionDays: days})
 		return
 	}
-	query, err := parseActivityQuery(r, s.deps.Backfill)
+	query, err := parseActivityQuery(r)
 	if err != nil {
 		s.writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -2589,7 +2589,7 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 	query.Authorize = func(e activity.Event) bool { return s.deps.Authorizer.CanReadActivityEvent(claims, e) }
 	page, err := s.deps.Backfill.Query(r.Context(), query)
 	if err != nil {
-		if errors.Is(err, activity.ErrInvalidCursor) {
+		if errors.Is(err, activity.ErrInvalidCursor) || errors.Is(err, activity.ErrRangeOutsideRetention) {
 			s.writeJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -2611,7 +2611,9 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, page)
 }
 
-func parseActivityQuery(r *http.Request, backfill activity.Backfill) (activity.Query, error) {
+// parseActivityQuery checks the request syntax only. It never reads the
+// record store, so the live stream does not depend on the store.
+func parseActivityQuery(r *http.Request) (activity.Query, error) {
 	v := r.URL.Query()
 	q := activity.Query{Cursor: v.Get("cursor"), Cluster: v.Get("cluster"), Controller: v.Get("controller"), Namespace: v.Get("namespace"), Source: v.Get("source"), Severity: v.Get("severity"), Actor: strings.TrimSpace(v.Get("actor")), Type: v.Get("type")}
 	if raw := v.Get("limit"); raw != "" {
@@ -2636,13 +2638,6 @@ func parseActivityQuery(r *http.Request, backfill activity.Backfill) (activity.Q
 	if q.Start != nil {
 		if !q.Start.Before(*q.End) {
 			return q, fmt.Errorf("start must be before end")
-		}
-		mode, days := backfill.Retention()
-		if mode == "off" {
-			return q, fmt.Errorf("historical ranges are unavailable when activity retention is off")
-		}
-		if q.Start.Before(time.Now().Add(-time.Duration(days) * 24 * time.Hour)) {
-			return q, fmt.Errorf("start is outside activity retention")
 		}
 	}
 	valid := func(value string, allowed ...string) bool {
@@ -2707,7 +2702,7 @@ func (s *Server) handleActivityStream(w http.ResponseWriter, r *http.Request) {
 	authz := s.deps.Authorizer
 
 	controller := r.URL.Query().Get("controller")
-	filter, err := parseActivityQuery(r, s.deps.Backfill)
+	filter, err := parseActivityQuery(r)
 	if err != nil {
 		s.writeJSONError(w, http.StatusBadRequest, err.Error())
 		return

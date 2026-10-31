@@ -51,6 +51,8 @@ var (
 	ErrInvalidCursor = errors.New("invalid activity cursor")
 	// ErrCursorExpired indicates a cursor outside the retained activity window.
 	ErrCursorExpired = errors.New("activity cursor expired")
+	// ErrRangeOutsideRetention indicates a range start before the retained activity window.
+	ErrRangeOutsideRetention = errors.New("start is outside activity retention")
 )
 
 // Matches reports whether an event satisfies an activity query's filters.
