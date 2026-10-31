@@ -17,7 +17,9 @@ type CellGrantSubject struct {
 // CellGrant is one grant that reaches a tenant of a cell. Jobs carries
 // omitempty because an absent list and an empty list mean different
 // things: an absent list narrows nothing. FederatedFrom names the core
-// VarroaRoleBindings of a federatedBinding copy.
+// VarroaRoleBindings of a federatedBinding copy. AllTenants is true on a
+// federatedBinding copy that reaches every tenant of the cell. It carries
+// omitempty, so every other row omits it.
 type CellGrant struct {
 	Source        string             `json:"source"`
 	Binding       string             `json:"binding,omitempty"`
@@ -26,6 +28,7 @@ type CellGrant struct {
 	Verbs         []string           `json:"verbs"`
 	Jobs          []string           `json:"jobs,omitempty"`
 	FederatedFrom []string           `json:"federatedFrom,omitempty"`
+	AllTenants    bool               `json:"allTenants,omitempty"`
 }
 
 // CellMemberRole is one generated Jenkins member role of a tenant. Binding

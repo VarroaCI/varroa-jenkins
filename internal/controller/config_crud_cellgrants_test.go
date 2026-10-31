@@ -120,4 +120,27 @@ func TestCellTenantGrantsReport_NeverNullAndOmitsEmptyJobs(t *testing.T) {
 	if strings.Contains(body, `"federatedFrom"`) {
 		t.Errorf("body %s carries federatedFrom for a cluster-wide grant", body)
 	}
+	if strings.Contains(body, `"allTenants"`) {
+		t.Errorf("body %s carries allTenants for a cluster-wide grant", body)
+	}
+}
+
+func TestCellTenantGrantsReport_CarriesAllTenants(t *testing.T) {
+	report := CellTenantGrantsReport("alpha", []rbac.TenantGrantSource{{
+		Source:        rbac.GrantSourceFederatedBinding,
+		Binding:       "varroa-fed-tenant-all-abc",
+		RoleRef:       "pipelines-writer",
+		Subjects:      []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}},
+		Verbs:         []string{"write"},
+		FederatedFrom: []string{"fleet-writers"},
+		AllTenants:    true,
+	}}, false, nil)
+
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"allTenants":true`) {
+		t.Errorf("body %s lacks allTenants:true on the all-tenants copy", raw)
+	}
 }

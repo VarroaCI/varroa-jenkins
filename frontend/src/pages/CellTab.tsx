@@ -474,8 +474,7 @@ function PermissionsPanel({
   loading: boolean;
 }) {
   const refused = error instanceof ApiError && error.status === 403;
-  // A cluster-wide binding reaches every tenant. The BFF repeats its row in
-  // each tenant entry, so the panel lists it once above the tenant blocks.
+  // A cluster-wide binding and a federated all-tenants copy reach every tenant. The BFF repeats each row in every tenant entry, so the panel lists it once above the tenant blocks.
   const split = splitClusterWideGrants(entries ?? []);
   const anyTruncated = (entries ?? []).some((e) => e.truncated);
   return (
@@ -501,6 +500,11 @@ function PermissionsPanel({
               <h4 className={styles.subTitle}>Cluster-wide bindings</h4>
               <p className={styles.note}>These bindings reach every tenant on this cell.</p>
               <GrantsTable grants={split.clusterWide} />
+              {split.clusterWide.some((g) => g.source === "federatedBinding") && (
+                <p className={styles.note}>
+                  A federatedBinding row is a copy of a core binding on this member cluster.
+                </p>
+              )}
               {anyTruncated && (
                 <p className={styles.note}>
                   The list can be incomplete: a tenant list stops at 50 grants.

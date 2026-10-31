@@ -50,6 +50,46 @@ func TestTenantGrantSources_ReportsFederatedCopy(t *testing.T) {
 	}
 }
 
+func TestTenantGrantSources_MarksAllTenantsCopy(t *testing.T) {
+	alice := v1alpha1.SubjectRef{Kind: "User", Name: "alice"}
+	bob := v1alpha1.SubjectRef{Kind: "User", Name: "bob"}
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, nil)
+	r = withFederatedCopies(r,
+		federatedGrantCopy("varroa-fed-tenant-all-abc", FederatedAllTenants, "", "fleet-writers", alice),
+		federatedGrantCopy("varroa-fed-tenant-one", "sbsoftware", "", "acme-writers", bob),
+	)
+
+	grants := r.TenantGrantSources(mustParseTenant(t, "sbsoftware"))
+	if len(grants) != 2 {
+		t.Fatalf("sbsoftware: expected 2 grants, got %d: %+v", len(grants), grants)
+	}
+	byName := map[string]TenantGrantSource{}
+	for _, g := range grants {
+		byName[g.Binding] = g
+	}
+	all, ok := byName["varroa-fed-tenant-all-abc"]
+	if !ok {
+		t.Fatalf("sbsoftware: no all-tenants copy in %+v", grants)
+	}
+	if !all.AllTenants {
+		t.Errorf("all-tenants copy: AllTenants = false, want true")
+	}
+	if all.Jobs != nil {
+		t.Errorf("all-tenants copy: Jobs = %v, want nil", all.Jobs)
+	}
+	if one := byName["varroa-fed-tenant-one"]; one.AllTenants {
+		t.Errorf("per-tenant copy: AllTenants = true, want false")
+	}
+
+	other := r.TenantGrantSources(mustParseTenant(t, "other-team"))
+	if len(other) != 1 {
+		t.Fatalf("other-team: expected exactly the all-tenants copy, got %d: %+v", len(other), other)
+	}
+	if other[0].Binding != "varroa-fed-tenant-all-abc" || !other[0].AllTenants {
+		t.Errorf("other-team: got %+v, want the all-tenants copy with AllTenants set", other[0])
+	}
+}
+
 func TestTenantGrantSources_FederatedWholeFolderCopyHasNilJobs(t *testing.T) {
 	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, nil)
 	r = withFederatedCopies(r, federatedGrantCopy("varroa-fed-tenant-whole", "sbsoftware", "", "alpha-writers",

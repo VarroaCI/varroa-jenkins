@@ -66,6 +66,7 @@ func CellTenantGrantsReport(tenant string, sources []rbac.TenantGrantSource, tru
 			Subjects:      subjectReports(src.Subjects),
 			Verbs:         src.Verbs,
 			FederatedFrom: src.FederatedFrom,
+			AllTenants:    src.AllTenants,
 		}
 		if grant.Verbs == nil {
 			grant.Verbs = []string{}
