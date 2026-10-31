@@ -63,4 +63,9 @@ describe("assistant drawer layout", () => {
     const mid = mediaBody(read("AssistantDrawer.module.css"), "(min-width: 640px) and (max-width: 1023.98px)");
     expect(ruleBody(mid, ".drawer")).toMatch(/align-self:\s*stretch/);
   });
+
+  it("the activity dots stop under reduced motion", () => {
+    const reduced = mediaBody(read("AssistantDrawer.module.css"), "(prefers-reduced-motion: reduce)");
+    expect(ruleBody(reduced, ".dots span")).toMatch(/animation:\s*none/);
+  });
 });

@@ -194,7 +194,7 @@ reason `budget_day`. The step limit is the chart value `assistant.budgets.steps`
 
 - `/pipelines/<tenant>/agent` shows the Tenant agent of the Tenant. Its tabs are
   Sessions, Approvals, Capabilities, and Settings. A session opens the full
-  transcript.
+  transcript. The transcript shows a status line, as the assistant drawer does.
 - The Tenant home shows a Tenant agent card. The card is hidden when the Tenant has no
   accepted agent.
 - `/agents` lists every Tenant agent of the brood. It needs the `agentsessions:read`

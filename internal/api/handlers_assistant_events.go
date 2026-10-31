@@ -106,17 +106,20 @@ func streamCursor(r *http.Request) (int, error) {
 }
 
 // writeAssistantEvents writes every event after the cursor and reports the
-// new cursor, and whether a done event was written. full selects whether
-// tool result content is written; see assistantEventFrame.
+// new cursor, and whether the last event written is a done event. An earlier
+// done event does not end the write, so a replay of a session with several
+// runs arrives in one burst. full selects whether tool result content is
+// written; see assistantEventFrame.
 func writeAssistantEvents(ctx context.Context, rt *AssistantRuntime, w io.Writer, id uuid.UUID, after int, full bool) (int, bool, error) {
 	last := after
+	ended := false
 	for {
 		page, err := rt.Store.Events(ctx, id, last, 500)
 		if err != nil {
 			return last, false, err
 		}
 		if len(page) == 0 {
-			return last, false, nil
+			return last, ended, nil
 		}
 		for _, e := range page {
 			frame, err := assistantEventFrame(e, full)
@@ -127,9 +130,7 @@ func writeAssistantEvents(ctx context.Context, rt *AssistantRuntime, w io.Writer
 				return last, false, err
 			}
 			last = e.Seq
-			if e.Type == agent.EventDone {
-				return last, true, nil
-			}
+			ended = e.Type == agent.EventDone
 		}
 	}
 }

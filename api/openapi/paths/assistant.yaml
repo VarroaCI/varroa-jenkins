@@ -163,8 +163,8 @@
     summary: Streams the transcript of one session as server-sent events.
     description: >
       Sends every event after the cursor, then each new event. Each frame
-      carries its sequence number as its id. The stream closes after a done
-      event. The stream reads the ticket of the session scope, because a
+      carries its sequence number as its id. The stream closes when the last
+      event it wrote is a done event. The stream reads the ticket of the session scope, because a
       browser EventSource cannot set headers. A caller who is neither the session
       owner nor, for a Tenant agent session, a tenant reader, receives each
       tool_result frame with an empty content and withheld set to true. The

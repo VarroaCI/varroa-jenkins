@@ -170,4 +170,73 @@ describe("AssistantDrawer", () => {
     await waitFor(() => expect(client.createAssistantSession).toHaveBeenCalled());
     expect(vi.mocked(client.createAssistantSession).mock.calls[0][0]).toMatchObject({ message: "hello" });
   });
+
+  it("shows a sent message at once and names each step of the run", async () => {
+    vi.mocked(client.getAssistantSession).mockResolvedValue({ session: { ...session, state: "completed" }, approvals: [] });
+    renderDrawer();
+    fireEvent.click(screen.getByText("open"));
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+    const at = "2026-10-31T10:00:00Z";
+    act(() => {
+      es.emitNamedEvent("done", JSON.stringify({ state: "completed", created_at: at }), "1");
+    });
+    const box = await screen.findByLabelText("Message");
+    const count = MockEventSource.instances.length;
+
+    let release: () => void = () => undefined;
+    vi.mocked(client.postAssistantMessage).mockImplementationOnce(
+      () => new Promise((resolve) => { release = () => resolve({ state: "running" } as never); }),
+    );
+    fireEvent.change(box, { target: { value: "and the fix?" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("and the fix?")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Sending…");
+    expect((box as HTMLTextAreaElement).value).toBe("");
+
+    act(() => release());
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Thinking…"));
+
+    act(() => {
+      es.emitNamedEvent("user", JSON.stringify({ text: "and the fix?", created_at: at }), "2");
+    });
+    await waitFor(() => expect(screen.getAllByText("and the fix?")).toHaveLength(1));
+
+    act(() => {
+      es.emitNamedEvent("tool_call", JSON.stringify({ call_id: "c1", name: "get_run", arguments: {}, class: "read", created_at: at }), "3");
+    });
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("get_run · In progress"));
+
+    act(() => {
+      es.emitNamedEvent("tool_result", JSON.stringify({ call_id: "c1", content: "ok", is_error: false, data_level: "logs", created_at: at }), "4");
+    });
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Thinking…"));
+
+    act(() => {
+      es.emitNamedEvent("done", JSON.stringify({ state: "completed", created_at: at }), "5");
+    });
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(""));
+    expect(MockEventSource.instances.length).toBe(count);
+  });
+
+  it("restores the message when the send fails", async () => {
+    vi.mocked(client.getAssistantSession).mockResolvedValue({ session: { ...session, state: "completed" }, approvals: [] });
+    vi.mocked(client.postAssistantMessage).mockRejectedValueOnce(new Error("network down"));
+    const { container } = renderDrawer();
+    fireEvent.click(screen.getByText("open"));
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+    act(() => {
+      es.emitNamedEvent("done", JSON.stringify({ state: "completed", created_at: "2026-10-31T10:00:00Z" }), "1");
+    });
+    const box = await screen.findByLabelText("Message");
+    fireEvent.change(box, { target: { value: "retry me" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The message was not sent.");
+    expect((box as HTMLTextAreaElement).value).toBe("retry me");
+    expect(Array.from(container.querySelectorAll("p")).some((p) => p.textContent === "retry me")).toBe(false);
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
 });

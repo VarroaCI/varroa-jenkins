@@ -217,6 +217,42 @@ func TestAssistantEvents_StreamsTranscript(t *testing.T) {
 	}
 }
 
+// TestAssistantEvents_ReplaysPastAnEarlierDone proves a replay of a session
+// with two runs writes both runs in one burst and closes after the last done.
+func TestAssistantEvents_ReplaysPastAnEarlierDone(t *testing.T) {
+	f := newAssistantFixture(t, assistantTextTurn("first answer"), assistantTextTurn("second answer"))
+	f.deps.Broadcaster = sse.NewBroadcaster()
+	rec := f.do(t, f.viewer, http.MethodPost, "/assistant/sessions", map[string]any{"message": "hi"})
+	var sess assistantSessionJSON
+	decodeBody(t, rec, &sess)
+	f.rt.Wait()
+	f.do(t, f.viewer, http.MethodPost, "/assistant/sessions/"+sess.ID+"/messages", map[string]any{"message": "again"})
+	f.rt.Wait()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/assistant/sessions/"+sess.ID+"/events", nil)
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), f.viewer))
+	rec = httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		NewRouter(f.deps).ServeHTTP(rec, req)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream did not close after the last done")
+	}
+	body := rec.Body.String()
+	if got := strings.Count(body, "event: done"); got != 2 {
+		t.Errorf("stream has %d done events, want 2: %s", got, body)
+	}
+	for _, want := range []string{"first answer", "again", "second answer"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("stream lacks %q: %s", want, body)
+		}
+	}
+}
+
 // TestAssistantGet_WithholdsResultsFromAdmin proves an admin who is not the
 // owner reads each approval with its result withheld, and the owner reads it.
 func TestAssistantGet_WithholdsResultsFromAdmin(t *testing.T) {
@@ -268,8 +304,9 @@ func TestAssistantEvents_WithholdsToolResultFromAdmin(t *testing.T) {
 	f.do(t, f.viewer, http.MethodPost, "/assistant/approvals/"+page.Items[0].ID.String()+"/approve", nil)
 	f.rt.Wait()
 
-	// The stream closes at the first done event, which is seq 5 here. A cursor
-	// of 5 reads the tool_result that the approval wrote after it.
+	// The stream writes every stored event and closes after the last done
+	// event. A cursor of 5 starts after the park, so it reads the tool_result
+	// that the approval wrote.
 	stream := func(claims *auth.Claims, query string) string {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/assistant/sessions/"+sess.ID+"/events"+query, nil)

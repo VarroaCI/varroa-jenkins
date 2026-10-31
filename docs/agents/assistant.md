@@ -92,8 +92,12 @@ conversation to change it.
 
 Select **Sessions** to see your recent conversations. On a phone, the drawer opens full screen.
 
+Your message shows in the transcript at once. A status line under it shows what the assistant does now. It thinks, it runs a named tool, or it waits for your approval. The answer text then appears at a steady rate. A conversation that you open again shows all of its text at once. When your system asks for reduced motion, the text and the status line do not move.
+
+The assistant writes Markdown. Tables, task lists, and strikethrough also show. A wide table scrolls inside the drawer.
+
 A tool call that changes something waits for approval. Approve or deny it in
-the drawer. You can only decide an approval that you started.
+the drawer. The call row opens while it waits. You can only decide an approval that you started.
 
 On a failed build, select **Explain this failure**. The answer is posted as a
 note on the build. Everyone who can read the build sees the note.

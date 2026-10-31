@@ -93,6 +93,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* The shared transcript scrolls inside this bounded box. */
+  max-height: 70vh;
 }
 
 .meta {
