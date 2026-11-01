@@ -359,10 +359,10 @@ func artifactTestReconciler(t *testing.T, withSecret bool) (*Reconciler, *testCl
 // pinnedProfile seeds a JenkinsVersionProfile matching cr.Spec.Version whose
 // resolved plugin set pins artifact-manager-s3.
 func pinnedProfile(client *testClient, cr *v1alpha1.Controller) {
-	cr.Spec.Version = "2.570"
-	client.profiles["jenkins-2-570"] = &v1alpha1.JenkinsVersionProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "jenkins-2-570"},
-		Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.570"},
+	cr.Spec.Version = "2.588"
+	client.profiles["jenkins-2-588"] = &v1alpha1.JenkinsVersionProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "jenkins-2-588"},
+		Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.588"},
 		Status: v1alpha1.JenkinsVersionProfileStatus{
 			ContentRef: "profile-content-artifacts",
 			Conditions: []v1alpha1.JenkinsVersionProfileCondition{{
@@ -383,10 +383,10 @@ func pinnedProfile(client *testClient, cr *v1alpha1.Controller) {
 // plugin, so it stays a valid PluginMissing proof once task 7.2 (not this
 // batch's task) pins artifact-manager-s3 into that baseline.
 func unpinnedProfile(client *testClient, cr *v1alpha1.Controller) {
-	cr.Spec.Version = "2.570"
-	client.profiles["jenkins-2-570"] = &v1alpha1.JenkinsVersionProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "jenkins-2-570"},
-		Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.570"},
+	cr.Spec.Version = "2.588"
+	client.profiles["jenkins-2-588"] = &v1alpha1.JenkinsVersionProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "jenkins-2-588"},
+		Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.588"},
 		Status: v1alpha1.JenkinsVersionProfileStatus{
 			ContentRef: "profile-content-no-artifacts",
 			Conditions: []v1alpha1.JenkinsVersionProfileCondition{{
@@ -439,7 +439,7 @@ func TestArtifactStorageFragment_EmitAndSilentCases(t *testing.T) {
 		seedProfileWithoutArtifactManager(client)
 		seedClientCRDs(client)
 		cr := testController("test", "ns", v1alpha1.ControllerPhaseProvisioning)
-		cr.Spec.Version = "2.570"
+		cr.Spec.Version = "2.588"
 
 		fragment, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
 		if fragment != "" {
@@ -637,7 +637,7 @@ func TestArtifactStorageConditionReasons(t *testing.T) {
 		rec.SetArtifactSecretBase("abase")
 		rec.SetBlobstoreURL("s3://my-bucket?region=us-east-1")
 		cr := testController("test", "ns", v1alpha1.ControllerPhaseProvisioning)
-		cr.Spec.Version = "2.570"
+		cr.Spec.Version = "2.588"
 		_ = rec.reconcileController(context.Background(), cr)
 		cond := findCondition(cr.Status.Conditions, ConditionArtifactStorage)
 		if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "PluginMissing" {
@@ -915,8 +915,8 @@ func TestRemainingVarRefs_ArtifactFragmentPassesThrough(t *testing.T) {
 // test of the PluginMissing reason needs a profile that does not.
 func seedProfileWithoutArtifactManager(client *testClient) {
 	profile := &v1alpha1.JenkinsVersionProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "jenkins-2-570"},
-		Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.570"},
+		ObjectMeta: metav1.ObjectMeta{Name: "jenkins-2-588"},
+		Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.588"},
 		Status: v1alpha1.JenkinsVersionProfileStatus{
 			ContentRef: "profile-content",
 			Conditions: []v1alpha1.JenkinsVersionProfileCondition{{
@@ -925,7 +925,7 @@ func seedProfileWithoutArtifactManager(client *testClient) {
 			}},
 		},
 	}
-	client.profiles["jenkins-2-570"] = profile
+	client.profiles["jenkins-2-588"] = profile
 	client.configMapData["profile-content"] = map[string]string{
 		"plugins.yaml": "core:\n  - git\nplugins:\n  - artifactId: git\n    version: \"5.10.1\"\n",
 	}
@@ -1325,8 +1325,8 @@ func TestVersionPinsPlugin(t *testing.T) {
 	}
 	seedClientCRDs(client)
 
-	if got := rec.VersionPinsPlugin(context.Background(), "2.570", "artifact-manager-s3"); got {
-		t.Error("expected false: the version 2.570 profile does not pin the plugin")
+	if got := rec.VersionPinsPlugin(context.Background(), "2.588", "artifact-manager-s3"); got {
+		t.Error("expected false: the version 2.588 profile does not pin the plugin")
 	}
 }
 

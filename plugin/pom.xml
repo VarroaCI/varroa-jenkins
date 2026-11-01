@@ -19,9 +19,9 @@
     <name>Varroa Mite Authentication</name>
 
     <properties>
-        <jenkins.version>2.555.3</jenkins.version>
+        <jenkins.version>2.580.2</jenkins.version>
         <!--
-          Jenkins 2.555.x is a Java-21-only LTS line: jenkins-core 2.555.3 ships
+          Jenkins 2.580.x is a Java-21-only LTS line: jenkins-core 2.580.2 ships
           class-file-version-65 (Java 21) bytecode. The maven-hpi-plugin pinned by
           parent 5.31 (3.1784) depends on version-number 1.12, whose
           JavaSpecificationVersion.fromClassVersion() only maps up to class 64
@@ -56,13 +56,13 @@
         <dependencies>
             <!--
               Align plugin dependency versions (incl. configuration-as-code and
-              its test-harness) with the Jenkins 2.555.x baseline so the JCasC
-              round-trip tests resolve a JCasC build compatible with core 2.555.3.
+              its test-harness) with the Jenkins 2.580.x baseline so the JCasC
+              round-trip tests resolve a JCasC build compatible with core 2.580.2.
             -->
             <dependency>
                 <groupId>io.jenkins.tools.bom</groupId>
-                <artifactId>bom-2.555.x</artifactId>
-                <version>7237.v5071b_f4589f1</version>
+                <artifactId>bom-2.580.x</artifactId>
+                <version>7280.ve2096dda_41b_9</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

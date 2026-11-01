@@ -311,6 +311,7 @@ sets:
           - "1363.v03f731255494"
           - "1384.vdc05a_48f535f"
           - "1413.v2ff1a_5e720fa_"
+          - "1429.v7a_1b_efb_a_f7c5"
       - artifactId: workflow-cps
         version: "4395.v738456a_5da_6b_"
         mins:
@@ -322,6 +323,7 @@ sets:
         mins:
           - "1505.vea_4b_20a_4a_495"
           - "1571.1580.v18e46842c125"
+          - "1622.vc41c189cb_e5f"
       - artifactId: workflow-multibranch
         version: "842.v3a_b_59b_57b_e6e"
         mins:
@@ -343,6 +345,7 @@ sets:
         mins:
           - "6.1053.vd62fb_b_f7367b_"
           - "6.1106.v3a_d9a_6d2465e"
+          - "6.1107.v31f8955765c8"
       - artifactId: mailer
         version: "534.v1b_36f5864073"
         mins:
@@ -748,6 +751,7 @@ sets:
           - "1363.v03f731255494"
           - "1384.vdc05a_48f535f"
           - "1413.v2ff1a_5e720fa_"
+          - "1429.v7a_1b_efb_a_f7c5"
       - artifactId: workflow-cps
         version: "4395.v738456a_5da_6b_"
         mins:
@@ -759,6 +763,7 @@ sets:
         mins:
           - "1505.vea_4b_20a_4a_495"
           - "1571.1580.v18e46842c125"
+          - "1622.vc41c189cb_e5f"
       - artifactId: workflow-multibranch
         version: "842.v3a_b_59b_57b_e6e"
         mins:
@@ -780,6 +785,7 @@ sets:
         mins:
           - "6.1053.vd62fb_b_f7367b_"
           - "6.1106.v3a_d9a_6d2465e"
+          - "6.1107.v31f8955765c8"
       - artifactId: mailer
         version: "534.v1b_36f5864073"
         mins:

@@ -22,6 +22,9 @@
 # The weekly entry must equal `baseline`. An unpinned controller ("" or "lts")
 # deploys jenkins/jenkins:<baseline> with the baseline plugin set, so the
 # baseline must name an exact release that has no open core advisory.
+#
+# The oldest core that these profiles deploy is the operator's supported floor
+# (pluginlock.SupportedFloor). A controller below it is refused.
 baseline: "2.588"
 profiles:
   # LTS line 2.580. The 2026-10-28 core advisory affects LTS 2.580.1 and

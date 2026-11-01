@@ -264,7 +264,7 @@ func checkPluginCoreCompat(ctx context.Context, deps Deps, draft *v1alpha1.Contr
 
 	profile, kind := controller.ResolveProfile(version, profiles)
 	ready := controller.ProfilePluginSetReady(profile)
-	res := controller.EvaluateCoreCompat(version, profile, kind, ready, B0)
+	res := controller.EvaluateCoreCompat(version, profile, kind, ready, B0, pluginlock.SupportedFloor())
 
 	var c Check
 	switch res.Verdict {

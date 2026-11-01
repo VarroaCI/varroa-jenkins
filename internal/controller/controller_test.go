@@ -1173,9 +1173,9 @@ func TestProvisioningBlocksDirectPluginProfileConflict(t *testing.T) {
 	client := newTestClientWithBundle()
 	client.configMapData["test-bundle-content"]["plugins.yaml"] = "plugins:\n" +
 		"  - artifactId: git\n    version: 5.10.1\n"
-	client.profiles["jenkins-2-570"] = &v1alpha1.JenkinsVersionProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "jenkins-2-570"},
-		Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.570"},
+	client.profiles["jenkins-2-588"] = &v1alpha1.JenkinsVersionProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "jenkins-2-588"},
+		Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.588"},
 		Status: v1alpha1.JenkinsVersionProfileStatus{
 			ContentRef: "profile-content",
 			Conditions: []v1alpha1.JenkinsVersionProfileCondition{{
@@ -1190,7 +1190,7 @@ func TestProvisioningBlocksDirectPluginProfileConflict(t *testing.T) {
 	rec := newTestReconciler(client)
 
 	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
-	cr.Spec.Version = "2.570"
+	cr.Spec.Version = "2.588"
 
 	err := rec.reconcileController(context.Background(), cr)
 	if err == nil {
@@ -1242,9 +1242,9 @@ func TestProvisioningPluginPinConflictNonBlockingAndIndependent(t *testing.T) {
 	client := newTestClientWithBundle()
 	client.configMapData["test-bundle-content"]["plugins.yaml"] = "plugins:\n" +
 		"  - artifactId: git\n    version: 5.10.1\n"
-	client.profiles["jenkins-2-570"] = &v1alpha1.JenkinsVersionProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "jenkins-2-570"},
-		Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.570"},
+	client.profiles["jenkins-2-588"] = &v1alpha1.JenkinsVersionProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "jenkins-2-588"},
+		Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.588"},
 		Status: v1alpha1.JenkinsVersionProfileStatus{
 			ContentRef: "profile-content",
 			Conditions: []v1alpha1.JenkinsVersionProfileCondition{{
@@ -1259,7 +1259,7 @@ func TestProvisioningPluginPinConflictNonBlockingAndIndependent(t *testing.T) {
 	rec := newTestReconciler(client)
 
 	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
-	cr.Spec.Version = "2.570"
+	cr.Spec.Version = "2.588"
 	cr.Spec.PluginSpec = &v1alpha1.PluginSpec{Entries: []v1alpha1.PluginEntry{
 		{ArtifactId: "other-plugin", Version: "1.0.0"},
 	}}

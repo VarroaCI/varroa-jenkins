@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/jenkinsver"
 )
 
 // yamlProfileSpec mirrors v1alpha1.JenkinsVersionProfileSpec's seedable fields.
@@ -42,6 +43,10 @@ type SeedProfile struct {
 var seedFS embed.FS
 
 var seeds []SeedProfile
+
+// supportedFloor is the oldest core that the default profiles deploy. It is
+// computed once in init from the seeds.
+var supportedFloor string
 
 func init() {
 	entries, err := seedFS.ReadDir("seed")
@@ -91,6 +96,37 @@ func init() {
 		})
 	}
 	sort.Slice(seeds, func(i, j int) bool { return seeds[i].Version < seeds[j].Version })
+	supportedFloor = computeSupportedFloor(seeds)
+}
+
+// computeSupportedFloor returns the lowest deployed core among seeds. A seed
+// deploys its ResolveVersion when set, else its Version. It panics when a
+// value does not parse, because the seeds are build-time data.
+func computeSupportedFloor(seeds []SeedProfile) string {
+	floor := ""
+	var floorSegs []int
+	for _, s := range seeds {
+		core := s.Spec.ResolveVersion
+		if core == "" {
+			core = s.Spec.Version
+		}
+		segs, ok := jenkinsver.Core(core)
+		if !ok {
+			panic("pluginlock: seed " + s.Version + " deploys an unparseable core " + core)
+		}
+		if floorSegs == nil || jenkinsver.Compare(segs, floorSegs) < 0 {
+			floor = core
+			floorSegs = segs
+		}
+	}
+	return floor
+}
+
+// SupportedFloor returns the oldest Jenkins core that Varroa supports. It is
+// the lowest core that a default seed profile deploys. A controller below this
+// core is refused at provisioning and at a version roll.
+func SupportedFloor() string {
+	return supportedFloor
 }
 
 // Seeds returns every ship-time default JenkinsVersionProfile embedded in the
