@@ -35,7 +35,12 @@ export function useActivityFeed(
 		const params = new URLSearchParams(); const effective = {...filters};
 		if (scope) { effective.cluster = scope.cluster ?? ""; effective.controller = `${scope.namespace}/${scope.name}`; }
 		for (const [key, value] of Object.entries(effective)) if ((value || (scope && key === "cluster")) && key !== "range") params.set(key, value ?? "");
-		if (filters.range && filters.range !== "custom") { const amounts = {"15m": 15*60e3, "1h": 36e5, "6h": 6*36e5, "24h": 24*36e5, "7d": 7*24*36e5}; const end = new Date(); params.set("end", end.toISOString()); params.set("start", new Date(end.getTime()-amounts[filters.range]).toISOString()); }
+		if (filters.range && filters.range !== "custom") {
+			const amounts = {"15m": 15*60e3, "1h": 36e5, "6h": 6*36e5, "24h": 24*36e5, "7d": 7*24*36e5};
+			// A preset sends no end, because the live stream drops each event at or after end.
+			params.delete("end");
+			params.set("start", new Date(Date.now()-amounts[filters.range]).toISOString());
+		}
 		return params.size ? `?${params}` : "";
 	}, [JSON.stringify(filters), scope?.cluster, scope?.namespace, scope?.name]);
 

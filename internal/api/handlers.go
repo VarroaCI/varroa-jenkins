@@ -2632,13 +2632,8 @@ func parseActivityQuery(r *http.Request) (activity.Query, error) {
 			*target = &parsed
 		}
 	}
-	if (q.Start == nil) != (q.End == nil) {
-		return q, fmt.Errorf("start and end must be provided together")
-	}
-	if q.Start != nil {
-		if !q.Start.Before(*q.End) {
-			return q, fmt.Errorf("start must be before end")
-		}
+	if q.Start != nil && q.End != nil && !q.Start.Before(*q.End) {
+		return q, fmt.Errorf("start must be before end")
 	}
 	valid := func(value string, allowed ...string) bool {
 		if value == "" {
@@ -2680,6 +2675,12 @@ func (s *Server) handleBroodStreamSSE(w http.ResponseWriter, r *http.Request) {
 
 // handleActivityStream serves a live SSE stream of activity events.
 func (s *Server) handleActivityStream(w http.ResponseWriter, r *http.Request) {
+	// Parse first, so a bad request answers 400 even when the fan-out is down.
+	filter, err := parseActivityQuery(r)
+	if err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if s.deps.Broadcaster == nil {
 		s.writeJSONError(w, http.StatusServiceUnavailable, "broadcaster not available")
 		return
@@ -2702,11 +2703,6 @@ func (s *Server) handleActivityStream(w http.ResponseWriter, r *http.Request) {
 	authz := s.deps.Authorizer
 
 	controller := r.URL.Query().Get("controller")
-	filter, err := parseActivityQuery(r)
-	if err != nil {
-		s.writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	var ch <-chan sse.Record
 	if controller != "" {
 		// Per-controller subscription: key format "namespace/controller"

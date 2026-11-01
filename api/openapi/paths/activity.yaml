@@ -12,8 +12,8 @@
       - {name: severity, in: query, schema: {type: string, enum: [info, warning, error]}}
       - {name: actor, in: query, schema: {type: string}}
       - {name: type, in: query, schema: {type: string}}
-      - {name: start, in: query, schema: {type: string, format: date-time}}
-      - {name: end, in: query, schema: {type: string, format: date-time}}
+      - {name: start, in: query, description: 'Reads events at or after start, oldest first. With no end, the read goes to the present.', schema: {type: string, format: date-time}}
+      - {name: end, in: query, description: 'Reads events before end. With no start, the read is newest first.', schema: {type: string, format: date-time}}
       - {name: cursor, in: query, schema: {type: string}}
       - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 250, default: 100}}
       - {name: excludeRoutineSignIns, in: query, description: 'true leaves out each routine local sign-in, an auth.local.login event below warning severity.', schema: {type: boolean, default: false}}
@@ -36,7 +36,7 @@
                 retentionDays: {type: integer}
               additionalProperties: false
       "400":
-        description: Invalid filters, cursor, or range.
+        description: Invalid filter, limit, cursor, or range.
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
       "410":
@@ -55,10 +55,12 @@
       - {name: controller, in: query, schema: {type: string}}
       - {name: cluster, in: query, schema: {type: string}}
       - {name: namespace, in: query, schema: {type: string}}
-      - {name: source, in: query, schema: {type: string}}
-      - {name: severity, in: query, schema: {type: string}}
+      - {name: source, in: query, schema: {type: string, enum: [mite, operator, user, api, jenkins, mcp, assistant, tenant_agent]}}
+      - {name: severity, in: query, schema: {type: string, enum: [info, warning, error]}}
       - {name: actor, in: query, schema: {type: string}}
       - {name: type, in: query, schema: {type: string}}
+      - {name: start, in: query, description: 'Drops each live event earlier than start.', schema: {type: string, format: date-time}}
+      - {name: end, in: query, description: 'Drops each live event at or after end. Leave out end to keep the stream open; an end in the past sends no events.', schema: {type: string, format: date-time}}
       - {name: excludeRoutineSignIns, in: query, description: 'true leaves out each routine local sign-in, an auth.local.login event below warning severity.', schema: {type: boolean, default: false}}
     responses:
       "200":
@@ -66,5 +68,17 @@
         content:
           text/event-stream:
             schema: {type: string}
+      "400":
+        description: 'Invalid filter or range: a bound is not RFC 3339, start is not before end, or a source, severity, or excludeRoutineSignIns value is unknown.'
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
+      "503":
+        description: The live event fan-out is not available.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'

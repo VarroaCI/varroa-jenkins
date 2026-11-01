@@ -67,6 +67,8 @@ func TestListActivity_FilterMapping(t *testing.T) {
 		{"Type", ActivityQuery{Type: "login", Scope: activity.Scope{All: true}}, 1, nil},
 		{"Start", ActivityQuery{Start: tPtr(base.Add(1 * time.Second)), End: tPtr(base.Add(10 * time.Second)), Scope: activity.Scope{All: true}}, 2, nil},
 		{"End", ActivityQuery{Start: tPtr(base.Add(-10 * time.Second)), End: tPtr(base.Add(1 * time.Second)), Scope: activity.Scope{All: true}}, 1, nil},
+		{"Start only", ActivityQuery{Start: tPtr(base.Add(time.Second)), Scope: activity.Scope{All: true}}, 2, nil},
+		{"End only", ActivityQuery{End: tPtr(base.Add(time.Second)), Scope: activity.Scope{All: true}}, 1, nil},
 	}
 
 	for _, tt := range tests {

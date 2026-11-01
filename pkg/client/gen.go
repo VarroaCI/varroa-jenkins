@@ -6160,10 +6160,14 @@ type ListActivityParams struct {
 	Severity   *ListActivityParamsSeverity `form:"severity,omitempty" json:"severity,omitempty"`
 	Actor      *string                     `form:"actor,omitempty" json:"actor,omitempty"`
 	Type       *string                     `form:"type,omitempty" json:"type,omitempty"`
-	Start      *time.Time                  `form:"start,omitempty" json:"start,omitempty"`
-	End        *time.Time                  `form:"end,omitempty" json:"end,omitempty"`
-	Cursor     *string                     `form:"cursor,omitempty" json:"cursor,omitempty"`
-	Limit      *int                        `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Start Reads events at or after start, oldest first. With no end, the read goes to the present.
+	Start *time.Time `form:"start,omitempty" json:"start,omitempty"`
+
+	// End Reads events before end. With no start, the read is newest first.
+	End    *time.Time `form:"end,omitempty" json:"end,omitempty"`
+	Cursor *string    `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int       `form:"limit,omitempty" json:"limit,omitempty"`
 
 	// ExcludeRoutineSignIns true leaves out each routine local sign-in, an auth.local.login event below warning severity.
 	ExcludeRoutineSignIns *bool `form:"excludeRoutineSignIns,omitempty" json:"excludeRoutineSignIns,omitempty"`

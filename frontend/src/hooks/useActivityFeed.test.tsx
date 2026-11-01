@@ -20,14 +20,18 @@ vi.mock("../api/client", () => ({
 let mockLastEvent: { type: string; data: ActivityEvent } | null = null;
 let mockReadyState = "closed";
 let mockSSEError: Event | null = null;
+let mockStreamUrl: unknown = null;
 
 vi.mock("./useEventStream", () => ({
-  useEventStream: (..._args: unknown[]) => ({
+  useEventStream: (...args: unknown[]) => {
+    mockStreamUrl = args[0];
+    return {
     lastEvent: mockLastEvent,
     readyState: mockReadyState,
     error: mockSSEError,
     close: vi.fn(),
-  }),
+    };
+  },
 }));
 
 function createEvent(overrides: Partial<ActivityEvent>): ActivityEvent {
@@ -56,6 +60,7 @@ beforeEach(() => {
   mockLastEvent = null;
   mockReadyState = "closed";
   mockSSEError = null;
+  mockStreamUrl = null;
 });
 
 describe("useActivityFeed", () => {
@@ -183,3 +188,59 @@ describe("useActivityFeed", () => {
     });
   });
 });
+
+describe("useActivityFeed range bounds", () => {
+  it("a preset range sends start and no end to history and the live stream", async () => {
+    renderHook(() => useActivityFeed(undefined, { range: "1h" }), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(mockBffFetch).toHaveBeenCalled();
+    });
+    const historyUrl = String(mockBffFetch.mock.calls[0][0]);
+    expect(historyUrl).toMatch(/^\/activity\?start=/);
+    expect(historyUrl).not.toContain("end=");
+
+    const streamUrl = String(mockStreamUrl);
+    expect(streamUrl).toBe("/api/v1/activity/stream" + historyUrl.slice("/activity".length));
+    expect(streamUrl).not.toContain("end=");
+
+    const start = new URL(streamUrl, "http://x").searchParams.get("start");
+    expect(start).not.toBeNull();
+    expect(Math.abs(Date.parse(start!) - (Date.now() - 36e5))).toBeLessThan(5000);
+  });
+
+  it("a preset range drops a stale end from the URL", async () => {
+    renderHook(
+      () =>
+        useActivityFeed(undefined, {
+          range: "1h",
+          end: "2020-01-01T00:00:00.000Z",
+        }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(mockBffFetch).toHaveBeenCalled();
+    });
+    expect(String(mockBffFetch.mock.calls[0][0])).not.toContain("end=");
+    expect(String(mockStreamUrl)).not.toContain("end=");
+  });
+
+  it("a custom range sends its start and end to the live stream", async () => {
+    const start = "2026-10-30T00:00:00.000Z";
+    const end = "2026-10-30T06:00:00.000Z";
+    renderHook(() => useActivityFeed(undefined, { range: "custom", start, end }), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(mockStreamUrl).not.toBeNull();
+    });
+    const params = new URL(String(mockStreamUrl), "http://x").searchParams;
+    expect(params.get("start")).toBe(start);
+    expect(params.get("end")).toBe(end);
+  });
+});
+
