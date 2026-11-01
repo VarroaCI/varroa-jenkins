@@ -16,7 +16,7 @@
 #   hack/build-plugin-pack.sh <profileName> <version> <ghcr-tag-base>
 #
 # Example:
-#   hack/build-plugin-pack.sh 2-555 2.555 ghcr.io/varroaci/varroa-jenkins
+#   hack/build-plugin-pack.sh 2-580 2.580 ghcr.io/varroaci/varroa-jenkins
 #
 # The resulting OCI tag is <ghcr-tag-base>/plugin-pack:<profileName>.
 # Only that single tag is written (no immutable dual-tag — by design for
@@ -32,7 +32,7 @@ VARROACTL="${REPO_ROOT}/bin/varroactl"
 
 if [ $# -ne 3 ]; then
     echo "Usage: $0 <profileName> <version> <ghcr-tag-base>" >&2
-    echo "Example: $0 2-555 2.555 ghcr.io/varroaci/varroa-jenkins" >&2
+    echo "Example: $0 2-580 2.580 ghcr.io/varroaci/varroa-jenkins" >&2
     exit 1
 fi
 

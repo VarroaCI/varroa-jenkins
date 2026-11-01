@@ -165,7 +165,7 @@ func TestEvaluateCoreCompat(t *testing.T) {
 		},
 		{
 			name:              "suffixed tag no profile above baseline",
-			version:           "2.579.1-jdk17",
+			version:           "2.589.1-jdk17",
 			profile:           nil,
 			kind:              MatchBaseline,
 			pluginSetReady:    false,

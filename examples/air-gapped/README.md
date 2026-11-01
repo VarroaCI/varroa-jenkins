@@ -13,8 +13,8 @@ air-gapped cluster never needs to reach `updates.jenkins.io`.
 
    ```bash
    varroactl export plugins \
-     --profile jenkins-version-2-555 \
-     --to oci://registry.internal.example.com/varroa/plugin-pack:jenkins-version-2-555
+     --profile jenkins-version-2-580 \
+     --to oci://registry.internal.example.com/varroa/plugin-pack:jenkins-version-2-580
    ```
 
    For sneakernet transfer, export `--to tar:///tmp/seed.tar.gz` instead and

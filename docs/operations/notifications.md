@@ -238,9 +238,9 @@ Set the SMTP server on the `CellPool`:
 apiVersion: varroa.dev/v1alpha1
 kind: CellPool
 metadata:
-  name: lts-2-555
+  name: lts-2-580
 spec:
-  profileRef: lts-2-555
+  profileRef: lts-2-580
   mail:
     host: smtp.example.com
     port: 587

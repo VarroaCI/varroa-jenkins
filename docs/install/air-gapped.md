@@ -18,7 +18,7 @@ The values files choose the image set. They do not choose the configuration that
 varroactl export release \
   --version 3.0.0 \
   --values values-prod.yaml \
-  --profile jenkins-version-2-570 \
+  --profile jenkins-version-2-588 \
   --to tar:///transfer/varroa-3.0.0.tar.gz
 ```
 
@@ -181,7 +181,7 @@ In another shell:
 
 ```bash
 varroactl import \
-  --from tar:///transfer/plugins-2-570.tar.gz \
+  --from tar:///transfer/plugins-2-588.tar.gz \
   --to uc://localhost:8080
 ```
 

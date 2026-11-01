@@ -40,7 +40,7 @@ updateCenter:
   # public ghcr.io seed ref, which is unreachable here).
   seed:
     refs:
-      - registry.internal.example.com/varroa/plugin-pack:jenkins-version-2-555
+      - registry.internal.example.com/varroa/plugin-pack:jenkins-version-2-580
   storage:
     type: oci                    # or "local" and pre-populate the PVC
     oci:

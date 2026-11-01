@@ -4934,11 +4934,11 @@ func TestReconcileVersionRoll(t *testing.T) {
 
 	t.Run("connected delta transitions to Provisioning", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570.2"
+		cr.Spec.Version = "2.588.2"
 
 		if !rec.reconcileVersionRoll(ctx, cr) {
 			t.Fatal("expected reconcileVersionRoll to return true (transition)")
@@ -4961,11 +4961,11 @@ func TestReconcileVersionRoll(t *testing.T) {
 
 	t.Run("running delta transitions to Provisioning", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseRunning)
-		cr.Spec.Version = "2.570.2"
+		cr.Spec.Version = "2.588.2"
 		if !rec.reconcileVersionRoll(ctx, cr) {
 			t.Fatal("expected transition from Running")
 		}
@@ -4976,15 +4976,15 @@ func TestReconcileVersionRoll(t *testing.T) {
 
 	t.Run("converged is a no-op and gate is not called", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.2"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.2"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.2"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.2"}
 		rec := newTestReconciler(client)
 		rec.versionRollGate = func(context.Context, *v1alpha1.Controller, string, string) (bool, string, string) {
 			t.Fatal("gate must not be called when converged")
 			return true, "", ""
 		}
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570.2"
+		cr.Spec.Version = "2.588.2"
 		if rec.reconcileVersionRoll(ctx, cr) {
 			t.Fatal("expected no transition when converged")
 		}
@@ -4999,11 +4999,11 @@ func TestReconcileVersionRoll(t *testing.T) {
 
 	t.Run("converged with preserved override notes divergence", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.2"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.2"}
 		client.stsLiveImages = map[string]string{"jenkins": "custom/override:1"}
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570.2"
+		cr.Spec.Version = "2.588.2"
 		if rec.reconcileVersionRoll(ctx, cr) {
 			t.Fatal("expected no transition (stamp == desired)")
 		}
@@ -5019,10 +5019,10 @@ func TestReconcileVersionRoll(t *testing.T) {
 	t.Run("pre-stamp fallback uses live image", func(t *testing.T) {
 		client := newTestClient()
 		client.stsComputedImages = nil // no stamp
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570.2"
+		cr.Spec.Version = "2.588.2"
 		if !rec.reconcileVersionRoll(ctx, cr) {
 			t.Fatal("expected transition using pre-stamp live fallback")
 		}
@@ -5034,7 +5034,7 @@ func TestReconcileVersionRoll(t *testing.T) {
 		client.stsLiveImages = nil // no STS
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570.2"
+		cr.Spec.Version = "2.588.2"
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type: v1alpha1.ConditionVersionRollPending, Status: metav1.ConditionTrue, Reason: "SENTINEL",
 		})
@@ -5052,7 +5052,7 @@ func TestReconcileVersionRoll(t *testing.T) {
 		client.stsImagesErr = fmt.Errorf("boom")
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570.2"
+		cr.Spec.Version = "2.588.2"
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type: v1alpha1.ConditionVersionRollPending, Status: metav1.ConditionTrue, Reason: "SENTINEL",
 		})
@@ -5070,8 +5070,8 @@ func TestReconcileVersionRoll(t *testing.T) {
 
 	t.Run("denying gate holds the controller and is re-evaluated each tick", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		rec := newTestReconciler(client)
 		calls := 0
 		rec.versionRollGate = func(_ context.Context, _ *v1alpha1.Controller, cur, tgt string) (bool, string, string) {
@@ -5079,7 +5079,7 @@ func TestReconcileVersionRoll(t *testing.T) {
 			return false, "VersionUpgradeBlocked", "blocked reason"
 		}
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570.2"
+		cr.Spec.Version = "2.588.2"
 		for i := 0; i < 2; i++ {
 			if rec.reconcileVersionRoll(ctx, cr) {
 				t.Fatalf("tick %d: expected hold (no transition)", i)
@@ -5099,14 +5099,14 @@ func TestReconcileVersionRoll(t *testing.T) {
 
 	t.Run("denying gate with empty reason defaults to VersionRollHeld", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		rec := newTestReconciler(client)
 		rec.versionRollGate = func(context.Context, *v1alpha1.Controller, string, string) (bool, string, string) {
 			return false, "", ""
 		}
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570.2"
+		cr.Spec.Version = "2.588.2"
 		rec.reconcileVersionRoll(ctx, cr)
 		vc := findCondition(cr.Status.Conditions, v1alpha1.ConditionVersionRollPending)
 		if vc == nil || vc.Reason != "VersionRollHeld" {
@@ -5120,7 +5120,7 @@ func TestReconcileVersionRoll(t *testing.T) {
 		client.stsLiveImages = map[string]string{"jenkins": "my-reg/custom:1.0"}
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570.2"
+		cr.Spec.Version = "2.588.2"
 		cr.Spec.ResourceOverlay = &v1alpha1.ResourceOverlay{
 			StatefulSet: "spec:\n  template:\n    spec:\n      containers:\n      - name: jenkins\n        image: my-reg/custom:1.0\n",
 		}
@@ -5144,13 +5144,13 @@ func TestReconcileVersionRoll(t *testing.T) {
 
 	t.Run("reconcileController skips connected dispatch on a version roll", func(t *testing.T) {
 		client := newTestClientWithBundle()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		rec := newTestReconcilerWithTokenSigner(client)
 		capT := &captureTransport{}
 		rec.miteTransport = capT
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570.2"
+		cr.Spec.Version = "2.588.2"
 		cr.Status.Conditions = []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: "MiteConnected"}}
 
 		if err := rec.reconcileController(ctx, cr); err != nil {
@@ -6131,12 +6131,12 @@ func TestVersionRollTwoPhaseConvergence(t *testing.T) {
 
 	t.Run("delta then converged", func(t *testing.T) {
 		client := newTestClientWithBundle()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		rec := newTestReconcilerWithTokenSigner(client)
 		rec.miteTransport = &captureTransport{}
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570.2"
+		cr.Spec.Version = "2.588.2"
 		cr.Status.Conditions = []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: "MiteConnected"}}
 
 		// Tick 1: Connected + delta → Provisioning.
@@ -6150,8 +6150,8 @@ func TestVersionRollTwoPhaseConvergence(t *testing.T) {
 		// Tick 2 (provisioning pass) is represented by advancing the stamp to the
 		// desired image, exactly what CreateStatefulSet writes (asserted separately
 		// in TestCreateStatefulSetImageUpdate). Then back to Connected.
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.2"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.2"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.2"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.2"}
 		cr.Status.Phase = v1alpha1.ControllerPhaseConnected
 
 		// Tick 3: converged.
@@ -6179,9 +6179,9 @@ func TestVersionRollTwoPhaseConvergence(t *testing.T) {
 		client.configMapData["test-bundle-content"]["plugins.yaml"] = "plugins:\n  - artifactId: simple-theme-plugin\n    version: \"1.0\"\n"
 
 		// Add a version delta that the (default allow-all) gate permits.
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		cr.Spec.Version = "2.570.2"
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		cr.Spec.Version = "2.588.2"
 		cr.Status.Phase = v1alpha1.ControllerPhaseConnected
 		cr.Status.Conditions = []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: "MiteConnected"}}
 
@@ -6213,9 +6213,9 @@ func TestVersionRollTwoPhaseConvergence(t *testing.T) {
 			t.Fatalf("provisioning: %v", err)
 		}
 		client.configMapData["test-bundle-content"]["plugins.yaml"] = "plugins:\n  - artifactId: simple-theme-plugin\n    version: \"1.0\"\n"
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		cr.Spec.Version = "2.570.2"
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		cr.Spec.Version = "2.588.2"
 		cr.Status.Phase = v1alpha1.ControllerPhaseConnected
 		cr.Status.Conditions = []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: "MiteConnected"}}
 

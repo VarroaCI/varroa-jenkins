@@ -12,7 +12,7 @@ arguments. Other mutable controller fields belong in `spec`:
 {
   "namespace": "tenants-platform",
   "name": "demo",
-  "version": "2.555",
+  "version": "2.580",
   "hibernation": {
     "enabled": true,
     "gracePeriodMinutes": 60
@@ -66,7 +66,7 @@ Resolve the conflict in this order:
 {
   "namespace": "tenants-platform",
   "name": "demo",
-  "version": "2.555",
+  "version": "2.580",
   "force": true
 }
 ```
