@@ -34,7 +34,7 @@ type Dependencies struct {
 	MiteRegistry transport.Transport
 	Auth         auth.Provider
 
-	// JenkinsTokenSigner is used by the MCP proxy to mint per-caller Jenkins tokens; nil when the mite signing key is unavailable.
+	// JenkinsTokenSigner mints per-caller and operator Jenkins tokens. The BFF exits at start without it, so a nil value occurs only in a test Deps.
 	JenkinsTokenSigner *mitesrv.MiteTokenSigner
 
 	// Local is set in local auth mode and when local accounts run beside
