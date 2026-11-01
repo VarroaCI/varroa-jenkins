@@ -263,8 +263,10 @@ func decodeMaskedParameterNames(payload json.RawMessage) []string {
 }
 
 // truncateRehydrationChanges caps raw, a JSON array of change entries
-// stored newest first, to maxRehydrationChanges entries. It answers raw
-// unchanged when it holds no array or fewer entries than the cap.
+// stored in plugin order, oldest first, to maxRehydrationChanges entries.
+// The cap keeps the newest entries, the tail of the array, in their
+// stored order. It answers raw unchanged when it holds no array or
+// fewer entries than the cap.
 func truncateRehydrationChanges(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {
 		return raw
@@ -276,7 +278,7 @@ func truncateRehydrationChanges(raw json.RawMessage) json.RawMessage {
 	if len(entries) <= maxRehydrationChanges {
 		return raw
 	}
-	truncated, err := json.Marshal(entries[:maxRehydrationChanges])
+	truncated, err := json.Marshal(entries[len(entries)-maxRehydrationChanges:])
 	if err != nil {
 		return raw
 	}

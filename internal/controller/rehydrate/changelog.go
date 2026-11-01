@@ -26,7 +26,8 @@ type changelogEntryXML struct {
 }
 
 // RenderChangelog renders one changelog0.xml document for changes,
-// newest first, capped at maxChangelogEntries. It answers (nil, nil)
+// oldest first, as the plugin orders them. The cap keeps the newest
+// maxChangelogEntries entries, the tail of changes. It answers (nil, nil)
 // for an empty changes: the caller writes no file and the owning
 // build.xml carries no <checkouts> element in that case.
 //
@@ -40,7 +41,7 @@ func RenderChangelog(changes []Change) ([]byte, error) {
 	}
 	entries := changes
 	if len(entries) > maxChangelogEntries {
-		entries = entries[:maxChangelogEntries]
+		entries = entries[len(entries)-maxChangelogEntries:]
 	}
 
 	doc := changelogDocXML{}

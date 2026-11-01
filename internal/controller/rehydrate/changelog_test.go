@@ -1,6 +1,7 @@
 package rehydrate
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -56,6 +57,30 @@ func TestRenderChangelog_CapsAtOneHundredEntries(t *testing.T) {
 	mustUnmarshal(t, out, &doc)
 	if len(doc.Entries) != maxChangelogEntries {
 		t.Errorf("got %d entries, want %d", len(doc.Entries), maxChangelogEntries)
+	}
+}
+
+// TestRenderChangelog_CapKeepsNewestEntries asserts the cap drops the
+// oldest entries: the array is oldest first, so the tail is the newest.
+func TestRenderChangelog_CapKeepsNewestEntries(t *testing.T) {
+	changes := make([]Change, 150)
+	for i := range changes {
+		changes[i] = Change{CommitID: fmt.Sprintf("c%d", i+1), Timestamp: time.Now()}
+	}
+	out, err := RenderChangelog(changes)
+	if err != nil {
+		t.Fatalf("RenderChangelog: %v", err)
+	}
+	var doc changelogDocXML
+	mustUnmarshal(t, out, &doc)
+	if len(doc.Entries) != maxChangelogEntries {
+		t.Fatalf("got %d entries, want %d", len(doc.Entries), maxChangelogEntries)
+	}
+	if first := doc.Entries[0].CommitID; first != "c51" {
+		t.Errorf("first entry %q, want c51", first)
+	}
+	if last := doc.Entries[len(doc.Entries)-1].CommitID; last != "c150" {
+		t.Errorf("last entry %q, want c150", last)
 	}
 }
 

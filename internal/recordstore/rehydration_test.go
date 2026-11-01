@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -295,5 +296,63 @@ func TestListRehydrationRecordsCarriesParamsMaskedNamesAndChanges(t *testing.T) 
 	}
 	if len(changes) != 2 {
 		t.Fatalf("want 2 changes, got %d", len(changes))
+	}
+}
+
+// TestTruncateRehydrationChanges asserts the cap keeps the newest
+// entries of an oldest-first array, in their stored order.
+func TestTruncateRehydrationChanges(t *testing.T) {
+	t.Parallel()
+
+	numbered := func(n int) json.RawMessage {
+		entries := make([]map[string]string, n)
+		for i := range entries {
+			entries[i] = map[string]string{"commit_id": fmt.Sprintf("c%d", i+1)}
+		}
+		raw, err := json.Marshal(entries)
+		if err != nil {
+			t.Fatalf("marshal %d entries: %v", n, err)
+		}
+		return raw
+	}
+
+	tests := []struct {
+		name      string
+		input     json.RawMessage
+		wantSame  bool
+		wantCount int
+		wantFirst string
+		wantLast  string
+	}{
+		{name: "empty input returns input", input: json.RawMessage{}, wantSame: true},
+		{name: "non-array value returns input", input: json.RawMessage(`{"commit_id":"c1"}`), wantSame: true},
+		{name: "three entries return unchanged", input: numbered(3), wantSame: true},
+		{name: "exactly the cap returns unchanged", input: numbered(100), wantSame: true},
+		{name: "over the cap keeps the newest", input: numbered(150), wantCount: 100, wantFirst: "c51", wantLast: "c150"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := truncateRehydrationChanges(tc.input)
+			if tc.wantSame {
+				if string(got) != string(tc.input) {
+					t.Fatalf("want input unchanged, got %s", got)
+				}
+				return
+			}
+			var entries []struct {
+				CommitID string `json:"commit_id"`
+			}
+			if err := json.Unmarshal(got, &entries); err != nil {
+				t.Fatalf("decode truncated value: %v", err)
+			}
+			if len(entries) != tc.wantCount {
+				t.Fatalf("want %d entries, got %d", tc.wantCount, len(entries))
+			}
+			if entries[0].CommitID != tc.wantFirst || entries[len(entries)-1].CommitID != tc.wantLast {
+				t.Fatalf("want first %s and last %s, got %s and %s",
+					tc.wantFirst, tc.wantLast, entries[0].CommitID, entries[len(entries)-1].CommitID)
+			}
+		})
 	}
 }

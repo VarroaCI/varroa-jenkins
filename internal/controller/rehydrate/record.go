@@ -47,8 +47,9 @@ type Record struct {
 	// reaches a file. The record store already replaces a masked
 	// value with a placeholder; this is the second line.
 	MaskedParameterNames []string
-	// Changes holds the run's recorded changeset, newest first,
-	// already capped by the caller (the record store caps at 100). A
+	// Changes holds the run's recorded changeset, oldest first, the
+	// plugin order, already capped by the caller (the record store
+	// caps at 100 and keeps the newest). A
 	// non-empty Changes gets a changelog0.xml file and a <checkouts>
 	// element.
 	Changes []Change
