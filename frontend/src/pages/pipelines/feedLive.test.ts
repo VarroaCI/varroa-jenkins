@@ -10,7 +10,6 @@ function run(id: string, status = "COMPLETED"): FleetRunRow {
     cluster: "core",
     tenant: "pay",
     tenantFolder: "pay",
-    title: id,
     trigger: { kind: "push", label: "Push" },
     pendingInput: false,
     canWrite: false,

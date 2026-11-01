@@ -19,7 +19,7 @@ function row(over: Partial<FleetRunRow> = {}): FleetRunRow {
     buildNumber: 42,
     actor: "nate",
     branch: "main",
-    title: "Fix the parser",
+    changeSummary: "Fix the parser",
     trigger: { kind: "push", label: "Push" },
     pendingInput: false,
     canWrite: true,
@@ -50,7 +50,7 @@ describe("RunRow", () => {
   });
 
   it("links a run with no commit subject by its job and build number", () => {
-    renderRow(row({ title: "pay/api" }));
+    renderRow(row({ changeSummary: undefined }));
     expect(screen.getByRole("link", { name: "api #42" })).toBeInTheDocument();
   });
 

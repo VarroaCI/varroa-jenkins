@@ -38,7 +38,7 @@ function run(over: Partial<FleetRunRow> = {}): FleetRunRow {
     buildNumber: 7,
     actor: "nate",
     branch: "main",
-    title: "Fix the parser",
+    changeSummary: "Fix the parser",
     trigger: { kind: "push", label: "Push" },
     pendingInput: false,
     canWrite: true,
@@ -182,7 +182,7 @@ function cronRun(n: number): FleetRunRow {
   return run({
     runId: `cron-${n}`,
     buildNumber: n,
-    title: "pay/api",
+    changeSummary: undefined,
     actor: "timer",
     trigger: { kind: "cron", label: "Cron" },
     branch: undefined,

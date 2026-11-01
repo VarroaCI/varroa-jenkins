@@ -111,6 +111,55 @@ func fleetAuthorizer() *api.Authorizer {
 	return api.NewAuthorizer(rbac.NewTestResolverWithRoles(roles, bindings), false)
 }
 
+func TestListRunsRowsCarryNoTitle(t *testing.T) {
+	deps := fleetDeps(t)
+	tr := callPipelineTool(t, deps, "list_runs", map[string]interface{}{})
+	if tr.IsError {
+		t.Fatalf("list_runs returned error: %v", tr.Content)
+	}
+	var payload struct {
+		Items []map[string]json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(tr.StructuredContent, &payload); err != nil {
+		t.Fatalf("unmarshal structuredContent: %v", err)
+	}
+	if len(payload.Items) != 2 {
+		t.Fatalf("items = %d; want 2", len(payload.Items))
+	}
+	for i, item := range payload.Items {
+		if _, ok := item["title"]; ok {
+			t.Errorf("item %d carries a title field", i)
+		}
+	}
+}
+
+func TestRunListOutputSchemaHasNoTitle(t *testing.T) {
+	var schema struct {
+		Properties struct {
+			Items struct {
+				Items struct {
+					AnyOf []struct {
+						Properties map[string]json.RawMessage `json:"properties"`
+					} `json:"anyOf"`
+				} `json:"items"`
+			} `json:"items"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(runListOutputSchema, &schema); err != nil {
+		t.Fatalf("unmarshal runListOutputSchema: %v", err)
+	}
+	if len(schema.Properties.Items.Items.AnyOf) == 0 {
+		t.Fatal("runListOutputSchema has no anyOf branches")
+	}
+	props := schema.Properties.Items.Items.AnyOf[0].Properties
+	if _, ok := props["title"]; ok {
+		t.Error("runListOutputSchema declares a title property")
+	}
+	if _, ok := props["changeSummary"]; !ok {
+		t.Error("runListOutputSchema lacks the changeSummary property")
+	}
+}
+
 func TestListRunsWithoutTenantReadsFleet(t *testing.T) {
 	deps := fleetDeps(t)
 	tr := callPipelineTool(t, deps, "list_runs", map[string]interface{}{})

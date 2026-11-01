@@ -117,7 +117,7 @@ function run(over: Partial<FleetRunRow> = {}): FleetRunRow {
     buildNumber: 3,
     actor: "nate",
     branch: "main",
-    title: "Fix the parser",
+    changeSummary: "Fix the parser",
     trigger: { kind: "push", label: "Push" },
     pendingInput: false,
     canWrite: false,

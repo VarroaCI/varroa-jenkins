@@ -40,16 +40,16 @@ export function runJobName(r: FleetRunRow): string {
 }
 
 /**
- * titleIsJob is true when the run has no commit subject, so its title is
- * its job path. Such a row names the job once, with its build number.
+ * titleIsJob is true when the run has no commit subject. Such a row titles
+ * itself by its job and build number, and names the job once.
  */
 export function titleIsJob(r: FleetRunRow): boolean {
-  return r.title === (r.jobPath ?? "");
+  return !r.changeSummary;
 }
 
 /** runTitle answers the link text of a run: its commit subject, or its job and build number. */
 export function runTitle(r: FleetRunRow): string {
-  if (!titleIsJob(r)) return r.title;
+  if (r.changeSummary) return r.changeSummary;
   const build = r.buildNumber !== undefined ? ` #${r.buildNumber}` : "";
   return `${runJobName(r)}${build}`;
 }

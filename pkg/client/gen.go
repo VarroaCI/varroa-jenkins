@@ -2993,7 +2993,7 @@ type ComponentsSchemasFleetRunPage struct {
 	NextCursor *string                        `json:"nextCursor,omitempty"`
 }
 
-// ComponentsSchemasFleetRunRow One run of the fleet run feed. It extends RunSummary with the tenant, the title, and the trigger.
+// ComponentsSchemasFleetRunRow One run of the fleet run feed. It extends RunSummary with the cluster, the tenant, and the trigger.
 type ComponentsSchemasFleetRunRow struct {
 	Actor       *string `json:"actor,omitempty"`
 	Branch      *string `json:"branch,omitempty"`
@@ -3042,9 +3042,6 @@ type ComponentsSchemasFleetRunRow struct {
 
 	// TenantFolder The tenant's Jenkins folder prefix of jobPath. Empty for a root-hosted tenant.
 	TenantFolder string `json:"tenantFolder"`
-
-	// Title The first line of the newest commit message, else the job path.
-	Title string `json:"title"`
 
 	// Trigger The trigger class of a fleet run, with the label the UI shows.
 	Trigger ComponentsSchemasFleetRunTrigger `json:"trigger"`

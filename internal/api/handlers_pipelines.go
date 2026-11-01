@@ -430,8 +430,8 @@ func latestChangeMessage(raw json.RawMessage) string {
 }
 
 // latestChangeSubject returns the first line of the newest commit message,
-// with surrounding white space removed. Every changeSummary field and the
-// fleet title read it, so the surfaces show the same text.
+// with surrounding white space removed. Every changeSummary field reads it,
+// so the surfaces show the same text.
 func latestChangeSubject(raw json.RawMessage) string {
 	line, _, _ := strings.Cut(latestChangeMessage(raw), "\n")
 	return strings.TrimSpace(line)

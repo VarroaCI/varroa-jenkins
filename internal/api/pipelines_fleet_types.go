@@ -19,14 +19,13 @@ type FleetRunUpstream struct {
 }
 
 // FleetRunRow is one row of the fleet run feed. It extends the run summary
-// with the cluster, the rail name, the title, and the trigger. CanWrite is
+// with the cluster, the rail name, and the trigger. CanWrite is
 // true when the caller passes the tenant write check for the run's job.
 type FleetRunRow struct {
 	runSummaryJSON
 	Cluster           string            `json:"cluster"`
 	Tenant            string            `json:"tenant"` // rail and URL name
 	TenantFolder      string            `json:"tenantFolder"`
-	Title             string            `json:"title"`
 	Trigger           FleetRunTrigger   `json:"trigger"`
 	PendingInput      bool              `json:"pendingInput"`
 	QueueWaitMs       *int64            `json:"queueWaitMs,omitempty"`

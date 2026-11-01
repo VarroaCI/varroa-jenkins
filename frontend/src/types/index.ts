@@ -2792,7 +2792,6 @@ export interface FleetRunRow extends RunSummary {
   tenant: string;
   /** The tenant's Jenkins folder prefix of jobPath. Empty for a root-hosted tenant. */
   tenantFolder: string;
-  title: string;
   trigger: { kind: FleetTriggerKind; label: string };
   pendingInput: boolean;
   queueWaitMs?: number;
