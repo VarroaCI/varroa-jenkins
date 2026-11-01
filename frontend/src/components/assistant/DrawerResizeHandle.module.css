@@ -1,0 +1,24 @@
+/* The handle sits on the left edge of the docked drawer. The drawer is the
+   positioning context (position: sticky). touch-action keeps a touch drag on
+   the handle from scrolling the page. */
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.handle:hover,
+.handle[data-dragging="true"] {
+  background: var(--accent);
+}
+
+.handle:focus-visible {
+  background: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}

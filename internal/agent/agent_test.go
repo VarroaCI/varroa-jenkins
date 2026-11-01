@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -191,5 +192,33 @@ func TestParseClientContext(t *testing.T) {
 	empty, err := ParseClientContext(nil)
 	if err != nil || len(empty) != 0 {
 		t.Fatalf("empty raw = (%v, %v), want an empty map", empty, err)
+	}
+}
+
+// TestTrimFirstMessage pins the list form of a first message: one line, at
+// most FirstMessageMax runes, and a cut text ends with an ellipsis.
+func TestTrimFirstMessage(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"short text unchanged", "why did it fail", "why did it fail"},
+		{"white space collapses", "  why did\n\tit fail  ", "why did it fail"},
+		{"empty", "", ""},
+		{"white space only", " \n\t ", ""},
+		{"ascii cut at max", strings.Repeat("a", 200), strings.Repeat("a", FirstMessageMax-1) + "…"},
+		{"runes cut by rune not byte", strings.Repeat("ü", 200), strings.Repeat("ü", FirstMessageMax-1) + "…"},
+		{"scan bound cuts before collapse", strings.Repeat("a", 1100) + " " + strings.Repeat("b", 50), strings.Repeat("a", FirstMessageMax-1) + "…"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := TrimFirstMessage(c.in); got != c.want {
+				t.Fatalf("TrimFirstMessage = %q, want %q", got, c.want)
+			}
+		})
 	}
 }

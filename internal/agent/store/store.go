@@ -345,6 +345,22 @@ func containsEventType(t agent.EventType) bool {
 	return false
 }
 
+// firstMessageOf returns the first message of a session from its events in
+// sequence order. Only the first user event counts.
+func firstMessageOf(evs []agent.Event) string {
+	for _, e := range evs {
+		if e.Type != agent.EventUser {
+			continue
+		}
+		var p agent.UserPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return ""
+		}
+		return agent.TrimFirstMessage(p.Text)
+	}
+	return ""
+}
+
 // normalizeEvents checks the event types and payloads, and gives an empty
 // payload the value {}.
 func normalizeEvents(in []agent.EventInput) ([]agent.EventInput, error) {

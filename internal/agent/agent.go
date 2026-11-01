@@ -293,6 +293,9 @@ type Session struct {
 	LeaseExpiresAt        *time.Time
 	StartedAt             time.Time
 	EndedAt               *time.Time
+	// FirstMessage is the first user text in its list form (TrimFirstMessage).
+	// The store reads it from the events. No column holds it, and a write ignores it.
+	FirstMessage string
 }
 
 // Tokens returns the prompt and completion tokens of the session together.

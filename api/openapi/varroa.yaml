@@ -602,6 +602,11 @@ components:
           format: date-time
           nullable: true
           type: string
+        firstMessage:
+          description: |
+            The first user message as one line of plain text. Runs of white space become one space. A longer message is cut to 120 characters and ends with an ellipsis. It is empty when the session has no user message.
+          maxLength: 120
+          type: string
         id:
           type: string
         keySource:
@@ -657,6 +662,7 @@ components:
       - cluster
       - state
       - context
+      - firstMessage
       - keySource
       - dataSharing
       - promptTokens
@@ -5099,6 +5105,11 @@ components:
           format: date-time
           nullable: true
           type: string
+        firstMessage:
+          description: |
+            The first user message as one line of plain text. Runs of white space become one space. A longer message is cut to 120 characters and ends with an ellipsis. It is empty when the session has no user message.
+          maxLength: 120
+          type: string
         id:
           type: string
         keySource:
@@ -5154,6 +5165,7 @@ components:
       - cluster
       - state
       - context
+      - firstMessage
       - keySource
       - dataSharing
       - promptTokens

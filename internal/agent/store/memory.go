@@ -67,9 +67,11 @@ func guardLocked(s *agent.Session, g Guard) error {
 	return g.check(s.State, s.LeaseOwner)
 }
 
-func copySession(s *agent.Session) agent.Session {
+// copySession returns a copy of s with its first message. The caller holds m.mu.
+func (m *Memory) copySession(s *agent.Session) agent.Session {
 	out := *s
 	out.Context = cloneContext(s.Context)
+	out.FirstMessage = firstMessageOf(m.events[s.ID])
 	return out
 }
 
@@ -115,7 +117,7 @@ func (m *Memory) CreateSession(_ context.Context, s agent.Session, events []agen
 	s.Context = cloneContext(s.Context)
 	m.sessions[s.ID] = &s
 	out := m.appendLocked(s.ID, evs, now)
-	return copySession(&s), copyEvents(out), nil
+	return m.copySession(&s), copyEvents(out), nil
 }
 
 // fillSession sets the defaults of a new session row and checks it.
@@ -159,7 +161,7 @@ func (m *Memory) GetSession(_ context.Context, id uuid.UUID) (agent.Session, err
 	if err != nil {
 		return agent.Session{}, err
 	}
-	return copySession(s), nil
+	return m.copySession(s), nil
 }
 
 // GetApproval returns one approval.
@@ -202,7 +204,7 @@ func (m *Memory) ListSessions(_ context.Context, q SessionQuery) (SessionPage, e
 		if hasCursor && !sessionBefore(*s, cT, cID) {
 			continue
 		}
-		rows = append(rows, copySession(s))
+		rows = append(rows, m.copySession(s))
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		return sessionBefore(rows[j], rows[i].StartedAt, rows[i].ID)
@@ -276,7 +278,7 @@ func (m *Memory) TakeLease(_ context.Context, id uuid.UUID, owner string, from [
 	s.LeaseOwner = owner
 	s.LeaseExpiresAt = &exp
 	s.EndedAt = nil
-	return copySession(s), nil
+	return m.copySession(s), nil
 }
 
 // RenewLease extends the lease of a running session held by owner.
@@ -332,7 +334,7 @@ func (m *Memory) RecordStep(_ context.Context, id uuid.UUID, owner string, promp
 	s.PromptTokens += prompt
 	s.CompletionTokens += completion
 	s.Steps++
-	return copySession(s), nil
+	return m.copySession(s), nil
 }
 
 // EndSession ends a session with a final state, clears its lease, and
@@ -525,7 +527,7 @@ func (m *Memory) ResolveApproval(_ context.Context, id uuid.UUID, r Resolution) 
 			left++
 		}
 	}
-	return ResolveResult{Approval: copyApproval(a), Session: copySession(s), PendingLeft: left}, nil
+	return ResolveResult{Approval: copyApproval(a), Session: m.copySession(s), PendingLeft: left}, nil
 }
 
 // ListApprovals returns one page of approvals, newest first.

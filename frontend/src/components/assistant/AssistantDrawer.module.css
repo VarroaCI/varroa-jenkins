@@ -2,11 +2,12 @@
    --drawer-top matches the sticky top bar height (Topbar.module.css, 62px). */
 .drawer {
   --drawer-top: 62px;
+  --drawer-w: clamp(320px, 30vw, 420px);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  flex: 0 0 clamp(320px, 30vw, 420px);
-  width: clamp(320px, 30vw, 420px);
+  flex: 0 0 min(var(--drawer-w), 40vw);
+  width: min(var(--drawer-w), 40vw);
   position: sticky;
   top: var(--drawer-top);
   align-self: flex-start;
@@ -90,6 +91,25 @@
 }
 
 .sessionMeta {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.sessionTitle {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+.sessionContext {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--text-2);
 }

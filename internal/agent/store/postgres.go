@@ -168,20 +168,26 @@ func update(ctx context.Context, tx pgx.Tx, sql string, args ...any) error {
 }
 
 // sessionCols lists the columns of agent_sessions in the order scanSession reads.
+// The last column is the first message, read from the first user event. The
+// subquery names agent_sessions.id, so every query that uses sessionCols must
+// read from an unaliased "FROM varroa.agent_sessions". The 1024 in the cut
+// equals agent.FirstMessageScan.
 const sessionCols = `id, kind, principal, tenant, cluster, trigger, context, provider, model,
   key_source, data_sharing, instructions_sha, tenant_agent_generation, state,
   COALESCE(skip_reason, ''), prompt_tokens, completion_tokens, steps,
-  COALESCE(lease_owner, ''), lease_expires_at, started_at, ended_at`
+  COALESCE(lease_owner, ''), lease_expires_at, started_at, ended_at,
+  COALESCE((SELECT left(e.payload->>'text', 1024) FROM varroa.agent_session_events e
+    WHERE e.session_id = agent_sessions.id AND e.type = 'user' ORDER BY e.seq LIMIT 1), '')`
 
 // scanSession reads one row of sessionCols.
 func scanSession(row pgx.Row) (agent.Session, error) {
 	var s agent.Session
-	var kind, keySource, dataSharing, state, skip string
+	var kind, keySource, dataSharing, state, skip, first string
 	var ctxRaw []byte
 	err := row.Scan(&s.ID, &kind, &s.Principal, &s.Tenant, &s.Cluster, &s.Trigger, &ctxRaw,
 		&s.Provider, &s.Model, &keySource, &dataSharing, &s.InstructionsSHA,
 		&s.TenantAgentGeneration, &state, &skip, &s.PromptTokens, &s.CompletionTokens, &s.Steps,
-		&s.LeaseOwner, &s.LeaseExpiresAt, &s.StartedAt, &s.EndedAt)
+		&s.LeaseOwner, &s.LeaseExpiresAt, &s.StartedAt, &s.EndedAt, &first)
 	if err != nil {
 		return agent.Session{}, err
 	}
@@ -190,6 +196,7 @@ func scanSession(row pgx.Row) (agent.Session, error) {
 	s.DataSharing = agent.DataSharing(dataSharing)
 	s.State = agent.SessionState(state)
 	s.SkipReason = agent.SkipReason(skip)
+	s.FirstMessage = agent.TrimFirstMessage(first)
 	s.Context = map[string]any{}
 	if len(ctxRaw) > 0 {
 		if err := json.Unmarshal(ctxRaw, &s.Context); err != nil {

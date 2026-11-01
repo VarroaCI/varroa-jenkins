@@ -53,6 +53,7 @@ func createSessionTx(ctx context.Context, tx pgx.Tx, s agent.Session, evs []agen
 	if err != nil {
 		return agent.Session{}, nil, err
 	}
+	s.FirstMessage = firstMessageOf(out)
 	return s, out, nil
 }
 

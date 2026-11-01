@@ -16,6 +16,7 @@ export function createAssistantSession(overrides: Partial<AssistantSession> = {}
     cluster: "core",
     trigger: "manual",
     context: { route: "dashboard" },
+    firstMessage: "",
     provider: "smoke",
     model: "varroa-smoke",
     keySource: "chart",

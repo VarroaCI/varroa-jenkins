@@ -1,7 +1,7 @@
 // AssistantDrawer is the panel that holds one session. It streams the frames
 // of the open session, shows the transcript and the approvals, and takes the
 // next message. It resumes after the last seq it applied.
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import { History, MessageSquarePlus, X } from "lucide-react";
@@ -17,6 +17,15 @@ import {
 import { useAssistant } from "./AssistantProvider";
 import { useNarrowViewport } from "../../hooks/useNarrowViewport";
 import { emptyModel, type TranscriptModel } from "./transcript";
+import { DrawerResizeHandle } from "./DrawerResizeHandle";
+import {
+  DOCKED_QUERY,
+  clampDrawerWidth,
+  defaultDrawerWidth,
+  maxDrawerWidth,
+  readDrawerWidth,
+  writeDrawerWidth,
+} from "./drawerWidth";
 import { contextLabel, contextDiffers, routeContext } from "./routeContext";
 import { Button } from "../Button";
 import { age } from "../activityTimeline.util";
@@ -40,6 +49,19 @@ export default function AssistantDrawer() {
   const [pending, setPending] = useState<PendingMessage | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const narrow = useNarrowViewport();
+  // useNarrowViewport answers any media query. Only the docked drawer takes a width handle.
+  const docked = useNarrowViewport(DOCKED_QUERY);
+  const [storedWidth, setStoredWidth] = useState<number | null>(() => readDrawerWidth());
+  const [viewport, setViewport] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setViewport(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const drawerWidth = clampDrawerWidth(storedWidth ?? defaultDrawerWidth(viewport), viewport);
+  const drawerStyle = docked && storedWidth !== null
+    ? ({ "--drawer-w": `${drawerWidth}px` } as CSSProperties)
+    : undefined;
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -161,11 +183,20 @@ export default function AssistantDrawer() {
     <section
       ref={sectionRef}
       className={styles.drawer}
+      style={drawerStyle}
       role={narrow ? "dialog" : "complementary"}
       aria-modal={narrow ? true : undefined}
       aria-label="Assistant"
       onKeyDown={onKey}
     >
+      {docked && (
+        <DrawerResizeHandle
+          width={drawerWidth}
+          max={maxDrawerWidth(viewport)}
+          onResize={setStoredWidth}
+          onCommit={writeDrawerWidth}
+        />
+      )}
       <header className={styles.header}>
         <span className={styles.chip} title={contextLabel(ctx)}>{contextLabel(ctx)}</span>
         {sid && ctxDiffers && (
@@ -210,21 +241,26 @@ export default function AssistantDrawer() {
       )}
       {showList && sessions.data && sessions.data.items.length > 0 && (
         <ul className={styles.list} aria-label="Sessions">
-          {sessions.data.items.map((s) => (
-            <li key={s.id}>
-              <button
-                type="button"
-                className={styles.sessionRow}
-                aria-current={s.id === sid ? "true" : undefined}
-                onClick={() => { setPending(null); a.openSession(s.id); }}
-              >
-                <span>{contextLabel(s.context)}</span>
-                <span className={styles.sessionMeta}>
-                  {s.state} · {age(s.startedAt)}{s.id === sid ? " · Current" : ""}
-                </span>
-              </button>
-            </li>
-          ))}
+          {sessions.data.items.map((s) => {
+            const label = contextLabel(s.context);
+            const title = s.firstMessage || label;
+            return (
+              <li key={s.id}>
+                <button
+                  type="button"
+                  className={styles.sessionRow}
+                  aria-current={s.id === sid ? "true" : undefined}
+                  onClick={() => { setPending(null); a.openSession(s.id); }}
+                >
+                  <span className={styles.sessionTitle} title={title}>{title}</span>
+                  {s.firstMessage && <span className={styles.sessionContext}>{label}</span>}
+                  <span className={styles.sessionMeta}>
+                    {s.state} · {age(s.startedAt)}{s.id === sid ? " · Current" : ""}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
 

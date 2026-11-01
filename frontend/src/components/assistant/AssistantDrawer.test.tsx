@@ -41,6 +41,7 @@ const session: AssistantSession = {
   cluster: "core",
   trigger: "manual",
   context: { route: "dashboard" },
+  firstMessage: "",
   provider: "smoke",
   model: "varroa-smoke",
   keySource: "chart",
@@ -139,7 +140,7 @@ describe("AssistantDrawer", () => {
   it("lists sessions with a relative age and marks the current one", async () => {
     const startedAt = new Date(Date.now() - 5 * 60_000).toISOString();
     vi.mocked(client.listAssistantSessions).mockResolvedValueOnce({
-      items: [{ ...session, startedAt }],
+      items: [{ ...session, startedAt, firstMessage: "why did it fail" }],
       nextCursor: null,
     });
     renderDrawer();
@@ -148,9 +149,27 @@ describe("AssistantDrawer", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Sessions" }));
     const list = await screen.findByRole("list", { name: "Sessions" });
     const row = within(list).getByRole("button");
+    const title = row.querySelector("span");
+    expect(title?.textContent).toBe("why did it fail");
     expect(row.textContent).toContain(contextLabel({ route: "dashboard" }));
     expect(row.textContent).toMatch(/5m ago · Current/);
     expect(row.getAttribute("aria-current")).toBe("true");
+  });
+
+  it("uses the context label as the row title when the first message is empty", async () => {
+    vi.mocked(client.listAssistantSessions).mockResolvedValueOnce({
+      items: [{ ...session, firstMessage: "" }],
+      nextCursor: null,
+    });
+    renderDrawer();
+    fireEvent.click(screen.getByText("open"));
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    fireEvent.click(await screen.findByRole("button", { name: "Sessions" }));
+    const list = await screen.findByRole("list", { name: "Sessions" });
+    const row = within(list).getByRole("button");
+    const title = row.querySelector("span");
+    expect(title?.textContent).toBe(contextLabel({ route: "dashboard" }));
+    expect(row.querySelectorAll("span")).toHaveLength(2);
   });
 
   it("the header close control is a labelled button", async () => {

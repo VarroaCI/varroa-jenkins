@@ -445,3 +445,44 @@ func TestAssistantSettings_GetAsViewer(t *testing.T) {
 		t.Errorf("no paused flag: %s", rec.Body)
 	}
 }
+
+// TestAssistantList_FirstMessage proves the create answer, the list, and the
+// detail each carry the first message in list form.
+func TestAssistantList_FirstMessage(t *testing.T) {
+	f := newAssistantFixture(t, assistantTextTurn("hi"))
+	rec := f.do(t, f.viewer, http.MethodPost, "/assistant/sessions", map[string]any{"message": "  restart\nthe   build "})
+	var created assistantSessionJSON
+	decodeBody(t, rec, &created)
+	f.rt.Wait()
+	const want = "restart the build"
+	if created.FirstMessage != want {
+		t.Fatalf("create firstMessage = %q, want %q", created.FirstMessage, want)
+	}
+
+	rec = f.do(t, f.viewer, http.MethodGet, "/assistant/sessions?limit=10", nil)
+	var list struct {
+		Items []assistantSessionJSON `json:"items"`
+	}
+	decodeBody(t, rec, &list)
+	found := false
+	for _, it := range list.Items {
+		if it.ID == created.ID {
+			found = true
+			if it.FirstMessage != want {
+				t.Fatalf("list firstMessage = %q, want %q", it.FirstMessage, want)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("list did not return session %s", created.ID)
+	}
+
+	rec = f.do(t, f.viewer, http.MethodGet, "/assistant/sessions/"+created.ID, nil)
+	var detail struct {
+		Session assistantSessionJSON `json:"session"`
+	}
+	decodeBody(t, rec, &detail)
+	if detail.Session.FirstMessage != want {
+		t.Fatalf("detail firstMessage = %q, want %q", detail.Session.FirstMessage, want)
+	}
+}
