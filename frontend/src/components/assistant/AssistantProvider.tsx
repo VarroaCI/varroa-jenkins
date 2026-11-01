@@ -32,6 +32,7 @@ export interface AssistantState {
   pausedAt: string | null;
   drawerOpen: boolean;
   activeSessionId: string | null;
+  /** epoch changes when a session opens or starts. The drawer then streams that session from seq 0. */
   epoch: number;
   hint: RouteHint;
   setHint(h: RouteHint): void;
@@ -40,6 +41,7 @@ export interface AssistantState {
   openWithMessage(text: string, ctx: AssistantSessionContext): void;
   explainRun(runId: string, ctx: AssistantSessionContext): void;
   startSession(body: { context: AssistantSessionContext; message?: string; prompt?: string }): Promise<StartResult>;
+  /** resolved refreshes the approval and session reads after a decision. It does not change epoch. */
   resolved(sessionId: string): void;
   onSessionDone(sessionId: string, state: AssistantSessionState): void;
   closeDrawer(): void;
@@ -256,11 +258,12 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     [startSession, pending],
   );
 
+  // A decision changes no epoch. The open stream folds the approval_resolved
+  // frame and the frames of the resumed run, so the transcript stays in place.
   const resolved = useCallback(
     (sessionId: string) => {
-      void sessionId;
-      setEpoch((e) => e + 1);
       void queryClient.invalidateQueries({ queryKey: ["assistant-approvals"] });
+      if (sessionId) void queryClient.invalidateQueries({ queryKey: ["assistant-session", sessionId] });
     },
     [queryClient],
   );

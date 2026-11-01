@@ -37,8 +37,7 @@ function Probe({ onState }: { onState: (a: ReturnType<typeof useAssistant>) => v
   return null;
 }
 
-function renderWith(node: ReactNode) {
-  const qc = createTestQueryClient();
+function renderWith(node: ReactNode, qc = createTestQueryClient()) {
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>{node}</MemoryRouter>
@@ -147,6 +146,26 @@ describe("AssistantProvider helpers", () => {
     act(() => state!.onSessionDone("s6", "failed"));
     expect(pendingNotes("alice").list()).toEqual([]);
     expect(client.createRunNote).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the approval reads after a decision and keeps the epoch", async () => {
+    const qc = createTestQueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    let state: ReturnType<typeof useAssistant> | null = null;
+    renderWith(
+      <AssistantProvider>
+        <Probe onState={(a) => { state = a; }} />
+      </AssistantProvider>,
+      qc,
+    );
+    await waitFor(() => expect(state?.answered).toBe(true));
+    act(() => state!.openSession("s1"));
+    const epoch = state!.epoch;
+    spy.mockClear();
+    act(() => state!.resolved("s1"));
+    expect(state!.epoch).toBe(epoch);
+    expect(spy).toHaveBeenCalledWith({ queryKey: ["assistant-approvals"] });
+    expect(spy).toHaveBeenCalledWith({ queryKey: ["assistant-session", "s1"] });
   });
 
   it("sets the page hint while a page mounts and clears it on unmount", async () => {
