@@ -179,9 +179,11 @@ func init() {
 		contractCase{Name: "updateProvisioningDefaults", Method: "PUT", Path: "/api/v1/clusters/core/provisioningdefaults/varroa-defaults", Claims: adminClaims, Body: map[string]interface{}{"spec": map[string]interface{}{}}, WantStatus: http.StatusOK},
 	)
 
-	// ── activity + streams (5 cases) ─────────────────────────────────────
+	// ── activity + streams (7 cases) ─────────────────────────────────────
 	registerContractCases(
 		contractCase{Name: "listActivity", Method: "GET", Path: "/api/v1/activity", Claims: adminClaims, WantStatus: http.StatusOK},
+		contractCase{Name: "streamActivity-bad-range-400", Method: "GET", Path: "/api/v1/activity/stream?start=2026-01-02T00:00:00Z&end=2026-01-01T00:00:00Z", Claims: adminClaims, WantStatus: http.StatusBadRequest},
+		contractCase{Name: "streamActivity-no-fanout-503", Method: "GET", Path: "/api/v1/activity/stream", Claims: adminClaims, WantStatus: http.StatusServiceUnavailable},
 		contractCase{Name: "search", Method: "GET", Path: "/api/v1/search?q=test", Claims: adminClaims, WantStatus: http.StatusOK},
 		contractCase{Name: "createStreamTicket", Method: "POST", Path: "/api/v1/stream/ticket", Claims: adminClaims, Body: map[string]string{"scope": "brood"}, WantStatus: http.StatusOK},
 	)

@@ -14120,12 +14120,15 @@ paths:
         name: type
         schema:
           type: string
-      - in: query
+      - description: Reads events at or after start, oldest first. With no end, the
+          read goes to the present.
+        in: query
         name: start
         schema:
           format: date-time
           type: string
-      - in: query
+      - description: Reads events before end. With no start, the read is newest first.
+        in: query
         name: end
         schema:
           format: date-time
@@ -14177,7 +14180,7 @@ paths:
                 type: object
           description: Activity history page.
         "400":
-          description: Invalid filters, cursor, or range.
+          description: Invalid filter, limit, cursor, or range.
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
         "410":
@@ -14207,10 +14210,23 @@ paths:
       - in: query
         name: source
         schema:
+          enum:
+          - mite
+          - operator
+          - user
+          - api
+          - jenkins
+          - mcp
+          - assistant
+          - tenant_agent
           type: string
       - in: query
         name: severity
         schema:
+          enum:
+          - info
+          - warning
+          - error
           type: string
       - in: query
         name: actor
@@ -14219,6 +14235,19 @@ paths:
       - in: query
         name: type
         schema:
+          type: string
+      - description: Drops each live event earlier than start.
+        in: query
+        name: start
+        schema:
+          format: date-time
+          type: string
+      - description: Drops each live event at or after end. Leave out end to keep
+          the stream open; an end in the past sends no events.
+        in: query
+        name: end
+        schema:
+          format: date-time
           type: string
       - description: true leaves out each routine local sign-in, an auth.local.login
           event below warning severity.
@@ -14234,8 +14263,22 @@ paths:
               schema:
                 type: string
           description: 'SSE event stream (event: activity, data = ActivityEvent).'
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: 'Invalid filter or range: a bound is not RFC 3339, start is
+            not before end, or a source, severity, or excludeRoutineSignIns value
+            is unknown.'
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The live event fan-out is not available.
       summary: Streams filtered activity events via Server-Sent Events.
       tags:
       - activity

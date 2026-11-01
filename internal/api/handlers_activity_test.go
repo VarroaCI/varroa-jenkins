@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/varroaci/varroa-jenkins/api/openapi"
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/api/sse"
@@ -686,7 +688,8 @@ func TestHandleActivity_RangeOutsideRetention(t *testing.T) {
 }
 
 // TestActivityFilter_RangeBounds proves parseActivityQuery checks only the
-// range syntax: start and end come together, and start is before end.
+// range syntax: each bound is optional, and start is before end when both
+// are set.
 func TestActivityFilter_RangeBounds(t *testing.T) {
 	now := time.Now().UTC()
 	ts := func(d time.Duration) string { return now.Add(d).Format(time.RFC3339) }
@@ -695,7 +698,8 @@ func TestActivityFilter_RangeBounds(t *testing.T) {
 		target  string
 		wantErr bool
 	}{
-		{"start without end", "/activity?start=" + ts(-time.Hour), true},
+		{"start without end", "/activity?start=" + ts(-time.Hour), false},
+		{"end without start", "/activity?end=" + ts(-time.Hour), false},
 		{"start equals end", "/activity?start=" + ts(0) + "&end=" + ts(0), true},
 		{"start after end", "/activity?start=" + ts(time.Hour) + "&end=" + ts(-time.Hour), true},
 		{"valid range", "/activity?start=" + ts(-time.Hour) + "&end=" + ts(time.Hour), false},
@@ -707,5 +711,145 @@ func TestActivityFilter_RangeBounds(t *testing.T) {
 				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestHandleActivity_StartOnlyReadsToPresent proves a start-only history read
+// returns the events from start up to the present, and no event before start.
+func TestHandleActivity_StartOnlyReadsToPresent(t *testing.T) {
+	now := time.Now().UTC()
+	srv := NewServer(&Dependencies{
+		Backfill: &fakeBackfill{events: []activity.Event{
+			{Type: "auth.local.login", Source: "user", Namespace: "ns", Controller: "c1", Message: "old", Timestamp: now.Add(-2 * time.Hour)},
+			{Type: "auth.local.login", Source: "user", Namespace: "ns", Controller: "c1", Message: "recent", Timestamp: now.Add(-time.Minute)},
+		}},
+		Authorizer: testAuthorizer(true, ""),
+		Logger:     slog.Default(),
+	})
+	target := "/activity?start=" + now.Add(-time.Hour).Format(time.RFC3339)
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req = req.WithContext(contextWithClaims(req.Context(), &auth.Claims{Subject: "test-user"}))
+	w := httptest.NewRecorder()
+
+	srv.handleActivity(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var page activity.Page
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Message != "recent" {
+		t.Fatalf("items = %+v, want one recent event", page.Items)
+	}
+}
+
+// TestHandleActivityStream_StartOnlyKeepsLiveEvents proves a start-only live
+// stream delivers an event at the present.
+func TestHandleActivityStream_StartOnlyKeepsLiveEvents(t *testing.T) {
+	now := time.Now().UTC()
+	ch := make(chan sse.Record, 1)
+	ch <- sse.Record{Event: "auth.local.login", Data: activity.Event{Type: "auth.local.login", Source: "user", Namespace: "ns", Controller: "c1", Message: "m", Timestamp: now}}
+	close(ch)
+
+	srv := NewServer(&Dependencies{
+		Authorizer:  testAuthorizer(true, ""),
+		Broadcaster: &fakeActivitySource{ch: ch},
+		Logger:      slog.Default(),
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/activity/stream?start="+now.Add(-time.Hour).Format(time.RFC3339), nil).
+		WithContext(authContext(&auth.Claims{Subject: "test-user"}))
+	w := httptest.NewRecorder()
+
+	srv.handleActivityStream(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if n := strings.Count(w.Body.String(), "event: activity\n"); n != 1 {
+		t.Fatalf("expected one activity frame, got %d: %s", n, w.Body.String())
+	}
+}
+
+// TestHandleActivityStream_ClosedRangeDropsLiveEvents proves a live event at
+// the present is dropped when the requested range ended in the past.
+func TestHandleActivityStream_ClosedRangeDropsLiveEvents(t *testing.T) {
+	now := time.Now().UTC()
+	ch := make(chan sse.Record, 1)
+	ch <- sse.Record{Event: "auth.local.login", Data: activity.Event{Type: "auth.local.login", Source: "user", Namespace: "ns", Controller: "c1", Message: "m", Timestamp: now}}
+	close(ch)
+
+	srv := NewServer(&Dependencies{
+		Authorizer:  testAuthorizer(true, ""),
+		Broadcaster: &fakeActivitySource{ch: ch},
+		Logger:      slog.Default(),
+	})
+	target := "/api/v1/activity/stream?start=" + now.Add(-2*time.Hour).Format(time.RFC3339) + "&end=" + now.Add(-time.Hour).Format(time.RFC3339)
+	req := httptest.NewRequest(http.MethodGet, target, nil).
+		WithContext(authContext(&auth.Claims{Subject: "test-user"}))
+	w := httptest.NewRecorder()
+
+	srv.handleActivityStream(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if n := strings.Count(w.Body.String(), "event: activity\n"); n != 0 {
+		t.Fatalf("expected no activity frames, got %d: %s", n, w.Body.String())
+	}
+}
+
+// TestHandleActivityStream_BadRangeAnswers400BeforeFanout proves a bad range
+// answers 400 even when no broadcaster is wired, so the parse runs first.
+func TestHandleActivityStream_BadRangeAnswers400BeforeFanout(t *testing.T) {
+	now := time.Now().UTC()
+	srv := NewServer(&Dependencies{
+		Authorizer: testAuthorizer(true, ""),
+		Logger:     slog.Default(),
+	})
+	target := "/api/v1/activity/stream?start=" + now.Format(time.RFC3339) + "&end=" + now.Add(-time.Hour).Format(time.RFC3339)
+	req := httptest.NewRequest(http.MethodGet, target, nil).
+		WithContext(authContext(&auth.Claims{Subject: "test-user"}))
+	w := httptest.NewRecorder()
+
+	srv.handleActivityStream(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["error"] != "start must be before end" {
+		t.Errorf("error = %q, want %q", body["error"], "start must be before end")
+	}
+}
+
+// TestStreamActivitySpecListsRangeAndErrors proves the embedded contract
+// lists the range and filter parameters of the live stream, and its 400
+// and 503 answers.
+func TestStreamActivitySpecListsRangeAndErrors(t *testing.T) {
+	doc, err := (&openapi3.Loader{IsExternalRefsAllowed: false}).LoadFromData(openapi.SpecJSON)
+	if err != nil {
+		t.Fatalf("load spec: %v", err)
+	}
+	item := doc.Paths.Find("/api/v1/activity/stream")
+	if item == nil || item.Get == nil {
+		t.Fatal("spec has no streamActivity operation")
+	}
+	for _, name := range []string{"controller", "cluster", "namespace", "source", "severity", "actor", "type", "start", "end", "excludeRoutineSignIns"} {
+		if item.Get.Parameters.GetByInAndName("query", name) == nil {
+			t.Errorf("streamActivity lists no query parameter %q", name)
+		}
+	}
+	for _, code := range []int{http.StatusBadRequest, http.StatusServiceUnavailable} {
+		if item.Get.Responses.Status(code) == nil {
+			t.Errorf("streamActivity declares no %d response", code)
+		}
 	}
 }
