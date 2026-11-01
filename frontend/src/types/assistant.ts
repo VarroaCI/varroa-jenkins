@@ -71,6 +71,8 @@ export interface AssistantSession {
   cluster: string;
   trigger: string;
   context: AssistantSessionContext;
+  /** The first user message as one line of plain text, at most 120 characters. Empty when the session has no user message. */
+  firstMessage: string;
   provider: string;
   model: string;
   keySource: "chart" | "user";

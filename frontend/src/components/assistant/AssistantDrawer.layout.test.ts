@@ -69,3 +69,17 @@ describe("assistant drawer layout", () => {
     expect(ruleBody(reduced, ".dots span")).toMatch(/animation:\s*none/);
   });
 });
+
+describe("assistant drawer width", () => {
+  it("the docked width reads --drawer-w under a 40vw cap", () => {
+    const body = ruleBody(read("AssistantDrawer.module.css"), ".drawer");
+    expect(body).toMatch(/--drawer-w:\s*clamp\(320px,\s*30vw,\s*420px\)/);
+    expect(body).toMatch(/width:\s*min\(var\(--drawer-w\),\s*40vw\)/);
+  });
+
+  it("the resize handle takes touch drags", () => {
+    const body = ruleBody(read("DrawerResizeHandle.module.css"), ".handle");
+    expect(body).toMatch(/touch-action:\s*none/);
+    expect(body).toMatch(/cursor:\s*col-resize/);
+  });
+});

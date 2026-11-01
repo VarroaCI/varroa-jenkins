@@ -2,12 +2,34 @@ package agent
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
 // UserPayload is the payload of a user event.
 type UserPayload struct {
 	Text string `json:"text"`
+}
+
+// FirstMessageScan is the number of runes of a first user text that
+// TrimFirstMessage reads. The Postgres store cuts the text to this length in SQL.
+const FirstMessageScan = 1024
+
+// FirstMessageMax is the maximum number of runes in a first message.
+const FirstMessageMax = 120
+
+// TrimFirstMessage returns the list form of a first user text: one line of
+// plain text with at most FirstMessageMax runes. A cut text ends with "…".
+func TrimFirstMessage(text string) string {
+	if r := []rune(text); len(r) > FirstMessageScan {
+		text = string(r[:FirstMessageScan])
+	}
+	line := strings.Join(strings.Fields(text), " ")
+	r := []rune(line)
+	if len(r) <= FirstMessageMax {
+		return line
+	}
+	return string(r[:FirstMessageMax-1]) + "…"
 }
 
 // AssistantPayload is the payload of an assistant event. The chunks of one

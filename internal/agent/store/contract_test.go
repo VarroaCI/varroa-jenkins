@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -58,6 +59,7 @@ func runContract(t *testing.T, f factory) {
 		{"LeaseLostDeniesPendingApprovals", testLeaseLostDeniesPendingApprovals},
 		{"ExpireDueSkipsEndedSessions", testExpireDueSkipsEndedSessions},
 		{"ExpireDueDeniesRemainingApprovals", testExpireDueDeniesRemainingApprovals},
+		{"FirstMessage", testFirstMessage},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1034,5 +1036,86 @@ func testExpireDueDeniesRemainingApprovals(t *testing.T, f factory) {
 	ap, _ := s.GetApproval(ctx, laterID)
 	if ap.State != agent.ApprovalDenied || ap.Reason != "the session ended as expired" {
 		t.Fatalf("remaining approval = state %s reason %q; want denied as expired", ap.State, ap.Reason)
+	}
+}
+
+// testFirstMessage proves the first user event gives the session its first
+// message, in list form, for every reader of the session.
+func testFirstMessage(t *testing.T, f factory) {
+	clock := newTestClock()
+	s := f(t, Options{Now: clock.Now})
+	ctx := context.Background()
+	sess, _, err := s.CreateSession(ctx, newSession(agent.StateRunning, ""),
+		[]agent.EventInput{userEvent("  why did\nit fail ")})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	const want = "why did it fail"
+	if sess.FirstMessage != want {
+		t.Fatalf("CreateSession FirstMessage = %q, want %q", sess.FirstMessage, want)
+	}
+	got, err := s.GetSession(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.FirstMessage != want {
+		t.Fatalf("GetSession FirstMessage = %q, want %q", got.FirstMessage, want)
+	}
+	page, err := s.ListSessions(ctx, SessionQuery{Principal: "alice"})
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	listed := false
+	for _, row := range page.Items {
+		if row.ID == sess.ID {
+			listed = true
+			if row.FirstMessage != want {
+				t.Fatalf("ListSessions FirstMessage = %q, want %q", row.FirstMessage, want)
+			}
+		}
+	}
+	if !listed {
+		t.Fatalf("ListSessions did not return session %s", sess.ID)
+	}
+
+	if _, err := s.AppendEvent(ctx, sess.ID, Guard{}, userEvent("second")); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	got, err = s.GetSession(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("GetSession after second message: %v", err)
+	}
+	if got.FirstMessage != want {
+		t.Fatalf("second user event changed FirstMessage to %q", got.FirstMessage)
+	}
+
+	running, _, err := s.CreateSession(ctx, newSession(agent.StateRunning, ""), nil)
+	if err != nil {
+		t.Fatalf("CreateSession without events: %v", err)
+	}
+	if running.FirstMessage != "" {
+		t.Fatalf("session without events FirstMessage = %q, want empty", running.FirstMessage)
+	}
+	if _, err := s.AppendEvent(ctx, running.ID, Guard{}, userEvent("later")); err != nil {
+		t.Fatalf("AppendEvent to empty session: %v", err)
+	}
+	got, err = s.GetSession(ctx, running.ID)
+	if err != nil {
+		t.Fatalf("GetSession after first event: %v", err)
+	}
+	if got.FirstMessage != "later" {
+		t.Fatalf("FirstMessage after first user event = %q, want later", got.FirstMessage)
+	}
+
+	long, _, err := s.CreateSession(ctx, newSession(agent.StateRunning, ""),
+		[]agent.EventInput{userEvent(strings.Repeat("x", 300))})
+	if err != nil {
+		t.Fatalf("CreateSession long: %v", err)
+	}
+	if n := utf8.RuneCountInString(long.FirstMessage); n != agent.FirstMessageMax {
+		t.Fatalf("long FirstMessage has %d runes, want %d", n, agent.FirstMessageMax)
+	}
+	if !strings.HasSuffix(long.FirstMessage, "…") {
+		t.Fatalf("long FirstMessage = %q, want an ellipsis at the end", long.FirstMessage)
 	}
 }

@@ -214,6 +214,7 @@ type assistantSessionJSON struct {
 	Cluster          string         `json:"cluster"`
 	Trigger          string         `json:"trigger"`
 	Context          map[string]any `json:"context"`
+	FirstMessage     string         `json:"firstMessage"`
 	Provider         string         `json:"provider"`
 	Model            string         `json:"model"`
 	KeySource        string         `json:"keySource"`
@@ -230,8 +231,8 @@ type assistantSessionJSON struct {
 func toAssistantSessionJSON(s agent.Session) assistantSessionJSON {
 	out := assistantSessionJSON{
 		ID: s.ID.String(), Kind: string(s.Kind), Principal: s.Principal, Tenant: s.Tenant,
-		Cluster: s.Cluster, Trigger: s.Trigger, Context: s.Context, Provider: s.Provider,
-		Model: s.Model, KeySource: string(s.KeySource), DataSharing: string(s.DataSharing),
+		Cluster: s.Cluster, Trigger: s.Trigger, Context: s.Context, FirstMessage: s.FirstMessage,
+		Provider: s.Provider, Model: s.Model, KeySource: string(s.KeySource), DataSharing: string(s.DataSharing),
 		State: string(s.State), PromptTokens: s.PromptTokens, CompletionTokens: s.CompletionTokens,
 		Steps: s.Steps, StartedAt: s.StartedAt, EndedAt: s.EndedAt,
 	}

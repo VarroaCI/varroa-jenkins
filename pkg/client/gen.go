@@ -1156,19 +1156,22 @@ type ComponentsSchemasAssistantSession struct {
 	Context          map[string]interface{}                       `json:"context"`
 	DataSharing      ComponentsSchemasAssistantSessionDataSharing `json:"dataSharing"`
 	EndedAt          *time.Time                                   `json:"endedAt"`
-	Id               string                                       `json:"id"`
-	KeySource        ComponentsSchemasAssistantSessionKeySource   `json:"keySource"`
-	Kind             ComponentsSchemasAssistantSessionKind        `json:"kind"`
-	Model            *string                                      `json:"model,omitempty"`
-	Principal        string                                       `json:"principal"`
-	PromptTokens     int64                                        `json:"promptTokens"`
-	Provider         *string                                      `json:"provider,omitempty"`
-	SkipReason       *ComponentsSchemasAssistantSessionSkipReason `json:"skipReason"`
-	StartedAt        time.Time                                    `json:"startedAt"`
-	State            ComponentsSchemasAssistantSessionState       `json:"state"`
-	Steps            int                                          `json:"steps"`
-	Tenant           *string                                      `json:"tenant,omitempty"`
-	Trigger          *string                                      `json:"trigger,omitempty"`
+
+	// FirstMessage The first user message as one line of plain text. Runs of white space become one space. A longer message is cut to 120 characters and ends with an ellipsis. It is empty when the session has no user message.
+	FirstMessage string                                       `json:"firstMessage"`
+	Id           string                                       `json:"id"`
+	KeySource    ComponentsSchemasAssistantSessionKeySource   `json:"keySource"`
+	Kind         ComponentsSchemasAssistantSessionKind        `json:"kind"`
+	Model        *string                                      `json:"model,omitempty"`
+	Principal    string                                       `json:"principal"`
+	PromptTokens int64                                        `json:"promptTokens"`
+	Provider     *string                                      `json:"provider,omitempty"`
+	SkipReason   *ComponentsSchemasAssistantSessionSkipReason `json:"skipReason"`
+	StartedAt    time.Time                                    `json:"startedAt"`
+	State        ComponentsSchemasAssistantSessionState       `json:"state"`
+	Steps        int                                          `json:"steps"`
+	Tenant       *string                                      `json:"tenant,omitempty"`
+	Trigger      *string                                      `json:"trigger,omitempty"`
 }
 
 // ComponentsSchemasAssistantSessionDataSharing defines model for ComponentsSchemasAssistantSession.DataSharing.
@@ -5204,6 +5207,9 @@ type ComponentsSchemasTenantAgentSession struct {
 	Context          map[string]interface{}                         `json:"context"`
 	DataSharing      ComponentsSchemasTenantAgentSessionDataSharing `json:"dataSharing"`
 	EndedAt          *time.Time                                     `json:"endedAt"`
+
+	// FirstMessage The first user message as one line of plain text. Runs of white space become one space. A longer message is cut to 120 characters and ends with an ellipsis. It is empty when the session has no user message.
+	FirstMessage     string                                         `json:"firstMessage"`
 	Id               string                                         `json:"id"`
 	KeySource        ComponentsSchemasTenantAgentSessionKeySource   `json:"keySource"`
 	Kind             ComponentsSchemasTenantAgentSessionKind        `json:"kind"`
