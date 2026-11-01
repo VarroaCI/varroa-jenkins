@@ -125,7 +125,7 @@ Each cluster of the brood holds its own pools. A pool name is unique inside one 
 varroactl get cellpools
 varroactl describe cellpool jenkins-lts
 varroactl scale cellpool jenkins-lts --warm 3 --max-cells 8
-varroactl scale cellpool lts-2-570 --cluster east --warm 2
+varroactl scale cellpool lts-2-588 --cluster east --warm 2
 ```
 
 `get cellpools` lists every cluster, with a `CLUSTER` column. A command on one pool uses the core

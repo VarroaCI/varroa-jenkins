@@ -51,7 +51,7 @@ The panel lists the script signatures that the sandbox refused in this cell and 
 Open `/cells`. The page and its navigation row need cluster-wide `cellpools:read`. A namespace-scoped grant admits neither.
 
 The page renders one block for each cell pool of each cluster. The block head names the cluster
-and the pool, for example `east / lts-2-570`. Each block states:
+and the pool, for example `east / lts-2-588`. Each block states:
 
 | Value | Meaning |
 |---|---|

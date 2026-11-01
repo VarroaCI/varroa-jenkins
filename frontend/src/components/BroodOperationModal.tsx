@@ -511,7 +511,7 @@ export function BroodOperationModal({ targets, onClose, onSubmitted, embedded = 
               />
 
               <label>
-                or enter a line (e.g. 2.555)
+                or enter a line (e.g. 2.580)
                 <input
                   type="text"
                   value={upgradeLine}

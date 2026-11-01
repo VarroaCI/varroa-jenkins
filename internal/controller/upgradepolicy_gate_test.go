@@ -24,14 +24,14 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 
 	t.Run("manual holds a profile-driven roll", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		client.profiles = map[string]*v1alpha1.JenkinsVersionProfile{
 			"p1": {
 				ObjectMeta: metav1.ObjectMeta{Name: "p1"},
 				Spec: v1alpha1.JenkinsVersionProfileSpec{
-					Version:        "2.570",
-					ResolveVersion: "2.570.2",
+					Version:        "2.588",
+					ResolveVersion: "2.588.2",
 				},
 			},
 		}
@@ -40,7 +40,7 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 		}
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570"
+		cr.Spec.Version = "2.588"
 
 		if rec.reconcileVersionRoll(ctx, cr) {
 			t.Fatal("expected no transition: upgradePolicy=manual must hold the roll")
@@ -60,14 +60,14 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 
 	t.Run("clears on convergence regardless of cause", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.2"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.2"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.2"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.2"}
 		client.profiles = map[string]*v1alpha1.JenkinsVersionProfile{
 			"p1": {
 				ObjectMeta: metav1.ObjectMeta{Name: "p1"},
 				Spec: v1alpha1.JenkinsVersionProfileSpec{
-					Version:        "2.570",
-					ResolveVersion: "2.570.2",
+					Version:        "2.588",
+					ResolveVersion: "2.588.2",
 				},
 			},
 		}
@@ -76,7 +76,7 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 		}
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570"
+		cr.Spec.Version = "2.588"
 		// Pre-seed a held state as if a previous reconcile had held it.
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type:   v1alpha1.ConditionUpgradePending,
@@ -95,14 +95,14 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 
 	t.Run("resourceOverlay-governed image always proceeds", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		client.profiles = map[string]*v1alpha1.JenkinsVersionProfile{
 			"p1": {
 				ObjectMeta: metav1.ObjectMeta{Name: "p1"},
 				Spec: v1alpha1.JenkinsVersionProfileSpec{
-					Version:        "2.570",
-					ResolveVersion: "2.570.2",
+					Version:        "2.588",
+					ResolveVersion: "2.588.2",
 				},
 			},
 		}
@@ -111,7 +111,7 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 		}
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570"
+		cr.Spec.Version = "2.588"
 		cr.Spec.ResourceOverlay = &v1alpha1.ResourceOverlay{
 			StatefulSet: "spec:\n  template:\n    spec:\n      containers:\n      - name: jenkins\n        image: my-reg/custom:1.0\n",
 		}
@@ -126,14 +126,14 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 
 	t.Run("ProvisioningDefaults read error holds fail-safe", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		client.profiles = map[string]*v1alpha1.JenkinsVersionProfile{
 			"p1": {
 				ObjectMeta: metav1.ObjectMeta{Name: "p1"},
 				Spec: v1alpha1.JenkinsVersionProfileSpec{
-					Version:        "2.570",
-					ResolveVersion: "2.570.2",
+					Version:        "2.588",
+					ResolveVersion: "2.588.2",
 				},
 			},
 		}
@@ -145,7 +145,7 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 		client.store.FailAlways("get", pdGVR, errors.New("etcdserver: request timed out"))
 
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570"
+		cr.Spec.Version = "2.588"
 
 		if rec.reconcileVersionRoll(ctx, cr) {
 			t.Fatal("expected no transition: an unreadable ProvisioningDefaults must fail safe and hold")
@@ -166,14 +166,14 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 
 	t.Run("matching release annotation allows a manual-held roll and clears it", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		client.profiles = map[string]*v1alpha1.JenkinsVersionProfile{
 			"p1": {
 				ObjectMeta: metav1.ObjectMeta{Name: "p1"},
 				Spec: v1alpha1.JenkinsVersionProfileSpec{
-					Version:        "2.570",
-					ResolveVersion: "2.570.2",
+					Version:        "2.588",
+					ResolveVersion: "2.588.2",
 				},
 			},
 		}
@@ -182,8 +182,8 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 		}
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570"
-		cr.Annotations = map[string]string{"varroa.dev/upgrade-release": "jenkins/jenkins:2.570.2"}
+		cr.Spec.Version = "2.588"
+		cr.Annotations = map[string]string{"varroa.dev/upgrade-release": "jenkins/jenkins:2.588.2"}
 		crdstore.MustSeed(client.store, cr)
 
 		if !rec.reconcileVersionRoll(ctx, cr) {
@@ -204,14 +204,14 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 
 	t.Run("matching release annotation short-circuits an unreadable ProvisioningDefaults", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		client.profiles = map[string]*v1alpha1.JenkinsVersionProfile{
 			"p1": {
 				ObjectMeta: metav1.ObjectMeta{Name: "p1"},
 				Spec: v1alpha1.JenkinsVersionProfileSpec{
-					Version:        "2.570",
-					ResolveVersion: "2.570.2",
+					Version:        "2.588",
+					ResolveVersion: "2.588.2",
 				},
 			},
 		}
@@ -223,8 +223,8 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 		client.store.FailAlways("get", pdGVR, errors.New("etcdserver: request timed out"))
 
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570"
-		cr.Annotations = map[string]string{"varroa.dev/upgrade-release": "jenkins/jenkins:2.570.2"}
+		cr.Spec.Version = "2.588"
+		cr.Annotations = map[string]string{"varroa.dev/upgrade-release": "jenkins/jenkins:2.588.2"}
 		crdstore.MustSeed(client.store, cr)
 
 		if !rec.reconcileVersionRoll(ctx, cr) {
@@ -234,14 +234,14 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 
 	t.Run("release annotation clear failure holds the roll without allowing it", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		client.profiles = map[string]*v1alpha1.JenkinsVersionProfile{
 			"p1": {
 				ObjectMeta: metav1.ObjectMeta{Name: "p1"},
 				Spec: v1alpha1.JenkinsVersionProfileSpec{
-					Version:        "2.570",
-					ResolveVersion: "2.570.2",
+					Version:        "2.588",
+					ResolveVersion: "2.588.2",
 				},
 			},
 		}
@@ -254,8 +254,8 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 			t.Fatalf("GVRFor: %v", err)
 		}
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570"
-		cr.Annotations = map[string]string{"varroa.dev/upgrade-release": "jenkins/jenkins:2.570.2"}
+		cr.Spec.Version = "2.588"
+		cr.Annotations = map[string]string{"varroa.dev/upgrade-release": "jenkins/jenkins:2.588.2"}
 		crdstore.MustSeed(client.store, cr)
 		client.store.FailAlways("patchmeta", ctrlGVR, errors.New("etcdserver: request timed out"))
 
@@ -271,14 +271,14 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 
 	t.Run("non-matching release annotation falls through to upgradePolicy: manual", func(t *testing.T) {
 		client := newTestClient()
-		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
-		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.570.1"}
+		client.stsComputedImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
+		client.stsLiveImages = map[string]string{"jenkins": "jenkins/jenkins:2.588.1"}
 		client.profiles = map[string]*v1alpha1.JenkinsVersionProfile{
 			"p1": {
 				ObjectMeta: metav1.ObjectMeta{Name: "p1"},
 				Spec: v1alpha1.JenkinsVersionProfileSpec{
-					Version:        "2.570",
-					ResolveVersion: "2.570.2",
+					Version:        "2.588",
+					ResolveVersion: "2.588.2",
 				},
 			},
 		}
@@ -287,7 +287,7 @@ func TestUpgradePolicyVersionRollGate(t *testing.T) {
 		}
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
-		cr.Spec.Version = "2.570"
+		cr.Spec.Version = "2.588"
 		cr.Annotations = map[string]string{"varroa.dev/upgrade-release": "jenkins/jenkins:9.9.9"}
 		crdstore.MustSeed(client.store, cr)
 

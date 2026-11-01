@@ -362,10 +362,10 @@ jobs:
       fail-fast: false
       matrix:
         profile:
-          - name: "2-555"
-            version: "2.555"
-          - name: "2-570"
-            version: "2.570"
+          - name: "2-580"
+            version: "2.580"
+          - name: "2-588"
+            version: "2.588"
     # Packs are one of three routes that populate an update center (pull-through
     # and varroactl import/upload are the others), and nothing in this workflow
     # depends on this job — it never gated image publishing. Soft-failing gives

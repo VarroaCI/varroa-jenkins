@@ -5,7 +5,7 @@ import (
 )
 
 func TestResolve_ExactMatch(t *testing.T) {
-	set, matched := Resolve("2.570")
+	set, matched := Resolve("2.588")
 	if !matched {
 		t.Error("expected matched=true for exact version key")
 	}
@@ -138,7 +138,7 @@ func TestParsedLock_SeedMembership(t *testing.T) {
 }
 
 func TestResolve_SortedOutput(t *testing.T) {
-	set, _ := Resolve("2.570")
+	set, _ := Resolve("2.588")
 	for i := 1; i < len(set); i++ {
 		if set[i-1].ArtifactID >= set[i].ArtifactID {
 			t.Errorf("output not sorted: %q >= %q", set[i-1].ArtifactID, set[i].ArtifactID)
@@ -154,7 +154,7 @@ func TestResolve_SortedOutput(t *testing.T) {
 // Resolve's key selection (exact → ""/"lts" → baseline) and deliberately not
 // the LTS-line chain that lives in versionresolve.go.
 func TestBootstrap_KeySelectionMatchesResolve(t *testing.T) {
-	for _, v := range []string{"2.570", "2.555", "", "lts", "9.9.9-unknown", "2.5"} {
+	for _, v := range []string{"2.588", "2.580", "", "lts", "9.9.9-unknown", "2.5"} {
 		_, resolveMatched := Resolve(v)
 		entries, bootstrapMatched := Bootstrap(v)
 		if resolveMatched != bootstrapMatched {
@@ -167,7 +167,7 @@ func TestBootstrap_KeySelectionMatchesResolve(t *testing.T) {
 }
 
 func TestBootstrap_RootFirstWithoutMins(t *testing.T) {
-	entries, matched := Bootstrap("2.555")
+	entries, matched := Bootstrap("2.580")
 	if !matched {
 		t.Fatal("expected matched=true for an exact key")
 	}
@@ -186,7 +186,7 @@ func TestBootstrap_RootFirstWithoutMins(t *testing.T) {
 // enforces offline: every member is present in the set's plugin list at exactly
 // the recorded version.
 func TestBootstrap_MembersArePinnedInTheSameSet(t *testing.T) {
-	for _, v := range []string{"2.555", "2.570"} {
+	for _, v := range []string{"2.580", "2.588"} {
 		set, _ := Resolve(v)
 		pins := map[string]string{}
 		for _, p := range set {
@@ -213,7 +213,7 @@ func TestBootstrap_MembersArePinnedInTheSameSet(t *testing.T) {
 // protect: mailer and its transitive mandatory dependencies. The optional
 // configuration-as-code dependency must NOT be traversed.
 func TestBootstrap_MandatoryClosureIsComplete(t *testing.T) {
-	entries, _ := Bootstrap("2.555")
+	entries, _ := Bootstrap("2.580")
 	got := map[string]bool{}
 	for _, e := range entries {
 		got[e.ArtifactID] = true
@@ -230,12 +230,12 @@ func TestBootstrap_MandatoryClosureIsComplete(t *testing.T) {
 
 // TestBootstrap_ReturnsACopy guards the embedded lock against caller mutation.
 func TestBootstrap_ReturnsACopy(t *testing.T) {
-	a, _ := Bootstrap("2.555")
+	a, _ := Bootstrap("2.580")
 	a[1].ArtifactID = "mutated"
 	if len(a[1].Mins) > 0 {
 		a[1].Mins[0] = "mutated"
 	}
-	b, _ := Bootstrap("2.555")
+	b, _ := Bootstrap("2.580")
 	if b[1].ArtifactID == "mutated" || (len(b[1].Mins) > 0 && b[1].Mins[0] == "mutated") {
 		t.Error("Bootstrap must return a copy of the embedded lock")
 	}

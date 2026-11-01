@@ -19,9 +19,9 @@ Set `approvedSignatures` on the `CellPool`. Each entry is one script-security si
 apiVersion: varroa.dev/v1alpha1
 kind: CellPool
 metadata:
-  name: lts-2-555
+  name: lts-2-580
 spec:
-  profileRef: lts-2-555
+  profileRef: lts-2-580
   warm: 2
   approvedSignatures:
     - method hudson.Util getHost

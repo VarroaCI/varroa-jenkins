@@ -9,6 +9,6 @@ metadata:
   namespace: varroa-tenants
 spec:
   namespace: varroa-tenants
-  version: "2.555"               # must match the seeded version profile
+  version: "2.580"               # must match the seeded version profile
   persistence:
     size: 20Gi

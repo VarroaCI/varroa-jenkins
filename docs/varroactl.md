@@ -145,7 +145,7 @@ top-level verb `scale`:
 varroactl get cellpools
 varroactl describe cellpool jenkins-lts
 varroactl scale cellpool jenkins-lts --warm 3 --max-cells 8
-varroactl scale cellpool lts-2-570 --cluster east --warm 2
+varroactl scale cellpool lts-2-588 --cluster east --warm 2
 ```
 
 `get cellpools` prints `CLUSTER`, `NAME`, `PROFILE`, `WARM`, `PLACED`, `FREE`, and `READY` for
@@ -191,7 +191,7 @@ A username and password Secret needs the `varroa.dev/allowed-hosts` annotation. 
 
 ```bash
 varroactl export release --version 3.0.0 --values values-prod.yaml \
-  --profile jenkins-version-2-570 --to tar:///transfer/varroa-3.0.0.tar.gz
+  --profile jenkins-version-2-588 --to tar:///transfer/varroa-3.0.0.tar.gz
 
 varroactl import release --from tar:///transfer/varroa-3.0.0.tar.gz \
   --to oci://registry.example.com/varroa --manifest-digest sha256:<digest>

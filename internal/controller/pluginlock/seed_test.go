@@ -144,6 +144,28 @@ func TestSeeds_PluginsMatchLock(t *testing.T) {
 	}
 }
 
+// TestBaseline_NamesAnExactWeeklySeed verifies the baseline names a weekly
+// seed. An unpinned controller deploys the baseline core, so the baseline seed
+// must be an exact weekly release, not an LTS line.
+func TestBaseline_NamesAnExactWeeklySeed(t *testing.T) {
+	var found *SeedProfile
+	for _, s := range Seeds() {
+		if s.Version == Baseline() {
+			found = &s
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no seed for baseline %q", Baseline())
+	}
+	if found.Spec.Channel != "weekly" {
+		t.Errorf("baseline seed %q channel = %q, want weekly", Baseline(), found.Spec.Channel)
+	}
+	if found.Spec.ResolveVersion != "" {
+		t.Errorf("baseline seed %q resolveVersion = %q, want empty (exact pin)", Baseline(), found.Spec.ResolveVersion)
+	}
+}
+
 // TestSeeds_HoldQualityPlugins checks that each seed carries the core and
 // plugin pins that run quality reports need on a cell. A seed without them
 // would lose the recordCoverage and recordIssues steps.

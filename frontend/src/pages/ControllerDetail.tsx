@@ -1711,7 +1711,7 @@ export function VersionCard({ ctrl, canUpdate }: { ctrl: NonNullable<ReturnType<
   // pinned plugin list (plugins[]) for BOTH the current-version-matching profile
   // and the target profile, diff them client-side. Profiles are matched to a
   // version with the same dotted-prefix rule as the drift indicator, so an LTS
-  // line profile (2.555) matches a 3-segment patch (2.555.1).
+  // line profile (2.580) matches a 3-segment patch (2.580.1).
   const matchProfile = (ver?: string) =>
     ver ? (profiles ?? []).find((p) => !versionsDiffer(p.version, ver)) : undefined;
   const curProfile = matchProfile(ctrl.version);

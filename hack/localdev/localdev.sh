@@ -286,7 +286,7 @@ seed_updatecenter() {
       return 1
     fi
   else
-    if ! bin/varroactl import --from "oci://ghcr.io/varroaci/varroa-jenkins/plugin-pack:jenkins-version-2-555" \
+    if ! bin/varroactl import --from "oci://ghcr.io/varroaci/varroa-jenkins/plugin-pack:2-580" \
         --to uc://localhost:8080; then
       echo "WARNING: seed pack import failed, continuing — sample controller will rely on pull-through" >&2
     fi

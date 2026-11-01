@@ -12,7 +12,7 @@ files.
 
 ```bash
 varroactl export plugins \
-  --profile jenkins-version-2-555 \
+  --profile jenkins-version-2-580 \
   --to oci://ghcr.io/varroaci/plugin-pack
 ```
 
@@ -47,7 +47,7 @@ Sources and destinations support `oci://`, `dir://`, and `tar://`:
 
 ```bash
 varroactl import \
-  --from oci://ghcr.io/varroaci/plugin-pack:jenkins-version-2-555 \
+  --from oci://ghcr.io/varroaci/plugin-pack:jenkins-version-2-580 \
   --to dir:///tmp/plugin-pack
 ```
 
@@ -56,7 +56,7 @@ Upload to an update center with a destination-only `uc://` URL:
 ```bash
 export VARROACTL_UC_TOKEN='<import-token>'
 varroactl import \
-  --from tar:///tmp/plugin-pack-2-555.tar.gz \
+  --from tar:///tmp/plugin-pack-2-580.tar.gz \
   --to uc://update-center.example.com
 ```
 
