@@ -177,7 +177,7 @@ func TestEvaluateCoreCompat(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			res := EvaluateCoreCompat(tc.version, tc.profile, tc.kind, tc.pluginSetReady, baseline)
+			res := EvaluateCoreCompat(tc.version, tc.profile, tc.kind, tc.pluginSetReady, baseline, "")
 			if res.Verdict != tc.wantVerdict {
 				t.Errorf("Verdict = %v, want %v", res.Verdict, tc.wantVerdict)
 			}
@@ -200,5 +200,97 @@ func TestEvaluateCoreCompat(t *testing.T) {
 func TestProfilePluginSetReady(t *testing.T) {
 	if ProfilePluginSetReady(nil) {
 		t.Error("ProfilePluginSetReady(nil) should be false")
+	}
+}
+
+func TestEvaluateCoreCompat_SupportedFloor(t *testing.T) {
+	const (
+		baseline = "2.588"
+		floor    = "2.580.2"
+	)
+	readyProfile := func(version, resolve string) *v1alpha1.JenkinsVersionProfile {
+		return &v1alpha1.JenkinsVersionProfile{
+			ObjectMeta: metav1.ObjectMeta{Name: "floor-profile"},
+			Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: version, ResolveVersion: resolve},
+		}
+	}
+	tests := []struct {
+		name        string
+		version     string
+		profile     *v1alpha1.JenkinsVersionProfile
+		kind        MatchKind
+		ready       bool
+		floor       string
+		wantVerdict CompatVerdict
+		wantReason  string
+	}{
+		{
+			name:        "ready profile resolving below the floor",
+			version:     "2.555",
+			profile:     readyProfile("2.555", "2.555.3"),
+			kind:        MatchLine,
+			ready:       true,
+			floor:       floor,
+			wantVerdict: CompatUnsafe,
+			wantReason:  v1alpha1.ReasonCoreBelowSupportedFloor,
+		},
+		{
+			name:        "profile at the floor",
+			version:     "2.580",
+			profile:     readyProfile("2.580", "2.580.2"),
+			kind:        MatchLine,
+			ready:       true,
+			floor:       floor,
+			wantVerdict: CompatOK,
+			wantReason:  v1alpha1.ReasonCoreCompatible,
+		},
+		{
+			name:        "floor disabled keeps the old behavior",
+			version:     "2.555",
+			profile:     readyProfile("2.555", "2.555.3"),
+			kind:        MatchLine,
+			ready:       true,
+			floor:       "",
+			wantVerdict: CompatOK,
+			wantReason:  v1alpha1.ReasonCoreCompatible,
+		},
+		{
+			name:        "unpinned lts is never refused by the floor",
+			version:     "lts",
+			profile:     nil,
+			kind:        MatchBaseline,
+			floor:       floor,
+			wantVerdict: CompatOK,
+			wantReason:  v1alpha1.ReasonCoreCompatible,
+		},
+		{
+			name:        "unprofiled version between the floor and the baseline",
+			version:     "2.585",
+			profile:     nil,
+			kind:        MatchBaseline,
+			floor:       floor,
+			wantVerdict: CompatUnsafe,
+			wantReason:  v1alpha1.ReasonCoreOlderThanPluginBaseline,
+		},
+		{
+			name:        "unparseable version",
+			version:     "fancy",
+			profile:     nil,
+			kind:        MatchBaseline,
+			floor:       floor,
+			wantVerdict: CompatUnknown,
+			wantReason:  v1alpha1.ReasonUnparseableVersion,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			res := EvaluateCoreCompat(tc.version, tc.profile, tc.kind, tc.ready, baseline, tc.floor)
+			if res.Verdict != tc.wantVerdict {
+				t.Errorf("Verdict = %v, want %v", res.Verdict, tc.wantVerdict)
+			}
+			if res.Reason != tc.wantReason {
+				t.Errorf("Reason = %q, want %q", res.Reason, tc.wantReason)
+			}
+		})
 	}
 }

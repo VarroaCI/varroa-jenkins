@@ -49,7 +49,8 @@ type CompatResult struct {
 //   - kind:    how the profile was matched (MatchBaseline when no profile).
 //   - pluginSetReady: whether the profile's plugin set is materialized.
 //   - baseline: the embedded plugin lock baseline version string.
-func EvaluateCoreCompat(version string, profile *v1alpha1.JenkinsVersionProfile, kind MatchKind, pluginSetReady bool, baseline string) CompatResult {
+//   - floor: the supported floor core. An empty floor turns the floor check off.
+func EvaluateCoreCompat(version string, profile *v1alpha1.JenkinsVersionProfile, kind MatchKind, pluginSetReady bool, baseline string, floor string) CompatResult {
 	v := strings.TrimSpace(version)
 
 	// Unpinned version — always compatible; core and plugin set both come from
@@ -61,6 +62,27 @@ func EvaluateCoreCompat(version string, profile *v1alpha1.JenkinsVersionProfile,
 			EffectiveSource: baseline,
 			UsingBaseline:   true,
 			Message:         "version unpinned; deploys the embedded plugin-lock baseline core, compatible",
+		}
+	}
+
+	// The supported floor refuses a core that the default profiles do not
+	// support. A baseline match has no profile, so its core is the spec version.
+	p := profile
+	if kind == MatchBaseline {
+		p = nil
+	}
+	if floor != "" {
+		resolved := deployedCore(v, p)
+		core, okCore := jenkinsver.Core(resolved)
+		fl, okFloor := jenkinsver.Core(floor)
+		if okCore && okFloor && jenkinsver.Compare(core, fl) < 0 {
+			return CompatResult{
+				Verdict:         CompatUnsafe,
+				Reason:          v1alpha1.ReasonCoreBelowSupportedFloor,
+				EffectiveSource: baseline,
+				UsingBaseline:   true,
+				Message:         fmt.Sprintf("core %s is below the supported floor %s; set spec.version to a supported version", resolved, floor),
+			}
 		}
 	}
 
@@ -113,7 +135,7 @@ func EvaluateCoreCompat(version string, profile *v1alpha1.JenkinsVersionProfile,
 // reconciliation path.
 func (r *Reconciler) evaluateVersionRollGate(ctx context.Context, cr *v1alpha1.Controller, currentImage, targetImage string) (bool, string, string) {
 	profile, kind := r.resolveProfileForCr(cr)
-	res := EvaluateCoreCompat(cr.Spec.Version, profile, kind, ProfilePluginSetReady(profile), pluginlock.Baseline())
+	res := EvaluateCoreCompat(cr.Spec.Version, profile, kind, ProfilePluginSetReady(profile), pluginlock.Baseline(), pluginlock.SupportedFloor())
 	r.setVersionUpgradeBlocked(cr, res)
 	if res.Verdict == CompatOK {
 		return true, "", ""

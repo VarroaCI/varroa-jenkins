@@ -3581,7 +3581,7 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 	// vouching profile) would crash-loop plugins-init. Block BEFORE the
 	// plugins.txt write and all StatefulSet work later in this function, so a
 	// deny never rolls anything. The condition is (re)written every pass.
-	compat := EvaluateCoreCompat(cr.Spec.Version, profile, matchKind, ProfilePluginSetReady(profile), pluginlock.Baseline())
+	compat := EvaluateCoreCompat(cr.Spec.Version, profile, matchKind, ProfilePluginSetReady(profile), pluginlock.Baseline(), pluginlock.SupportedFloor())
 	r.setVersionUpgradeBlocked(cr, compat)
 	if compat.Verdict != CompatOK {
 		r.persistStatusDiagnostics(ctx, cr)

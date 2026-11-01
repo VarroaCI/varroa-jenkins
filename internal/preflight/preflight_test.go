@@ -334,6 +334,14 @@ func TestCheckPluginCoreCompat_Table(t *testing.T) {
 		{name: "P6 no profile below", version: below, wantStatus: "fail"},
 		// P7: unparseable no profile -> warn
 		{name: "P7 unparseable", version: "fancy", wantStatus: "warn"},
+		// Supported floor: a ready profile that resolves below the floor -> fail.
+		{name: "floor ready profile below", version: "2.555", profiles: []*v1alpha1.JenkinsVersionProfile{
+			{Spec: v1alpha1.JenkinsVersionProfileSpec{Version: "2.555", ResolveVersion: "2.555.3"}, Status: v1alpha1.JenkinsVersionProfileStatus{Conditions: []v1alpha1.JenkinsVersionProfileCondition{{Type: "PluginSetReady", Status: metav1.ConditionTrue}}}},
+		}, wantStatus: "fail"},
+		// Supported floor: an update that keeps the same below-floor version -> warn.
+		{name: "floor below unchanged on update", version: "2.555", forUpdate: true, priorVer: "2.555", profiles: []*v1alpha1.JenkinsVersionProfile{
+			{Spec: v1alpha1.JenkinsVersionProfileSpec{Version: "2.555", ResolveVersion: "2.555.3"}, Status: v1alpha1.JenkinsVersionProfileStatus{Conditions: []v1alpha1.JenkinsVersionProfileCondition{{Type: "PluginSetReady", Status: metav1.ConditionTrue}}}},
+		}, wantStatus: "warn"},
 		// ForUpdate leniency: below + same prior -> warn
 		{name: "ForUpdate same version below", version: below, forUpdate: true, priorVer: below, profiles: []*v1alpha1.JenkinsVersionProfile{
 			{Spec: v1alpha1.JenkinsVersionProfileSpec{Version: below}},

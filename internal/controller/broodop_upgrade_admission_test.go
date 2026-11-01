@@ -35,9 +35,9 @@ func lineProfile(version string) *v1alpha1.JenkinsVersionProfile {
 }
 
 func TestReconcilePendingUpgrade_ExactMatchPassesAdmission(t *testing.T) {
-	op := upgradeOpWithVersion("2.570")
+	op := upgradeOpWithVersion("2.588")
 	rec, fc, _ := newBORec(t, op, testCtrl2("c1", "team-a", v1alpha1.ControllerPhaseConnected))
-	crdstore.MustSeed(fc.store, lineProfile("2.570"))
+	crdstore.MustSeed(fc.store, lineProfile("2.588"))
 
 	if err := rec.reconcilePending(context.Background(), op); err != nil {
 		t.Fatalf("reconcilePending: %v", err)
@@ -51,9 +51,9 @@ func TestReconcilePendingUpgrade_ExactMatchPassesAdmission(t *testing.T) {
 }
 
 func TestReconcilePendingUpgrade_LineMatchPassesAdmission(t *testing.T) {
-	op := upgradeOpWithVersion("2.570.5")
+	op := upgradeOpWithVersion("2.588.5")
 	rec, fc, _ := newBORec(t, op, testCtrl2("c1", "team-a", v1alpha1.ControllerPhaseConnected))
-	crdstore.MustSeed(fc.store, lineProfile("2.570"))
+	crdstore.MustSeed(fc.store, lineProfile("2.588"))
 
 	if err := rec.reconcilePending(context.Background(), op); err != nil {
 		t.Fatalf("reconcilePending: %v", err)
@@ -63,6 +63,27 @@ func TestReconcilePendingUpgrade_LineMatchPassesAdmission(t *testing.T) {
 	}
 	if len(op.Status.Targets) == 0 {
 		t.Error("a passing admission must proceed to target resolution")
+	}
+}
+
+// A targetVersion that matches a profile but resolves below the supported
+// floor fails the operation before any target is touched.
+func TestReconcilePendingUpgrade_BelowFloorFailsAdmission(t *testing.T) {
+	op := upgradeOpWithVersion("2.555.3")
+	rec, fc, _ := newBORec(t, op, testCtrl2("c1", "team-a", v1alpha1.ControllerPhaseConnected))
+	crdstore.MustSeed(fc.store, lineProfile("2.555"))
+
+	if err := rec.reconcilePending(context.Background(), op); err != nil {
+		t.Fatalf("reconcilePending: %v", err)
+	}
+	if op.Status.Phase != v1alpha1.BroodOperationPhaseFailed {
+		t.Fatalf("phase = %q, want Failed", op.Status.Phase)
+	}
+	if op.Status.Reason != "TargetVersionBelowFloor" {
+		t.Errorf("reason = %q, want TargetVersionBelowFloor", op.Status.Reason)
+	}
+	if len(op.Status.Targets) != 0 {
+		t.Error("a refused admission must not snapshot any target")
 	}
 }
 

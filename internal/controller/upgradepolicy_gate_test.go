@@ -341,7 +341,7 @@ func funcSourceSHA256(t *testing.T, file, fn string) string {
 // computePluginRollGate. If either function's body changes, this test fails
 // and the hash below must be re-derived deliberately, not silently updated.
 func TestEvaluateVersionRollGateAndComputePluginRollGate_Unmodified(t *testing.T) {
-	const wantEvaluateVersionRollGate = "d74522dd6531a0d3c7aa8309927023ef4ca55755acb5ef2da01dc35041337e02"
+	const wantEvaluateVersionRollGate = "c534af674bb2d911342f6ce3819835ece0467768fd4892f1f67083577ce9dfc2"
 	const wantComputePluginRollGate = "6badd461f1c6e8569eb269562a8b469836c355db85f72f4f863f4c1c2c38410a"
 
 	if got := funcSourceSHA256(t, "corecompat.go", "evaluateVersionRollGate"); got != wantEvaluateVersionRollGate {

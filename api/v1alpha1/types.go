@@ -1020,6 +1020,8 @@ const (
 	ReasonMiteSpecConverged = "MiteSpecConverged"
 	// ReasonCoreOlderThanPluginBaseline is set when core(spec.version) < plugin-set baseline (a crash-inducing mismatch).
 	ReasonCoreOlderThanPluginBaseline = "CoreOlderThanPluginBaseline"
+	// ReasonCoreBelowSupportedFloor is set when core(spec.version) is older than the supported floor.
+	ReasonCoreBelowSupportedFloor = "CoreBelowSupportedFloor"
 	// ReasonUnparseableVersion is set when spec.version is unparseable and no profile vouches for it.
 	ReasonUnparseableVersion = "UnparseableVersion"
 	// ReasonCoreCompatible is set (with VersionUpgradeBlocked=False) when the requested core is compatible.

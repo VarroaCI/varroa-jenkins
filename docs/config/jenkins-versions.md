@@ -55,6 +55,10 @@ seeds, then resolve normally.
 
 An operator upgrade can drop a default profile. The seeder does not delete the old profile or its pluginset ConfigMap. Controllers, cell pools, and tenants that name the old profile keep running on it. Move each of them to a current profile, then delete the old profile and its ConfigMap.
 
+## Supported floor
+
+The supported floor is the oldest Jenkins core that the embedded default profiles deploy. The operator computes it at build time from those profiles. A controller whose core is below the floor is refused at provisioning and at a version roll. Its `VersionUpgradeBlocked` condition is `True` with reason `CoreBelowSupportedFloor`. The running pod is not changed. A brood upgrade whose `targetVersion` matches a profile, but resolves below the floor, fails with reason `TargetVersionBelowFloor`. The `varroa-mite-auth` plugin builds against the current LTS core, so a controller on an older core cannot run it.
+
 ## Create a profile
 
 Create a ConfigMap in the operator namespace. Its `plugins.yaml` must contain a

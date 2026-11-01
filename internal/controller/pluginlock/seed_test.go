@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/varroaci/varroa-jenkins/internal/jenkinsver"
 )
 
 // TestSeeds_ParsesWithoutError verifies Seeds() returns exactly one entry per
@@ -198,5 +200,38 @@ func TestSeeds_HoldQualityPlugins(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestSupportedFloor_IsOldestSeedCore verifies SupportedFloor names the lowest
+// core that any seed deploys, and that no seed deploys below it.
+func TestSupportedFloor_IsOldestSeedCore(t *testing.T) {
+	floor := SupportedFloor()
+	floorSegs, ok := jenkinsver.Core(floor)
+	if !ok {
+		t.Fatalf("SupportedFloor() = %q, want a parseable core", floor)
+	}
+	seen := false
+	for _, s := range Seeds() {
+		core := s.Spec.ResolveVersion
+		if core == "" {
+			core = s.Spec.Version
+		}
+		segs, ok := jenkinsver.Core(core)
+		if !ok {
+			t.Fatalf("seed %s deploys unparseable core %q", s.Version, core)
+		}
+		if jenkinsver.Compare(segs, floorSegs) < 0 {
+			t.Errorf("seed %s deploys %s, below the floor %s", s.Version, core, floor)
+		}
+		if core == floor {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Errorf("SupportedFloor() = %q matches no seed core", floor)
+	}
+	if floor != "2.580.2" {
+		t.Errorf("SupportedFloor() = %q, want 2.580.2 for the shipped seeds", floor)
 	}
 }

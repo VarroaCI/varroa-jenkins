@@ -34,6 +34,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins"
+	"github.com/varroaci/varroa-jenkins/internal/jenkinsver"
 	"github.com/varroaci/varroa-jenkins/internal/mite"
 	"github.com/varroaci/varroa-jenkins/internal/overlay"
 )
@@ -437,7 +438,8 @@ func (r *BroodOperationReconciler) reconcilePending(ctx context.Context, op *v1a
 				r.emitRunFinished(op)
 				return r.patchStatus(ctx, op)
 			}
-			if _, match := ResolveProfile(tv, profiles); match != MatchExact && match != MatchLine {
+			profile, match := ResolveProfile(tv, profiles)
+			if match != MatchExact && match != MatchLine {
 				op.Status.Phase = v1alpha1.BroodOperationPhaseFailed
 				op.Status.Reason = "TargetVersionUnresolved"
 				now := metav1.NewTime(r.now())
@@ -445,6 +447,18 @@ func (r *BroodOperationReconciler) reconcilePending(ctx context.Context, op *v1a
 				r.updateSummary(op)
 				r.emitRunFinished(op)
 				return r.patchStatus(ctx, op)
+			}
+			// A target below the supported floor is refused for every target.
+			if core, ok := jenkinsver.Core(deployedCore(tv, profile)); ok {
+				if floor, okFloor := jenkinsver.Core(pluginlock.SupportedFloor()); okFloor && jenkinsver.Compare(core, floor) < 0 {
+					op.Status.Phase = v1alpha1.BroodOperationPhaseFailed
+					op.Status.Reason = "TargetVersionBelowFloor"
+					now := metav1.NewTime(r.now())
+					op.Status.FinishedAt = &now
+					r.updateSummary(op)
+					r.emitRunFinished(op)
+					return r.patchStatus(ctx, op)
+				}
 			}
 		}
 	}
