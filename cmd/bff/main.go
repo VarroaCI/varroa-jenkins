@@ -60,11 +60,9 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/forgerelay"
 	"github.com/varroaci/varroa-jenkins/internal/logging"
 	mcp "github.com/varroaci/varroa-jenkins/internal/mcp"
-	mitesrv "github.com/varroaci/varroa-jenkins/internal/mite"
 	rbac "github.com/varroaci/varroa-jenkins/internal/rbac"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
-	"github.com/varroaci/varroa-jenkins/internal/signing"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 	tenantagentcache "github.com/varroaci/varroa-jenkins/internal/tenantagent/cache"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
@@ -255,34 +253,18 @@ func main() {
 	readModel := transport.NewBusReadModel(cluster, busConn, snapshotKV, presenceKV)
 	miteTransport := transport.NewBusReadModelTransport(readModel)
 
-	// Load the shared mite signing key for local auth mode user JWT issuance.
-	// Token refresh grants are operator-owned in bus mode; the BFF does not
-	// respond to mite TokenRefreshRequest messages.
-	// The operator creates this Secret; the BFF reads it to share the same KID.
-	var tokenSigner *mitesrv.MiteTokenSigner
-	{
-		deadline := time.Now().Add(60 * time.Second)
-		for {
-			keyData, err := client.GetSecret(context.Background(), "varroa-mite-signing-key", operatorNamespace)
-			if err == nil && len(keyData["private-key"]) > 0 {
-				tokenSigner, err = mitesrv.NewMiteTokenSignerFromPEM(keyData["private-key"])
-				if err != nil {
-					logger.Error("failed to load mite signing key", "error", err)
-					os.Exit(1)
-				}
-				logger.Info("loaded mite signing key", "kid", tokenSigner.KID())
-				break
-			}
-			if time.Now().After(deadline) {
-				logger.Warn("mite signing key not available, token refresh will not work")
-				break
-			}
-			time.Sleep(2 * time.Second)
-		}
+	// Every auth mode needs the shared mite signing key. The BFF signs stream
+	// tickets, local sessions, and Jenkins tokens with it, and verifies schedule
+	// tokens with it. The operator creates the Secret. The BFF only reads it.
+	tokenSigner, err := loadMiteSigningKey(context.Background(), clientsetClient.Clientset(), operatorNamespace,
+		signingKeyWaitTimeout, signingKeyPoll, logger)
+	if err != nil {
+		logger.Error("failed to load the mite signing key; exiting so Kubernetes restarts the BFF",
+			"namespace", operatorNamespace, "secret", miteSigningKeySecretName, "error", err)
+		os.Exit(1)
 	}
-	if tokenSigner != nil {
-		logger.Info("loaded mite signing key for local auth", "kid", tokenSigner.KID())
-	}
+	logger.Info("loaded mite signing key from Secret",
+		"namespace", operatorNamespace, "secret", miteSigningKeySecretName, "kid", tokenSigner.KID())
 
 	// --- SSE bus fanout (replaces Broadcaster) ---
 	fanout := sse.NewBusFanout(busConn)
@@ -291,11 +273,10 @@ func main() {
 	defer cancel()
 	// The assistant runtime is built before the fanout starts, so the fanout
 	// subscribes to the session notices only when the assistant is on.
-	assistantPEM := ""
-	if tokenSigner != nil {
-		if pem, err := tokenSigner.Signer().PrivateKeyPEM(); err == nil {
-			assistantPEM = pem
-		}
+	assistantPEM, err := tokenSigner.Signer().PrivateKeyPEM()
+	if err != nil {
+		logger.Error("failed to export the mite signing key for the assistant", "error", err)
+		os.Exit(1)
 	}
 	assistantRT, err := buildAssistant(ctx, os.Getenv("VARROA_ASSISTANT_CONFIG"), os.Getenv("VARROA_RECORDSTORE_DSN"),
 		cluster, assistantPEM, busConn.Publish, logger)
@@ -898,22 +879,12 @@ func main() {
 
 	// --- Auth provider construction ---
 	var provider auth.Provider
-	var signer *signing.Signer
-	if tokenSigner != nil {
-		signer = tokenSigner.Signer()
-	}
-	var scheduleVerifier auth.ScheduleVerifier
-	if signer != nil {
-		scheduleVerifier = schedule.NewVerifier(signer)
-	}
+	signer := tokenSigner.Signer()
+	scheduleVerifier := schedule.NewVerifier(signer)
 	switch *authMode {
 	case "local":
 		if *bffURL == "" {
 			logger.Error("--bff-url is required in local auth mode")
-			os.Exit(1)
-		}
-		if signer == nil {
-			logger.Error("signing key not available for local auth; ensure the operator Secret exists")
 			os.Exit(1)
 		}
 		lp := localpkg.New(signer, bffUserStore{clientsetClient, client}, operatorNamespace, *bffURL, *oidcClientID, 8*time.Hour, *oidcCookieDomain)
@@ -936,10 +907,6 @@ func main() {
 	case "ldap":
 		if *bffURL == "" {
 			logger.Error("--bff-url is required in ldap auth mode")
-			os.Exit(1)
-		}
-		if signer == nil {
-			logger.Error("signing key not available for ldap auth; ensure the operator Secret exists")
 			os.Exit(1)
 		}
 		if *ldapURL == "" {
@@ -1026,10 +993,6 @@ func main() {
 					logger.Error("--bff-url is required with --local-accounts")
 					os.Exit(1)
 				}
-				if signer == nil {
-					logger.Error("signing key not available for local accounts; ensure the operator Secret exists")
-					os.Exit(1)
-				}
 				lp := localpkg.New(signer, bffUserStore{clientsetClient, client}, operatorNamespace, *bffURL, *oidcClientID, 8*time.Hour, *oidcCookieDomain)
 				lp.SetBesideOIDC(true)
 				apiDeps.Local = lp
@@ -1067,14 +1030,10 @@ func main() {
 		LocalAccounts: *localAccounts,
 	}
 
-	// Stream-ticket issuer/verifier for header-less SSE auth. Requires the local RS256
-	// signer (present in local/ldap modes); in OIDC mode there is no BFF signer, so SSE
-	// falls back to cookie auth and no tickets are minted.
-	var ticketVerifier *auth.TicketVerifier
-	if signer != nil {
-		apiDeps.TicketIssuer = auth.NewTicketIssuer(signer, *bffURL, 30*time.Second)
-		ticketVerifier = auth.NewTicketVerifier(signer.PublicKey(), *bffURL)
-	}
+	// Stream-ticket issuer and verifier for header-less SSE auth. Every auth
+	// mode mints tickets with the shared signer.
+	apiDeps.TicketIssuer = auth.NewTicketIssuer(signer, *bffURL, 30*time.Second)
+	ticketVerifier := auth.NewTicketVerifier(signer.PublicKey(), *bffURL)
 
 	// A Tenant agent token is verified only when the runner is on, which is the
 	// only time the key file is mounted. The verifier answers the cached
