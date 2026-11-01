@@ -32,5 +32,19 @@ describe("assistant Markdown layout", () => {
 
   it("keeps the code block background on the pre, not the code", () => {
     expect(ruleBody(css, ".markdown pre code")).toMatch(/background:\s*none/);
+    expect(ruleBody(css, ".markdown pre code")).toMatch(/font-size:\s*inherit/);
+  });
+
+  it("gives inline code a theme tint, not the code surface", () => {
+    const body = ruleBody(css, ".markdown code");
+    expect(body).toMatch(/color-mix\(in srgb, var\(--text\)/);
+    expect(body).not.toMatch(/--code-bg|--code-text|color-scheme/);
+  });
+
+  it("keeps the dark code surface on a fenced block", () => {
+    const body = ruleBody(css, ".markdown pre");
+    expect(body).toMatch(/--code-bg/);
+    expect(body).toMatch(/--code-text/);
+    expect(body).toMatch(/color-scheme:\s*dark/);
   });
 });

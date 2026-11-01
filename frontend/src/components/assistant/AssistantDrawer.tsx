@@ -112,7 +112,6 @@ export default function AssistantDrawer() {
       if (approve) await approveAssistantApproval(approvalId);
       else await denyAssistantApproval(approvalId, {});
       a.resolved(sid ?? "");
-      void queryClient.invalidateQueries({ queryKey: ["assistant-approvals"] });
     } catch {
       void queryClient.invalidateQueries({ queryKey: ["assistant-session", sid] });
     }

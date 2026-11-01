@@ -28,6 +28,8 @@ vi.mock("../../api/client", async (orig) => {
     createAssistantSession: vi.fn(),
     listAssistantSessions: vi.fn(async () => ({ items: [], nextCursor: null })),
     createRunNote: vi.fn(),
+    approveAssistantApproval: vi.fn(async () => ({ approval: {}, result: { content: "ok", isError: false } })),
+    denyAssistantApproval: vi.fn(async () => ({ approval: {}, result: { content: "no", isError: true } })),
   };
 });
 
@@ -217,6 +219,64 @@ describe("AssistantDrawer", () => {
       es.emitNamedEvent("done", JSON.stringify({ state: "completed", created_at: at }), "5");
     });
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe(""));
+    expect(MockEventSource.instances.length).toBe(count);
+  });
+
+  /** openWaitingApproval opens s1 with one approval waiting and returns the stream count. */
+  async function openWaitingApproval() {
+    vi.mocked(client.getAssistantSession).mockResolvedValue({ session: { ...session, state: "waiting_approval" }, approvals: [] });
+    renderDrawer();
+    fireEvent.click(screen.getByText("open"));
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+    const at = "2026-10-31T10:00:00Z";
+    act(() => {
+      es.emitNamedEvent("user", JSON.stringify({ text: "restart it", created_at: at }), "1");
+      es.emitNamedEvent("tool_call", JSON.stringify({ call_id: "c1", name: "restart_controller", arguments: {}, class: "write", created_at: at }), "2");
+      es.emitNamedEvent("approval_requested", JSON.stringify({ approval_id: "ap1", call_id: "c1", created_at: at }), "3");
+      es.emitNamedEvent("done", JSON.stringify({ state: "waiting_approval", created_at: at }), "4");
+    });
+    await screen.findByText("restart it");
+    return { es, count: MockEventSource.instances.length, at };
+  }
+
+  it("resolves an approval in place without a new stream", async () => {
+    const { es, count, at } = await openWaitingApproval();
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(client.approveAssistantApproval).toHaveBeenCalledWith("ap1"));
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(screen.getByText("restart it")).toBeTruthy();
+    expect(MockEventSource.instances.length).toBe(count);
+    expect(MockEventSource.instances.filter((i) => i.url.includes("after=0"))).toHaveLength(1);
+
+    act(() => {
+      es.emitNamedEvent("approval_resolved", JSON.stringify({ approval_id: "ap1", state: "approved", created_at: at }), "5");
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Approve" })).toBeNull());
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("restart_controller · In progress"));
+
+    act(() => {
+      es.emitNamedEvent("tool_result", JSON.stringify({ call_id: "c1", content: "ok", is_error: false, data_level: "logs", created_at: at }), "6");
+      es.emitNamedEvent("assistant", JSON.stringify({ turn: 2, text: "Restarted.", final: true, created_at: at }), "7");
+      es.emitNamedEvent("done", JSON.stringify({ state: "completed", created_at: at }), "8");
+    });
+    expect(await screen.findByText("Restarted.")).toBeTruthy();
+    expect(MockEventSource.instances.length).toBe(count);
+  });
+
+  it("resolves a denial in place without a new stream", async () => {
+    const { es, count, at } = await openWaitingApproval();
+    fireEvent.click(await screen.findByRole("button", { name: "Deny" }));
+    await waitFor(() => expect(client.denyAssistantApproval).toHaveBeenCalledWith("ap1", {}));
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(screen.getByText("restart it")).toBeTruthy();
+    expect(MockEventSource.instances.length).toBe(count);
+
+    act(() => {
+      es.emitNamedEvent("approval_resolved", JSON.stringify({ approval_id: "ap1", state: "denied", created_at: at }), "5");
+    });
+    expect(await screen.findByText("restart_controller · Denied")).toBeTruthy();
+    expect(screen.getByText("restart it")).toBeTruthy();
     expect(MockEventSource.instances.length).toBe(count);
   });
 

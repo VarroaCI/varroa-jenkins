@@ -98,6 +98,7 @@ The assistant writes Markdown. Tables, task lists, and strikethrough also show. 
 
 A tool call that changes something waits for approval. Approve or deny it in
 the drawer. The call row opens while it waits. You can only decide an approval that you started.
+After you decide, the transcript stays in place. The call row shows your decision, and the answer continues under it.
 
 On a failed build, select **Explain this failure**. The answer is posted as a
 note on the build. Everyone who can read the build sees the note.

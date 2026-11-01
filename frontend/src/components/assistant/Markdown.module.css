@@ -13,12 +13,15 @@
   overflow-x: auto;
 }
 
+/* Inline code sits in the sentence. A tint of the text color follows the theme and the surface under it. */
 .markdown code {
-  background: var(--code-bg);
-  color: var(--code-text);
-  color-scheme: dark;
-  border-radius: 3px;
-  padding: 0 3px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: 0.9em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 /* The global reset removes every margin. Each block after the first gets its space back here. */
@@ -38,7 +41,7 @@
 .markdown blockquote { padding-left: 10px; border-left: 3px solid var(--border-strong); color: var(--text-2); }
 .markdown hr { border: 0; border-top: 1px solid var(--border); }
 .markdown a { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; }
-.markdown pre code { background: none; padding: 0; border-radius: 0; }
+.markdown pre code { background: none; padding: 0; border-radius: 0; font-size: inherit; }
 .tableScroll { max-width: 100%; overflow-x: auto; }
 .markdown table { border-collapse: collapse; font-size: 13px; overflow-wrap: normal; }
 .markdown :is(th, td) { padding: 4px 8px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
