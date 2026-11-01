@@ -18,7 +18,7 @@ function row(over: Partial<FleetRunRow> = {}): FleetRunRow {
     buildNumber: 42,
     actor: "nate",
     branch: "main",
-    title: "Fix the parser",
+    changeSummary: "Fix the parser",
     trigger: { kind: "push", label: "Push" },
     pendingInput: false,
     canWrite: false,
@@ -119,7 +119,19 @@ describe("runJobName and runTitle", () => {
   });
 
   it("titles a run with no commit subject by its job and build number", () => {
-    expect(runTitle(row({ title: "pay/api" }))).toBe("api #42");
+    expect(runTitle(row({ changeSummary: undefined }))).toBe("api #42");
+  });
+
+  it("titles a run with an empty commit subject by its job and build number", () => {
+    expect(runTitle(row({ changeSummary: "" }))).toBe("api #42");
+  });
+
+  it("titles a run with no subject and no build number by its job", () => {
+    expect(runTitle(row({ changeSummary: undefined, buildNumber: undefined }))).toBe("api");
+  });
+
+  it("keeps a commit subject that matches the job path as the title", () => {
+    expect(runTitle(row({ changeSummary: "pay/api" }))).toBe("pay/api");
   });
 });
 
@@ -137,7 +149,7 @@ describe("runSecondLine", () => {
   });
 
   it("names the tenant and the trigger once when the title names the job", () => {
-    expect(runSecondLine(row({ title: "pay/api", actor: undefined, trigger: { kind: "cron", label: "Cron" } }))).toBe(
+    expect(runSecondLine(row({ changeSummary: undefined, actor: undefined, trigger: { kind: "cron", label: "Cron" } }))).toBe(
       "pay: Cron",
     );
   });

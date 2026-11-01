@@ -51,15 +51,6 @@ func upstreamLabel(run recordstore.Run) string {
 	return label
 }
 
-// fleetRunTitle answers the newest commit subject of a run. A run with no
-// commit subject answers its job path.
-func fleetRunTitle(run recordstore.Run) string {
-	if subject := latestChangeSubject(run.Changes); subject != "" {
-		return subject
-	}
-	return run.JobPath
-}
-
 // buildFleetRunRow maps one stored run onto a fleet row. railName is the
 // rail and URL name of the tenant the run belongs to. canWrite is the tenant
 // write check the caller passed for the run's job.
@@ -69,7 +60,6 @@ func buildFleetRunRow(run recordstore.Run, railName string, canWrite bool) Fleet
 		runSummaryJSON: sum,
 		Cluster:        run.Cluster,
 		Tenant:         railName,
-		Title:          fleetRunTitle(run),
 		Trigger:        fleetTrigger(run, sum),
 		CanWrite:       canWrite,
 		CreatedAt:      run.CreatedAt,

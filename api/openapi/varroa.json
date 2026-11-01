@@ -2767,7 +2767,7 @@
       },
       "FleetRunRow": {
         "additionalProperties": false,
-        "description": "One run of the fleet run feed. It extends RunSummary with the tenant, the title, and the trigger.",
+        "description": "One run of the fleet run feed. It extends RunSummary with the cluster, the tenant, and the trigger.",
         "properties": {
           "actor": {
             "type": "string"
@@ -2866,10 +2866,6 @@
             "description": "The tenant's Jenkins folder prefix of jobPath. Empty for a root-hosted tenant.",
             "type": "string"
           },
-          "title": {
-            "description": "The first line of the newest commit message, else the job path.",
-            "type": "string"
-          },
           "trigger": {
             "$ref": "#/components/schemas/components_schemas_FleetRunTrigger"
           },
@@ -2907,7 +2903,6 @@
           "cluster",
           "tenant",
           "tenantFolder",
-          "title",
           "trigger",
           "pendingInput",
           "canWrite",
@@ -11332,7 +11327,7 @@
       },
       "components_schemas_FleetRunRow": {
         "additionalProperties": false,
-        "description": "One run of the fleet run feed. It extends RunSummary with the tenant, the title, and the trigger.",
+        "description": "One run of the fleet run feed. It extends RunSummary with the cluster, the tenant, and the trigger.",
         "properties": {
           "actor": {
             "type": "string"
@@ -11431,10 +11426,6 @@
             "description": "The tenant's Jenkins folder prefix of jobPath. Empty for a root-hosted tenant.",
             "type": "string"
           },
-          "title": {
-            "description": "The first line of the newest commit message, else the job path.",
-            "type": "string"
-          },
           "trigger": {
             "$ref": "#/components/schemas/components_schemas_FleetRunTrigger"
           },
@@ -11472,7 +11463,6 @@
           "cluster",
           "tenant",
           "tenantFolder",
-          "title",
           "trigger",
           "pendingInput",
           "canWrite",

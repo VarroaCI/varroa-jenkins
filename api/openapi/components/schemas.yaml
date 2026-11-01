@@ -8069,14 +8069,13 @@ QualityTrend:
 
 FleetRunRow:
   type: object
-  description: One run of the fleet run feed. It extends RunSummary with the tenant, the title, and the trigger.
+  description: One run of the fleet run feed. It extends RunSummary with the cluster, the tenant, and the trigger.
   required:
   - runId
   - status
   - cluster
   - tenant
   - tenantFolder
-  - title
   - trigger
   - pendingInput
   - canWrite
@@ -8162,9 +8161,6 @@ FleetRunRow:
     tenantFolder:
       type: string
       description: The tenant's Jenkins folder prefix of jobPath. Empty for a root-hosted tenant.
-    title:
-      type: string
-      description: The first line of the newest commit message, else the job path.
     trigger:
       $ref: '#/FleetRunTrigger'
     pendingInput:

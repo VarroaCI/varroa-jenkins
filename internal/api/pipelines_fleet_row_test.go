@@ -46,33 +46,54 @@ func TestFleetTriggerMapping(t *testing.T) {
 	}
 }
 
-func TestFleetRunTitle(t *testing.T) {
-	two, _ := json.Marshal([]map[string]string{
-		{"message": "older subject"},
-		{"message": "fix the cache key\n\nlong body"},
-	})
-	run := recordstore.Run{JobPath: "pay/build", Changes: two}
-	if got := fleetRunTitle(run); got != "fix the cache key" {
-		t.Fatalf("title = %q; want the newest first line", got)
-	}
-	if got := fleetRunTitle(recordstore.Run{JobPath: "pay/build"}); got != "pay/build" {
-		t.Fatalf("title with no changes = %q; want the job path", got)
-	}
-}
-
 func TestBuildFleetRunRowCarriesChangeSummary(t *testing.T) {
 	two, _ := json.Marshal([]map[string]string{
 		{"message": "older subject"},
 		{"message": "fix the cache key\n\nbody"},
 	})
 	row := buildFleetRunRow(recordstore.Run{RunID: "run-1", JobPath: "pay/build", Status: "COMPLETED", Changes: two}, "pay", false)
-	if row.ChangeSummary != "fix the cache key" || row.Title != "fix the cache key" {
-		t.Fatalf("changeSummary = %q, title = %q; want both %q", row.ChangeSummary, row.Title, "fix the cache key")
+	if row.ChangeSummary != "fix the cache key" {
+		t.Fatalf("changeSummary = %q; want %q", row.ChangeSummary, "fix the cache key")
 	}
 
 	bare := buildFleetRunRow(recordstore.Run{RunID: "run-2", JobPath: "pay/build", Status: "COMPLETED"}, "pay", false)
-	if bare.ChangeSummary != "" || bare.Title != "pay/build" {
-		t.Fatalf("no changes: changeSummary = %q, title = %q; want empty and the job path", bare.ChangeSummary, bare.Title)
+	if bare.ChangeSummary != "" {
+		t.Fatalf("no changes: changeSummary = %q; want empty", bare.ChangeSummary)
+	}
+}
+
+func TestFleetRunRowJSONCarriesNoTitle(t *testing.T) {
+	two, _ := json.Marshal([]map[string]string{{"message": "fix the cache key\n\nbody"}})
+	withChange := buildFleetRunRow(recordstore.Run{RunID: "run-1", JobPath: "pay/build", Status: "COMPLETED", Changes: two}, "pay", false)
+	bare := buildFleetRunRow(recordstore.Run{RunID: "run-2", JobPath: "pay/build", Status: "COMPLETED"}, "pay", false)
+
+	decode := func(row FleetRunRow) map[string]json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(row)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return fields
+	}
+
+	for name, row := range map[string]FleetRunRow{"with change": withChange, "bare": bare} {
+		fields := decode(row)
+		if _, ok := fields["title"]; ok {
+			t.Errorf("%s: row carries a title field", name)
+		}
+		if string(fields["jobPath"]) != `"pay/build"` {
+			t.Errorf("%s: jobPath = %s; want \"pay/build\"", name, fields["jobPath"])
+		}
+	}
+	if _, ok := decode(withChange)["changeSummary"]; !ok {
+		t.Error("row with a change: changeSummary absent")
+	}
+	if _, ok := decode(bare)["changeSummary"]; ok {
+		t.Error("row with no change: changeSummary present")
 	}
 }
 

@@ -16,7 +16,6 @@ function row(n: number, over: Partial<FleetRunRow> = {}): FleetRunRow {
     jobPath: "smoke-a/cron-probe",
     buildNumber: n,
     actor: "timer",
-    title: "smoke-a/cron-probe",
     trigger: { kind: "cron", label: "Cron" },
     pendingInput: false,
     canWrite: false,
@@ -46,9 +45,9 @@ describe("foldRuns", () => {
 
   it("never folds a run with a commit subject", () => {
     const items = foldRuns([
-      row(3, { title: "Fix the parser" }),
-      row(2, { title: "Fix the parser" }),
-      row(1, { title: "Fix the parser" }),
+      row(3, { changeSummary: "Fix the parser" }),
+      row(2, { changeSummary: "Fix the parser" }),
+      row(1, { changeSummary: "Fix the parser" }),
     ]);
     expect(shape(items)).toEqual(["run", "run", "run"]);
   });
