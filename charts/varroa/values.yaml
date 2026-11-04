@@ -505,6 +505,8 @@ auth:
 # Varroa Operator — sharded controller reconciler + hibernation wake server
 # ---------------------------------------------------------------------------
 operator:
+  # The BFF and the gateway read Secrets that the operator creates.
+  # A full-mode render with bff.enabled, or any render with gateway.enabled, and operator.enabled=false fails.
   enabled: true
   image:
     repository: ghcr.io/varroaci/varroa-jenkins
@@ -592,6 +594,7 @@ jenkins:
 # Varroa Gateway — terminates mite gRPC, bridges to NATS bus
 # ---------------------------------------------------------------------------
 gateway:
+  # Needs operator.enabled. The render fails without the operator.
   enabled: true
   image:
     repository: ghcr.io/varroaci/varroa-jenkins
@@ -635,6 +638,7 @@ gateway:
 # Varroa BFF — stateless API tier (HTTP + SSE from bus)
 # ---------------------------------------------------------------------------
 bff:
+  # Needs operator.enabled in full mode. The render fails without the operator.
   enabled: true
   image:
     repository: ghcr.io/varroaci/varroa-jenkins

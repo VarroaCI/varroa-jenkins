@@ -1,0 +1,9 @@
+{{- /*
+bff/guard.yaml
+Fails the render when a full-mode release renders the BFF without the
+operator. The BFF reads the varroa-mite-signing-key Secret at start, and only
+the operator creates it. A hive release renders no BFF. Renders no objects.
+*/}}
+{{- if and .Values.bff.enabled (not .Values.operator.enabled) (not (include "varroa.isHive" .)) }}
+{{- fail "bff.enabled needs operator.enabled. The BFF reads the varroa-mite-signing-key Secret, and only the operator creates it." }}
+{{- end }}
