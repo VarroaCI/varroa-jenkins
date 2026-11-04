@@ -5,7 +5,7 @@ import { useController } from "../hooks/useControllers";
 import type { PluginInventoryDriftEntry, ControllerDetail } from "../hooks/useControllers";
 import { useClusters, coreOf } from "../hooks/useClusters";
 import { clusterQuery, controllerRoute } from "../routing";
-import { useEventStream } from "../hooks/useEventStream";
+import { useEventStream, type SSEEvent } from "../hooks/useEventStream";
 import { ApiError, bffFetch } from "../hooks/useApi";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage } from "../components/RecoveryState";
 import { useComposedBundles } from "../hooks/useCatalog";
@@ -1322,6 +1322,17 @@ interface LogEntry {
   message: string;
 }
 
+// The logs endpoint sends bare LogEntry frames, unlike the {type, data}
+// wrapper of the activity stream. logEntryOf accepts both shapes. It
+// returns null for a frame with no string message.
+function logEntryOf(frame: unknown): LogEntry | null {
+  const wrapped = frame && typeof frame === "object" && "data" in frame
+    ? (frame as { data: unknown }).data
+    : frame;
+  const entry = wrapped as LogEntry | null;
+  return entry && typeof entry.message === "string" ? entry : null;
+}
+
 interface StreamEntry {
   key: string;
   ts: number;
@@ -1351,56 +1362,70 @@ function ControllerStream({
   // dropped just because they repeat a very recent message.
   const connectedAtRef = useRef(0);
 
-  const { lastEvent, readyState, error: streamError } = useEventStream<LogEntry>(
+  // Log frames wait in this queue until the drain effect below appends them.
+  // useEventStream calls onEvent once for each frame, also for each frame of
+  // a burst that reaches React as one render. lastEvent keeps only the last
+  // frame of that burst, so the stream never reads lastEvent.
+  const logQueueRef = useRef<unknown[]>([]);
+  const [logTick, setLogTick] = useState(0);
+  const onLogEvent = useCallback((ev: SSEEvent<LogEntry>) => {
+    logQueueRef.current.push(ev);
+    setLogTick((n) => n + 1);
+  }, []);
+
+  const { readyState, error: streamError } = useEventStream<LogEntry>(
     isCore
       ? `${BFF_BASE}/clusters/${encodeURIComponent(cluster)}/controllers/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/logs?follow=true`
       : null,
     isCore ? `controller:${cluster}/${namespace}/${name}` : null,
+    [],
+    { onEvent: onLogEvent },
   );
 
+  // This effect must stay above the drain effect. When the open and the
+  // first burst land in one render, the drain then reads the new connect time.
   useEffect(() => {
     if (readyState === "open") connectedAtRef.current = Date.now();
   }, [readyState]);
 
+  // Append every queued log frame in one lines update.
   useEffect(() => {
-    if (lastEvent) {
-      // The logs endpoint emits bare LogEntry frames (unlike the activity
-      // stream's {type, data} wrapper); handle both shapes defensively.
-      const raw = lastEvent as unknown;
-      const wrapped = raw && typeof raw === "object" && "data" in raw
-        ? (raw as { data: unknown }).data
-        : raw;
-      const entry = wrapped as LogEntry;
-      if (entry && typeof entry.message === "string") {
-        const now = Date.now();
-        const source = entry.source ?? "";
-        // Only the post-(re)connect settle window may contain replayed tail
-        // lines; outside it, every line is new output even if it repeats one
-        // seen very recently.
-        const inSettleWindow = now - connectedAtRef.current < 5000;
-        // A re-tailed line from the logs endpoint reports a timestamp from
-        // BEFORE the (re)connect, while genuinely new output reports one at or
-        // after it. Gate the replay dedupe on that too: a line that repeats a
-        // recent (source, message) but is stamped at/after the connection is
-        // new output (e.g. a heartbeat right after reconnect), not a replay.
-        // If timestamp is missing/unparseable, treat it as new output rather
-        // than risk dropping a real log line.
-        const entryTs = entry.timestamp ? Date.parse(entry.timestamp) : NaN;
-        const isPreConnectTail = !Number.isNaN(entryTs) && entryTs < connectedAtRef.current;
-        const replay = inSettleWindow && isPreConnectTail && recentRef.current.some(
-          (r) => r.source === source && r.message === entry.message,
-        );
-        if (!replay) {
-          recentRef.current.push({ source, message: entry.message, at: now });
-          if (recentRef.current.length > 200) recentRef.current = recentRef.current.slice(-150);
-          setLines((prev) => {
-            const next = [...prev, entry];
-            return next.length > 500 ? next.slice(-500) : next;
-          });
-        }
-      }
+    const frames = logQueueRef.current;
+    if (frames.length === 0) return;
+    logQueueRef.current = [];
+    const now = Date.now();
+    // Only the post-(re)connect settle window may contain replayed tail
+    // lines; outside it, every line is new output even if it repeats one
+    // seen very recently.
+    const inSettleWindow = now - connectedAtRef.current < 5000;
+    const kept: LogEntry[] = [];
+    for (const frame of frames) {
+      const entry = logEntryOf(frame);
+      if (!entry) continue;
+      const source = entry.source ?? "";
+      // A re-tailed line from the logs endpoint reports a timestamp from
+      // BEFORE the (re)connect, while genuinely new output reports one at or
+      // after it. Gate the replay dedupe on that too: a line that repeats a
+      // recent (source, message) but is stamped at/after the connection is
+      // new output (e.g. a heartbeat right after reconnect), not a replay.
+      // If timestamp is missing/unparseable, treat it as new output rather
+      // than risk dropping a real log line.
+      const entryTs = entry.timestamp ? Date.parse(entry.timestamp) : NaN;
+      const isPreConnectTail = !Number.isNaN(entryTs) && entryTs < connectedAtRef.current;
+      const replay = inSettleWindow && isPreConnectTail && recentRef.current.some(
+        (r) => r.source === source && r.message === entry.message,
+      );
+      if (replay) continue;
+      recentRef.current.push({ source, message: entry.message, at: now });
+      if (recentRef.current.length > 200) recentRef.current = recentRef.current.slice(-150);
+      kept.push(entry);
     }
-  }, [lastEvent]);
+    if (kept.length === 0) return;
+    setLines((prev) => {
+      const next = [...prev, ...kept];
+      return next.length > 500 ? next.slice(-500) : next;
+    });
+  }, [logTick]);
 
   const entries = useMemo<StreamEntry[]>(() => {
     const onlyLogs = chip === "Logs";
