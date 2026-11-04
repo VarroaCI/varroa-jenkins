@@ -85,7 +85,16 @@ type ProfileCandidateReconciler struct {
 	// tests run against a local httptest server. "" means upstream metadata
 	// is off, and selectSource returns errUpstreamDisabled.
 	upstreamBaseURL string
+
+	// tiers maps an LTS target to the stable tier that upstream publishes
+	// metadata for. A nil index keeps the target-version URL.
+	tiers *ucmeta.TierIndex
 }
+
+// SetUpstreamTiers sets the tier index that maps each LTS target to its
+// metadata tier. The operator shares one index with the update-center
+// reconciler.
+func (r *ProfileCandidateReconciler) SetUpstreamTiers(t *ucmeta.TierIndex) { r.tiers = t }
 
 // errUpstreamDisabled reports that no in-cluster update center serves the
 // candidate and the upstream host is turned off. Retrying changes nothing
@@ -455,7 +464,7 @@ func (r *ProfileCandidateReconciler) selectSource(ctx context.Context, target st
 		if !apierrors.IsNotFound(err) {
 			logger.Warn("failed to fetch UpdateCenter; falling back to online source", "error", err)
 		}
-		return r.upstreamSource(target, logger)
+		return r.upstreamSource(ctx, target, logger)
 	}
 
 	switch uc.Spec.Storage.Type {
@@ -471,7 +480,7 @@ func (r *ProfileCandidateReconciler) selectSource(ctx context.Context, target st
 		// local-PVC-backed store (only the varroa-updatecenter pod does).
 		return nil, nil, pluginresolve.ErrMetadataUnavailable
 	default:
-		return r.upstreamSource(target, logger)
+		return r.upstreamSource(ctx, target, logger)
 	}
 }
 
@@ -499,20 +508,21 @@ func (r *ProfileCandidateReconciler) buildRegistryStore(ctx context.Context, uc 
 // upstreamSource is the online branch of selectSource. It returns
 // errUpstreamDisabled when the upstream host is off, so no request leaves the
 // cluster.
-func (r *ProfileCandidateReconciler) upstreamSource(target string, logger *slog.Logger) (pluginresolve.MetadataSource, pluginresolve.Fetcher, error) {
+func (r *ProfileCandidateReconciler) upstreamSource(ctx context.Context, target string, logger *slog.Logger) (pluginresolve.MetadataSource, pluginresolve.Fetcher, error) {
 	if r.upstreamBaseURL == "" {
 		return nil, nil, errUpstreamDisabled
 	}
-	return r.onlineSource(target, logger), pluginresolve.HTTPFetcher(r.upstreamBaseURL), nil
+	return r.onlineSource(ctx, target, logger), pluginresolve.HTTPFetcher(r.upstreamBaseURL), nil
 }
 
 // onlineSource builds a *ucmeta.Resolver against the upstream host, mirroring
 // cmd/varroactl/export.go's newExportResolver two-source ("weekly" then
-// per-target dynamic-stable) pattern.
-func (r *ProfileCandidateReconciler) onlineSource(target string, logger *slog.Logger) pluginresolve.MetadataSource {
+// dynamic-stable) pattern. The second source is the stable tier that carries
+// target, which can differ from target itself.
+func (r *ProfileCandidateReconciler) onlineSource(ctx context.Context, target string, logger *slog.Logger) pluginresolve.MetadataSource {
 	sources := []ucmeta.Source{
 		{URL: r.upstreamBaseURL + "/update-center.actual.json"},
-		{URL: fmt.Sprintf("%s/dynamic-stable-%s/update-center.actual.json", r.upstreamBaseURL, target)},
+		{URL: r.tiers.SourceURL(ctx, r.upstreamBaseURL, target)},
 	}
 	resolver := ucmeta.NewResolver(func() []ucmeta.Source { return sources }, time.Hour, &http.Client{Timeout: candidateHTTPTimeout}, logger)
 	return pluginresolve.UpstreamSource{Resolver: resolver}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // candidateFixtureHPI builds a genuine .hpi holding just a manifest, mirroring
@@ -47,6 +49,62 @@ func candidateFixtureHPI(t *testing.T, shortName, version, requiredCore, deps st
 		t.Fatalf("close zip: %v", err)
 	}
 	return buf.Bytes()
+}
+
+// TestProfileCandidateReconciler_NonTierTargetReadsTierSource verifies that a
+// target which is not a stable tier resolves from the tier that carries it. The
+// tier list names 2.479.3, so target 2.479.4 must read the 2.479.3 document and
+// never the 2.479.4 document, which upstream does not publish.
+func TestProfileCandidateReconciler_NonTierTargetReadsTierSource(t *testing.T) {
+	gitHPI := candidateFixtureHPI(t, "git", "5.6.0", "", "")
+	rootHPI := candidateFixtureHPI(t, "varroa-mite-auth", "1.0", "2.400", "git:5.0")
+	candidateFixtureHPIForRoot = rootHPI
+
+	gitDoc, err := json.Marshal(map[string]any{
+		"plugins": map[string]any{
+			"git": map[string]any{"version": "5.6.0", "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "requiredCore": "2.400"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal tier fixture: %v", err)
+	}
+	var mu sync.Mutex
+	var requested []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requested = append(requested, r.URL.Path)
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/update-center.actual.json":
+			_, _ = w.Write([]byte(`{"plugins":{}}`))
+		case "/tiers.json":
+			_, _ = w.Write([]byte(`{"stableCores":["2.479.3"]}`))
+		case "/dynamic-stable-2.479.3/update-center.actual.json":
+			_, _ = w.Write(gitDoc)
+		case "/download/plugins/git/5.6.0/git.hpi":
+			_, _ = w.Write(gitHPI)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client, candidate := newCandidateTestFixtures(t) // target is 2.479.4
+	rec := newCandidateReconciler(client, srv.URL)
+	rec.SetUpstreamTiers(ucmeta.NewTierIndex(srv.Client(), time.Hour, testLogger()))
+
+	got, _ := reconcileCandidate(t, rec, candidate.Name)
+
+	if got.Status.Phase != v1alpha1.ProfileCandidatePhaseReady {
+		t.Fatalf("expected Phase Ready, got %q (conditions: %+v)", got.Status.Phase, got.Status.Conditions)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, p := range requested {
+		if strings.HasPrefix(p, "/dynamic-stable-2.479.4/") {
+			t.Fatalf("candidate requested %q; the 2.479.4 document is not published", p)
+		}
+	}
 }
 
 // candidateUpstreamServer serves a minimal online update-center + plugin

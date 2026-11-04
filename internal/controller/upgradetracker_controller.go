@@ -18,31 +18,26 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/jenkinsver"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // UpgradeTrackerInterval is how often UpgradeTrackerReconciler ticks. The
 // tickerRunnable registering it in cmd/operator/main.go is leader-gated
-// (everyReplica: false), since every tick performs outbound HTTP probes and
+// (everyReplica: false), since every tick performs outbound HTTP reads and
 // CRD writes that must not race across operator replicas.
 const UpgradeTrackerInterval = 6 * time.Hour
 
-// maxPatchProbeSteps bounds the same-line newer-patch probe: a Jenkins LTS
-// line typically ships on the order of a dozen patches a year, so 20 gives
-// headroom for a line that has gone unwatched across several ticks, without
-// an unbounded fetch loop.
-const maxPatchProbeSteps = 20
-
 // UpgradeTrackerReconciler discovers upstream Jenkins LTS patch/line movement
-// on a periodic tick: a same-line newer patch than a tracked
-// JenkinsVersionProfile's current ResolveVersion becomes a ProfileCandidate; a
-// newer LTS line than every tracked profile's line is a one-shot informational
-// event. See docs/operations/jenkins-upgrades.md.
+// on a periodic tick: a newer patch on a tracked JenkinsVersionProfile's line
+// becomes a ProfileCandidate; a newer LTS line than every tracked profile's
+// line is a one-shot informational event. See
+// docs/operations/jenkins-upgrades.md.
 type UpgradeTrackerReconciler struct {
 	store             crdstore.Backend
 	activityPublisher activity.EventSink
 	logger            *slog.Logger
 
-	// baseURL is the Jenkins upstream host the tracker probes, with the
+	// baseURL is the Jenkins upstream host the tracker reads, with the
 	// updates.jenkins.io layout. The operator passes "" when upstream reads are
 	// off; Reconcile then does nothing.
 	baseURL string
@@ -61,7 +56,7 @@ type UpgradeTrackerReconciler struct {
 }
 
 // NewUpgradeTrackerReconciler creates a new UpgradeTrackerReconciler that
-// probes baseURL. An empty baseURL makes the tracker inert.
+// reads from baseURL. An empty baseURL makes the tracker inert.
 func NewUpgradeTrackerReconciler(store crdstore.Backend, activityPublisher activity.EventSink, baseURL string, logger *slog.Logger) *UpgradeTrackerReconciler {
 	if logger == nil {
 		logger = slog.Default()
@@ -76,10 +71,11 @@ func NewUpgradeTrackerReconciler(store crdstore.Backend, activityPublisher activ
 	}
 }
 
-// Reconcile runs one tick: the once-per-tick new-LTS-line fetch, the
-// per-profile same-line newer-patch probe (which may create or supersede
-// ProfileCandidates), and the new-line informational event. One profile's
-// failure is logged and does not stop the rest — never a hard failure.
+// Reconcile runs one tick: it reads the stable core and tiers.json once, then
+// checks each tracked profile for a newer patch on its line (which may create
+// or supersede ProfileCandidates), and emits the new-line informational
+// event. One profile's failure is logged and does not stop the rest — never a
+// hard failure.
 func (r *UpgradeTrackerReconciler) Reconcile(ctx context.Context) {
 	if r.baseURL == "" {
 		return
@@ -97,15 +93,42 @@ func (r *UpgradeTrackerReconciler) Reconcile(ctx context.Context) {
 		}
 	}
 
-	discoveredLine, ok := r.fetchNewLTSLine(ctx)
+	stableCore, stableOK := r.fetchStableCore(ctx)
+	tiers, err := ucmeta.FetchTiers(ctx, r.httpDoer, r.baseURL)
+	if err != nil {
+		r.logger.Warn("upgrade tracker: read tiers.json failed; using the stable core only", "error", err)
+	}
+	observed := append([]string(nil), tiers.StableCores...)
+	if stableOK {
+		observed = append(observed, stableCore)
+	}
 
 	for _, p := range tracked {
-		r.reconcileProfile(ctx, p)
+		r.reconcileProfile(ctx, p, observed)
 	}
 
-	if ok {
-		r.emitNewLineIfNewer(discoveredLine, tracked)
+	if line, ok := newestObservedLine(observed); ok {
+		r.emitNewLineIfNewer(line, tracked)
 	}
+}
+
+// newestObservedLine returns the major.minor line of the newest observed
+// patch. A version that is not an exact patch is skipped.
+func newestObservedLine(observed []string) (string, bool) {
+	var best []int
+	for _, v := range observed {
+		segs, ok := jenkinsver.Core(strings.TrimSpace(v))
+		if !ok || len(segs) != 3 {
+			continue
+		}
+		if best == nil || jenkinsver.Compare(segs, best) > 0 {
+			best = segs
+		}
+	}
+	if best == nil {
+		return "", false
+	}
+	return fmt.Sprintf("%d.%d", best[0], best[1]), true
 }
 
 // isTwoSegmentVersion reports whether version has exactly two dot-separated
@@ -120,28 +143,34 @@ func isTwoSegmentVersion(version string) bool {
 // must sit above its real size. It only guards against an unbounded body.
 const stableDocumentMaxBytes = 32 << 20
 
-// fetchNewLTSLine issues a GET against upstream's "current stable LTS"
-// alias, following the redirect (an ordinary http.Client does this by
-// default) onto the per-patch document, decoding only its top-level
-// core.version into the major.minor line. Never a hard failure: any
-// fetch/parse problem logs at warn and returns ok=false, which skips this
-// tick's new-line check only.
-func (r *UpgradeTrackerReconciler) fetchNewLTSLine(ctx context.Context) (string, bool) {
-	url := r.baseURL + "/stable/update-center.actual.json"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		r.logger.Warn("upgrade tracker: build stable/ request failed", "error", err)
+// latestCoreMaxBytes caps the stable/latestCore.txt read. The file holds one
+// version string.
+const latestCoreMaxBytes = 64
+
+// parseLTSPatch returns the exact MAJOR.MINOR.PATCH form of v. It rejects a
+// version with any other segment count.
+func parseLTSPatch(v string) (string, bool) {
+	segs, ok := jenkinsver.Core(strings.TrimSpace(v))
+	if !ok || len(segs) != 3 {
 		return "", false
+	}
+	return fmt.Sprintf("%d.%d.%d", segs[0], segs[1], segs[2]), true
+}
+
+// readStableDocumentCore reads core.version from upstream's "current stable
+// LTS" document, following the redirect that an ordinary http.Client follows.
+func (r *UpgradeTrackerReconciler) readStableDocumentCore(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.baseURL+"/stable/update-center.actual.json", nil)
+	if err != nil {
+		return "", err
 	}
 	resp, err := r.httpDoer.Do(req)
 	if err != nil {
-		r.logger.Warn("upgrade tracker: fetch stable/ failed", "error", err)
-		return "", false
+		return "", err
 	}
 	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
-		r.logger.Warn("upgrade tracker: unexpected status fetching stable/", "status", resp.StatusCode)
-		return "", false
+		return "", fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	var doc struct {
 		Core struct {
@@ -149,77 +178,96 @@ func (r *UpgradeTrackerReconciler) fetchNewLTSLine(ctx context.Context) (string,
 		} `json:"core"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, stableDocumentMaxBytes)).Decode(&doc); err != nil {
-		r.logger.Warn("upgrade tracker: parse stable/ response failed", "error", err)
-		return "", false
+		return "", fmt.Errorf("parse response: %w", err)
 	}
-	segs, ok := jenkinsver.Core(doc.Core.Version)
-	if !ok || len(segs) < 2 {
-		r.logger.Warn("upgrade tracker: unparseable core.version in stable/ response", "version", doc.Core.Version)
-		return "", false
+	core, ok := parseLTSPatch(doc.Core.Version)
+	if !ok {
+		return "", fmt.Errorf("unparseable core.version %q", doc.Core.Version)
 	}
-	return fmt.Sprintf("%d.%d", segs[0], segs[1]), true
+	return core, nil
 }
 
-// reconcileProfile probes same-line newer patches for a single tracked
-// profile, starting just above the profile's current ResolveVersion, and on
-// any discovery creates/supersedes ProfileCandidates accordingly. A
-// transport/parse error at any probe step logs at warn and skips this
-// profile for this tick only.
-func (r *UpgradeTrackerReconciler) reconcileProfile(ctx context.Context, profile *v1alpha1.JenkinsVersionProfile) {
+// readStableLatestCore reads the plain-text stable core from
+// stable/latestCore.txt.
+func (r *UpgradeTrackerReconciler) readStableLatestCore(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.baseURL+"/stable/latestCore.txt", nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := r.httpDoer.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, latestCoreMaxBytes))
+	if err != nil {
+		return "", fmt.Errorf("read body: %w", err)
+	}
+	core, ok := parseLTSPatch(string(body))
+	if !ok {
+		return "", fmt.Errorf("unparseable latestCore.txt body %q", string(body))
+	}
+	return core, nil
+}
+
+// fetchStableCore returns the newest stable LTS core. It reads the stable/
+// document and falls back to stable/latestCore.txt only when that read fails.
+// Never a hard failure: when both reads fail it logs at warn and returns
+// ok=false, which skips the stable-core input for this tick only.
+func (r *UpgradeTrackerReconciler) fetchStableCore(ctx context.Context) (string, bool) {
+	core, err := r.readStableDocumentCore(ctx)
+	if err == nil {
+		return core, true
+	}
+	r.logger.Warn("upgrade tracker: read stable/ core.version failed; reading stable/latestCore.txt", "error", err)
+	core, err = r.readStableLatestCore(ctx)
+	if err != nil {
+		r.logger.Warn("upgrade tracker: read stable/latestCore.txt failed", "error", err)
+		return "", false
+	}
+	return core, true
+}
+
+// reconcileProfile finds the newest observed patch on the profile's line that
+// is above its current ResolveVersion, and on any discovery creates or
+// supersedes ProfileCandidates accordingly. It performs no HTTP request. The
+// observed versions are the stable core and every tiers.json entry, on any line.
+func (r *UpgradeTrackerReconciler) reconcileProfile(ctx context.Context, profile *v1alpha1.JenkinsVersionProfile, observed []string) {
 	segs, ok := jenkinsver.Core(profile.Spec.ResolveVersion)
 	if !ok || len(segs) != 3 {
 		r.logger.Warn("upgrade tracker: skipping profile with unparseable resolveVersion",
 			"profile", profile.Name, "resolveVersion", profile.Spec.ResolveVersion)
 		return
 	}
-	major, minor, patch := segs[0], segs[1], segs[2]
+	major, minor := segs[0], segs[1]
+	current := segs
 
-	lastSuccess := -1
-	k := patch + 1
-	for step := 0; step < maxPatchProbeSteps; step++ {
-		url := fmt.Sprintf("%s/dynamic-stable-%d.%d.%d/update-center.actual.json", r.baseURL, major, minor, k)
-		status, err := r.probeStatus(ctx, url)
-		if err != nil {
-			r.logger.Warn("upgrade tracker: patch probe failed", "profile", profile.Name, "url", url, "error", err)
-			return
+	var best []int
+	for _, v := range observed {
+		vs, ok := jenkinsver.Core(strings.TrimSpace(v))
+		if !ok || len(vs) != 3 {
+			continue
 		}
-		if status == http.StatusNotFound {
-			break
+		if vs[0] != major || vs[1] != minor {
+			continue
 		}
-		if status != http.StatusOK {
-			r.logger.Warn("upgrade tracker: unexpected status on patch probe",
-				"profile", profile.Name, "url", url, "status", status)
-			return
+		if jenkinsver.Compare(vs, current) <= 0 {
+			continue
 		}
-		lastSuccess = k
-		k++
+		if best == nil || jenkinsver.Compare(vs, best) > 0 {
+			best = vs
+		}
 	}
-	if lastSuccess == -1 {
-		// First probe 404'd: the profile's current patch is already the
-		// newest on its line. No candidate, no error.
+	if best == nil {
 		return
 	}
 
-	discoveredVersion := fmt.Sprintf("%d.%d.%d", major, minor, lastSuccess)
+	discoveredVersion := fmt.Sprintf("%d.%d.%d", best[0], best[1], best[2])
 	r.createCandidate(ctx, profile, discoveredVersion)
 	r.supersedeOlder(ctx, profile.Name, discoveredVersion)
-}
-
-// probeStatus issues a GET against url and returns its status code. The body
-// is drained (not parsed — only the status code matters here) so keep-alive
-// connections can be reused.
-func (r *UpgradeTrackerReconciler) probeStatus(ctx context.Context, url string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return 0, err
-	}
-	resp, err := r.httpDoer.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close() //nolint:errcheck
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode, nil
 }
 
 // candidateName computes the deterministic ProfileCandidate name: the

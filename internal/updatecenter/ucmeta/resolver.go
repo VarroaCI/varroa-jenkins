@@ -1,6 +1,6 @@
 // Package ucmeta resolves a Jenkins plugin (name, version) to its upstream SHA-256
 // across one or more update-center metadata sources (the current weekly source plus
-// any LTS-line "dynamic-stable-<version>" sources), caching each source with a TTL.
+// any LTS-line "dynamic-stable-<tier>" sources), caching each source with a TTL.
 //
 // It exists because the current weekly update-center metadata lists only one version
 // per plugin, so an LTS-line profile that pins an aged version cannot be resolved from
@@ -45,7 +45,7 @@ const failureRetryBase = 30 * time.Second
 // Source is one upstream update-center metadata endpoint, e.g.
 //
 //	https://updates.jenkins.io/update-center.actual.json                        (weekly)
-//	https://updates.jenkins.io/dynamic-stable-2.555.3/update-center.actual.json (LTS line)
+//	https://updates.jenkins.io/dynamic-stable-2.555.1/update-center.actual.json (LTS line)
 type Source struct {
 	URL string
 }

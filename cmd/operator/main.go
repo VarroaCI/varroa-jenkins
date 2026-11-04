@@ -63,6 +63,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 	"github.com/varroaci/varroa-jenkins/internal/tenancy"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 var version = "dev"
@@ -640,6 +641,11 @@ func main() {
 	profileCandidateReconciler := controller.NewProfileCandidateReconciler(
 		clientsetClient, clientsetClient, operatorNamespace,
 		os.Getenv("VARROA_UPDATE_CENTER_URL"), jenkinsUpstream, actPub, logger)
+
+	// One cache of tiers.json per upstream host, shared by the update-center and
+	// candidate reconcilers. Each maps an LTS core to its stable metadata tier.
+	upstreamTiers := ucmeta.NewTierIndex(&http.Client{Timeout: 30 * time.Second}, time.Hour, logger)
+	profileCandidateReconciler.SetUpstreamTiers(upstreamTiers)
 
 	// --- Controller-runtime manager ---
 	scheme := runtime.NewScheme()
@@ -1275,6 +1281,7 @@ func main() {
 	// rewires each controller's plugins-init JENKINS_UC* env.
 	if ucURL := os.Getenv("VARROA_UPDATE_CENTER_URL"); ucURL != "" {
 		ucRec := controller.NewUpdateCenterReconciler(clientsetClient, clientsetClient, operatorNamespace, ucURL, logger)
+		ucRec.SetUpstreamTiers(upstreamTiers)
 		if err := ucRec.SetupWithManager(mgr); err != nil {
 			logger.Error("failed to set up update-center reconciler", "error", err)
 			os.Exit(1)

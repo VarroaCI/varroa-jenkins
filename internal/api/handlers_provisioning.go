@@ -52,7 +52,7 @@ type VersionProfileDetail struct {
 	PluginSetRef    string                    `json:"pluginSetRef,omitempty"` // spec source CM name
 	ContentRef      string                    `json:"contentRef,omitempty"`   // materialized CM name
 	PluginCount     int                       `json:"pluginCount,omitempty"`
-	ResolveVersion  string                    `json:"resolveVersion,omitempty"` // LTS-line exact patch (dynamic-stable metadata endpoint)
+	ResolveVersion  string                    `json:"resolveVersion,omitempty"` // LTS-line exact patch
 	Plugins         []string                  `json:"plugins,omitempty"`        // full pinned lines "name@version" (bare name if unversioned)
 	HasJcasc        bool                      `json:"hasJcasc"`
 	RequiredPlugins []string                  `json:"requiredPlugins,omitempty"` // spec.jcasc.requiredPlugins

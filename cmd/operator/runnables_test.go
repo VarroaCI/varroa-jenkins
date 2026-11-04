@@ -173,6 +173,22 @@ func TestMain_ProfileCandidateReconcilerRegistered(t *testing.T) {
 	}
 }
 
+// TestMain_UpstreamTiersWired verifies that the update-center and candidate
+// reconcilers share the tier index, so both map an LTS core to its tier.
+func TestMain_UpstreamTiersWired(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	text := string(src)
+	if !strings.Contains(text, "profileCandidateReconciler.SetUpstreamTiers(") {
+		t.Fatal("main.go does not pass the tier index to the ProfileCandidateReconciler")
+	}
+	if !strings.Contains(text, "ucRec.SetUpstreamTiers(") {
+		t.Fatal("main.go does not pass the tier index to the UpdateCenterReconciler")
+	}
+}
+
 func TestTickerRunnable_SetupBeforeImmediateTick(t *testing.T) {
 	var setupRan bool
 	var tickRan bool

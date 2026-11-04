@@ -15,7 +15,7 @@ A build check fails when a source adds a host that this page does not list.
 | Destination | Purpose | Protocol | Control | Can a deny-all cluster disable it? |
 | --- | --- | --- | --- | --- |
 | updates.jenkins.io | Find newer LTS patches and resolve candidate plugin sets for the upgrade tracker. | HTTPS 443 | jenkins.upstreamURL | Yes. Set jenkins.upstreamURL to "". |
-| updates.jenkins.io (update-center metadata) | Read update-center metadata when pull-through uses the default upstream. | HTTPS 443 | updateCenter.pullThrough.upstreamURL | Yes. Pull-through is off by default. Keep updateCenter.pullThrough.enabled false. |
+| updates.jenkins.io (update-center metadata) | Read tiers.json to choose the LTS metadata sources that pull-through reads. | HTTPS 443 | updateCenter.pullThrough.upstreamURL | Yes. Pull-through is off by default. Keep updateCenter.pullThrough.enabled false. |
 | Git remotes of catalog sources and bundle inputs | Clone catalog sources and git bundle inputs. | HTTPS 443 or SSH 22 | CatalogSource.spec.repoURL and ComposedBundle gitSource inputs | Yes. Do not declare the source or the input. |
 | OCI registries of catalog sources and bundle inputs | Pull catalog and bundle artifacts. | HTTPS 443 | CatalogSource.spec.ociRef and ComposedBundle ociSource inputs | Yes. Do not declare the source or the input. |
 | api.github.com | Read a proposed repository and open a pull request on GitHub. | HTTPS 443 | the repo field of POST /pipelines/{tenant}/propose and of the open_pull_request tool, and a tenant credential's varroa.dev/allowed-hosts | Yes. Create no tenant credential that lists github.com. |

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -70,27 +71,66 @@ func rewriteToServer(t *testing.T, ts *httptest.Server) doerFunc {
 	}
 }
 
-// dynamicStableServer serves /stable/update-center.actual.json with
-// stableCore as {"core":{"version":...}} (or a 500 if stableCore is empty,
-// simulating an unreachable/degraded response), and 200s for exactly the
-// paths listed in okPaths, 404 for every other /dynamic-stable-*/ request.
-func dynamicStableServer(stableCore string, okPaths map[string]bool) *httptest.Server {
+// upstreamFixture is a local stand-in for the upstream stable/ documents and
+// tiers.json. It records every request path, so a test can assert that no
+// dynamic-stable path was read.
+type upstreamFixture struct {
+	*httptest.Server
+	mu    sync.Mutex
+	paths []string
+}
+
+// newUpstreamFixture serves stable/update-center.actual.json with stableCore
+// (500 when empty), tiers.json with stableCores (500 when nil), and
+// stable/latestCore.txt with latestCore (404 when empty). Every other path,
+// including every dynamic-stable path, answers 404.
+func newUpstreamFixture(stableCore string, stableCores []string, latestCore string) *upstreamFixture {
+	f := &upstreamFixture{}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/stable/update-center.actual.json", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/stable/update-center.actual.json", func(w http.ResponseWriter, r *http.Request) {
+		f.record(r)
 		if stableCore == "" {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 		fmt.Fprintf(w, `{"core":{"version":%q}}`, stableCore)
 	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if okPaths[r.URL.Path] {
-			_, _ = w.Write([]byte(`{}`))
+	mux.HandleFunc("/tiers.json", func(w http.ResponseWriter, r *http.Request) {
+		f.record(r)
+		if stableCores == nil {
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		body, _ := json.Marshal(map[string][]string{"stableCores": stableCores})
+		_, _ = w.Write(body)
+	})
+	mux.HandleFunc("/stable/latestCore.txt", func(w http.ResponseWriter, r *http.Request) {
+		f.record(r)
+		if latestCore == "" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(latestCore))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		f.record(r)
 		w.WriteHeader(http.StatusNotFound)
 	})
-	return httptest.NewServer(mux)
+	f.Server = httptest.NewServer(mux)
+	return f
+}
+
+func (f *upstreamFixture) record(r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.paths = append(f.paths, r.URL.Path)
+}
+
+// requested returns every path the fixture served.
+func (f *upstreamFixture) requested() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.paths...)
 }
 
 // paddedStableServer serves /stable/update-center.actual.json as a body of
@@ -128,14 +168,12 @@ func TestUpgradeTrackerNewLineDedup(t *testing.T) {
 		testProfile("profile-2-479", "2.479", "2.479.10"),
 		testProfile("profile-2-555", "2.555", "2.555.3"),
 	)
-	// No patch ever succeeds — isolates the new-line signal from candidate
-	// creation.
-	ts := dynamicStableServer("2.999.1", nil)
-	defer ts.Close()
+	fx := newUpstreamFixture("2.999.1", []string{"2.999.1"}, "")
+	defer fx.Close()
 
 	sink := &recordingSink{}
 	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
-	tracker.httpDoer = rewriteToServer(t, ts)
+	tracker.httpDoer = rewriteToServer(t, fx.Server)
 
 	tracker.Reconcile(context.Background())
 	tracker.Reconcile(context.Background())
@@ -146,20 +184,17 @@ func TestUpgradeTrackerNewLineDedup(t *testing.T) {
 	}
 }
 
-// TestUpgradeTrackerFirstProbe404NoOp verifies the "404-at-start" case: the
-// profile's current patch is already the newest on its line, so no
-// ProfileCandidate is created and no event fires.
-func TestUpgradeTrackerFirstProbe404NoOp(t *testing.T) {
+// TestUpgradeTrackerNoNewerPatchNoOp verifies that a profile already on the
+// newest observed patch of its line gets no ProfileCandidate and no event.
+func TestUpgradeTrackerNoNewerPatchNoOp(t *testing.T) {
 	store := crdstore.NewFake()
 	crdstore.MustSeed(store, testProfile("profile-2-555", "2.555", "2.555.3"))
-	// stable/ names the same line as the tracked profile, so no new-line
-	// event either — isolates this test to the no-op assertion.
-	ts := dynamicStableServer("2.555.1", nil)
-	defer ts.Close()
+	fx := newUpstreamFixture("2.555.3", []string{"2.555.1", "2.555.3"}, "")
+	defer fx.Close()
 
 	sink := &recordingSink{}
 	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
-	tracker.httpDoer = rewriteToServer(t, ts)
+	tracker.httpDoer = rewriteToServer(t, fx.Server)
 
 	tracker.Reconcile(context.Background())
 
@@ -168,29 +203,87 @@ func TestUpgradeTrackerFirstProbe404NoOp(t *testing.T) {
 		t.Fatalf("list ProfileCandidates: %v", err)
 	}
 	if len(candidates) != 0 {
-		t.Fatalf("candidates = %d, want 0 (first probe 404 means current patch already newest)", len(candidates))
+		t.Fatalf("candidates = %d, want 0 (no observed patch is newer than 2.555.3)", len(candidates))
 	}
 	if events := sink.ofType("upgrade.candidate.created"); len(events) != 0 {
 		t.Fatalf("upgrade.candidate.created events = %d, want 0", len(events))
 	}
 }
 
-// TestUpgradeTrackerCreatesCandidateOnPatchDiscovery verifies that one or
-// more 200s before a 404 creates a ProfileCandidate off the last confirmed
-// 200, with ObservedVersion/ResolveVersion set correctly.
-func TestUpgradeTrackerCreatesCandidateOnPatchDiscovery(t *testing.T) {
+// TestUpgradeTrackerDiscoversNonTierPatchFromStableCore verifies that a newer
+// patch which is not a tier is still discovered from the stable core, with no
+// dynamic-stable document read.
+func TestUpgradeTrackerDiscoversNonTierPatchFromStableCore(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store, testProfile("profile-2-555", "2.555", "2.555.3"))
-	ts := dynamicStableServer("2.555.1", map[string]bool{
-		"/dynamic-stable-2.555.4/update-center.actual.json": true,
-		"/dynamic-stable-2.555.5/update-center.actual.json": true,
-		// 2.555.6 404s (absent from the map).
-	})
-	defer ts.Close()
+	crdstore.MustSeed(store, testProfile("profile-2-580", "2.580", "2.580.1"))
+	fx := newUpstreamFixture("2.580.2", []string{"2.568.3", "2.580.1"}, "")
+	defer fx.Close()
 
 	sink := &recordingSink{}
 	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
-	tracker.httpDoer = rewriteToServer(t, ts)
+	tracker.httpDoer = rewriteToServer(t, fx.Server)
+
+	tracker.Reconcile(context.Background())
+
+	name := candidateName("profile-2-580", "2.580.2")
+	got, err := crdstore.Get[v1alpha1.ProfileCandidate](context.Background(), store, name, "")
+	if err != nil {
+		t.Fatalf("get candidate %s: %v", name, err)
+	}
+	if got.Spec.ObservedVersion != "2.580.1" {
+		t.Errorf("ObservedVersion = %q, want 2.580.1", got.Spec.ObservedVersion)
+	}
+	if got.Spec.ResolveVersion != "2.580.2" {
+		t.Errorf("ResolveVersion = %q, want 2.580.2", got.Spec.ResolveVersion)
+	}
+	if got.Status.Phase != v1alpha1.ProfileCandidatePhasePending {
+		t.Errorf("Phase = %q, want Pending", got.Status.Phase)
+	}
+	for _, p := range fx.requested() {
+		if strings.Contains(p, "/dynamic-stable-") {
+			t.Errorf("tracker requested %q; it must not probe dynamic-stable paths", p)
+		}
+	}
+}
+
+// TestUpgradeTrackerDiscoversTierPatchOnOlderLine verifies that a tier on an
+// older line is discovered for a profile on that line, and that a stable core
+// on a newer line does not affect it.
+func TestUpgradeTrackerDiscoversTierPatchOnOlderLine(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, testProfile("profile-2-568", "2.568", "2.568.2"))
+	fx := newUpstreamFixture("2.580.2", []string{"2.568.3", "2.580.1"}, "")
+	defer fx.Close()
+
+	tracker := NewUpgradeTrackerReconciler(store, &recordingSink{}, "https://updates.jenkins.io", testLogger())
+	tracker.httpDoer = rewriteToServer(t, fx.Server)
+
+	tracker.Reconcile(context.Background())
+
+	name := candidateName("profile-2-568", "2.568.3")
+	got, err := crdstore.Get[v1alpha1.ProfileCandidate](context.Background(), store, name, "")
+	if err != nil {
+		t.Fatalf("get candidate %s: %v", name, err)
+	}
+	if got.Spec.ResolveVersion != "2.568.3" {
+		t.Errorf("ResolveVersion = %q, want 2.568.3", got.Spec.ResolveVersion)
+	}
+	candidates, _ := crdstore.List[v1alpha1.ProfileCandidate](context.Background(), store, "", "")
+	if len(candidates) != 1 {
+		t.Fatalf("candidates = %d, want 1 (the 2.580 line must not create one for 2.568)", len(candidates))
+	}
+}
+
+// TestUpgradeTrackerPicksHighestObservedPatch verifies that when the tier list
+// and the stable core both name newer patches, the candidate takes the highest.
+func TestUpgradeTrackerPicksHighestObservedPatch(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, testProfile("profile-2-555", "2.555", "2.555.3"))
+	fx := newUpstreamFixture("2.555.5", []string{"2.555.4"}, "")
+	defer fx.Close()
+
+	tracker := NewUpgradeTrackerReconciler(store, &recordingSink{}, "https://updates.jenkins.io", testLogger())
+	tracker.httpDoer = rewriteToServer(t, fx.Server)
 
 	tracker.Reconcile(context.Background())
 
@@ -199,85 +292,72 @@ func TestUpgradeTrackerCreatesCandidateOnPatchDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get candidate %s: %v", name, err)
 	}
-	if got.Spec.ProfileRef != "profile-2-555" {
-		t.Errorf("ProfileRef = %q, want profile-2-555", got.Spec.ProfileRef)
-	}
-	if got.Spec.ObservedVersion != "2.555.3" {
-		t.Errorf("ObservedVersion = %q, want 2.555.3", got.Spec.ObservedVersion)
-	}
 	if got.Spec.ResolveVersion != "2.555.5" {
 		t.Errorf("ResolveVersion = %q, want 2.555.5", got.Spec.ResolveVersion)
 	}
-	if got.Status.Phase != v1alpha1.ProfileCandidatePhasePending {
-		t.Errorf("Phase = %q, want Pending", got.Status.Phase)
-	}
-	if events := sink.ofType("upgrade.candidate.created"); len(events) != 1 {
-		t.Fatalf("upgrade.candidate.created events = %d, want 1", len(events))
-	}
 }
 
-// TestUpgradeTrackerExhaustsProbeStepsCreatesCandidate verifies the
-// bound-reached case: exhausting maxPatchProbeSteps with no 404 still
-// creates a candidate off the last confirmed 200 (a lower-bound discovery,
-// not a proven newest patch).
-func TestUpgradeTrackerExhaustsProbeStepsCreatesCandidate(t *testing.T) {
+// TestUpgradeTrackerTiersFailureUsesStableCore verifies that a failed
+// tiers.json read leaves the stable core as the only observed input.
+func TestUpgradeTrackerTiersFailureUsesStableCore(t *testing.T) {
 	store := crdstore.NewFake()
 	crdstore.MustSeed(store, testProfile("profile-2-555", "2.555", "2.555.3"))
-	okPaths := make(map[string]bool, maxPatchProbeSteps)
-	for k := 4; k <= 3+maxPatchProbeSteps; k++ {
-		okPaths[fmt.Sprintf("/dynamic-stable-2.555.%d/update-center.actual.json", k)] = true
-	}
-	ts := dynamicStableServer("2.555.1", okPaths)
-	defer ts.Close()
+	fx := newUpstreamFixture("2.555.5", nil, "")
+	defer fx.Close()
 
-	sink := &recordingSink{}
-	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
-	tracker.httpDoer = rewriteToServer(t, ts)
+	tracker := NewUpgradeTrackerReconciler(store, &recordingSink{}, "https://updates.jenkins.io", testLogger())
+	tracker.httpDoer = rewriteToServer(t, fx.Server)
 
 	tracker.Reconcile(context.Background())
 
-	wantVersion := fmt.Sprintf("2.555.%d", 3+maxPatchProbeSteps)
-	name := candidateName("profile-2-555", wantVersion)
-	got, err := crdstore.Get[v1alpha1.ProfileCandidate](context.Background(), store, name, "")
-	if err != nil {
-		t.Fatalf("get candidate %s: %v", name, err)
-	}
-	if got.Spec.ResolveVersion != wantVersion {
-		t.Errorf("ResolveVersion = %q, want %q (last confirmed 200 within the %d-probe bound)", got.Spec.ResolveVersion, wantVersion, maxPatchProbeSteps)
+	if _, err := crdstore.Get[v1alpha1.ProfileCandidate](context.Background(), store, candidateName("profile-2-555", "2.555.5"), ""); err != nil {
+		t.Fatalf("expected a candidate from the stable core when tiers.json fails: %v", err)
 	}
 }
 
-// TestUpgradeTrackerTransportErrorSkipsProfile verifies the never-hard-fail
-// semantics: a transport error probing one profile's line is logged and
-// skipped, and does not abort the tick's remaining profiles.
-func TestUpgradeTrackerTransportErrorSkipsProfile(t *testing.T) {
+// TestUpgradeTrackerStableFailureUsesLatestCoreTxt verifies that when the
+// stable/ document cannot be read, the tracker falls back to latestCore.txt.
+func TestUpgradeTrackerStableFailureUsesLatestCoreTxt(t *testing.T) {
 	store := crdstore.NewFake()
-	crdstore.MustSeed(store,
-		testProfile("profile-broken", "2.400", "2.400.1"),
-		testProfile("profile-ok", "2.555", "2.555.3"),
-	)
-	ts := dynamicStableServer("2.555.1", map[string]bool{
-		"/dynamic-stable-2.555.4/update-center.actual.json": true,
-	})
-	defer ts.Close()
-	good := rewriteToServer(t, ts)
+	crdstore.MustSeed(store, testProfile("profile-2-555", "2.555", "2.555.3"))
+	fx := newUpstreamFixture("", []string{"2.555.4"}, "2.555.5\n")
+	defer fx.Close()
+
+	tracker := NewUpgradeTrackerReconciler(store, &recordingSink{}, "https://updates.jenkins.io", testLogger())
+	tracker.httpDoer = rewriteToServer(t, fx.Server)
+
+	tracker.Reconcile(context.Background())
+
+	if _, err := crdstore.Get[v1alpha1.ProfileCandidate](context.Background(), store, candidateName("profile-2-555", "2.555.5"), ""); err != nil {
+		t.Fatalf("expected a candidate from stable/latestCore.txt: %v", err)
+	}
+}
+
+// TestUpgradeTrackerAllReadsFailNoCandidate verifies that when every upstream
+// read fails, the tracker creates no candidate and does not fail.
+func TestUpgradeTrackerAllReadsFailNoCandidate(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, testProfile("profile-2-555", "2.555", "2.555.3"))
+	fx := newUpstreamFixture("", nil, "")
+	defer fx.Close()
 
 	sink := &recordingSink{}
 	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
-	tracker.httpDoer = doerFunc(func(req *http.Request) (*http.Response, error) {
-		if strings.Contains(req.URL.Path, "2.400") {
-			return nil, errors.New("simulated transport failure")
-		}
-		return good(req)
+	tracker.httpDoer = doerFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("simulated transport failure")
 	})
 
 	tracker.Reconcile(context.Background())
 
-	if _, err := crdstore.Get[v1alpha1.ProfileCandidate](context.Background(), store, candidateName("profile-broken", "2.400.2"), ""); err == nil {
-		t.Fatalf("expected no candidate for profile-broken (transport error should skip it silently)")
+	candidates, err := crdstore.List[v1alpha1.ProfileCandidate](context.Background(), store, "", "")
+	if err != nil {
+		t.Fatalf("list ProfileCandidates: %v", err)
 	}
-	if _, err := crdstore.Get[v1alpha1.ProfileCandidate](context.Background(), store, candidateName("profile-ok", "2.555.4"), ""); err != nil {
-		t.Fatalf("expected profile-ok's candidate to still be created despite profile-broken's error: %v", err)
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %d, want 0 when every read fails", len(candidates))
+	}
+	if events := sink.ofType("upgrade.candidate.created"); len(events) != 0 {
+		t.Fatalf("upgrade.candidate.created events = %d, want 0", len(events))
 	}
 }
 
@@ -287,14 +367,12 @@ func TestUpgradeTrackerTransportErrorSkipsProfile(t *testing.T) {
 func TestUpgradeTrackerApplyOwnedNoOpOnRepeat(t *testing.T) {
 	store := crdstore.NewFake()
 	crdstore.MustSeed(store, testProfile("profile-2-555", "2.555", "2.555.3"))
-	ts := dynamicStableServer("2.555.1", map[string]bool{
-		"/dynamic-stable-2.555.4/update-center.actual.json": true,
-	})
-	defer ts.Close()
+	fx := newUpstreamFixture("2.555.4", []string{"2.555.4"}, "")
+	defer fx.Close()
 
 	sink := &recordingSink{}
 	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
-	tracker.httpDoer = rewriteToServer(t, ts)
+	tracker.httpDoer = rewriteToServer(t, fx.Server)
 
 	tracker.Reconcile(context.Background())
 	tracker.Reconcile(context.Background())
@@ -313,7 +391,7 @@ func TestUpgradeTrackerApplyOwnedNoOpOnRepeat(t *testing.T) {
 
 // TestUpgradeTracker_StableDocumentLargerThanOneMiB verifies that the stable/
 // document parses when it exceeds 1 MiB and core.version sits after the
-// padding. The tracker must still learn the stable LTS line.
+// padding. The tracker must still learn the stable core.
 func TestUpgradeTracker_StableDocumentLargerThanOneMiB(t *testing.T) {
 	ts := paddedStableServer("2.570.2")
 	defer ts.Close()
@@ -321,11 +399,30 @@ func TestUpgradeTracker_StableDocumentLargerThanOneMiB(t *testing.T) {
 	tracker := NewUpgradeTrackerReconciler(crdstore.NewFake(), &recordingSink{}, "https://updates.jenkins.io", testLogger())
 	tracker.httpDoer = rewriteToServer(t, ts)
 
-	line, ok := tracker.fetchNewLTSLine(context.Background())
+	core, ok := tracker.fetchStableCore(context.Background())
 	if !ok {
-		t.Fatal("fetchNewLTSLine ok = false, want true for a stable/ document larger than 1 MiB")
+		t.Fatal("fetchStableCore ok = false, want true for a stable/ document larger than 1 MiB")
 	}
-	if line != "2.570" {
-		t.Fatalf("fetchNewLTSLine line = %q, want %q", line, "2.570")
+	if core != "2.570.2" {
+		t.Fatalf("fetchStableCore core = %q, want %q", core, "2.570.2")
+	}
+}
+
+// TestUpgradeTrackerNewLineFromTiersWhenStableFails verifies that a newer LTS
+// line named only by tiers.json is still reported when both stable reads fail.
+func TestUpgradeTrackerNewLineFromTiersWhenStableFails(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, testProfile("profile-2-555", "2.555", "2.555.3"))
+	fx := newUpstreamFixture("", []string{"2.588.1"}, "")
+	defer fx.Close()
+
+	sink := &recordingSink{}
+	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
+	tracker.httpDoer = rewriteToServer(t, fx.Server)
+
+	tracker.Reconcile(context.Background())
+
+	if events := sink.ofType("upgrade.upstream.observed"); len(events) != 1 {
+		t.Fatalf("upgrade.upstream.observed events = %d, want 1 for the tiers.json line 2.588", len(events))
 	}
 }
