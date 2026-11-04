@@ -241,9 +241,11 @@ changes.
 writes the new placement first, then both cells' tenant lists. A claim carrying an older
 generation is refused, so a lost cell never grants a build after the move.
 
-A voluntary move (a rebalance, or a profile change) waits. The reconciler drops the tenant's
-folder from the old cell first (`Placed=False`, reason `TenantMoving`), waits until that cell
-confirms the folder is idle, then does the same two-step move.
+A voluntary move (a rebalance, a profile change, or a pool change) waits. The reconciler drops the
+tenant's folder from every member cell first (`Placed=False`, reason `TenantMoving`). It waits
+until slot 0's old cell and each member cell on the old profile or pool confirm the folder is
+idle. It then does the same two-step move. [Tenant Slots](tenant-slots.md#a-profile-or-pool-change-moves-every-member)
+describes how the other members move.
 
 **Roll.** A cell that reports `CellReady=False` past `cells.unreadyGracePeriod`, for a reason
 other than the three configuration gates, gets its pod deleted once and the reason `CellRolled`.

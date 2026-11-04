@@ -400,7 +400,8 @@ func Place(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1al
 }
 
 // applyMemberReason overrides the Placed reason with the one the member
-// set implies, when the member set has one to state. SlotPending outranks
+// set implies, when the member set has one to state and the placed reason
+// may be refined (memberReasonRefines). SlotPending outranks
 // StandbyPending, and both report Placed=False. MembersApplied reports
 // Placed=True.
 //
@@ -415,6 +416,9 @@ func applyMemberReason(tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, n
 	if wantedSlots+wantedStandby <= 1 {
 		return
 	}
+	if !memberReasonRefines(placedReason(status)) {
+		return
+	}
 	switch memberReasonFromStatus(status.Placement.Members, wantedSlots, wantedStandby) {
 	case v1alpha1.TenantReasonSlotPending:
 		setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonSlotPending,
@@ -424,6 +428,22 @@ func applyMemberReason(tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, n
 			"every active slot holds a cell and at least one standby does not", nowT)
 	case v1alpha1.TenantReasonMembersApplied:
 		setPlaced(status, metav1.ConditionTrue, v1alpha1.TenantReasonMembersApplied, "", nowT)
+	}
+}
+
+// memberReasonRefines reports whether the member reason may replace the
+// Placed reason that the keep and move path set this tick. A hold reason
+// stands. TenantMoving carries the voluntary move across ticks.
+// CellNotReady, AwaitingCell, and CellCapReached state why slot 0 does
+// not build.
+func memberReasonRefines(reason string) bool {
+	switch reason {
+	case v1alpha1.TenantReasonTenantPlaced, v1alpha1.TenantReasonTenantMoved,
+		v1alpha1.TenantReasonSlotPending, v1alpha1.TenantReasonStandbyPending,
+		v1alpha1.TenantReasonMembersApplied:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -470,7 +490,7 @@ func evaluateKeep(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantSta
 	if c.Evacuate {
 		return &c, moveImmediate
 	}
-	if !c.Enabled || c.ResolvedProfile != tenant.Spec.Pipelines.Profile || !keepsMembership(in, tenant, c) {
+	if !cellKeepsTenant(in, tenant, c) {
 		return &c, moveVoluntary
 	}
 	return &c, moveNone
@@ -776,13 +796,36 @@ func performVoluntaryMove(ctx context.Context, in Inputs, tenant *v1alpha1.Tenan
 		setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonTenantMoving, tenantMovingMessage, nowT)
 		return
 	}
-	if containsString(oldCell.AppliedTenants, tenant.Name) || hasPendingDeletionForTenant(oldCell.PendingDeletionPaths, tenant.Name) {
+	if containsString(oldCell.AppliedTenants, tenant.Name) ||
+		hasPendingDeletionForTenant(oldCell.PendingDeletionPaths, tenant.Name) ||
+		!staleMembersDrained(in, tenant, status.Placement) {
 		// Still draining: keep the message constant so LastTransitionTime
 		// keeps recording when the wait began.
 		setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonTenantMoving, tenantMovingMessage, nowT)
 		return
 	}
 	performMove(ctx, in, tenant, status, oldCell, nowT, out)
+}
+
+// staleMembersDrained reports whether each member cell that fails the
+// keep rule has dropped the tenant's folder. The move releases such a
+// cell, and a pool drain of a released cell ends a build that still runs
+// there. A cell that is gone or evacuating counts as drained, because
+// its builds are already lost.
+func staleMembersDrained(in Inputs, tenant *v1alpha1.Tenant, placement *v1alpha1.TenantPlacementStatus) bool {
+	if placement == nil {
+		return true
+	}
+	for _, m := range placement.Members {
+		cell, found := lookupCell(in.Cells, m.Cell, m.CellNamespace)
+		if !found || cell.Evacuate || cellKeepsTenant(in, tenant, cell) {
+			continue
+		}
+		if !cellDrainedTenant(cell, tenant.Name) {
+			return false
+		}
+	}
+	return true
 }
 
 // retryMovePurge re-requests the purge for status.Pipelines.

@@ -76,6 +76,27 @@ old holder's agent pods go as [Agent pod lifetime](tenant-pod-templates.md#agent
 Every other slot keeps building. A claim carrying the generation from before the promotion
 answers `NOT_READY`, a retry and never a cancel.
 
+## A profile or pool change moves every member
+
+A change to `spec.pipelines.profile` or `spec.pipelines.cellPool` moves every member to a cell
+of the new pool.
+
+1. Slot 0 moves through the voluntary move in [Placement lifecycle](cells.md#placement-lifecycle).
+   While it waits, every member drops the tenant folder. A running build continues, and no new
+   build starts on any member.
+2. The move also waits until each member cell on the old profile or pool is idle.
+3. Each other slot and each standby then takes a ready cell of the new pool. When the pool has
+   no such cell yet, the member stays on its old cell and continues to build. It moves on a
+   later tick. After the move completes, a member with no replacement stays on its old cell and
+   builds there again.
+
+A standby on an old cell never takes a slot. Each tick that moves a member raises the tenant
+generation once. A claim that carries the older generation answers `NOT_READY`, a retry and
+never a cancel.
+
+The pool creates the cells that the move needs. A pool at its `maxCells` leaves the remaining
+members on their old cells, and they keep building there. Raise `maxCells` to complete the move.
+
 ## Build state across slots
 
 Each slot holder is its own Jenkins. A cell writes artifacts and stashes under its own object
