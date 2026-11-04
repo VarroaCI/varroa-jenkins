@@ -54,7 +54,11 @@ func runLogout(cmd *cobra.Command, args []string) error {
 	if revoke {
 		prefix := extractPrefix(ctx.APIKey)
 		// Create a client to revoke the key
-		c, err := client.New(ctx.Server, ctx.APIKey, client.WithUserAgent("varroactl/"+version))
+		server, err := normalizeServerURL(ctx.Server)
+		if err != nil {
+			return err
+		}
+		c, err := client.New(server, ctx.APIKey, client.WithUserAgent("varroactl/"+version))
 		if err != nil {
 			return err
 		}

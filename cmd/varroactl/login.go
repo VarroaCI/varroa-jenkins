@@ -36,7 +36,7 @@ func init() {
 			Short: "Log in to a Varroa server",
 			RunE:  runLogin,
 		}
-		loginCmd.Flags().String("server", "", "Server URL")
+		loginCmd.Flags().String("server", "", "server URL; a value with no scheme gets https://")
 		loginCmd.Flags().String("api-key", "", "API key (or - for stdin)")
 		loginCmd.Flags().String("username", "", "Username for local/ldap login")
 		loginCmd.Flags().Bool("password-stdin", false, "Read password from stdin")
@@ -184,12 +184,17 @@ func loginWithAPIKey(cmd *cobra.Command, apiKey string) error {
 	if server == "" {
 		rc, err := resolveContext(func(name string) string { return "" })
 		if err != nil {
-			// Try without context — require --server or VARROACTL_SERVER
-			return fmt.Errorf("--server is required")
+			return err
 		}
 		server = rc.server
 	}
-	server = strings.TrimRight(server, "/")
+	server, err := normalizeServerURL(server)
+	if err != nil {
+		return err
+	}
+	if server == "" {
+		return fmt.Errorf("--server is required")
+	}
 
 	// Validate token by calling /me
 	c, err := client.New(server, apiKey, client.WithUserAgent("varroactl/"+version))
@@ -232,10 +237,13 @@ func loginBrowser(cmd *cobra.Command, serverFlag string) error {
 			server = rc.server
 		}
 	}
+	server, err := normalizeServerURL(server)
+	if err != nil {
+		return err
+	}
 	if server == "" {
 		return fmt.Errorf("--server is required for browser login")
 	}
-	server = strings.TrimRight(server, "/")
 
 	// 1. Listen on 127.0.0.1:0
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -257,9 +265,11 @@ func loginBrowser(cmd *cobra.Command, serverFlag string) error {
 	loginURL := fmt.Sprintf("%s/cli-auth?port=%d&state=%s&name=%s",
 		server, port, url.QueryEscape(nonce), url.QueryEscape(name))
 
-	// Open browser
+	// Print the URL before the open: a launcher can exit 0 and open nothing.
+	errOut := cmd.ErrOrStderr()
+	_, _ = fmt.Fprintf(errOut, "Opening the login page in a browser. If no browser window opens, go to this URL:\n  %s\n", loginURL)
 	if err := openBrowser(loginURL); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Open this URL:\n  %s\n", loginURL)
+		_, _ = fmt.Fprintf(errOut, "Cannot open a browser: %v\nGo to the URL above in a browser on this computer, or use: varroactl login --api-key\n", err)
 	}
 
 	// 4. Loopback server
@@ -347,10 +357,13 @@ func loginWithUsername(cmd *cobra.Command, username string) error {
 	if server == "" {
 		server = os.Getenv("VARROACTL_SERVER")
 	}
+	server, err := normalizeServerURL(server)
+	if err != nil {
+		return err
+	}
 	if server == "" {
 		return fmt.Errorf("--server is required for username login")
 	}
-	server = strings.TrimRight(server, "/")
 
 	c, err := client.New(server, "", client.WithUserAgent("varroactl/"+version))
 	if err != nil {
