@@ -31,6 +31,7 @@ import { Button } from "../Button";
 import { age } from "../activityTimeline.util";
 import { TranscriptView } from "./TranscriptView";
 import { TranscriptStream } from "./TranscriptStream";
+import { labelFor } from "./labels";
 import { unechoedPending, type PendingMessage } from "./activity";
 import styles from "./AssistantDrawer.module.css";
 import type { AssistantSession, AssistantSessionState } from "../../types/assistant";
@@ -255,7 +256,7 @@ export default function AssistantDrawer() {
                   <span className={styles.sessionTitle} title={title}>{title}</span>
                   {s.firstMessage && <span className={styles.sessionContext}>{label}</span>}
                   <span className={styles.sessionMeta}>
-                    {s.state} · {age(s.startedAt)}{s.id === sid ? " · Current" : ""}
+                    {labelFor("sessionStates", s.state)} · {age(s.startedAt)}{s.id === sid ? " · Current" : ""}
                   </span>
                 </button>
               </li>
@@ -311,7 +312,7 @@ export default function AssistantDrawer() {
       </form>
 
       <footer className={styles.footer}>
-        <span aria-live="polite">{state ? `State: ${state}` : "No session"}</span>
+        <span aria-live="polite">{state ? `State: ${labelFor("sessionStates", state)}` : "No session"}</span>
         {running && <Button size="sm" onClick={stop}>Stop</Button>}
       </footer>
     </section>
