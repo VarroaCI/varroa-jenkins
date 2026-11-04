@@ -112,6 +112,69 @@ describe("useActivityFeed live ingest (named `activity` frames)", () => {
     });
   });
 
+  it("keeps every frame of a burst that reaches React as one render", async () => {
+    const { result } = renderHook(() => useActivityFeed(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    const es = MockEventSource.instances[0];
+
+    act(() => {
+      es.emitOpen();
+      for (let i = 1; i <= 5; i++) {
+        es.emitNamedEvent(
+          "activity",
+          JSON.stringify(
+            createEvent({
+              timestamp: `2024-01-01T00:00:0${i}Z`,
+              message: `burst ${i}`,
+            }),
+          ),
+        );
+      }
+    });
+
+    await waitFor(() => expect(result.current.events).toHaveLength(5));
+    expect(result.current.events.map((e) => e.message)).toEqual([
+      "burst 5",
+      "burst 4",
+      "burst 3",
+      "burst 2",
+      "burst 1",
+    ]);
+  });
+
+  it("queues every frame of a burst while paused", async () => {
+    const { result } = renderHook(() => useActivityFeed(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    const es = MockEventSource.instances[0];
+
+    act(() => result.current.setPaused(true));
+    act(() => {
+      es.emitOpen();
+      for (let i = 1; i <= 3; i++) {
+        es.emitNamedEvent(
+          "activity",
+          JSON.stringify(
+            createEvent({
+              timestamp: `2024-01-01T00:00:0${i}Z`,
+              message: `paused ${i}`,
+            }),
+          ),
+        );
+      }
+    });
+
+    await waitFor(() => expect(result.current.pendingCount).toBe(3));
+    expect(result.current.events).toHaveLength(0);
+
+    act(() => result.current.resume());
+    await waitFor(() => expect(result.current.events).toHaveLength(3));
+    expect(result.current.pendingCount).toBe(0);
+  });
+
   it("drops a named activity frame that has no type or timestamp", async () => {
     const { result } = renderHook(
       () => useActivityFeed({ namespace: "ns", name: "ctrl" }),

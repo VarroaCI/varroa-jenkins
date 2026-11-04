@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -52,20 +52,24 @@ vi.mock("../hooks/useClusters", () => ({
   coreOf: (c: unknown[]) => (c as any[])?.find((c2: any) => c2.core),
 }));
 
-let mockSSELastEvent: { type: string; data: ActivityEvent } | null = null;
+let mockOnEvent: ((ev: { type: string; data: unknown }) => void) | undefined;
 let mockSSEReadyState = "closed";
 let mockSSEError: Event | null = null;
 
 vi.mock("../hooks/useEventStream", () => ({
-  useEventStream: (..._args: unknown[]) => ({
-    lastEvent: mockSSELastEvent,
+  useEventStream: (...args: unknown[]) => {
+    mockOnEvent = (args[3] as { onEvent?: typeof mockOnEvent } | undefined)?.onEvent;
+    return {
+    lastEvent: null,
     readyState: mockSSEReadyState,
     error: mockSSEError,
     close: vi.fn(),
-  }),
+    };
+  },
 }));
 
 import ActivityTimeline from "./ActivityTimeline";
+import { useActivityFeed } from "../hooks/useActivityFeed";
 import type { ActivityEvent } from "../types";
 
 function createEvent(overrides: Partial<ActivityEvent>): ActivityEvent {
@@ -80,6 +84,15 @@ function createEvent(overrides: Partial<ActivityEvent>): ActivityEvent {
   };
 }
 
+// The page calls useActivityFeed once and passes the result to the timeline.
+function Harness({ scope, selectedControllers }: {
+  scope?: { namespace: string; name: string };
+  selectedControllers?: Set<string>;
+}) {
+  const feed = useActivityFeed(scope);
+  return <ActivityTimeline feed={feed} selectedControllers={selectedControllers} />;
+}
+
 function renderTimeline(props?: {
   scope?: { namespace: string; name: string };
   selectedControllers?: Set<string>;
@@ -90,7 +103,7 @@ function renderTimeline(props?: {
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <ActivityTimeline scope={props?.scope} selectedControllers={props?.selectedControllers} />
+        <Harness scope={props?.scope} selectedControllers={props?.selectedControllers} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -99,7 +112,7 @@ function renderTimeline(props?: {
 beforeEach(() => {
   mockBffFetch.mockReset();
   mockBffFetch.mockResolvedValue({items: []});
-  mockSSELastEvent = null;
+  mockOnEvent = undefined;
   mockSSEReadyState = "closed";
   mockSSEError = null;
 });
@@ -335,15 +348,20 @@ describe("ActivityTimeline", () => {
   });
 
   it("renders no row for a live frame with no type", async () => {
-    mockSSELastEvent = {
-      type: "activity",
-      data: { event: "heartbeat", name: "c1", namespace: "ns", cluster: "core" } as unknown as ActivityEvent,
-    };
     renderTimeline();
 
     await waitFor(() => {
       expect(screen.getByText(/No activity yet/)).toBeInTheDocument();
     });
+    // Fail loudly if the timeline stops wiring the frame handler to the feed.
+    expect(mockOnEvent).toBeDefined();
+    act(() => {
+      mockOnEvent?.({
+        type: "activity",
+        data: { event: "heartbeat", name: "c1", namespace: "ns", cluster: "core" },
+      });
+    });
+    expect(screen.getByText(/No activity yet/)).toBeInTheDocument();
     expect(document.querySelector('[title="Invalid Date"]')).toBeNull();
   });
 
