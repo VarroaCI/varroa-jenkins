@@ -2696,6 +2696,23 @@ func (s *Server) handleActivityStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
+	// The stream closes at end: the endC timer below ends the loop. Matches
+	// drops each event at or after end, so no late event is sent.
+	// A stream whose end has passed sends the headers and closes at once.
+	// It takes no fan-out subscription. A nil endC never fires.
+	var endC <-chan time.Time
+	if filter.End != nil {
+		wait := time.Until(*filter.End)
+		if wait <= 0 {
+			w.WriteHeader(http.StatusOK)
+			flusher.Flush()
+			return
+		}
+		endTimer := time.NewTimer(wait)
+		defer endTimer.Stop()
+		endC = endTimer.C
+	}
+
 	// Capture authorization context at connection time. Claims are fixed
 	// for the lifetime of the connection; the Authorizer (informer-backed)
 	// is re-evaluated per event for role-change reactivity.
@@ -2726,6 +2743,8 @@ func (s *Server) handleActivityStream(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-endC:
 			return
 		case <-keepalive.C:
 			fmt.Fprintf(w, ": ping\n\n")

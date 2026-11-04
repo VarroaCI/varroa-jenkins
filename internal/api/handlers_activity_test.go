@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -392,6 +393,32 @@ func (f *fakeActivitySource) Subscribe(string) <-chan sse.Record    { return f.c
 func (f *fakeActivitySource) SubscribeAll() <-chan sse.Record       { return f.ch }
 func (f *fakeActivitySource) Unsubscribe(string, <-chan sse.Record) {}
 
+// countingActivitySource is a sse.EventSource that counts subscriptions, so a
+// test can prove a stream released its fan-out subscription.
+type countingActivitySource struct {
+	ch                   chan sse.Record
+	subscribed, released atomic.Int32
+}
+
+func (c *countingActivitySource) Subscribe(string) <-chan sse.Record {
+	c.subscribed.Add(1)
+	return c.ch
+}
+
+func (c *countingActivitySource) SubscribeAll() <-chan sse.Record {
+	c.subscribed.Add(1)
+	return c.ch
+}
+
+func (c *countingActivitySource) Unsubscribe(string, <-chan sse.Record) {
+	c.released.Add(1)
+}
+
+// open returns the number of subscriptions not yet released.
+func (c *countingActivitySource) open() int32 {
+	return c.subscribed.Load() - c.released.Load()
+}
+
 func TestHandleActivityStream_DropsNonActivityRecords(t *testing.T) {
 	ch := make(chan sse.Record, 2)
 	ch <- sse.Record{Event: "heartbeat", Data: map[string]interface{}{"event": "heartbeat", "name": "c1", "namespace": "ns", "cluster": "core"}}
@@ -744,31 +771,107 @@ func TestHandleActivityStream_StartOnlyKeepsLiveEvents(t *testing.T) {
 	}
 }
 
-// TestHandleActivityStream_ClosedRangeDropsLiveEvents proves a live event at
-// the present is dropped when the requested range ended in the past.
-func TestHandleActivityStream_ClosedRangeDropsLiveEvents(t *testing.T) {
+// TestHandleActivityStream_PastEndClosesAtOnce proves a stream whose end has
+// passed sends the headers and returns with no event and no fan-out
+// subscription. The fake channel is never closed and never sends, so only the
+// end check can stop the handler.
+func TestHandleActivityStream_PastEndClosesAtOnce(t *testing.T) {
 	now := time.Now().UTC()
-	ch := make(chan sse.Record, 1)
-	ch <- sse.Record{Event: "auth.local.login", Data: activity.Event{Type: "auth.local.login", Source: "user", Namespace: "ns", Controller: "c1", Message: "m", Timestamp: now}}
-	close(ch)
+	cases := map[string]string{
+		"start and end": "start=" + now.Add(-2*time.Hour).Format(time.RFC3339) + "&end=" + now.Add(-time.Hour).Format(time.RFC3339),
+		"end only":      "end=" + now.Add(-time.Hour).Format(time.RFC3339),
+	}
+	for name, query := range cases {
+		t.Run(name, func(t *testing.T) {
+			src := &countingActivitySource{ch: make(chan sse.Record)}
+			srv := NewServer(&Dependencies{
+				Authorizer:  testAuthorizer(true, ""),
+				Broadcaster: src,
+				Logger:      slog.Default(),
+			})
+			ctx, cancel := context.WithCancel(authContext(&auth.Claims{Subject: "test-user"}))
+			t.Cleanup(cancel)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/activity/stream?"+query, nil).WithContext(ctx)
+			w := httptest.NewRecorder()
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				srv.handleActivityStream(w, req)
+			}()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				cancel()
+				<-done
+				t.Fatal("stream with a past end did not close")
+			}
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+			}
+			if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+				t.Errorf("Content-Type = %q, want text/event-stream", ct)
+			}
+			if !w.Flushed {
+				t.Errorf("headers were not flushed")
+			}
+			if n := strings.Count(w.Body.String(), "event: activity\n"); n != 0 {
+				t.Errorf("expected no activity frames, got %d: %s", n, w.Body.String())
+			}
+			if n := src.subscribed.Load(); n != 0 {
+				t.Errorf("subscribed = %d, want 0", n)
+			}
+			if n := src.open(); n != 0 {
+				t.Errorf("open subscriptions = %d, want 0", n)
+			}
+		})
+	}
+}
+
+// TestHandleActivityStream_FutureEndClosesAtEnd proves a stream with an end in
+// the future delivers its events until end, then closes and releases its
+// subscription.
+func TestHandleActivityStream_FutureEndClosesAtEnd(t *testing.T) {
+	begin := time.Now().UTC()
+	end := begin.Add(300 * time.Millisecond)
+	src := &countingActivitySource{ch: make(chan sse.Record, 1)}
+	src.ch <- sse.Record{Event: "auth.local.login", Data: activity.Event{Type: "auth.local.login", Source: "user", Namespace: "ns", Controller: "c1", Message: "m", Timestamp: begin}}
 
 	srv := NewServer(&Dependencies{
 		Authorizer:  testAuthorizer(true, ""),
-		Broadcaster: &fakeActivitySource{ch: ch},
+		Broadcaster: src,
 		Logger:      slog.Default(),
 	})
-	target := "/api/v1/activity/stream?start=" + now.Add(-2*time.Hour).Format(time.RFC3339) + "&end=" + now.Add(-time.Hour).Format(time.RFC3339)
-	req := httptest.NewRequest(http.MethodGet, target, nil).
-		WithContext(authContext(&auth.Claims{Subject: "test-user"}))
+	ctx, cancel := context.WithCancel(authContext(&auth.Claims{Subject: "test-user"}))
+	t.Cleanup(cancel)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/activity/stream?end="+end.Format(time.RFC3339Nano), nil).WithContext(ctx)
 	w := httptest.NewRecorder()
 
-	srv.handleActivityStream(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		srv.handleActivityStream(w, req)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("stream did not close at its end")
 	}
-	if n := strings.Count(w.Body.String(), "event: activity\n"); n != 0 {
-		t.Fatalf("expected no activity frames, got %d: %s", n, w.Body.String())
+
+	if closed := time.Now(); closed.Before(end) {
+		t.Errorf("stream closed at %v, before its end %v", closed, end)
+	}
+	if n := strings.Count(w.Body.String(), "event: activity\n"); n != 1 {
+		t.Fatalf("expected one activity frame, got %d: %s", n, w.Body.String())
+	}
+	if n := src.subscribed.Load(); n != 1 {
+		t.Errorf("subscribed = %d, want 1", n)
+	}
+	if n := src.open(); n != 0 {
+		t.Errorf("open subscriptions = %d, want 0", n)
 	}
 }
 

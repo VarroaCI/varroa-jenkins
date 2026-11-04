@@ -227,8 +227,8 @@ describe("useActivityFeed range bounds", () => {
   });
 
   it("a custom range sends its start and end to the live stream", async () => {
-    const start = "2026-10-30T00:00:00.000Z";
-    const end = "2026-10-30T06:00:00.000Z";
+    const start = new Date(Date.now() - 36e5).toISOString();
+    const end = new Date(Date.now() + 36e5).toISOString();
     renderHook(() => useActivityFeed(undefined, { range: "custom", start, end }), {
       wrapper: createWrapper(),
     });
@@ -239,6 +239,47 @@ describe("useActivityFeed range bounds", () => {
     const params = new URL(String(mockStreamUrl), "http://x").searchParams;
     expect(params.get("start")).toBe(start);
     expect(params.get("end")).toBe(end);
+  });
+
+  it("a custom range whose end has passed opens no live stream", async () => {
+    const end = new Date(Date.now() - 60e3).toISOString();
+    const start = new Date(Date.parse(end) - 36e5).toISOString();
+    renderHook(() => useActivityFeed(undefined, { range: "custom", start, end }), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(mockBffFetch).toHaveBeenCalled();
+    });
+    expect(String(mockBffFetch.mock.calls[0][0])).toContain("end=");
+    expect(mockStreamUrl).toBeNull();
+  });
+
+  it("a custom range closes the live stream at its end", async () => {
+    const end = new Date(Date.now() + 300).toISOString();
+    const start = new Date(Date.parse(end) - 36e5).toISOString();
+    renderHook(() => useActivityFeed(undefined, { range: "custom", start, end }), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(mockStreamUrl).not.toBeNull();
+    });
+    await waitFor(() => expect(mockStreamUrl).toBeNull(), { timeout: 3000 });
+  });
+
+  it("a stream closed at its range end is not reported as an error", async () => {
+    const end = new Date(Date.now() - 60e3).toISOString();
+    const start = new Date(Date.parse(end) - 36e5).toISOString();
+    mockSSEError = new Event("error");
+    const { result } = renderHook(() => useActivityFeed(undefined, { range: "custom", start, end }), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(mockBffFetch).toHaveBeenCalled();
+    });
+    expect(result.current.error).toBeNull();
   });
 });
 

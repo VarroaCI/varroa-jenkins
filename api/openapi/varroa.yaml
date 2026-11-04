@@ -14246,8 +14246,10 @@ paths:
         schema:
           format: date-time
           type: string
-      - description: Drops each live event at or after end. Leave out end to keep
-          the stream open; an end in the past sends no events.
+      - description: Drops each live event at or after end. The server closes the
+          stream at end. When end has passed, the server closes the stream after the
+          headers and sends no event. Do not reconnect a stream whose end has passed.
+          Leave out end to keep the stream open.
         in: query
         name: end
         schema:
