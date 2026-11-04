@@ -30,7 +30,7 @@ connections:
   - component: operator
     destination: updates.jenkins.io (update-center metadata)
     hosts: []
-    purpose: Read update-center metadata when pull-through uses the default upstream.
+    purpose: Read tiers.json to choose the LTS metadata sources that pull-through reads.
     protocol: HTTPS 443
     control: updateCenter.pullThrough.upstreamURL
     disable: 'Yes. Pull-through is off by default. Keep updateCenter.pullThrough.enabled false.'

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
@@ -23,6 +24,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/oci"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // ---------------------------------------------------------------------------
@@ -190,6 +192,8 @@ func TestUpdateCenterReconciler(t *testing.T) {
 	t.Run("latest-pin-unstored-posted-as-latest", testLatestPinUnstoredPostedAsLatest)
 	t.Run("latest-pin-unstored-not-listed-unready", testLatestPinUnstoredNotListedUnready)
 	t.Run("lts-metadata-derivation", testLTSMetadataDerivation)
+	t.Run("lts-metadata-tier-mapping", testLTSMetadataTierMapping)
+	t.Run("lts-metadata-tiers-unavailable-uses-core", testLTSMetadataTiersUnavailableUsesCore)
 	t.Run("lts-metadata-stable-no-rewrite", testLTSMetadataStableNoRewrite)
 	t.Run("lts-metadata-disabled-clears", testLTSMetadataDisabledClears)
 	t.Run("lts-metadata-storage-unready-untouched", testLTSMetadataStorageUnreadyUntouched)
@@ -596,6 +600,88 @@ func testLTSMetadataDerivation(t *testing.T) {
 	want := []string{weekly, ltsURL}
 	if !reflect.DeepEqual(status.ResolvedMetadataSources, want) {
 		t.Fatalf("resolvedMetadataSources = %v, want %v", status.ResolvedMetadataSources, want)
+	}
+}
+
+// tiersTestServer serves tiers.json with stableCores. A nil list answers 500 to
+// simulate an unavailable tier list. Every other path answers 404.
+func tiersTestServer(t *testing.T, stableCores []string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tiers.json" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if stableCores == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		body, _ := json.Marshal(map[string][]string{"stableCores": stableCores})
+		_, _ = w.Write(body)
+	}))
+}
+
+// testLTSMetadataTierMapping verifies that each LTS profile maps to the stable
+// tier that carries it: 2.580.2 maps to 2.580.1, and two profiles that share a
+// tier yield one source.
+func testLTSMetadataTierMapping(t *testing.T) {
+	client := newTestClient()
+	uc := ucWithPullThrough(true)
+	tiers := tiersTestServer(t, []string{"2.568.3", "2.580.1"})
+	defer tiers.Close()
+	uc.Spec.PullThrough.UpstreamURL = tiers.URL
+	client.updateCenter = uc
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+	ts := emptyInventoryServer(t)
+	addProfile(client, "prof-580-1", "2.580.1")
+	addProfile(client, "prof-580-2", "2.580.2")
+	addProfile(client, "prof-568", "2.568.3")
+
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	rec.SetUpstreamTiers(ucmeta.NewTierIndex(tiers.Client(), time.Hour, testLogger()))
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	const url568 = "/dynamic-stable-2.568.3/update-center.actual.json"
+	const url5801 = "/dynamic-stable-2.580.1/update-center.actual.json"
+	wantCM := tiers.URL + url568 + "\n" + tiers.URL + url5801
+	cm := client.configMapData[metadataConfigMapName]
+	if cm == nil || cm[metadataConfigMapKey] != wantCM {
+		t.Fatalf("metadata ConfigMap = %q, want %q", cm[metadataConfigMapKey], wantCM)
+	}
+	status := lastUCStatus(t, client)
+	want := []string{tiers.URL + "/update-center.actual.json", tiers.URL + url568, tiers.URL + url5801}
+	if !reflect.DeepEqual(status.ResolvedMetadataSources, want) {
+		t.Fatalf("resolvedMetadataSources = %v, want %v", status.ResolvedMetadataSources, want)
+	}
+}
+
+// testLTSMetadataTiersUnavailableUsesCore verifies that a failed tiers.json read
+// keeps the profile core as the dynamic-stable source.
+func testLTSMetadataTiersUnavailableUsesCore(t *testing.T) {
+	client := newTestClient()
+	uc := ucWithPullThrough(true)
+	tiers := tiersTestServer(t, nil)
+	defer tiers.Close()
+	uc.Spec.PullThrough.UpstreamURL = tiers.URL
+	client.updateCenter = uc
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+	ts := emptyInventoryServer(t)
+	addProfile(client, "prof-580-2", "2.580.2")
+
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	rec.SetUpstreamTiers(ucmeta.NewTierIndex(tiers.Client(), time.Hour, testLogger()))
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	want := tiers.URL + "/dynamic-stable-2.580.2/update-center.actual.json"
+	cm := client.configMapData[metadataConfigMapName]
+	if cm == nil || cm[metadataConfigMapKey] != want {
+		t.Fatalf("metadata ConfigMap = %q, want the core-version URL %q", cm[metadataConfigMapKey], want)
 	}
 }
 

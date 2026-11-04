@@ -360,7 +360,7 @@ func resolveFromPluginsFile(path string, _ string) ([]resolvedEntry, string, err
 func downloadAndVerify(ctx context.Context, downloadURLBase, jenkinsVersion string, entries []resolvedEntry) ([]oci.ResolvedPlugin, []string, error) {
 	// One resolver per run: its sources are computed once and its per-source
 	// cache makes each metadata document a single fetch, not one per plugin.
-	resolver := newExportResolver(downloadURLBase, entries)
+	resolver := newExportResolver(ctx, downloadURLBase, entries)
 	entries, err := resolveLatestPins(ctx, resolver, jenkinsVersion, entries)
 	if err != nil {
 		return nil, nil, err
@@ -440,7 +440,9 @@ func (u userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 // newExportResolver builds the checksum resolver for one export run.
 //
 // Sources are the weekly metadata first, then one dynamic-stable document per
-// distinct non-empty ResolveVersion in first-seen order. They are computed once
+// distinct stable tier that carries a non-empty ResolveVersion, in first-seen
+// order. The tier comes from tiers.json under downloadURLBase; when that read
+// fails, the ResolveVersion itself names the document. They are computed once
 // here and returned by a closure that always yields the same slice: ucmeta
 // re-evaluates sources() on every ResolveSHA256 call, so building the list
 // inside the closure would redo the work for every plugin.
@@ -448,21 +450,38 @@ func (u userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 // Every source derives from downloadURLBase, so offline mirrors and test
 // servers keep working. The archive base is left at ucmeta's default; only
 // tests move it.
-func newExportResolver(downloadURLBase string, entries []resolvedEntry) *ucmeta.Resolver {
+func newExportResolver(ctx context.Context, downloadURLBase string, entries []resolvedEntry) *ucmeta.Resolver {
 	base := strings.TrimRight(downloadURLBase, "/")
+	client := &http.Client{Transport: userAgentRoundTripper{rt: http.DefaultTransport, ua: "varroactl/" + version}}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	// tiers.json is read once per run, and only when an entry names a version.
+	var tiers ucmeta.Tiers
+	for _, e := range entries {
+		if e.ResolveVersion != "" {
+			t, err := ucmeta.FetchTiers(ctx, client, base)
+			if err != nil {
+				logger.Warn("tiers.json unavailable; each LTS metadata source uses the profile core", "error", err)
+			} else {
+				tiers = t
+			}
+			break
+		}
+	}
+
 	srcs := []ucmeta.Source{{URL: base + "/update-center.actual.json"}}
 	seen := map[string]bool{}
 	for _, e := range entries {
-		if e.ResolveVersion == "" || seen[e.ResolveVersion] {
+		if e.ResolveVersion == "" {
 			continue
 		}
-		seen[e.ResolveVersion] = true
-		srcs = append(srcs, ucmeta.Source{
-			URL: fmt.Sprintf("%s/dynamic-stable-%s/update-center.actual.json", base, e.ResolveVersion),
-		})
+		u := tiers.SourceURL(base, e.ResolveVersion)
+		if seen[u] {
+			continue
+		}
+		seen[u] = true
+		srcs = append(srcs, ucmeta.Source{URL: u})
 	}
-	client := &http.Client{Transport: userAgentRoundTripper{rt: http.DefaultTransport, ua: "varroactl/" + version}}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	// The TTL is only ever compared against this run's own fetches, so it just
 	// has to outlast the run: a large export downloads blobs serially and can
 	// take a while.

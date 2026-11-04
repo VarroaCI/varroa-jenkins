@@ -114,7 +114,14 @@ type UpdateCenterReconciler struct {
 	prefetchFailedAt map[string]time.Time
 	// now returns the current time. Tests replace it to pass the retry window.
 	now func() time.Time
+	// tiers maps an LTS core to the stable tier that upstream publishes metadata
+	// for. A nil index keeps the core-version URL.
+	tiers *ucmeta.TierIndex
 }
+
+// SetUpstreamTiers sets the tier index that maps each LTS core to its metadata
+// tier. The operator shares one index with the profile candidate reconciler.
+func (r *UpdateCenterReconciler) SetUpstreamTiers(t *ucmeta.TierIndex) { r.tiers = t }
 
 // NewUpdateCenterReconciler creates a new UpdateCenterReconciler.
 func NewUpdateCenterReconciler(client ResourceClient, store crdstore.Backend, operatorNamespace, ucBaseURL string, logger *slog.Logger) *UpdateCenterReconciler {
@@ -882,7 +889,8 @@ func (r *UpdateCenterReconciler) reconcileMetadataSources(ctx context.Context, u
 	upstream = strings.TrimRight(upstream, "/")
 	weekly := upstream + "/update-center.actual.json"
 
-	// Derive dynamic-stable sources for every LTS-patch profile. On a transient list
+	// Derive one dynamic-stable source for each stable tier that an LTS-patch profile
+	// maps to. On a transient list
 	// failure, leave the ConfigMap and status.resolvedMetadataSources untouched (the
 	// prior value is carried by the status DeepCopy) rather than dropping valid LTS
 	// sources — mirroring computeGaps' leave-unchanged-on-failure invariant.
@@ -939,9 +947,10 @@ func (r *UpdateCenterReconciler) buildDeclaredPluginsValue(ctx context.Context, 
 func ptrTo[T any](v T) *T { return &v }
 
 // deriveLTSMetadataURLs returns the deduped, sorted dynamic-stable metadata URLs for
-// every JenkinsVersionProfile whose ResolveVersion is an exact MAJOR.MINOR.PATCH. A
-// non-nil error means the profile list could not be read and callers MUST NOT treat
-// the (empty) result as an authoritative "no LTS sources".
+// every JenkinsVersionProfile whose ResolveVersion is an exact MAJOR.MINOR.PATCH. Each
+// URL names the stable tier that carries the profile core, which can differ from the
+// core itself. A non-nil error means the profile list could not be read and callers
+// MUST NOT treat the (empty) result as an authoritative "no LTS sources".
 func (r *UpdateCenterReconciler) deriveLTSMetadataURLs(ctx context.Context, upstream string) ([]string, error) {
 	profiles, err := crdstore.List[v1alpha1.JenkinsVersionProfile](ctx, r.store, "", "")
 	if err != nil {
@@ -954,7 +963,7 @@ func (r *UpdateCenterReconciler) deriveLTSMetadataURLs(ctx context.Context, upst
 		if !ltsPatchRe.MatchString(rv) {
 			continue
 		}
-		u := upstream + "/dynamic-stable-" + rv + "/update-center.actual.json"
+		u := r.tiers.SourceURL(ctx, upstream, rv)
 		if _, dup := seen[u]; dup {
 			continue
 		}

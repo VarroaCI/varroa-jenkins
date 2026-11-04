@@ -1388,7 +1388,7 @@ func TestNewExportResolver_SourceOrderAndDedup(t *testing.T) {
 		{Name: "b", Version: "1", ResolveVersion: "2.555.3"},
 		{Name: "c", Version: "1", ResolveVersion: "2.570.1"},
 	}
-	resolver := newExportResolver(srv.URL, entries)
+	resolver := newExportResolver(context.Background(), srv.URL, entries)
 	// The archive would otherwise be a real network call; this test is only
 	// about which metadata sources were consulted.
 	resolver.SetArchiveBaseURL("")
@@ -1399,6 +1399,7 @@ func TestNewExportResolver_SourceOrderAndDedup(t *testing.T) {
 	}
 
 	want := []string{
+		"/tiers.json",
 		"/update-center.actual.json",
 		"/dynamic-stable-2.555.3/update-center.actual.json",
 		"/dynamic-stable-2.570.1/update-center.actual.json",
@@ -1410,6 +1411,30 @@ func TestNewExportResolver_SourceOrderAndDedup(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("source %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestNewExportResolver_MapsResolveVersionToTier verifies that a ResolveVersion
+// which is not a stable tier reads the tier below it, and never its own document.
+func TestNewExportResolver_MapsResolveVersionToTier(t *testing.T) {
+	shaA := hexToB64(strings.Repeat("a", 64))
+	srv := metaAndBlobServer(t, map[string][]byte{
+		"/tiers.json": []byte(`{"stableCores":["2.580.1"]}`),
+		"/dynamic-stable-2.580.1/update-center.actual.json": ucDocJSON(t, ucFixture{name: "foo", version: "1.0", sha256B64: shaA}),
+	}, nil)
+	defer srv.Close()
+
+	entries := []resolvedEntry{{Name: "foo", Version: "1.0", ResolveVersion: "2.580.2"}}
+	resolver := newExportResolver(context.Background(), srv.URL, entries)
+	resolver.SetArchiveBaseURL("")
+
+	if _, err := resolver.ResolveSHA256(context.Background(), "foo", "1.0"); err != nil {
+		t.Fatalf("ResolveSHA256: %v", err)
+	}
+	for _, p := range srv.recordedPaths() {
+		if strings.HasPrefix(p, "/dynamic-stable-2.580.2/") {
+			t.Fatalf("export requested %q; the 2.580.2 document is not published", p)
 		}
 	}
 }
@@ -1426,7 +1451,7 @@ func TestNewExportResolver_MetadataFetchedOncePerTTLWindow(t *testing.T) {
 	defer srv.Close()
 
 	entries := []resolvedEntry{{Name: "alpha", Version: "1.0"}, {Name: "beta", Version: "2.0"}}
-	resolver := newExportResolver(srv.URL, entries)
+	resolver := newExportResolver(context.Background(), srv.URL, entries)
 
 	for _, e := range entries {
 		if _, err := resolver.ResolveSHA256(context.Background(), e.Name, e.Version); err != nil {
@@ -1469,7 +1494,7 @@ func TestDownloadOnePlugin_AgedPinResolvesFromArchive(t *testing.T) {
 	defer archive.Close()
 
 	entry := resolvedEntry{Name: name, Version: agedPin}
-	resolver := newExportResolver(meta.URL, []resolvedEntry{entry})
+	resolver := newExportResolver(context.Background(), meta.URL, []resolvedEntry{entry})
 	resolver.SetArchiveBaseURL(archive.URL)
 
 	got, err := downloadOnePlugin(context.Background(), meta.URL, resolver, entry)
@@ -1508,7 +1533,7 @@ func TestDownloadOnePlugin_WeeklyHitSkipsArchive(t *testing.T) {
 	defer archive.Close()
 
 	entry := resolvedEntry{Name: name, Version: ver}
-	resolver := newExportResolver(meta.URL, []resolvedEntry{entry})
+	resolver := newExportResolver(context.Background(), meta.URL, []resolvedEntry{entry})
 	resolver.SetArchiveBaseURL(archive.URL)
 
 	if _, err := downloadOnePlugin(context.Background(), meta.URL, resolver, entry); err != nil {
@@ -1535,7 +1560,7 @@ func TestDownloadOnePlugin_UnreachableSourceSkipped(t *testing.T) {
 	defer meta.Close()
 
 	entry := resolvedEntry{Name: name, Version: ver, ResolveVersion: line}
-	resolver := newExportResolver(meta.URL, []resolvedEntry{entry})
+	resolver := newExportResolver(context.Background(), meta.URL, []resolvedEntry{entry})
 	resolver.SetArchiveBaseURL("")
 
 	got, err := downloadOnePlugin(context.Background(), meta.URL, resolver, entry)
@@ -1556,7 +1581,7 @@ func TestDownloadOnePlugin_UnresolvableErrorDoesNotOverClaim(t *testing.T) {
 	defer meta.Close()
 
 	entry := resolvedEntry{Name: name, Version: ver}
-	resolver := newExportResolver(meta.URL, []resolvedEntry{entry})
+	resolver := newExportResolver(context.Background(), meta.URL, []resolvedEntry{entry})
 	resolver.SetArchiveBaseURL("")
 
 	_, err := downloadOnePlugin(context.Background(), meta.URL, resolver, entry)
@@ -1602,7 +1627,7 @@ func TestDownloadOnePlugin_UserAgentOnMetadataAndArchive(t *testing.T) {
 	defer archive.Close()
 
 	entry := resolvedEntry{Name: name, Version: agedPin}
-	resolver := newExportResolver(meta.URL, []resolvedEntry{entry})
+	resolver := newExportResolver(context.Background(), meta.URL, []resolvedEntry{entry})
 	resolver.SetArchiveBaseURL(archive.URL)
 
 	if _, err := downloadOnePlugin(context.Background(), meta.URL, resolver, entry); err != nil {
@@ -1787,7 +1812,7 @@ func TestResolveLatestPins_FiltersByProfileCore(t *testing.T) {
 	defer srv.Close()
 
 	entries := []resolvedEntry{{Name: "foo", Version: "latest", ResolveVersion: "2.555.3"}}
-	resolver := newExportResolver(srv.URL, entries)
+	resolver := newExportResolver(context.Background(), srv.URL, entries)
 	out, err := resolveLatestPins(context.Background(), resolver, "", entries)
 	if err != nil {
 		t.Fatalf("resolveLatestPins: %v", err)
@@ -1800,7 +1825,7 @@ func TestResolveLatestPins_FiltersByProfileCore(t *testing.T) {
 func TestResolveLatestPins_LeavesExactPinsUnchanged(t *testing.T) {
 	// The resolver points at an unreachable host. An exact pin must never reach it.
 	entries := []resolvedEntry{{Name: "foo", Version: "1.0"}, {Name: "bar", Version: "2.1", ResolveVersion: "2.555.3"}}
-	resolver := newExportResolver("http://127.0.0.1:1", entries)
+	resolver := newExportResolver(context.Background(), "http://127.0.0.1:1", entries)
 	out, err := resolveLatestPins(context.Background(), resolver, "2.555.3", entries)
 	if err != nil {
 		t.Fatalf("resolveLatestPins: %v", err)
