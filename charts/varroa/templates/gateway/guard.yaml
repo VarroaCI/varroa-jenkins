@@ -1,0 +1,9 @@
+{{- /*
+gateway/guard.yaml
+Fails the render when the gateway renders without the operator. The gateway
+reads the varroa-ca Secret at start, and only the operator creates it. Renders
+no objects.
+*/}}
+{{- if and .Values.gateway.enabled (not .Values.operator.enabled) }}
+{{- fail "gateway.enabled needs operator.enabled. The gateway reads the varroa-ca Secret, and only the operator creates it." }}
+{{- end }}
