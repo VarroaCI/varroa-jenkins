@@ -85,25 +85,25 @@ cases:
   # composedBundleRef: a namespace is required, and it must be managed.
   - name: composedBundleRef without a namespace refused
     rule: |-
-      !has(self.pipelines) || !has(self.pipelines.composedBundleRef) || (has(self.pipelines.composedBundleRef.namespace) && size(self.pipelines.composedBundleRef.namespace) > 0)
+      !has(self.pipelines) || !has(self.pipelines.composedBundleRef) || (has(self.pipelines.composedBundleRef.__namespace__) && size(self.pipelines.composedBundleRef.__namespace__) > 0)
     field: spec
     new: {spec: {pipelines: {profile: lts, agentNamespace: tenant-a, composedBundleRef: {name: bundle-a}}}}
     want: reject
   - name: composedBundleRef naming a managed namespace accepted
     rule: |-
-      !has(self.pipelines) || !has(self.pipelines.composedBundleRef) || (has(self.pipelines.composedBundleRef.namespace) && size(self.pipelines.composedBundleRef.namespace) > 0)
+      !has(self.pipelines) || !has(self.pipelines.composedBundleRef) || (has(self.pipelines.composedBundleRef.__namespace__) && size(self.pipelines.composedBundleRef.__namespace__) > 0)
     field: spec
     new: {spec: {pipelines: {profile: lts, agentNamespace: tenant-a, composedBundleRef: {name: bundle-a, namespace: tenant-a}}}}
     want: accept
   - name: composedBundleRef naming a namespace outside spec.namespaces refused
     rule: |-
-      !has(self.pipelines) || !has(self.pipelines.composedBundleRef) || !has(self.pipelines.composedBundleRef.namespace) || self.pipelines.composedBundleRef.namespace in self.namespaces
+      !has(self.pipelines) || !has(self.pipelines.composedBundleRef) || !has(self.pipelines.composedBundleRef.__namespace__) || self.pipelines.composedBundleRef.__namespace__ in self.namespaces
     field: spec
     new: {spec: {pipelines: {profile: lts, agentNamespace: tenant-a, composedBundleRef: {name: bundle-a, namespace: search}}}}
     want: reject
   - name: composedBundleRef naming a managed namespace accepted by membership
     rule: |-
-      !has(self.pipelines) || !has(self.pipelines.composedBundleRef) || !has(self.pipelines.composedBundleRef.namespace) || self.pipelines.composedBundleRef.namespace in self.namespaces
+      !has(self.pipelines) || !has(self.pipelines.composedBundleRef) || !has(self.pipelines.composedBundleRef.__namespace__) || self.pipelines.composedBundleRef.__namespace__ in self.namespaces
     field: spec
     new: {spec: {pipelines: {profile: lts, agentNamespace: tenant-a, composedBundleRef: {name: bundle-a, namespace: tenant-a}}}}
     want: accept

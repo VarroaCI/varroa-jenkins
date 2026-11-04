@@ -431,11 +431,11 @@ spec:
             - message: pipelines.composedBundleRef.namespace must be non-empty when
                 composedBundleRef is set
               rule: '!has(self.pipelines) || !has(self.pipelines.composedBundleRef)
-                || (has(self.pipelines.composedBundleRef.namespace) && size(self.pipelines.composedBundleRef.namespace)
+                || (has(self.pipelines.composedBundleRef.__namespace__) && size(self.pipelines.composedBundleRef.__namespace__)
                 > 0)'
             - message: pipelines.composedBundleRef.namespace must be one of namespaces
               rule: '!has(self.pipelines) || !has(self.pipelines.composedBundleRef)
-                || !has(self.pipelines.composedBundleRef.namespace) || self.pipelines.composedBundleRef.namespace
+                || !has(self.pipelines.composedBundleRef.__namespace__) || self.pipelines.composedBundleRef.__namespace__
                 in self.namespaces'
             - message: pipelines.rehydrateDeadline must be between 1m and 24h
               rule: '!has(self.pipelines) || !has(self.pipelines.rehydrateDeadline)

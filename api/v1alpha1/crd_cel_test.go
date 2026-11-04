@@ -19,8 +19,11 @@ import (
 	apiservervalidation "k8s.io/apiextensions-apiserver/pkg/apiserver/validation"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/apimachinery/pkg/util/version"
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
+	apiservercel "k8s.io/apiserver/pkg/cel"
 	"k8s.io/apiserver/pkg/cel/common"
+	"k8s.io/apiserver/pkg/cel/environment"
 	"sigs.k8s.io/yaml"
 )
 
@@ -261,6 +264,93 @@ func TestCRDManifestsPassAPIServerValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// minAPIServerMinor is the oldest Kubernetes minor the chart installs on.
+// It equals the kubeVersion floor in charts/varroa/Chart.yaml. Raise it when that floor rises.
+const minAPIServerMinor = 30
+
+// TestCRDRulesCompileOnMinimumAPIServer compiles every CEL rule of every
+// generated manifest in the CEL environment of the oldest supported apiserver.
+// An apiserver compiles a new rule at its compatibility version, which is one
+// minor below its own version. A bare reserved word, such as namespace,
+// compiles only from compatibility version 1.31.
+func TestCRDRulesCompileOnMinimumAPIServer(t *testing.T) {
+	envSet := environment.MustBaseEnvSet(version.MajorMinor(1, minAPIServerMinor-1))
+	files, err := filepath.Glob(filepath.Join(crdDir, "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("no CRD manifests under %s", crdDir)
+	}
+	for _, file := range files {
+		t.Run(filepath.Base(file), func(t *testing.T) {
+			s := structural(t, internalSchema(t, loadCRD(t, file)))
+			compiled := compileRulesAt(t, envSet, s, model.SchemaDeclType(s, true), "")
+			var declared []ruleRef
+			collectRules(s, "", &declared)
+			if compiled != len(declared) {
+				t.Errorf("compiled %d of %d rules; the walk skipped a schema node", compiled, len(declared))
+			}
+		})
+	}
+}
+
+// compileRulesAt compiles the rules of s and of every node below it with
+// envSet. It walks the schema the way the apiserver validator does. It returns
+// the number of rules it compiled.
+func compileRulesAt(t *testing.T, envSet *environment.EnvSet, s *structuralschema.Structural, decl *apiservercel.DeclType, path string) int {
+	t.Helper()
+	n := len(s.XValidations)
+	if n > 0 {
+		results, err := cel.Compile(s, decl, celconfig.PerCallLimit, envSet, cel.NewExpressionsEnvLoader())
+		if err != nil {
+			t.Errorf("%q: %v", path, err)
+		}
+		for i, r := range results {
+			if r.Error != nil {
+				t.Errorf("%q: rule %q does not compile on Kubernetes 1.%d: %s", path, s.XValidations[i].Rule, minAPIServerMinor, r.Error.Detail)
+			}
+			if r.MessageExpressionError != nil {
+				t.Errorf("%q: messageExpression of rule %q does not compile on Kubernetes 1.%d: %s", path, s.XValidations[i].Rule, minAPIServerMinor, r.MessageExpressionError.Detail)
+			}
+		}
+	}
+	var elem *apiservercel.DeclType
+	if decl != nil {
+		elem = decl.ElemType
+	}
+	for k, p := range s.Properties {
+		var fieldType *apiservercel.DeclType
+		if escaped, ok := apiservercel.Escape(k); ok {
+			if decl == nil {
+				continue
+			}
+			f, ok := decl.Fields[escaped]
+			if !ok {
+				continue
+			}
+			fieldType = f.Type
+		} else {
+			fieldType = model.SchemaDeclType(&p, p.XEmbeddedResource)
+			if fieldType == nil {
+				continue
+			}
+		}
+		child := k
+		if path != "" {
+			child = path + "." + k
+		}
+		n += compileRulesAt(t, envSet, &p, fieldType, child)
+	}
+	if s.Items != nil {
+		n += compileRulesAt(t, envSet, s.Items, elem, path+"[*]")
+	}
+	if s.AdditionalProperties != nil && s.AdditionalProperties.Structural != nil {
+		n += compileRulesAt(t, envSet, s.AdditionalProperties.Structural, elem, path+"[*]")
+	}
+	return n
 }
 
 // TestCRDValidationRules evaluates every fixture case against the CRD's CEL
