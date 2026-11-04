@@ -50,6 +50,10 @@ Sign in with the browser flow:
 varroactl login --server https://varroa.example.com
 ```
 
+varroactl prints the login URL before it starts the browser. If no browser window opens, paste the URL into a browser on the same computer.
+
+A `--server` value without a scheme gets `https://`, so `--server varroa.example.com` also works. Write `http://` in full for a server without TLS.
+
 For automation, pass an API key through standard input:
 
 ```bash

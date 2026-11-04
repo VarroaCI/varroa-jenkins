@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -188,5 +189,25 @@ func TestLogout_RevokeFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to revoke") {
 		t.Errorf("expected 'failed to revoke', got %v", err)
+	}
+}
+
+// TestLogout_RevokeNormalizesSavedServer checks that a saved bare host gets https:// before revoke.
+func TestLogout_RevokeNormalizesSavedServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	hostPort := strings.TrimPrefix(srv.URL, "http://")
+	srv.Close()
+
+	t.Setenv("VARROACTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("VARROACTL_SERVER", "")
+	if err := saveConfig(&cliConfig{CurrentContext: "prod", Contexts: []cliContext{{Name: "prod", Server: hostPort, APIKey: "vk_abc123.def456"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	root := newRootCmd()
+	root.SetArgs([]string{"logout", "--revoke"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "https://"+hostPort) {
+		t.Fatalf("expected revoke error naming https://%s, got %v", hostPort, err)
 	}
 }

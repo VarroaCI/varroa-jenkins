@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -131,6 +132,42 @@ type resolvedContext struct {
 	defaultCluster   string
 }
 
+// normalizeServerURL returns the canonical form of a server value from a flag,
+// the environment, or a saved context. A value with no scheme gets https://.
+// The scheme must be http or https, and the value must name a host. A trailing
+// slash is removed and a path is kept. An empty value returns "".
+func normalizeServerURL(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", nil
+	}
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
+	}
+	// Checked before url.Parse, which rejects an unbracketed IPv6 host with a less useful message.
+	authority := s[strings.Index(s, "://")+3:]
+	if i := strings.IndexAny(authority, "/?#"); i >= 0 {
+		authority = authority[:i]
+	}
+	if !strings.HasPrefix(authority, "[") && strings.Count(authority, ":") > 1 {
+		return "", fmt.Errorf("invalid server URL %q: write an IPv6 address in brackets, for example [::1]:8443", raw)
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return "", fmt.Errorf("invalid server URL %q: %w", raw, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("invalid server URL %q: the scheme must be http or https", raw)
+	}
+	if u.Hostname() == "" {
+		return "", fmt.Errorf("invalid server URL %q: no host", raw)
+	}
+	if strings.ContainsAny(s, "?#") {
+		return "", fmt.Errorf("invalid server URL %q: remove the query and the fragment", raw)
+	}
+	return strings.TrimRight(s, "/"), nil
+}
+
 // resolveContext resolves the effective context from flags, env, and config.
 // getFlag is a function that returns the string value of a flag (or "").
 func resolveContext(getFlag func(name string) string) (*resolvedContext, error) {
@@ -192,12 +229,16 @@ func resolveContext(getFlag func(name string) string) (*resolvedContext, error) 
 		defaultCluster = ctx.DefaultCluster
 	}
 
+	server, err = normalizeServerURL(server)
+	if err != nil {
+		return nil, err
+	}
 	if server == "" {
 		return nil, fmt.Errorf(`no context: run "varroactl login" or set --server`)
 	}
 
 	return &resolvedContext{
-		server:           strings.TrimRight(server, "/"),
+		server:           server,
 		apiKey:           apiKey,
 		defaultNamespace: defaultNS,
 		defaultCluster:   defaultCluster,
@@ -304,6 +345,10 @@ func newSetContextCmd() *cobra.Command {
 			}
 			name := args[0]
 			server, _ := cmd.Flags().GetString("server")
+			server, err := normalizeServerURL(server)
+			if err != nil {
+				return err
+			}
 			apiKey, _ := cmd.Flags().GetString("api-key")
 			ns, _ := cmd.Flags().GetString("namespace")
 			cluster, _ := cmd.Flags().GetString("cluster")
@@ -341,7 +386,7 @@ func newSetContextCmd() *cobra.Command {
 			return saveConfig(cfg)
 		},
 	}
-	cmd.Flags().String("server", "", "server URL")
+	cmd.Flags().String("server", "", "server URL; a value with no scheme gets https://")
 	cmd.Flags().String("api-key", "", "API key")
 	cmd.Flags().String("namespace", "", "default namespace")
 	cmd.Flags().String("cluster", "", "default cluster")

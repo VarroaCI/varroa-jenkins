@@ -138,7 +138,7 @@ func newRootCmd() *cobra.Command {
 
 	// Persistent flags (design §2)
 	rootCmd.PersistentFlags().String("context", "", "context name")
-	rootCmd.PersistentFlags().String("server", "", "server URL")
+	rootCmd.PersistentFlags().String("server", "", "server URL; a value with no scheme gets https://")
 	rootCmd.PersistentFlags().StringP("namespace", "n", "", "namespace")
 	rootCmd.PersistentFlags().BoolP("all-namespaces", "A", false, "all namespaces")
 	rootCmd.PersistentFlags().StringP("output", "o", "table", "output format: table|wide|json|yaml|name")

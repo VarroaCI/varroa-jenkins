@@ -699,3 +699,151 @@ func TestGetContexts_ClusterColumn(t *testing.T) {
 		t.Error("expected prod-cluster value in output")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// server URL normalization tests
+// ---------------------------------------------------------------------------
+
+func TestNormalizeServerURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr string
+	}{
+		{name: "empty", in: "", want: ""},
+		{name: "blank", in: "  ", want: ""},
+		{name: "bare host", in: "varroa.example.com", want: "https://varroa.example.com"},
+		{name: "bare host trailing slash", in: "varroa.example.com/", want: "https://varroa.example.com"},
+		{name: "bare host surrounding space", in: " varroa.example.com\n", want: "https://varroa.example.com"},
+		{name: "https", in: "https://varroa.example.com", want: "https://varroa.example.com"},
+		{name: "https many slashes", in: "https://varroa.example.com///", want: "https://varroa.example.com"},
+		{name: "http kept", in: "http://localhost:8080", want: "http://localhost:8080"},
+		{name: "bare loopback", in: "localhost:8080", want: "https://localhost:8080"},
+		{name: "bare host with port", in: "varroa.example.com:8443", want: "https://varroa.example.com:8443"},
+		{name: "https with path", in: "https://varroa.example.com/varroa/", want: "https://varroa.example.com/varroa"},
+		{name: "bare host with path", in: "varroa.example.com/varroa", want: "https://varroa.example.com/varroa"},
+		{name: "ipv6 bare", in: "[::1]:8443", want: "https://[::1]:8443"},
+		{name: "ipv6 https", in: "https://[::1]:8443/", want: "https://[::1]:8443"},
+		{name: "unbracketed ipv6", in: "::1", wantErr: "brackets"},
+		{name: "ftp scheme", in: "ftp://varroa.example.com", wantErr: "http or https"},
+		{name: "no host", in: "https://", wantErr: "no host"},
+		{name: "query", in: "varroa.example.com/cli-auth?port=1", wantErr: "query"},
+		{name: "bad port", in: "https://varroa.example.com:notaport", wantErr: "invalid server URL"},
+		{name: "port only", in: ":8080", wantErr: "no host"},
+		{name: "space inside", in: "foo bar", wantErr: "invalid server URL"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := normalizeServerURL(tc.in)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("normalizeServerURL(%q) = %q, want error containing %q", tc.in, got, tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error %q does not contain %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeServerURL(%q) error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Fatalf("normalizeServerURL(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			again, err := normalizeServerURL(got)
+			if err != nil || again != got {
+				t.Fatalf("second pass of %q = %q, %v; want %q", got, again, err, got)
+			}
+		})
+	}
+}
+
+func TestResolveContext_NormalizesServer(t *testing.T) {
+	t.Run("env bare host", func(t *testing.T) {
+		t.Setenv("VARROACTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+		t.Setenv("VARROACTL_SERVER", "varroa.example.com/")
+		rc, err := resolveContext(func(string) string { return "" })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rc.server != "https://varroa.example.com" {
+			t.Fatalf("server = %q", rc.server)
+		}
+	})
+
+	t.Run("saved context bare host", func(t *testing.T) {
+		t.Setenv("VARROACTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+		t.Setenv("VARROACTL_SERVER", "")
+		if err := saveConfig(&cliConfig{CurrentContext: "prod", Contexts: []cliContext{{Name: "prod", Server: "varroa.example.com"}}}); err != nil {
+			t.Fatal(err)
+		}
+		rc, err := resolveContext(func(string) string { return "" })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rc.server != "https://varroa.example.com" {
+			t.Fatalf("server = %q", rc.server)
+		}
+	})
+
+	t.Run("flag http kept", func(t *testing.T) {
+		t.Setenv("VARROACTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+		t.Setenv("VARROACTL_SERVER", "")
+		rc, err := resolveContext(func(name string) string {
+			if name == "server" {
+				return "http://localhost:8080/"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rc.server != "http://localhost:8080" {
+			t.Fatalf("server = %q", rc.server)
+		}
+	})
+
+	t.Run("env bad scheme", func(t *testing.T) {
+		t.Setenv("VARROACTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+		t.Setenv("VARROACTL_SERVER", "ftp://x")
+		_, err := resolveContext(func(string) string { return "" })
+		if err == nil || !strings.Contains(err.Error(), "http or https") {
+			t.Fatalf("expected scheme error, got %v", err)
+		}
+	})
+}
+
+func TestSetContext_NormalizesServer(t *testing.T) {
+	t.Setenv("VARROACTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+
+	root := newRootCmd()
+	root.SetArgs([]string{"config", "set-context", "prod", "--server", "varroa.example.com/"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Contexts) != 1 || cfg.Contexts[0].Server != "https://varroa.example.com" {
+		t.Fatalf("stored contexts = %+v", cfg.Contexts)
+	}
+
+	root = newRootCmd()
+	root.SetArgs([]string{"config", "set-context", "stage", "--server", "ftp://x"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected error for ftp scheme")
+	}
+	cfg, err = loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cfg.Contexts {
+		if c.Name == "stage" {
+			t.Fatalf("bad set-context wrote context %+v", c)
+		}
+	}
+}

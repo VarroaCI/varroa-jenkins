@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -739,5 +741,109 @@ func TestLogin_TimeoutFlagWiring(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for login to complete")
+	}
+}
+
+// TestLogin_BrowserBareHostGetsHTTPS checks that a bare --server host opens an https login URL.
+func TestLogin_BrowserBareHostGetsHTTPS(t *testing.T) {
+	t.Setenv("VARROACTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("VARROACTL_SERVER", "")
+	t.Setenv("VARROACTL_API_KEY", "")
+
+	var opened string
+	oldBrowser := openBrowser
+	openBrowser = func(u string) error { opened = u; return nil }
+	t.Cleanup(func() { openBrowser = oldBrowser })
+
+	root := newRootCmd()
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"login", "--server", "varroa.example.invalid", "--timeout", "50ms"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+	if !strings.HasPrefix(opened, "https://varroa.example.invalid/cli-auth?port=") {
+		t.Fatalf("opened URL = %q", opened)
+	}
+}
+
+// TestLogin_BrowserPrintsURLBeforeOpen checks that the login URL is printed before the browser opens,
+// and that a failed open is reported.
+func TestLogin_BrowserPrintsURLBeforeOpen(t *testing.T) {
+	tests := []struct {
+		name    string
+		openErr error
+	}{
+		{name: "open succeeds"},
+		{name: "open fails", openErr: errors.New("launcher exited with status 1")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("VARROACTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+			t.Setenv("VARROACTL_SERVER", "")
+			t.Setenv("VARROACTL_API_KEY", "")
+
+			var buf bytes.Buffer
+			var opened string
+			var printedBeforeOpen bool
+			oldBrowser := openBrowser
+			openBrowser = func(u string) error {
+				opened = u
+				printedBeforeOpen = strings.Contains(buf.String(), u)
+				return tc.openErr
+			}
+			t.Cleanup(func() { openBrowser = oldBrowser })
+
+			root := newRootCmd()
+			root.SetErr(&buf)
+			root.SetArgs([]string{"login", "--server", "https://varroa.example.invalid", "--timeout", "100ms"})
+			err := root.Execute()
+			if opened == "" {
+				t.Fatal("browser launcher was not called")
+			}
+			if !printedBeforeOpen {
+				t.Fatalf("login URL was not printed before the open; stderr:\n%s", buf.String())
+			}
+			if err == nil || !strings.Contains(err.Error(), "timed out") || !strings.Contains(err.Error(), "--api-key") {
+				t.Fatalf("expected timeout error with headless hint, got %v", err)
+			}
+			out := buf.String()
+			if tc.openErr != nil {
+				want := "Cannot open a browser: launcher exited with status 1\n"
+				if !strings.Contains(out, want) {
+					t.Fatalf("stderr lacks %q:\n%s", want, out)
+				}
+				if !strings.Contains(out, "varroactl login --api-key") {
+					t.Fatalf("stderr lacks the --api-key hint:\n%s", out)
+				}
+			} else if strings.Contains(out, "Cannot open a browser") {
+				t.Fatalf("unexpected open error in stderr:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestLogin_APIKeyBareHostUsesHTTPS checks that a bare host:port with --api-key is dialed over https.
+func TestLogin_APIKeyBareHostUsesHTTPS(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	hostPort := strings.TrimPrefix(srv.URL, "http://")
+	srv.Close()
+
+	t.Setenv("VARROACTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("VARROACTL_SERVER", "")
+	t.Setenv("VARROACTL_API_KEY", "")
+
+	root := newRootCmd()
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"login", "--server", hostPort, "--api-key", "vk_test.abc"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected a connection error")
+	}
+	if !strings.Contains(err.Error(), "https://"+hostPort) {
+		t.Fatalf("error does not name the https URL: %v", err)
+	}
+	if strings.Contains(err.Error(), "unsupported protocol scheme") {
+		t.Fatalf("scheme was not added: %v", err)
 	}
 }
