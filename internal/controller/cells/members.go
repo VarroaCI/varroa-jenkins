@@ -39,6 +39,10 @@ type MemberBinding struct {
 	PendingJobs        []string
 	// LastSeenAt is this member's own newest mite-presence reading.
 	LastSeenAt *time.Time
+	// Stale is true when this member's cell fails the keep rule: it serves
+	// another profile or belongs to another pool. A stale member keeps its
+	// place until a replacement exists. A stale standby never takes a slot.
+	Stale bool
 }
 
 // slotValue answers a member's slot index, and -1 for a standby.
@@ -78,8 +82,9 @@ func desiredMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantS
 	}
 
 	// The surviving standbys keep their cells, and the pass fills the rest
-	// from the pool. A scale-down of the standby count releases the
-	// highest cell names first, because the surviving list is sorted.
+	// from the pool. A scale-down of the standby count releases a stale
+	// standby first, then the highest cell names, because the surviving
+	// list is sorted that way.
 	var keptStandby []MemberBinding
 	for _, s := range standbys {
 		if int32(len(keptStandby)) >= wantedStandby {
@@ -87,6 +92,15 @@ func desiredMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantS
 		}
 		if held[memberKey(s.Namespace, s.Cell)] {
 			continue
+		}
+		if s.Stale {
+			// A stale standby keeps its cell until a fresh candidate exists.
+			if candidate := selectCandidateExcluding(in, tenant, held); candidate != nil {
+				held[memberKey(candidate.Namespace, candidate.Name)] = true
+				keptStandby = append(keptStandby, newMember(in, tenant, *candidate,
+					v1alpha1.TenantMemberRoleStandby, nil, nowT))
+				continue
+			}
 		}
 		held[memberKey(s.Namespace, s.Cell)] = true
 		s.Role = v1alpha1.TenantMemberRoleStandby
@@ -126,8 +140,24 @@ func bindSlot(in Inputs, tenant *v1alpha1.Tenant, slot int32, slotZero *CellCand
 			refreshed = newMember(in, tenant, cell, v1alpha1.TenantMemberRoleActive, &slot, nowT)
 			refreshed.AppliedAt = keepAppliedAt(existing.AppliedAt, refreshed.Applied, nowT)
 		}
+		if !refreshed.Stale {
+			return &refreshed
+		}
+		// A stale holder keeps the slot until a replacement exists, so the
+		// slot never stands empty during a profile or pool change.
+		if replacement := replaceSlotHolder(in, tenant, slot, standbys, held, nowT); replacement != nil {
+			return replacement
+		}
 		return &refreshed
 	}
+	return replaceSlotHolder(in, tenant, slot, standbys, held, nowT)
+}
+
+// replaceSlotHolder answers a new holder for slot: the newest applied
+// standby, else a fresh candidate from the pool. It answers nil when
+// neither exists.
+func replaceSlotHolder(in Inputs, tenant *v1alpha1.Tenant, slot int32, standbys *[]MemberBinding,
+	held map[string]bool, nowT time.Time) *MemberBinding {
 	if promoted := takePromotionSource(standbys, held); promoted != nil {
 		promoted.Role = v1alpha1.TenantMemberRoleActive
 		s := slot
@@ -145,11 +175,13 @@ func bindSlot(in Inputs, tenant *v1alpha1.Tenant, slot int32, slotZero *CellCand
 // takePromotionSource removes and answers the standby that should take a
 // slot: the applied standby with the newest applied time, tie-broken by
 // cell name ascending. A newer applied time means a fresher folder. It
-// answers nil when no applied standby remains.
+// answers nil when no applied standby remains. A stale standby is never a
+// promotion source, because it would bind the slot to a cell of the old
+// profile or pool.
 func takePromotionSource(standbys *[]MemberBinding, held map[string]bool) *MemberBinding {
 	best := -1
 	for i, s := range *standbys {
-		if !s.Applied || held[memberKey(s.Namespace, s.Cell)] {
+		if !s.Applied || s.Stale || held[memberKey(s.Namespace, s.Cell)] {
 			continue
 		}
 		if best < 0 || newerApplied(s, (*standbys)[best]) {
@@ -181,8 +213,9 @@ func newerApplied(a, b MemberBinding) bool {
 
 // survivingMembers answers the tenant's current active members by slot and
 // its current standbys, dropping every member whose cell left the
-// candidate set, is evacuating, or is disabled. Slot 0 is excluded: the
-// keep and move path owns it.
+// candidate set or is evacuating. A member whose cell fails the keep rule
+// stays, marked Stale through newMember. Slot 0 is excluded: the keep and
+// move path owns it. Stale standbys sort last.
 func survivingMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus,
 	nowT time.Time) (map[int32]MemberBinding, []MemberBinding) {
 	active := map[int32]MemberBinding{}
@@ -193,7 +226,7 @@ func survivingMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.Tenan
 
 	for _, m := range status.Placement.Members {
 		cell, found := lookupCell(in.Cells, m.Cell, m.CellNamespace)
-		if !found || cell.Evacuate || !cell.Enabled {
+		if !found || cell.Evacuate {
 			continue
 		}
 		role := m.Role
@@ -210,7 +243,12 @@ func survivingMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.Tenan
 			active[*m.Slot] = bound
 		}
 	}
-	sort.Slice(standbys, func(i, j int) bool { return standbys[i].Cell < standbys[j].Cell })
+	sort.Slice(standbys, func(i, j int) bool {
+		if standbys[i].Stale != standbys[j].Stale {
+			return !standbys[i].Stale
+		}
+		return standbys[i].Cell < standbys[j].Cell
+	})
 	return active, standbys
 }
 
@@ -254,6 +292,7 @@ func newMember(in Inputs, tenant *v1alpha1.Tenant, cell CellCandidate, role stri
 		Instance:   cell.Instance,
 		Applied:    containsString(cell.AppliedTenants, tenant.Name),
 		LastSeenAt: cell.MiteLastSeen,
+		Stale:      !cellKeepsTenant(in, tenant, cell),
 	}
 	if slot != nil {
 		s := *slot
@@ -286,6 +325,14 @@ func promotionCellForSlotZero(in Inputs, tenant *v1alpha1.Tenant, status *v1alph
 		return nil
 	}
 	return &cell
+}
+
+// cellKeepsTenant is the keep rule for a bound cell. The cell is enabled,
+// serves the tenant's profile, and passes the membership test. Slot 0 and
+// every other member read this one rule, so a profile change or a pool
+// change reaches every member.
+func cellKeepsTenant(in Inputs, tenant *v1alpha1.Tenant, c CellCandidate) bool {
+	return c.Enabled && c.ResolvedProfile == tenant.Spec.Pipelines.Profile && keepsMembership(in, tenant, c)
 }
 
 // selectCandidateExcluding is selectCandidate with one added test: the
