@@ -659,34 +659,6 @@ func TestHandleActivity_RangeRecordStoreUnreachable(t *testing.T) {
 	}
 }
 
-// TestHandleActivity_RangeOutsideRetention proves a range start before the
-// retention window answers 400 with the retention message.
-func TestHandleActivity_RangeOutsideRetention(t *testing.T) {
-	now := time.Now().UTC()
-	srv := NewServer(&Dependencies{
-		Backfill:   &fakeBackfill{err: activity.ErrRangeOutsideRetention},
-		Authorizer: testAuthorizer(true, ""),
-		Logger:     slog.Default(),
-	})
-	target := "/activity?start=" + now.Add(-48*time.Hour).Format(time.RFC3339) + "&end=" + now.Format(time.RFC3339)
-	req := httptest.NewRequest(http.MethodGet, target, nil)
-	req = req.WithContext(contextWithClaims(req.Context(), &auth.Claims{Subject: "test-user"}))
-	w := httptest.NewRecorder()
-
-	srv.handleActivity(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
-	}
-	var body map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if body["error"] != "start is outside activity retention" {
-		t.Errorf("error = %q, want the retention message", body["error"])
-	}
-}
-
 // TestActivityFilter_RangeBounds proves parseActivityQuery checks only the
 // range syntax: each bound is optional, and start is before end when both
 // are set.

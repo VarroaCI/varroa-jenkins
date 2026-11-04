@@ -3,7 +3,6 @@ package recordstore
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 )
@@ -88,8 +87,8 @@ func (b *pgBackfill) Recent(ctx context.Context, scope string, limit int) ([]act
 // already processed).
 //
 // Query reads the retention days first and returns a read error at once,
-// so an unreachable store answers ErrUnavailable. A range Start before the
-// retention window returns activity.ErrRangeOutsideRetention.
+// so an unreachable store answers ErrUnavailable. Query passes Start
+// unchanged; ListActivity applies the retention edge.
 func (b *pgBackfill) Query(ctx context.Context, q activity.Query) (activity.Page, error) {
 	limit := q.Limit
 	if limit <= 0 {
@@ -103,20 +102,12 @@ func (b *pgBackfill) Query(ctx context.Context, q activity.Query) (activity.Page
 	if err != nil {
 		return activity.Page{}, err
 	}
-	// Zero days set no bound, the same rule as the cursor expiry check.
-	if q.Start != nil && days > 0 && q.Start.Before(time.Now().Add(-time.Duration(days)*24*time.Hour)) {
-		return activity.Page{}, activity.ErrRangeOutsideRetention
-	}
 
 	rq := ActivityQuery{
 		Cluster: q.Cluster, Controller: q.Controller, Namespace: q.Namespace,
 		Source: q.Source, Severity: q.Severity, Actor: q.Actor, Type: q.Type,
 		Start: q.Start, End: q.End, Limit: limit, Cursor: q.Cursor, Scope: q.Scope,
 		ExcludeRoutineSignIns: q.ExcludeRoutineSignIns,
-	}
-	direction := "backward"
-	if q.Start != nil {
-		direction = "forward"
 	}
 	filters := activityFilterKey(rq)
 
@@ -143,7 +134,7 @@ func (b *pgBackfill) Query(ctx context.Context, q activity.Query) (activity.Page
 			hasMore = page.HasMore || anyAuthorized(page.Items[i+1:], q.Authorize)
 			nextCursor = ""
 			if hasMore {
-				nextCursor = encodeActivityCursor(activityCursor{Direction: direction, Filters: filters, TS: e.Timestamp, EventKey: activity.EventKey(e)})
+				nextCursor = encodeActivityCursor(activityCursor{Filters: filters, TS: e.Timestamp, EventKey: activity.EventKey(e)})
 			}
 			break
 		}

@@ -4,6 +4,7 @@
     operationId: listActivity
     tags: [activity]
     summary: Returns authorized, filtered activity history with cursor pagination.
+    description: 'Each page lists the newest events first, also for a range. Send nextCursor to read older events. A read returns no event older than the retention window.'
     parameters:
       - {name: controller, in: query, schema: {type: string}}
       - {name: cluster, in: query, schema: {type: string}}
@@ -12,8 +13,8 @@
       - {name: severity, in: query, schema: {type: string, enum: [info, warning, error]}}
       - {name: actor, in: query, schema: {type: string}}
       - {name: type, in: query, schema: {type: string}}
-      - {name: start, in: query, description: 'Reads events at or after start, oldest first. With no end, the read goes to the present.', schema: {type: string, format: date-time}}
-      - {name: end, in: query, description: 'Reads events before end. With no start, the read is newest first.', schema: {type: string, format: date-time}}
+      - {name: start, in: query, description: 'Reads events at or after start. A start before the retention window reads from the window edge. With no end, the read goes to the present.', schema: {type: string, format: date-time}}
+      - {name: end, in: query, description: 'Reads events before end.', schema: {type: string, format: date-time}}
       - {name: cursor, in: query, schema: {type: string}}
       - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 250, default: 100}}
       - {name: excludeRoutineSignIns, in: query, description: 'true leaves out each routine local sign-in, an auth.local.login event below warning severity.', schema: {type: boolean, default: false}}
@@ -36,7 +37,7 @@
                 retentionDays: {type: integer}
               additionalProperties: false
       "400":
-        description: Invalid filter, limit, cursor, or range.
+        description: 'Invalid filter, limit, or cursor, or an invalid range: a bound is not RFC 3339, or start is not before end.'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
       "410":

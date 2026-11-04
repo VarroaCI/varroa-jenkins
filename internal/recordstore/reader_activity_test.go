@@ -191,7 +191,8 @@ func TestListActivity_ScopePushdown(t *testing.T) {
 }
 
 // TestListActivity_KeysetPaging_NoGapNoRepeat pages 300 seeded rows in
-// both directions and asserts every row is returned exactly once.
+// both the default read and an explicit range, and asserts every row is
+// returned exactly once.
 func TestListActivity_KeysetPaging_NoGapNoRepeat(t *testing.T) {
 	t.Parallel()
 
@@ -234,15 +235,15 @@ func TestListActivity_KeysetPaging_NoGapNoRepeat(t *testing.T) {
 		q.Cursor = page.NextCursor
 	}
 	if len(seen) != n {
-		t.Fatalf("backward paging: saw %d distinct events, want %d", len(seen), n)
+		t.Fatalf("default paging: saw %d distinct events, want %d", len(seen), n)
 	}
 	for k, c := range seen {
 		if c != 1 {
-			t.Fatalf("backward paging: event %s seen %d times, want 1", k, c)
+			t.Fatalf("default paging: event %s seen %d times, want 1", k, c)
 		}
 	}
 
-	// Forward (explicit range covering every seeded row), oldest-first.
+	// Range (explicit range covering every seeded row), newest-first.
 	seen = make(map[string]int)
 	start := base.Add(-time.Hour)
 	end := base.Add(time.Duration(n+1) * time.Second)
@@ -253,7 +254,7 @@ func TestListActivity_KeysetPaging_NoGapNoRepeat(t *testing.T) {
 		}
 		page, err := r.ListActivity(ctx, q)
 		if err != nil {
-			t.Fatalf("ListActivity forward page %d: %v", pages, err)
+			t.Fatalf("ListActivity range page %d: %v", pages, err)
 		}
 		for _, e := range page.Items {
 			seen[activity.EventKey(e)]++
@@ -264,18 +265,19 @@ func TestListActivity_KeysetPaging_NoGapNoRepeat(t *testing.T) {
 		q.Cursor = page.NextCursor
 	}
 	if len(seen) != n {
-		t.Fatalf("forward paging: saw %d distinct events, want %d", len(seen), n)
+		t.Fatalf("range paging: saw %d distinct events, want %d", len(seen), n)
 	}
 	for k, c := range seen {
 		if c != 1 {
-			t.Fatalf("forward paging: event %s seen %d times, want 1", k, c)
+			t.Fatalf("range paging: event %s seen %d times, want 1", k, c)
 		}
 	}
 }
 
 // TestListActivity_KeysetPaging_TiedTimestamps seeds several rows that
 // share one ts and pages them with a limit small enough that the page
-// boundary falls inside that tie group, in both directions. (ts,
+// boundary falls inside that tie group, for the default read and an
+// explicit range. (ts,
 // event_key) keyset paging must still return every row exactly once: the
 // event_key tiebreaker, not ts alone, decides where a page cuts.
 func TestListActivity_KeysetPaging_TiedTimestamps(t *testing.T) {
@@ -320,15 +322,15 @@ func TestListActivity_KeysetPaging_TiedTimestamps(t *testing.T) {
 		q.Cursor = page.NextCursor
 	}
 	if len(seen) != n {
-		t.Fatalf("backward paging: saw %d distinct events, want %d", len(seen), n)
+		t.Fatalf("default paging: saw %d distinct events, want %d", len(seen), n)
 	}
 	for k, c := range seen {
 		if c != 1 {
-			t.Fatalf("backward paging: event %s seen %d times, want 1", k, c)
+			t.Fatalf("default paging: event %s seen %d times, want 1", k, c)
 		}
 	}
 
-	// Forward (explicit range covering the tied timestamp), oldest-first.
+	// Range (explicit range covering the tied timestamp), newest-first.
 	seen = make(map[string]int)
 	start := base.Add(-time.Second)
 	end := base.Add(time.Second)
@@ -339,7 +341,7 @@ func TestListActivity_KeysetPaging_TiedTimestamps(t *testing.T) {
 		}
 		page, err := r.ListActivity(ctx, q)
 		if err != nil {
-			t.Fatalf("ListActivity forward page %d: %v", pages, err)
+			t.Fatalf("ListActivity range page %d: %v", pages, err)
 		}
 		for _, e := range page.Items {
 			seen[activity.EventKey(e)]++
@@ -350,13 +352,158 @@ func TestListActivity_KeysetPaging_TiedTimestamps(t *testing.T) {
 		q.Cursor = page.NextCursor
 	}
 	if len(seen) != n {
-		t.Fatalf("forward paging: saw %d distinct events, want %d", len(seen), n)
+		t.Fatalf("range paging: saw %d distinct events, want %d", len(seen), n)
 	}
 	for k, c := range seen {
 		if c != 1 {
-			t.Fatalf("forward paging: event %s seen %d times, want 1", k, c)
+			t.Fatalf("range paging: event %s seen %d times, want 1", k, c)
 		}
 	}
+}
+
+// TestListActivity_RangeReadsNewestFirst seeds five rows one second apart
+// and pages an explicit range. The first page must hold the newest rows.
+func TestListActivity_RangeReadsNewestFirst(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Truncate(time.Second)
+	events := make([]activity.Event, 5)
+	for i := range events {
+		events[i] = activity.Event{
+			Timestamp: base.Add(time.Duration(i) * time.Second),
+			Cluster:   "core", Namespace: "ns", Controller: "ctrl", Source: "operator", Type: "t",
+			Message: fmt.Sprintf("row %d", i),
+		}
+	}
+	r := NewReader(seedActivityEvents(t, events), 30)
+	ctx := context.Background()
+	all := activity.Scope{All: true}
+	msgs := func(p ActivityPage) []string {
+		out := make([]string, 0, len(p.Items))
+		for _, e := range p.Items {
+			out = append(out, e.Message)
+		}
+		return out
+	}
+	wantPage := func(t *testing.T, got []string, want ...string) {
+		t.Helper()
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("page = %v, want %v", got, want)
+		}
+	}
+
+	start := base.Add(-time.Minute)
+	q := ActivityQuery{Limit: 2, Start: &start, Scope: all}
+	p1, err := r.ListActivity(ctx, q)
+	if err != nil {
+		t.Fatalf("page 1: %v", err)
+	}
+	wantPage(t, msgs(p1), "row 4", "row 3")
+	q.Cursor = p1.NextCursor
+	p2, err := r.ListActivity(ctx, q)
+	if err != nil {
+		t.Fatalf("page 2: %v", err)
+	}
+	wantPage(t, msgs(p2), "row 2", "row 1")
+	q.Cursor = p2.NextCursor
+	p3, err := r.ListActivity(ctx, q)
+	if err != nil {
+		t.Fatalf("page 3: %v", err)
+	}
+	wantPage(t, msgs(p3), "row 0")
+	if p3.HasMore {
+		t.Fatalf("page 3 HasMore = true, want false")
+	}
+
+	end := base.Add(3 * time.Second)
+	q = ActivityQuery{Limit: 2, Start: &start, End: &end, Scope: all}
+	p1, err = r.ListActivity(ctx, q)
+	if err != nil {
+		t.Fatalf("bounded page 1: %v", err)
+	}
+	wantPage(t, msgs(p1), "row 2", "row 1")
+	q.Cursor = p1.NextCursor
+	p2, err = r.ListActivity(ctx, q)
+	if err != nil {
+		t.Fatalf("bounded page 2: %v", err)
+	}
+	wantPage(t, msgs(p2), "row 0")
+}
+
+// TestListActivity_RetentionEdge proves a read with a retention window
+// returns no row older than the window, and that a range start before the
+// window reads from the window edge.
+func TestListActivity_RetentionEdge(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	events := []activity.Event{
+		{Timestamp: now.Add(-49 * time.Hour), Cluster: "core", Namespace: "ns", Controller: "ctrl", Source: "operator", Type: "t", Message: "past"},
+		{Timestamp: now.Add(-47 * time.Hour), Cluster: "core", Namespace: "ns", Controller: "ctrl", Source: "operator", Type: "t", Message: "inside"},
+		{Timestamp: now.Add(-time.Hour), Cluster: "core", Namespace: "ns", Controller: "ctrl", Source: "operator", Type: "t", Message: "recent"},
+	}
+	r := NewReader(seedActivityEvents(t, events), 2)
+	ctx := context.Background()
+	all := activity.Scope{All: true}
+	msgs := func(p ActivityPage) string {
+		out := make([]string, 0, len(p.Items))
+		for _, e := range p.Items {
+			out = append(out, e.Message)
+		}
+		return fmt.Sprint(out)
+	}
+
+	t.Run("default read", func(t *testing.T) {
+		p, err := r.ListActivity(ctx, ActivityQuery{Limit: 10, Scope: all})
+		if err != nil {
+			t.Fatalf("ListActivity: %v", err)
+		}
+		if got := msgs(p); got != "[recent inside]" {
+			t.Fatalf("items = %s, want [recent inside]", got)
+		}
+	})
+
+	t.Run("start before the edge reads from the edge", func(t *testing.T) {
+		start := now.Add(-72 * time.Hour)
+		p, err := r.ListActivity(ctx, ActivityQuery{Limit: 10, Start: &start, Scope: all})
+		if err != nil {
+			t.Fatalf("ListActivity: %v", err)
+		}
+		if got := msgs(p); got != "[recent inside]" {
+			t.Fatalf("items = %s, want [recent inside]", got)
+		}
+	})
+
+	t.Run("range ending before the edge is empty", func(t *testing.T) {
+		start, end := now.Add(-72*time.Hour), now.Add(-50*time.Hour)
+		p, err := r.ListActivity(ctx, ActivityQuery{Limit: 10, Start: &start, End: &end, Scope: all})
+		if err != nil {
+			t.Fatalf("ListActivity: %v", err)
+		}
+		if len(p.Items) != 0 || p.HasMore {
+			t.Fatalf("items = %d, HasMore %v; want empty page", len(p.Items), p.HasMore)
+		}
+	})
+
+	t.Run("cursor pages across the edge start", func(t *testing.T) {
+		start := now.Add(-72 * time.Hour)
+		q := ActivityQuery{Limit: 1, Start: &start, Scope: all}
+		p1, err := r.ListActivity(ctx, q)
+		if err != nil {
+			t.Fatalf("page 1: %v", err)
+		}
+		if got := msgs(p1); got != "[recent]" || p1.NextCursor == "" {
+			t.Fatalf("page 1 = %s cursor %q, want [recent] with a cursor", got, p1.NextCursor)
+		}
+		q.Cursor = p1.NextCursor
+		p2, err := r.ListActivity(ctx, q)
+		if err != nil {
+			t.Fatalf("page 2: %v", err)
+		}
+		if got := msgs(p2); got != "[inside]" || p2.HasMore {
+			t.Fatalf("page 2 = %s HasMore %v, want [inside] and no more", got, p2.HasMore)
+		}
+	})
 }
 
 // TestListActivity_CursorErrors covers the two cursor error sentinels
@@ -382,7 +529,7 @@ func TestListActivity_CursorErrors(t *testing.T) {
 		// Force a cursor to exist by requesting a page smaller than the
 		// data: fabricate one from the returned item so this test does not
 		// depend on HasMore with only one seeded row.
-		cur := encodeActivityCursor(activityCursor{Direction: "backward", Filters: activityFilterKey(qA), TS: page.Items[0].Timestamp, EventKey: activity.EventKey(page.Items[0])})
+		cur := encodeActivityCursor(activityCursor{Filters: activityFilterKey(qA), TS: page.Items[0].Timestamp, EventKey: activity.EventKey(page.Items[0])})
 		qB := ActivityQuery{Cluster: "c2", Limit: 1, Cursor: cur, Scope: activity.Scope{All: true}}
 		if _, err := r.ListActivity(ctx, qB); !errors.Is(err, activity.ErrInvalidCursor) {
 			t.Fatalf("got err = %v, want ErrInvalidCursor", err)
@@ -393,8 +540,8 @@ func TestListActivity_CursorErrors(t *testing.T) {
 		r := NewReader(pool, 1) // 1-day retention
 		q := ActivityQuery{Cluster: "c1", Limit: 1, Scope: activity.Scope{All: true}}
 		oldCursor := encodeActivityCursor(activityCursor{
-			Direction: "backward", Filters: activityFilterKey(q),
-			TS: time.Now().Add(-48 * time.Hour), EventKey: "does-not-matter",
+			Filters: activityFilterKey(q),
+			TS:      time.Now().Add(-48 * time.Hour), EventKey: "does-not-matter",
 		})
 		q.Cursor = oldCursor
 		if _, err := r.ListActivity(ctx, q); !errors.Is(err, activity.ErrCursorExpired) {

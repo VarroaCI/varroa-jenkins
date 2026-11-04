@@ -112,7 +112,7 @@ type Reader interface {
 	NextBuildNumber(ctx context.Context, cluster, tenant, jobPath string) (int64, error)
 	SchemaVersion(ctx context.Context) (int64, error)
 
-	// ListActivity pages varroa.activity by keyset on (ts, event_key).
+	// ListActivity pages varroa.activity by keyset on (ts, event_key), newest first.
 	ListActivity(ctx context.Context, q ActivityQuery) (ActivityPage, error)
 	// ActivityRetentionDays reports the BFF's configured activity retention
 	// window in days, from VARROA_ACTIVITY_RETENTION_DAYS.
@@ -234,8 +234,8 @@ type JobHome struct {
 type pgReader struct {
 	pool *pgxpool.Pool
 	// activityRetentionDays is the BFF's configured activity retention
-	// window, from VARROA_ACTIVITY_RETENTION_DAYS. It bounds how old an
-	// incoming ListActivity cursor may be before ErrCursorExpired.
+	// window, from VARROA_ACTIVITY_RETENTION_DAYS. ListActivity returns no
+	// row older than it, and an older incoming cursor answers ErrCursorExpired.
 	activityRetentionDays int
 	// schemaOK is true after one schema check passes. Migrations only go
 	// up, so it stays true for the life of the Reader. A failed check
