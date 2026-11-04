@@ -2,7 +2,7 @@ import { Sparkles } from "lucide-react";
 import { useState, useMemo, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useActivityFeed } from "../hooks/useActivityFeed";
+import type { UseActivityFeedResult } from "../hooks/useActivityFeed";
 import { useClusters, coreOf } from "../hooks/useClusters";
 import { isRecordStoreUnreachable } from "../hooks/useApi";
 import { controllerRoute } from "../routing";
@@ -22,7 +22,7 @@ import {
   age,
   NEW_PILL_CAP,
 } from "./activityTimeline.util";
-import type { ActivityEvent, ActivityFilters } from "../types";
+import type { ActivityEvent } from "../types";
 import styles from "./ActivityTimeline.module.css";
 
 /**
@@ -38,10 +38,10 @@ function streamLabel(readyState: string, paused: boolean): string {
 // ── Props ──────────────────────────────────────────────────────────────────
 
 interface ActivityTimelineProps {
-  scope?: { cluster?: string; namespace: string; name: string };
+  /** The page's one feed. The page calls useActivityFeed once and passes the result here. */
+  feed: UseActivityFeedResult;
   selectedControllers?: Set<string>;
   hidePicker?: boolean;
-  filters?: ActivityFilters;
 }
 
 // ── Lane/source chip definitions ───────────────────────────────────────────
@@ -68,10 +68,9 @@ const SOURCE_CHIP_TO_VALUE: Record<string, "All" | string> = {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function ActivityTimeline({
-  scope,
+  feed,
   selectedControllers,
   hidePicker: _hidePicker,
-  filters = {},
 }: ActivityTimelineProps) {
   const { data: clusters } = useClusters();
   const core = coreOf(clusters);
@@ -87,7 +86,7 @@ export default function ActivityTimeline({
     hasMore,
     loadMore,
     isLoadingMore,
-  } = useActivityFeed(scope, filters);
+  } = feed;
 
   const [laneChip, setLaneChip] = useState<LaneChip>("All");
   const [sourceChip, setSourceChip] = useState<string>("All");

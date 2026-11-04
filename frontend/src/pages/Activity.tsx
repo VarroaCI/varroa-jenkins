@@ -12,7 +12,8 @@ export default function Activity() {
   const [params, setParams] = useSearchParams();
   const { data: controllers = [] } = useControllers();
   const filters = Object.fromEntries(FILTERS.flatMap((key) => params.get(key) ? [[key, params.get(key)!]] : [])) as ActivityFilters;
-  const { events, retentionMode, retentionDays } = useActivityFeed(undefined, filters);
+  const feed = useActivityFeed(undefined, filters);
+  const { events, retentionMode, retentionDays } = feed;
   const set = (key: string, value: string) => setParams((current) => { const next = new URLSearchParams(current); value ? next.set(key, value) : next.delete(key); if (key === "range" && value !== "custom") { next.delete("start"); next.delete("end"); } return next; });
   const namespaces = useMemo(() => [...new Set([...controllers.map((c) => c.namespace), ...events.flatMap((e) => e.namespace ? [e.namespace] : [])])].sort(), [controllers, events]);
   const actors = useMemo(() => [...new Set(events.flatMap((e) => e.actor ? [e.actor] : []))].sort(), [events]);
@@ -35,7 +36,7 @@ export default function Activity() {
     </div>
     <div className={styles.activeFilters}>{active.map((key) => <button key={key} onClick={() => set(key, "")}>{key}: {params.get(key)} x</button>)}</div>
     {retentionMode === "off" && <p className={styles.retentionNote}>History retention is off. Showing this server's current activity buffer.</p>}
-    <ActivityTimeline filters={filters} />
+    <ActivityTimeline feed={feed} />
   </div>;
 }
 

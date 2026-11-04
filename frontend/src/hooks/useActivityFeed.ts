@@ -11,7 +11,7 @@ import {
 } from "../components/activityTimeline.util";
 import type { ActivityEvent, ActivityFilters, ActivityPage } from "../types";
 
-interface UseActivityFeedResult {
+export interface UseActivityFeedResult {
   events: ActivityEvent[];
   pendingCount: number;
   paused: boolean;
@@ -27,6 +27,7 @@ interface UseActivityFeedResult {
 	retentionDays?: number;
 }
 
+/** useActivityFeed reads one history page and opens one live stream. A page calls it once and passes the result to each view of the feed. */
 export function useActivityFeed(
   scope?: { cluster?: string; namespace: string; name: string },
 	filters: ActivityFilters = {},
@@ -51,13 +52,24 @@ export function useActivityFeed(
     staleTime: 5_000,
   });
 
-  // Live SSE stream
+  // Live frames wait in this queue until the drain effect below merges them.
+  // useEventStream calls onEvent once for each frame, also for each frame of a
+  // burst that reaches React as one render. lastEvent keeps only the last
+  // frame of that burst, so the feed never reads lastEvent.
+  const liveQueueRef = useRef<unknown[]>([]);
+  const [liveTick, setLiveTick] = useState(0);
+  const onEvent = useCallback((ev: SSEEvent<ActivityEvent>) => {
+    if (ev.type !== "activity") return;
+    liveQueueRef.current.push(ev.data);
+    setLiveTick((n) => n + 1);
+  }, []);
+
   // EventSource cannot send an Authorization header, so the bearer token is
   // passed as a query param (same pattern as the controller-events stream).
   // Also use BFF_BASE so the stream targets the API origin, not the SPA origin.
   const sseUrl = `${BFF_BASE}/activity/stream${scopeQuery}`;
-  const { lastEvent, readyState, error: sseError } =
-    useEventStream<ActivityEvent>(sseUrl, "activity", ["activity"]);
+  const { readyState, error: sseError } =
+    useEventStream<ActivityEvent>(sseUrl, "activity", ["activity"], { onEvent });
 
   // Main ring buffer (newest-first)
   const [buffer, setBuffer] = useState<ActivityEvent[]>([]);
@@ -73,41 +85,17 @@ export function useActivityFeed(
 	const backfillSeededRef = useRef<string | null>(null);
 	const queryIdentity = scopeQuery;
 
-  // The lastEvent object currently retained by useEventStream, kept in a ref
-  // (updated each render) so the clear effect can read it without re-running
-  // on every new SSE frame.
-  const lastEventRef = useRef<SSEEvent<ActivityEvent> | null>(lastEvent);
-  lastEventRef.current = lastEvent;
-  // Reference to the lastEvent frame already consumed — either ingested into
-  // the feed, or retired because the feed identity changed. Frames are never
-  // re-processed, so a stale frame that useEventStream still retains after the
-  // stream URL changed cannot be re-ingested into a fresh buffer.
-  const consumedRef = useRef<SSEEvent<ActivityEvent> | null>(null);
-  // Previous query identity, so the clear effect can tell a genuine identity
-  // change (new stream URL) apart from the initial mount.
-  const prevQueryIdentityRef = useRef<string | null>(null);
-
   useEffect(() => {
-    const prevIdentity = prevQueryIdentityRef.current;
-    prevQueryIdentityRef.current = queryIdentity;
     setBuffer([]); pendingQueueRef.current = []; setPendingCount(0);
+    // A frame queued before this effect came from the stream of the previous
+    // query. useEventStream closes that stream in the same commit.
+    liveQueueRef.current = [];
     // Reset pagination alongside the buffer: nextCursor/hasMore/isLoadingMore
     // describe the PREVIOUS query's scope, so a stale "Load more" must never
     // fire the old cursor against the new query while the new backfill is
     // still in flight. The seeding effect below re-drives them from the fresh
     // page once it lands.
     setNextCursor(undefined); setHasMore(false); setLoadingMore(false);
-    // Only mark the retained lastEvent as consumed when the identity actually
-    // CHANGED — on the initial mount there is no previous stream, so a non-null
-    // retained frame is the feed's FIRST live event and must still be ingested.
-    // When the identity changes, useEventStream retains the PREVIOUS stream's
-    // lastEvent until the new stream delivers a frame; that retained frame was
-    // selected by the OLD filter (server-side), so mark it consumed by
-    // reference — it must never land in the just-cleared buffer. Filter
-    // semantics stay server-side; we only do identity tracking.
-    if (prevIdentity !== null && prevIdentity !== queryIdentity) {
-      consumedRef.current = lastEventRef.current;
-    }
   }, [queryIdentity]);
 
   // Seed from backfill — no "seed only if empty" guard; always merge
@@ -123,39 +111,28 @@ export function useActivityFeed(
     }
 	}, [backfillData, scope, queryIdentity]);
 
-  // Ingest live SSE events
+  // Merge every queued live frame in one buffer update.
   useEffect(() => {
-    if (lastEvent && lastEvent.type === "activity") {
-      // Skip frames already consumed — dedup by reference. In particular, when
-      // queryIdentity changes the clear effect above marks the retained frame
-      // consumed, so it is never re-ingested into the fresh buffer.
-      if (consumedRef.current === lastEvent) return;
-      consumedRef.current = lastEvent;
-      // The stream names every frame "activity", but brood telemetry can share
-      // the name. Drop any frame that lacks the ActivityEvent shape.
-      if (!isActivityEvent(lastEvent.data)) return;
-      const incoming = lastEvent.data;
-      // Apply defensive scope filter
-      if (scope && !passesScope(incoming, scope)) return;
-
-      if (!paused) {
-        setBuffer((b) => mergeEvents(b, [incoming], MAX_BUFFER));
-      } else {
-        pendingQueueRef.current = mergeEvents(
-          pendingQueueRef.current,
-          [incoming],
-          MAX_BUFFER,
-        );
-        setPendingCount(pendingQueueRef.current.length);
-      }
+    const frames = liveQueueRef.current;
+    if (frames.length === 0) return;
+    liveQueueRef.current = [];
+    // The stream names every frame "activity", but brood telemetry can share
+    // the name. Drop any frame that lacks the ActivityEvent shape, then apply
+    // the defensive scope filter.
+    const incoming = frames
+      .filter(isActivityEvent)
+      .filter((e) => !scope || passesScope(e, scope));
+    if (incoming.length === 0) return;
+    if (!paused) {
+      setBuffer((b) => mergeEvents(b, incoming, MAX_BUFFER));
+    } else {
+      pendingQueueRef.current = mergeEvents(pendingQueueRef.current, incoming, MAX_BUFFER);
+      setPendingCount(pendingQueueRef.current.length);
     }
-    // Key the effect on queryIdentity (a stable string derived from the
-    // scope's primitive fields) instead of `scope` itself: callers like
-    // ControllerDetail pass a fresh object literal every render, and
-    // mergeEvents returns a new array even for a no-op merge, so depending on
-    // the scope object identity made every in-flight event re-run this effect
-    // on every render -> setBuffer -> re-render -> infinite loop.
-  }, [lastEvent, paused, queryIdentity]);
+    // The effect does not depend on `scope`: callers such as ControllerDetail
+    // pass a fresh object literal on every render. The effect reads the scope
+    // of the render that runs it.
+  }, [liveTick, paused]);
 
   // Resume: merge pending into buffer, clear queue
   const resume = useCallback(() => {

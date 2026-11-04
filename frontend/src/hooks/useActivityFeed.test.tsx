@@ -17,7 +17,7 @@ vi.mock("../api/client", () => ({
   BFF_BASE: "/api/v1",
 }));
 
-let mockLastEvent: { type: string; data: ActivityEvent } | null = null;
+let mockOnEvent: ((ev: { type: string; data: unknown }) => void) | undefined;
 let mockReadyState = "closed";
 let mockSSEError: Event | null = null;
 let mockStreamUrl: unknown = null;
@@ -25,8 +25,9 @@ let mockStreamUrl: unknown = null;
 vi.mock("./useEventStream", () => ({
   useEventStream: (...args: unknown[]) => {
     mockStreamUrl = args[0];
+    mockOnEvent = (args[3] as { onEvent?: typeof mockOnEvent } | undefined)?.onEvent;
     return {
-    lastEvent: mockLastEvent,
+    lastEvent: null,
     readyState: mockReadyState,
     error: mockSSEError,
     close: vi.fn(),
@@ -57,7 +58,7 @@ function createWrapper() {
 beforeEach(() => {
   mockBffFetch.mockReset();
   mockBffFetch.mockResolvedValue({items: []});
-  mockLastEvent = null;
+  mockOnEvent = undefined;
   mockReadyState = "closed";
   mockSSEError = null;
   mockStreamUrl = null;
@@ -94,7 +95,7 @@ describe("useActivityFeed", () => {
 
   it("buffers paused arrivals in pendingQueue", async () => {
     mockBffFetch.mockResolvedValue({items: []});
-    const { result, rerender } = renderHook(() => useActivityFeed(), {
+    const { result } = renderHook(() => useActivityFeed(), {
       wrapper: createWrapper(),
     });
 
@@ -114,10 +115,8 @@ describe("useActivityFeed", () => {
       buildNumber: 1,
     });
     act(() => {
-      mockLastEvent = { type: "activity", data: sseEvent };
+      mockOnEvent!({ type: "activity", data: sseEvent });
     });
-    // Force re-render so useEffect picks up the new mockLastEvent
-    rerender();
 
     await waitFor(() => {
       expect(result.current.pendingCount).toBe(1);
@@ -127,7 +126,7 @@ describe("useActivityFeed", () => {
 
   it("resume flushes pendingQueue into buffer", async () => {
     mockBffFetch.mockResolvedValue({items: []});
-    const { result, rerender } = renderHook(() => useActivityFeed(), {
+    const { result } = renderHook(() => useActivityFeed(), {
       wrapper: createWrapper(),
     });
 
@@ -146,9 +145,8 @@ describe("useActivityFeed", () => {
       buildNumber: 1,
     });
     act(() => {
-      mockLastEvent = { type: "activity", data: sseEvent };
+      mockOnEvent!({ type: "activity", data: sseEvent });
     });
-    rerender();
 
     await waitFor(() => {
       expect(result.current.pendingCount).toBe(1);

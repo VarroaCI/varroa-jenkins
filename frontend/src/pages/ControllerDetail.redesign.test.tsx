@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -132,6 +132,7 @@ vi.mock("../components/BundleSelector", () => ({
 }));
 
 import { useEventStream } from "../hooks/useEventStream";
+import type { SSEEvent } from "../hooks/useEventStream";
 
 function setCtrl(overrides: Record<string, any>) {
   mockUseController.mockReturnValue({
@@ -695,26 +696,24 @@ describe("ControllerDetail — Diagnostics stream (8.2)", () => {
 
   it("'Logs' chip shows real log entries (no source filter) and hides activity", () => {
     // Stable references: ControllerStream appends lines on a [lastEvent]
-    // effect and useActivityFeed ingests on [lastEvent] too, so each simulated
-    // "current event" must be constructed ONCE and the same object returned on
-    // every mock invocation. A fresh object literal per render would make those
-    // effects fire every render and infinite-loop.
-    const activityState = {
-      lastEvent: {
-        type: "activity",
-        data: {
-          timestamp: "2024-01-01T00:00:00Z",
-          type: "info",
-          source: "operator",
-          message: "operator activity line",
-          cluster: "core",
-          namespace: "my-ns",
-          controller: "my-ctrl",
-        },
+    // effect, so each simulated "current event" must be constructed ONCE and
+    // the same object returned on every mock invocation. A fresh object literal
+    // per render would make that effect fire every render and infinite-loop.
+    // The activity feed reads its frames through options.onEvent instead.
+    const activityFrame = {
+      type: "activity",
+      data: {
+        timestamp: "2024-01-01T00:00:00Z",
+        type: "info",
+        source: "operator",
+        message: "operator activity line",
+        cluster: "core",
+        namespace: "my-ns",
+        controller: "my-ctrl",
       },
-      readyState: "open",
-      error: null,
     };
+    const activityState = { lastEvent: null, readyState: "open", error: null };
+    let activityOnEvent: ((ev: SSEEvent<unknown>) => void) | undefined;
     // Log frame source is "jenkins" — never literally "logs".
     const logState = {
       lastEvent: { type: "log", data: { timestamp: "2024-01-01T00:00:01Z", source: "jenkins", message: "jenkins log line" } },
@@ -722,8 +721,15 @@ describe("ControllerDetail — Diagnostics stream (8.2)", () => {
       error: null,
     };
     try {
-      vi.mocked(useEventStream).mockImplementation((_baseUrl, scope) => (scope === "activity" ? activityState : logState));
+      vi.mocked(useEventStream).mockImplementation((_baseUrl, scope, _names, options) => {
+        if (scope === "activity") {
+          activityOnEvent = options?.onEvent as typeof activityOnEvent;
+          return activityState;
+        }
+        return logState;
+      });
       renderWithProviders(<ControllerDetail />);
+      act(() => activityOnEvent?.(activityFrame));
       fireEvent.click(screen.getByText(/Diagnostics/));
       // "All" (default) mixes activity + log lines.
       expect(screen.getByText(/operator activity line/)).toBeInTheDocument();
@@ -937,21 +943,24 @@ describe("ControllerDetail — Diagnostics stream (8.2)", () => {
     };
     const activityEventA = { type: "activity", data: { ...shared, source: "operator" } };
     const activityEventB = { type: "activity", data: { ...shared, source: "mite" } };
-    let currentActivityEvent = activityEventA;
+    let activityOnEvent: ((ev: SSEEvent<unknown>) => void) | undefined;
+    const activityState = { lastEvent: null, readyState: "open", error: null };
     try {
       const streamMock = vi.mocked(useEventStream);
-      streamMock.mockImplementation((_baseUrl, scope) =>
-        scope === "activity"
-          ? { lastEvent: currentActivityEvent, readyState: "open", error: null }
-          : logState,
-      );
-      const { rerender } = renderWithProviders(<ControllerDetail />);
+      streamMock.mockImplementation((_baseUrl, scope, _names, options) => {
+        if (scope === "activity") {
+          activityOnEvent = options?.onEvent as typeof activityOnEvent;
+          return activityState;
+        }
+        return logState;
+      });
+      renderWithProviders(<ControllerDetail />);
       fireEvent.click(screen.getByText(/Diagnostics/));
+      act(() => activityOnEvent?.(activityEventA));
       expect(screen.getAllByText(/shared activity message/)).toHaveLength(1);
       // Deliver a second activity event from a different source, otherwise
       // identical — only a source-qualified key keeps the two entries apart.
-      currentActivityEvent = activityEventB;
-      rerender(<ControllerDetail />);
+      act(() => activityOnEvent?.(activityEventB));
       expect(screen.getAllByText(/shared activity message/)).toHaveLength(2);
       const keyWarnings = errorSpy.mock.calls.filter(
         ([msg]) => typeof msg === "string" && /same key|non-unique keys?/i.test(msg),
