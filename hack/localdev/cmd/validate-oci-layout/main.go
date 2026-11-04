@@ -1,13 +1,17 @@
-// Command validate-oci-layout validates that hack/localdev/pluginpack-fixture/
-// is a structurally valid OCI image-layout. It is invoked by CI (the
-// Checks job) to check the checked-in fixture after generation.
+// Command validate-oci-layout validates the checked-in localdev plugin-pack
+// fixture at hack/localdev/pluginpack-fixture/. The PR Checks job runs it.
+//
+// The layout must hold exactly one manifest. Its ref name must be the path
+// that localdev.sh imports, because "varroactl import --from dir://<path>"
+// resolves the ref <path>. Every blob must resolve, oci.ReadPluginPack must
+// read the pack, and the pack must name the profile of the lock baseline.
 //
 // Usage:
 //
-//	go run ./hack/localdev/cmd/validate-oci-layout [--dir <path>]
+//	go run ./hack/localdev/cmd/validate-oci-layout [--dir <path>] [--ref <ref>]
 //
-// Exit code 0 = valid or empty (fixture not yet generated).
-// Exit code 1 = structurally invalid (missing index, malformed JSON, dangling blob).
+// Exit code 0 = valid, or no index.json in the directory.
+// Exit code 1 = invalid.
 package main
 
 import (
@@ -19,11 +23,20 @@ import (
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
+	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/oci"
 )
 
+// fixtureRef is the path that localdev.sh passes to varroactl import --from dir://.
+const fixtureRef = "hack/localdev/pluginpack-fixture"
+
+// annPackProfile is the manifest annotation that oci.BuildPluginPack writes
+// from PackConfig.Profile.
+const annPackProfile = "dev.varroa.pack.profile"
+
 func main() {
-	dir := flag.String("dir", "hack/localdev/pluginpack-fixture", "path to OCI-layout directory")
+	dir := flag.String("dir", fixtureRef, "path to OCI-layout directory")
+	ref := flag.String("ref", fixtureRef, "manifest ref name that the localdev import resolves")
 	flag.Parse()
 
 	absDir, err := filepath.Abs(*dir)
@@ -32,69 +45,65 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Check if the directory exists and has an index.json.
+	// Opening a layout writes index.json when it is missing, so check first.
 	indexPath := filepath.Join(absDir, ocispec.ImageIndexFile)
 	if _, err := os.Stat(indexPath); os.IsNotExist(err) {
-		// Fixture not yet generated — skip gracefully.
 		fmt.Printf("SKIP: %s not found — fixture not generated yet\n", indexPath)
 		os.Exit(0)
 	}
 
-	store, err := oci.NewLayoutStore(absDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: opening OCI layout at %q: %v\n", absDir, err)
+	want := pluginlock.ProfileName(pluginlock.Baseline())
+	if err := validateLayout(context.Background(), absDir, *ref, want); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
 	}
+	fmt.Printf("VALID: one plugin pack, ref %q, profile %q\n", *ref, want)
+}
 
-	ctx := context.Background()
+// validateLayout returns an error unless dir holds exactly one plugin-pack
+// manifest tagged wantRef, every blob of that manifest resolves,
+// oci.ReadPluginPack reads it, and the pack names wantProfile.
+func validateLayout(ctx context.Context, dir, wantRef, wantProfile string) error {
+	store, err := oci.NewLayoutStore(dir)
+	if err != nil {
+		return fmt.Errorf("open OCI layout at %q: %w", dir, err)
+	}
 	descs, err := store.ListManifests(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: listing manifests (malformed index.json?): %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("list manifests (malformed index.json?): %w", err)
 	}
-
-	if len(descs) == 0 {
-		fmt.Fprintf(os.Stderr, "ERROR: index.json exists but contains no manifests\n")
-		os.Exit(1)
+	// An export into an existing layout keeps the old manifest in index.json.
+	if len(descs) != 1 {
+		return fmt.Errorf("index.json holds %d manifests, want 1: run hack/localdev/pluginpack-fixture/generate.sh", len(descs))
 	}
-
-	fmt.Printf("OK: %d manifest(s) in index.json\n", len(descs))
-
-	// Resolve every manifest descriptor and verify its blob + all layer/config blobs.
-	for _, desc := range descs {
-		fmt.Printf("  checking manifest %s (%d bytes, media type %s)\n",
-			desc.Digest, desc.Size, desc.MediaType)
-
-		manifest, err := store.Pull(ctx, desc.Digest)
+	desc := descs[0]
+	ref := desc.Annotations[ocispec.AnnotationRefName]
+	if ref != wantRef {
+		return fmt.Errorf("manifest %s has ref name %q, want %q", desc.Digest, ref, wantRef)
+	}
+	manifest, err := store.Pull(ctx, ref)
+	if err != nil {
+		return fmt.Errorf("pull manifest %q: %w", ref, err)
+	}
+	if manifest.ArtifactType != oci.ArtifactTypePluginPack {
+		return fmt.Errorf("manifest %q has artifact type %q, want %q", ref, manifest.ArtifactType, oci.ArtifactTypePluginPack)
+	}
+	for _, b := range append([]oci.Descriptor{manifest.Config}, manifest.Layers...) {
+		rc, err := store.FetchBlob(ctx, b.Digest)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: pulling manifest %s: %v\n", desc.Digest, err)
-			os.Exit(1)
+			return fmt.Errorf("fetch blob %s of manifest %q: %w", b.Digest, ref, err)
 		}
-
-		// Check config blob.
-		if manifest.Config.Digest != "" {
-			rc, err := store.FetchBlob(ctx, manifest.Config.Digest)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "ERROR: fetching config blob %s (referenced by manifest %s): %v\n",
-					manifest.Config.Digest, desc.Digest, err)
-				os.Exit(1)
-			}
-			_ = rc.Close()
-			fmt.Printf("    config blob %s: OK (%d bytes)\n", manifest.Config.Digest, manifest.Config.Size)
-		}
-
-		// Check each layer blob.
-		for _, layer := range manifest.Layers {
-			rc, err := store.FetchBlob(ctx, layer.Digest)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "ERROR: fetching layer blob %s (referenced by manifest %s): %v\n",
-					layer.Digest, desc.Digest, err)
-				os.Exit(1)
-			}
-			_ = rc.Close()
-			fmt.Printf("    layer blob %s: OK (%d bytes)\n", layer.Digest, layer.Size)
-		}
+		_ = rc.Close()
 	}
-
-	fmt.Println("VALID: OCI layout structure is intact")
+	cfg, _, err := oci.ReadPluginPack(ctx, store, ref)
+	if err != nil {
+		return fmt.Errorf("read plugin pack: %w", err)
+	}
+	if cfg.Profile != wantProfile {
+		return fmt.Errorf("pack config names profile %q, want the baseline profile %q: run hack/localdev/pluginpack-fixture/generate.sh", cfg.Profile, wantProfile)
+	}
+	if got := manifest.Annotations[annPackProfile]; got != wantProfile {
+		return fmt.Errorf("manifest annotation %s is %q, want %q: run hack/localdev/pluginpack-fixture/generate.sh", annPackProfile, got, wantProfile)
+	}
+	return nil
 }
