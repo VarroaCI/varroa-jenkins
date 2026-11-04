@@ -11,6 +11,7 @@
 # Env flags:
 #   LOCALDEV_SKIP_CONTROLLER=1   skip the sample controller in `up`
 #   LOCALDEV_OFFLINE=1           offline mode: no pull-through, use fixture, skip controller
+#   (online) update-center pull-through is on; the seed pack only warms the cache
 #
 # Everything is idempotent: re-running `up` converges instead of recreating.
 # Fallback note (design D6): if the in-cluster smart-HTTP git server
@@ -33,6 +34,7 @@ LOCALDEV_DIR="$REPO_ROOT/.localdev"
 KIND_CONFIG="$REPO_ROOT/hack/localdev/kind-config.yaml"
 BUNDLE_DIR="$REPO_ROOT/hack/localdev/bundle"
 MANIFEST_DIR="$REPO_ROOT/hack/localdev/manifests"
+SAMPLE_READY=1
 
 K() { kubectl --context "$CTX" "$@"; }
 
@@ -64,6 +66,16 @@ preflight() {
     command -v "$bin" >/dev/null || { echo "ERROR: '$bin' not found on PATH — install it first"; missing=1; }
   done
   [ "$missing" -eq 0 ] || exit 1
+  # Helm 3 applies client-side. Helm 4 applies server-side and needs
+  # --force-conflicts in helm_deploy. Both majors work.
+  local helm_version
+  helm_version=$(helm version --short 2>/dev/null) || die "'helm version --short' failed — check the helm install"
+  HELM_MAJOR=${helm_version#v}
+  HELM_MAJOR=${HELM_MAJOR%%.*}
+  case "$HELM_MAJOR" in
+    ''|*[!0-9]*) die "cannot read the helm major version from '$helm_version'" ;;
+  esac
+  [ "$HELM_MAJOR" -ge 3 ] || die "helm $helm_version is too old — install Helm 3 or Helm 4"
   docker info >/dev/null 2>&1 || die "docker daemon is not responding — start Docker"
   # Ports 80/443 must be free unless our own kind node already owns them.
   if ! cluster_exists; then
@@ -167,6 +179,40 @@ image_id12() { docker image inspect --format '{{.Id}}' "$1" | cut -d: -f2 | cut 
 
 POSTGRES_IMAGE="postgres:16.15"
 
+# kind_node_platform prints the OCI platform of the kind node, for example
+# linux/arm64. kind runs the node on the host architecture.
+kind_node_platform() {
+  local arch
+  arch=$(K get node "$CLUSTER-control-plane" -o jsonpath='{.status.nodeInfo.architecture}' 2>/dev/null) || true
+  [ -n "$arch" ] || die "cannot read the architecture of node $CLUSTER-control-plane — is the $CLUSTER cluster up?"
+  echo "linux/$arch"
+}
+
+# load_postgres_image imports one platform of POSTGRES_IMAGE into the kind node.
+load_postgres_image() {
+  docker save --platform "$1" "$POSTGRES_IMAGE" \
+    | docker exec -i "$CLUSTER-control-plane" ctr --namespace=k8s.io images import --snapshotter=overlayfs - >/dev/null
+}
+
+# baseline_pack_tag prints the seed-pack tag of the baseline core, for example
+# 2-588. The sample Controller sets no version, so it runs the baseline. The
+# release workflow tags each pack with its profile version, dots made dashes.
+baseline_pack_tag() {
+  local baseline
+  baseline=$(sed -n 's/^baseline:[[:space:]]*"\{0,1\}\([0-9][0-9.]*\).*/\1/p' "$REPO_ROOT/internal/controller/pluginlock/lock.yaml")
+  [ -n "$baseline" ] || die "cannot read baseline from internal/controller/pluginlock/lock.yaml"
+  echo "${baseline//./-}"
+}
+
+# controller_blockers prints "<type>: <reason> - <message>" for each True
+# condition of the sample Controller that can hold provisioning. Ready,
+# progress, connection, and fallback notices are left out.
+controller_blockers() {
+  K -n "$WORKLOAD_NS" get controller getting-started \
+    -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type}{": "}{.reason}{" - "}{.message}{"\n"}{end}' 2>/dev/null \
+    | grep -vE '^(BundleResolved|ClassResolved|MiteConnected|OverlayActive|Provisioning|Ready|UpdateCenterFallback): ' || true
+}
+
 build_images() {
   log "building backend image (operator/gateway/bff/mite + plugin HPI)"
   docker build --provenance=false --sbom=false -t varroa-jenkins:build "$REPO_ROOT" >/dev/null
@@ -186,21 +232,30 @@ build_images() {
   MITE_IMAGE="docker.io/library/varroa-jenkins:$BACKEND_TAG"
   GIT_IMAGE="docker.io/library/varroa-localdev-git:$GIT_TAG"
 
+  local pg_platform
+  pg_platform=$(kind_node_platform)
   if docker image inspect "$POSTGRES_IMAGE" >/dev/null 2>&1; then
     log "reusing cached $POSTGRES_IMAGE"
   elif [[ "${LOCALDEV_OFFLINE:-}" == "1" ]]; then
     die "postgres image $POSTGRES_IMAGE is not in the local Docker cache (LOCALDEV_OFFLINE=1 skips the pull)"
   else
-    log "pulling $POSTGRES_IMAGE"
-    docker pull --platform linux/amd64 "$POSTGRES_IMAGE" >/dev/null
+    log "pulling $POSTGRES_IMAGE ($pg_platform)"
+    docker pull --platform "$pg_platform" "$POSTGRES_IMAGE" >/dev/null
   fi
   # A pulled image is a multi-platform manifest list. `kind load docker-image`
   # imports it with --all-platforms and fails on the platforms Docker never
-  # pulled, so the load goes through a platform-filtered archive and a plain
-  # ctr import on the node.
-  log "loading $POSTGRES_IMAGE into kind"
-  docker save --platform linux/amd64 "$POSTGRES_IMAGE" \
-    | docker exec -i "$CLUSTER-control-plane" ctr --namespace=k8s.io images import --snapshotter=overlayfs - >/dev/null
+  # pulled, so the load goes through an archive of the node platform only and
+  # a plain ctr import on the node. A cached image can lack the node platform.
+  # Then the script pulls that platform once and loads again.
+  log "loading $POSTGRES_IMAGE ($pg_platform) into kind"
+  if ! load_postgres_image "$pg_platform" 2>/dev/null; then
+    if [[ "${LOCALDEV_OFFLINE:-}" == "1" ]]; then
+      die "the local Docker cache has no $pg_platform image of $POSTGRES_IMAGE (LOCALDEV_OFFLINE=1 skips the pull) — run 'docker pull --platform $pg_platform $POSTGRES_IMAGE' while online"
+    fi
+    log "the cached $POSTGRES_IMAGE has no $pg_platform image — pulling it"
+    docker pull --platform "$pg_platform" "$POSTGRES_IMAGE" >/dev/null
+    load_postgres_image "$pg_platform" || die "cannot load $POSTGRES_IMAGE ($pg_platform) into the kind node"
+  fi
 }
 
 helm_deploy() {
@@ -213,11 +268,17 @@ helm_deploy() {
   fi
   log "applying CRDs"
   K apply -f "$REPO_ROOT/charts/varroa/crds/" >/dev/null
-  log "helm upgrade --install $RELEASE (tags: backend=$BACKEND_TAG frontend=$FRONTEND_TAG)"
-  # --force-conflicts: helm v4 server-side apply vs the HPA controller, which
-  # co-owns .spec.replicas on bff/gateway via the scale subresource.
+  local force_conflicts="" pull_through=true
+  # Helm 4 applies server-side. The HPA controller co-owns .spec.replicas on
+  # bff and gateway through the scale subresource, so Helm 4 must force the
+  # conflict. Helm 3 applies client-side and has no --force-conflicts flag.
+  if [ "$HELM_MAJOR" -ge 4 ]; then force_conflicts=1; fi
+  # Online, pull-through gets each plugin that the seed pack does not hold.
+  # Offline has no upstream, so the update center serves the fixture only.
+  if [[ "${LOCALDEV_OFFLINE:-}" == "1" ]]; then pull_through=false; fi
+  log "helm v$HELM_MAJOR upgrade --install $RELEASE (tags: backend=$BACKEND_TAG frontend=$FRONTEND_TAG)"
   helm --kube-context "$CTX" upgrade --install "$RELEASE" "$REPO_ROOT/charts/varroa" \
-    -n "$NS" --create-namespace --force-conflicts \
+    -n "$NS" --create-namespace ${force_conflicts:+--force-conflicts} \
     -f "$REPO_ROOT/charts/varroa/values-localdev.yaml" \
     --set operator.image.tag="$BACKEND_TAG" \
     --set gateway.image.tag="$BACKEND_TAG" \
@@ -238,7 +299,7 @@ helm_deploy() {
     --set recorder.image.tag="$BACKEND_TAG" \
     --set agentRunner.image.repository=varroa-jenkins \
     --set agentRunner.image.tag="$BACKEND_TAG" \
-    ${LOCALDEV_OFFLINE:+--set updateCenter.pullThrough.enabled=false} >/dev/null
+    --set updateCenter.pullThrough.enabled="$pull_through" >/dev/null
   for d in "$RELEASE-varroa-operator" "$RELEASE-varroa-gateway" "$RELEASE-varroa-bff" "$RELEASE-frontend" "$RELEASE-updatecenter" "varroa-recorder"; do
     wait_for "deployment $d rollout" 60 5 \
       bash -c "kubectl --context $CTX -n $NS rollout status deployment/$d --timeout=5s" \
@@ -286,9 +347,11 @@ seed_updatecenter() {
       return 1
     fi
   else
-    if ! bin/varroactl import --from "oci://ghcr.io/varroaci/varroa-jenkins/plugin-pack:2-580" \
-        --to uc://localhost:8080; then
-      echo "WARNING: seed pack import failed, continuing — sample controller will rely on pull-through" >&2
+    local seed_ref
+    seed_ref="oci://ghcr.io/varroaci/varroa-jenkins/plugin-pack:$(baseline_pack_tag)"
+    log "seeding the update center from $seed_ref"
+    if ! bin/varroactl import --from "$seed_ref" --to uc://localhost:8080; then
+      echo "WARNING: seed pack import failed ($seed_ref), continuing — pull-through supplies the sample controller's plugins" >&2
     fi
   fi
 }
@@ -355,8 +418,16 @@ phase_controller() {
     wait_for "sample Jenkins StatefulSet ready" 96 5 \
       bash -c "kubectl --context $CTX -n $WORKLOAD_NS get sts -o jsonpath='{.items[?(@.status.readyReplicas==1)].metadata.name}' | grep -q jenkins" || ok=0
   fi
+  SAMPLE_READY=$ok
   if [ "$ok" -ne 1 ]; then
-    echo "WARN: the sample controller is not ready yet. The control plane is still usable." >&2
+    local phase blockers line
+    phase=$(K -n "$WORKLOAD_NS" get controller getting-started -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    echo "WARN: the sample controller is not ready yet (phase: ${phase:-unknown}). The control plane is still usable." >&2
+    blockers=$(controller_blockers)
+    if [ -n "$blockers" ]; then
+      echo "      Blocking conditions:" >&2
+      while IFS= read -r line; do echo "        $line" >&2; done <<<"$blockers"
+    fi
     echo "      Diagnose with:" >&2
     echo "        kubectl --context $CTX -n $WORKLOAD_NS describe controller getting-started" >&2
     echo "        kubectl --context $CTX -n $WORKLOAD_NS get pods" >&2
@@ -378,7 +449,11 @@ summary() {
  Bundle git  https://git.$DOMAIN/cgi-bin/git/localdev-bundle.git
 EOF
   if [ "${LOCALDEV_SKIP_CONTROLLER:-0}" != "1" ]; then
-    echo " Jenkins     https://getting-started.$DOMAIN"
+    if [ "$SAMPLE_READY" = "1" ]; then
+      echo " Jenkins     https://getting-started.$DOMAIN"
+    else
+      echo " Jenkins     https://getting-started.$DOMAIN (not ready, see WARN above)"
+    fi
   fi
   cat <<EOF
 ------------------------------------------------------------
