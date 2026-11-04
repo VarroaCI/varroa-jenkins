@@ -6161,10 +6161,10 @@ type ListActivityParams struct {
 	Actor      *string                     `form:"actor,omitempty" json:"actor,omitempty"`
 	Type       *string                     `form:"type,omitempty" json:"type,omitempty"`
 
-	// Start Reads events at or after start, oldest first. With no end, the read goes to the present.
+	// Start Reads events at or after start. A start before the retention window reads from the window edge. With no end, the read goes to the present.
 	Start *time.Time `form:"start,omitempty" json:"start,omitempty"`
 
-	// End Reads events before end. With no start, the read is newest first.
+	// End Reads events before end.
 	End    *time.Time `form:"end,omitempty" json:"end,omitempty"`
 	Cursor *string    `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *int       `form:"limit,omitempty" json:"limit,omitempty"`

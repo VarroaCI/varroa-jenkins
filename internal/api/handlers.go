@@ -2589,7 +2589,7 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 	query.Authorize = func(e activity.Event) bool { return s.deps.Authorizer.CanReadActivityEvent(claims, e) }
 	page, err := s.deps.Backfill.Query(r.Context(), query)
 	if err != nil {
-		if errors.Is(err, activity.ErrInvalidCursor) || errors.Is(err, activity.ErrRangeOutsideRetention) {
+		if errors.Is(err, activity.ErrInvalidCursor) {
 			s.writeJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}

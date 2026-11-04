@@ -281,12 +281,14 @@ type pagedActivityReader struct {
 	Reader
 	pages   []ActivityPage
 	calls   int
+	last    ActivityQuery
 	days    int
 	daysErr error
 }
 
-func (p *pagedActivityReader) ListActivity(_ context.Context, _ ActivityQuery) (ActivityPage, error) {
+func (p *pagedActivityReader) ListActivity(_ context.Context, q ActivityQuery) (ActivityPage, error) {
 	p.calls++
+	p.last = q
 	if p.calls > len(p.pages) {
 		return ActivityPage{}, nil
 	}
@@ -297,41 +299,47 @@ func (p *pagedActivityReader) ActivityRetentionDays(context.Context) (int, error
 	return p.days, p.daysErr
 }
 
-// TestPgBackfillQuery_RangeOutsideRetention proves a range start before the
-// retention window answers ErrRangeOutsideRetention without a list call, and
-// that a zero retention sets no bound.
-func TestPgBackfillQuery_RangeOutsideRetention(t *testing.T) {
+// TestPgBackfillQuery_RangeStartBeforeRetentionReads proves a range start
+// before the retention window reads ListActivity with the caller's start
+// unchanged, and that the page reports the retention days.
+func TestPgBackfillQuery_RangeStartBeforeRetentionReads(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now().UTC()
-	cases := []struct {
-		name    string
-		days    int
-		start   time.Time
-		wantErr error
-		calls   int
-	}{
-		{"start before window", 1, now.Add(-48 * time.Hour), activity.ErrRangeOutsideRetention, 0},
-		{"start inside window", 1, now.Add(-time.Hour), nil, 1},
-		{"zero days sets no bound", 0, now.Add(-48 * time.Hour), nil, 1},
+	reader := &pagedActivityReader{days: 1, pages: []ActivityPage{{}}}
+	bf := NewActivityBackfill(reader)
+	start := now.Add(-48 * time.Hour)
+	end := now.Add(time.Hour)
+	page, err := bf.Query(context.Background(), activity.Query{Limit: 5, Start: &start, End: &end, Scope: activity.Scope{All: true}})
+	if err != nil {
+		t.Fatalf("Query error = %v, want nil", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			reader := &pagedActivityReader{days: tc.days, pages: []ActivityPage{{}}}
-			bf := NewActivityBackfill(reader)
-			end := now.Add(time.Hour)
-			start := tc.start
-			_, err := bf.Query(context.Background(), activity.Query{Limit: 5, Start: &start, End: &end, Scope: activity.Scope{All: true}})
-			switch {
-			case tc.wantErr == nil && err != nil:
-				t.Fatalf("Query error = %v, want nil", err)
-			case tc.wantErr != nil && !errors.Is(err, tc.wantErr):
-				t.Fatalf("Query error = %v, want %v", err, tc.wantErr)
-			}
-			if reader.calls != tc.calls {
-				t.Fatalf("ListActivity calls = %d, want %d", reader.calls, tc.calls)
-			}
-		})
+	if reader.calls != 1 {
+		t.Fatalf("ListActivity calls = %d, want 1", reader.calls)
+	}
+	if page.RetentionDays != 1 {
+		t.Fatalf("RetentionDays = %d, want 1", page.RetentionDays)
+	}
+	if reader.last.Start == nil || !reader.last.Start.Equal(start) {
+		t.Fatalf("ListActivity start = %v, want the caller's start %v", reader.last.Start, start)
+	}
+}
+
+// TestPgBackfillQuery_ZeroRetentionReads proves a zero retention window
+// sets no bound on a range start.
+func TestPgBackfillQuery_ZeroRetentionReads(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	reader := &pagedActivityReader{days: 0, pages: []ActivityPage{{}}}
+	bf := NewActivityBackfill(reader)
+	start := now.Add(-48 * time.Hour)
+	end := now.Add(time.Hour)
+	if _, err := bf.Query(context.Background(), activity.Query{Limit: 5, Start: &start, End: &end, Scope: activity.Scope{All: true}}); err != nil {
+		t.Fatalf("Query error = %v, want nil", err)
+	}
+	if reader.calls != 1 {
+		t.Fatalf("ListActivity calls = %d, want 1", reader.calls)
 	}
 }
 
@@ -409,7 +417,7 @@ func TestPgBackfillQuery_HasMoreAtExactFill(t *testing.T) {
 		if !page.HasMore || page.NextCursor == "" {
 			t.Fatalf("HasMore %v, NextCursor %q; want true and a cursor", page.HasMore, page.NextCursor)
 		}
-		cur, err := decodeActivityCursor(page.NextCursor, activityFilterKey(ActivityQuery{Scope: q.Scope}), "backward")
+		cur, err := decodeActivityCursor(page.NextCursor, activityFilterKey(ActivityQuery{Scope: q.Scope}))
 		if err != nil {
 			t.Fatalf("decode cursor: %v", err)
 		}
@@ -459,26 +467,29 @@ func TestPgBackfillQuery_ExactSizeLastPageHasNoMore(t *testing.T) {
 	}
 
 	start, end := base.Add(-time.Minute), base.Add(time.Minute)
-	forward, err := bf.Query(ctx, activity.Query{Limit: 5, Start: &start, End: &end, Scope: all})
+	ranged, err := bf.Query(ctx, activity.Query{Limit: 5, Start: &start, End: &end, Scope: all})
 	if err != nil {
-		t.Fatalf("forward Query: %v", err)
+		t.Fatalf("range Query: %v", err)
 	}
-	if len(forward.Items) != 5 || forward.HasMore || forward.NextCursor != "" {
-		t.Fatalf("forward: %d items, HasMore %v, NextCursor %q; want 5, false, empty", len(forward.Items), forward.HasMore, forward.NextCursor)
+	if len(ranged.Items) != 5 || ranged.HasMore || ranged.NextCursor != "" {
+		t.Fatalf("range: %d items, HasMore %v, NextCursor %q; want 5, false, empty", len(ranged.Items), ranged.HasMore, ranged.NextCursor)
 	}
 
 	first, err := bf.Query(ctx, activity.Query{Limit: 4, Start: &start, End: &end, Scope: all})
 	if err != nil {
-		t.Fatalf("forward page 1: %v", err)
+		t.Fatalf("range page 1: %v", err)
 	}
 	if len(first.Items) != 4 || !first.HasMore || first.NextCursor == "" {
-		t.Fatalf("forward page 1: %d items, HasMore %v, NextCursor %q; want 4, true, cursor", len(first.Items), first.HasMore, first.NextCursor)
+		t.Fatalf("range page 1: %d items, HasMore %v, NextCursor %q; want 4, true, cursor", len(first.Items), first.HasMore, first.NextCursor)
 	}
 	second, err := bf.Query(ctx, activity.Query{Limit: 4, Start: &start, End: &end, Scope: all, Cursor: first.NextCursor})
 	if err != nil {
-		t.Fatalf("forward page 2: %v", err)
+		t.Fatalf("range page 2: %v", err)
 	}
 	if len(second.Items) != 1 || second.HasMore || second.NextCursor != "" {
-		t.Fatalf("forward page 2: %d items, HasMore %v, NextCursor %q; want 1, false, empty", len(second.Items), second.HasMore, second.NextCursor)
+		t.Fatalf("range page 2: %d items, HasMore %v, NextCursor %q; want 1, false, empty", len(second.Items), second.HasMore, second.NextCursor)
+	}
+	if first.Items[0].Message != "row 4" || second.Items[0].Message != "row 0" {
+		t.Fatalf("range pages start at %q then %q; want newest first, row 4 then row 0", first.Items[0].Message, second.Items[0].Message)
 	}
 }

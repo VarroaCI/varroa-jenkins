@@ -44,21 +44,22 @@ type ActivityPage struct {
 }
 
 // activityCursor is ListActivity's decoded keyset position: the primary
-// key of the last row a page kept, the direction it was read in, and a
-// fingerprint of the filters and scope that produced it. A cursor from a
-// different query returns activity.ErrInvalidCursor rather than silently
-// resuming at the wrong position.
+// key of the last row a page kept and a fingerprint of the filters and
+// scope that produced it. A cursor from a different query returns
+// activity.ErrInvalidCursor rather than silently resuming at the wrong
+// position.
 type activityCursor struct {
-	Direction string    `json:"direction"`
-	Filters   string    `json:"filters"`
-	TS        time.Time `json:"ts"`
-	EventKey  string    `json:"eventKey"`
+	Filters  string    `json:"filters"`
+	TS       time.Time `json:"ts"`
+	EventKey string    `json:"eventKey"`
 }
 
 // activityFilterKey fingerprints the nine filters ListActivity accepts,
 // the routine sign-in exclusion when it is set, and the scope, so a cursor
 // minted for one query cannot silently resume a differently filtered or
 // differently scoped one. An unset exclusion adds nothing to the key.
+// It keeps the caller's Start, never the retention edge. The edge moves on
+// every call, and a key built from it would refuse the next page's cursor.
 func activityFilterKey(q ActivityQuery) string {
 	start, end := "", ""
 	if q.Start != nil {
@@ -82,21 +83,21 @@ func encodeActivityCursor(c activityCursor) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func decodeActivityCursor(raw, filters, direction string) (activityCursor, error) {
+func decodeActivityCursor(raw, filters string) (activityCursor, error) {
 	var c activityCursor
 	b, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil || json.Unmarshal(b, &c) != nil || c.Filters != filters || c.Direction != direction {
+	if err != nil || json.Unmarshal(b, &c) != nil || c.Filters != filters {
 		return c, activity.ErrInvalidCursor
 	}
 	return c, nil
 }
 
-// ListActivity pages varroa.activity by keyset on (ts, event_key). A
-// default page (Start nil) reads backward, newest first, with
-// (ts, event_key) < cursor; an explicit Start/End range reads forward,
-// oldest first, with (ts, event_key) > cursor. It reads limit+1 rows and
-// keeps the first limit: HasMore is true, and NextCursor anchors on the
-// limit-th kept row, exactly when the (limit+1)-th row existed — the
+// ListActivity pages varroa.activity by keyset on (ts, event_key), newest
+// first, with (ts, event_key) < cursor. Start and End bound the range.
+// With a retention window, no read returns a row older than the window
+// edge, and a Start before the edge reads from the edge. It reads limit+1
+// rows and keeps the first limit: HasMore is true, and NextCursor anchors
+// on the limit-th kept row, exactly when the (limit+1)-th row existed — the
 // probe row itself is never returned and is re-scanned by the next page.
 func (r *pgReader) ListActivity(ctx context.Context, q ActivityQuery) (ActivityPage, error) {
 	if err := r.checkSchema(ctx); err != nil {
@@ -111,11 +112,14 @@ func (r *pgReader) ListActivity(ctx context.Context, q ActivityQuery) (ActivityP
 		limit = maxActivityPageLimit
 	}
 
-	direction := "backward"
-	if q.Start != nil {
-		direction = "forward"
-	}
 	filters := activityFilterKey(q)
+
+	// Zero retention days set no edge.
+	var edge *time.Time
+	if r.activityRetentionDays > 0 {
+		e := time.Now().Add(-time.Duration(r.activityRetentionDays) * 24 * time.Hour)
+		edge = &e
+	}
 
 	var args []any
 	var clauses []string
@@ -151,8 +155,12 @@ func (r *pgReader) ListActivity(ctx context.Context, q ActivityQuery) (ActivityP
 		args = append(args, activity.LocalSignInType)
 		clauses = append(clauses, fmt.Sprintf("NOT (type = $%d AND severity NOT IN ('warning', 'error'))", len(args)))
 	}
-	if q.Start != nil {
-		args = append(args, *q.Start)
+	lower := q.Start
+	if edge != nil && (lower == nil || lower.Before(*edge)) {
+		lower = edge
+	}
+	if lower != nil {
+		args = append(args, *lower)
 		clauses = append(clauses, fmt.Sprintf("ts >= $%d", len(args)))
 	}
 	if q.End != nil {
@@ -166,37 +174,29 @@ func (r *pgReader) ListActivity(ctx context.Context, q ActivityQuery) (ActivityP
 	}
 
 	if q.Cursor != "" {
-		cur, err := decodeActivityCursor(q.Cursor, filters, direction)
+		cur, err := decodeActivityCursor(q.Cursor, filters)
 		if err != nil {
 			return ActivityPage{}, err
 		}
-		if r.activityRetentionDays > 0 && cur.TS.Before(time.Now().Add(-time.Duration(r.activityRetentionDays)*24*time.Hour)) {
+		if edge != nil && cur.TS.Before(*edge) {
 			return ActivityPage{}, activity.ErrCursorExpired
 		}
 		args = append(args, cur.TS, cur.EventKey)
-		op := "<"
-		if direction == "forward" {
-			op = ">"
-		}
-		clauses = append(clauses, fmt.Sprintf("(ts, event_key) %s ($%d, $%d)", op, len(args)-1, len(args)))
+		clauses = append(clauses, fmt.Sprintf("(ts, event_key) < ($%d, $%d)", len(args)-1, len(args)))
 	}
 
 	where := "TRUE"
 	if len(clauses) > 0 {
 		where = strings.Join(clauses, " AND ")
 	}
-	orderDir := "DESC"
-	if direction == "forward" {
-		orderDir = "ASC"
-	}
 	args = append(args, limit+1)
 	sql := fmt.Sprintf(`
 		SELECT event_key, ts, payload
 		FROM varroa.activity
 		WHERE %s
-		ORDER BY ts %s, event_key %s
+		ORDER BY ts DESC, event_key DESC
 		LIMIT $%d
-	`, where, orderDir, orderDir, len(args))
+	`, where, len(args))
 
 	rows, err := r.pool.Query(ctx, sql, args...)
 	if err != nil {
@@ -233,7 +233,7 @@ func (r *pgReader) ListActivity(ctx context.Context, q ActivityQuery) (ActivityP
 	}
 	if len(page.Items) > limit {
 		last := all[limit-1]
-		page.NextCursor = encodeActivityCursor(activityCursor{Direction: direction, Filters: filters, TS: last.ts, EventKey: last.key})
+		page.NextCursor = encodeActivityCursor(activityCursor{Filters: filters, TS: last.ts, EventKey: last.key})
 		page.Items = page.Items[:limit]
 		page.HasMore = true
 	}
@@ -242,8 +242,8 @@ func (r *pgReader) ListActivity(ctx context.Context, q ActivityQuery) (ActivityP
 
 // ActivityRetentionDays reports the configured activity retention window
 // in days, from VARROA_ACTIVITY_RETENTION_DAYS. It is the day count
-// Backfill.Retention reports and the bound ListActivity checks an
-// incoming cursor's timestamp against.
+// Backfill.Retention reports, the floor ListActivity applies to every
+// read, and the bound it checks an incoming cursor's timestamp against.
 func (r *pgReader) ActivityRetentionDays(ctx context.Context) (int, error) {
 	if err := r.checkSchema(ctx); err != nil {
 		return 0, err
