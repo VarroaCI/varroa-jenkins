@@ -380,6 +380,14 @@ describe("BroodOperationDetail", () => {
       expect(screen.getByText("(TargetVersionUnresolved)")).toBeInTheDocument();
     });
 
+    it("renders TargetVersionBelowFloor as friendly copy with the raw code in parentheses", async () => {
+      mockGet.mockResolvedValue(withReason("TargetVersionBelowFloor"));
+      renderWithProviders(<BroodOperationDetail />);
+
+      expect(await screen.findByText(/The target version is below the supported core floor/)).toBeInTheDocument();
+      expect(screen.getByText("(TargetVersionBelowFloor)")).toBeInTheDocument();
+    });
+
     it("falls back to the raw code alone for an unmapped reason, with no parenthetical", async () => {
       mockGet.mockResolvedValue(withReason("SomeOtherReason"));
       renderWithProviders(<BroodOperationDetail />);

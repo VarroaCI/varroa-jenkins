@@ -100,7 +100,7 @@ describe("AssistantDrawer", () => {
 
     expect(await screen.findByText("why did it fail")).toBeTruthy();
     expect(await screen.findByText("timed out")).toBeTruthy();
-    expect(await screen.findByText("State: completed")).toBeTruthy();
+    expect(await screen.findByText("State: Completed")).toBeTruthy();
   });
 
   it("sends a follow-up message to a completed session", async () => {
@@ -154,6 +154,20 @@ describe("AssistantDrawer", () => {
     expect(row.textContent).toContain(contextLabel({ route: "dashboard" }));
     expect(row.textContent).toMatch(/5m ago · Current/);
     expect(row.getAttribute("aria-current")).toBe("true");
+  });
+
+  it("shows the state label on a session row, not the raw state", async () => {
+    vi.mocked(client.listAssistantSessions).mockResolvedValueOnce({
+      items: [{ ...session, id: "s9", state: "waiting_approval", firstMessage: "why did it fail" }],
+      nextCursor: null,
+    });
+    renderDrawer();
+    fireEvent.click(screen.getByText("toggle"));
+    fireEvent.click(await screen.findByRole("button", { name: "Sessions" }));
+    const list = await screen.findByRole("list", { name: "Sessions" });
+    const row = within(list).getByRole("button");
+    expect(row.textContent).toContain("Waiting for approval · ");
+    expect(row.textContent).not.toContain("waiting_approval");
   });
 
   it("uses the context label as the row title when the first message is empty", async () => {

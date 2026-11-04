@@ -187,6 +187,7 @@ export default function BroodOperationDetail() {
 
 const OPERATION_REASON_TEXT: Record<string, string> = {
   TargetVersionUnresolved: "The target version or line for this upgrade could not be resolved against any version profile.",
+  TargetVersionBelowFloor: "The target version is below the supported core floor. Select a version at or above the floor.",
 };
 
 function ClusterSection({ cluster }: { cluster: BroodRunCluster }) {
