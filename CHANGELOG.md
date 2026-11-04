@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.1](https://github.com/VarroaCI/varroa-jenkins/compare/v0.9.0...v0.9.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **activity:** close a live stream at its end ([ea6e0eb](https://github.com/VarroaCI/varroa-jenkins/commit/ea6e0eb74ce8c8bee9f8da6c14fd8a89a5c5477e))
+* **activity:** keep every live event of a burst and open one feed per page ([5430d54](https://github.com/VarroaCI/varroa-jenkins/commit/5430d542cdfc8f5890e7b81c04722abde458f988))
+* **activity:** read history newest first and clamp ranges to retention ([fb6abe1](https://github.com/VarroaCI/varroa-jenkins/commit/fb6abe15b05be94f0ca1d439a446ef0c90686bed))
+* **cells:** move every member of a tenant on a profile or pool change ([c60cfa0](https://github.com/VarroaCI/varroa-jenkins/commit/c60cfa09db546b58ddeb6719f332bbb1ce672726))
+* **chart:** refuse a BFF or gateway render without the operator ([6f33c0a](https://github.com/VarroaCI/varroa-jenkins/commit/6f33c0a2babba0f03551f82cc85ad68c6349097d))
+* **crds:** escape the reserved word namespace in the Tenant CEL rules ([0ef8e4c](https://github.com/VarroaCI/varroa-jenkins/commit/0ef8e4c333b312c6530250d989d9c01beac76f3a))
+* **localdev:** load Postgres for the node arch, gate Helm, seed the baseline pack ([96d5f1a](https://github.com/VarroaCI/varroa-jenkins/commit/96d5f1a3ed24dfd5b8661dc8d6e1359b2cd55a2c))
+* **upgrades:** map LTS cores to upstream stable tiers ([d327443](https://github.com/VarroaCI/varroa-jenkins/commit/d327443765d1c8b15559411ef6f12051e532ea26))
+* **varroactl:** add https:// to a server value with no scheme ([2b572ba](https://github.com/VarroaCI/varroa-jenkins/commit/2b572ba137fd4c150b9c10889266b0af302b1b77))
+
 ## [0.9.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.8.0...v0.9.0) (2026-11-01)
 
 
