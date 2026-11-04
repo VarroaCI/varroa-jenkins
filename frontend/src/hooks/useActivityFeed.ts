@@ -45,6 +45,23 @@ export function useActivityFeed(
 		return params.size ? `?${params}` : "";
 	}, [JSON.stringify(filters), scope?.cluster, scope?.namespace, scope?.name]);
 
+	// The BFF closes the live stream at end, and useEventStream reconnects a closed
+	// stream. A range whose end has passed therefore opens no stream.
+	const liveEnd = useMemo(() => {
+		const end = new URLSearchParams(scopeQuery.slice(1)).get("end");
+		const ms = end ? Date.parse(end) : NaN;
+		return Number.isNaN(ms) ? null : ms;
+	}, [scopeQuery]);
+	const [endTick, setEndTick] = useState(0);
+	useEffect(() => {
+		if (liveEnd === null) return;
+		const wait = liveEnd - Date.now();
+		if (wait <= 0) return;
+		const timer = setTimeout(() => setEndTick((n) => n + 1), Math.min(wait + 100, 2_147_483_647));
+		return () => clearTimeout(timer);
+	}, [liveEnd, endTick]);
+	const liveOpen = liveEnd === null || liveEnd > Date.now();
+
   // Backfill via react-query
   const { data: backfillData, isLoading, error: fetchError } = useQuery({
     queryKey: ["activity", "feed", scopeQuery],
@@ -67,7 +84,7 @@ export function useActivityFeed(
   // EventSource cannot send an Authorization header, so the bearer token is
   // passed as a query param (same pattern as the controller-events stream).
   // Also use BFF_BASE so the stream targets the API origin, not the SPA origin.
-  const sseUrl = `${BFF_BASE}/activity/stream${scopeQuery}`;
+  const sseUrl = liveOpen ? `${BFF_BASE}/activity/stream${scopeQuery}` : null;
   const { readyState, error: sseError } =
     useEventStream<ActivityEvent>(sseUrl, "activity", ["activity"], { onEvent });
 
@@ -162,7 +179,8 @@ export function useActivityFeed(
     setPaused,
     resume,
     readyState,
-    error: fetchError ?? (sseError ? new Error("SSE connection error") : null),
+    // The stream closes on purpose at end, so its close is not an error.
+    error: fetchError ?? (sseError && liveOpen ? new Error("SSE connection error") : null),
     isLoading,
 		hasMore, loadMore, isLoadingMore,
 		retentionMode: backfillData?.retentionMode,

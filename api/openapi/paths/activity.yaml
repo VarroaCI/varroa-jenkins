@@ -61,7 +61,7 @@
       - {name: actor, in: query, schema: {type: string}}
       - {name: type, in: query, schema: {type: string}}
       - {name: start, in: query, description: 'Drops each live event earlier than start.', schema: {type: string, format: date-time}}
-      - {name: end, in: query, description: 'Drops each live event at or after end. Leave out end to keep the stream open; an end in the past sends no events.', schema: {type: string, format: date-time}}
+      - {name: end, in: query, description: 'Drops each live event at or after end. The server closes the stream at end. When end has passed, the server closes the stream after the headers and sends no event. Do not reconnect a stream whose end has passed. Leave out end to keep the stream open.', schema: {type: string, format: date-time}}
       - {name: excludeRoutineSignIns, in: query, description: 'true leaves out each routine local sign-in, an auth.local.login event below warning severity.', schema: {type: boolean, default: false}}
     responses:
       "200":
