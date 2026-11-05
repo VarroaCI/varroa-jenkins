@@ -403,7 +403,6 @@ export function createProvisioningDefaultsSpec(
     defaultCPU: "1",
     defaultMemory: "2Gi",
     defaultStorage: "10Gi",
-    defaultPlugins: [{ artifactId: "git", version: "5.0.0" }],
     ...overrides,
   };
 }

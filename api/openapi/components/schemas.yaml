@@ -2610,8 +2610,6 @@ ProvisioningDefaultsSpec:
       type: string
     storageClass:
       type: string
-    storageSizeGB:
-      type: integer
     ingressClassName:
       type: string
     imagePullSecrets:

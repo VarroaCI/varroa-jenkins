@@ -925,10 +925,8 @@ export interface ProvisioningDefaultsSpec {
   defaultCPU?: string;
   defaultMemory?: string;
   defaultStorage?: string;
-  defaultPlugins?: { artifactId: string; version: string }[];
   defaultVersion?: string;
   storageClass?: string;
-  storageSizeGB?: number;
   provisioningTimeoutSec?: number;
   defaultReconciliationPolicy?: ReconciliationPolicy;
   upgradePolicy?: "auto" | "manual";

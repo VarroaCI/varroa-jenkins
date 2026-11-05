@@ -2838,10 +2838,8 @@ type ProvisioningDefaultsSpec struct {
 	DefaultCPU         string            `json:"defaultCPU,omitempty"`
 	DefaultMemory      string            `json:"defaultMemory,omitempty"`
 	DefaultStorage     string            `json:"defaultStorage,omitempty"`
-	DefaultPlugins     []PluginEntry     `json:"defaultPlugins,omitempty"`
 	DefaultVersion     string            `json:"defaultVersion,omitempty"`
 	StorageClass       string            `json:"storageClass,omitempty"`
-	StorageSizeGB      int               `json:"storageSizeGB,omitempty"`
 	// IngressClassName is the ingress class name for controller Ingresses.
 	IngressClassName string `json:"ingressClassName,omitempty"`
 	// ImagePullSecrets is a list of image pull secret names to attach to StatefulSet pods.

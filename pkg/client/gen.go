@@ -4281,7 +4281,6 @@ type ComponentsSchemasProvisioningDefaultsSpec struct {
 	RootDomain             *string                        `json:"rootDomain,omitempty"`
 	SizePresets            *[]ComponentsSchemasSizePreset `json:"sizePresets,omitempty"`
 	StorageClass           *string                        `json:"storageClass,omitempty"`
-	StorageSizeGB          *int                           `json:"storageSizeGB,omitempty"`
 }
 
 // ComponentsSchemasProvisioningDefaultsStatus Observed state of ProvisioningDefaults.
