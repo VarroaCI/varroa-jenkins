@@ -38,6 +38,10 @@ import { useFocusFallback } from "./useFocusFallback";
 import styles from "./AssistantDrawer.module.css";
 import type { AssistantSession, AssistantSessionState } from "../../types/assistant";
 
+// SPENT_TEXT is the refusal text of a plain 409 on a follow-up. While it
+// shows, the drawer also shows the "Start a new conversation" button.
+const SPENT_TEXT = "This conversation cannot continue. Start a new conversation.";
+
 /** AssistantDrawer renders the open session panel. */
 export default function AssistantDrawer() {
   const a = useAssistant();
@@ -51,7 +55,7 @@ export default function AssistantDrawer() {
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingMessage | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
-  // Stop, New conversation, Approve, and Deny can unmount while they have focus.
+  // Stop, the two new conversation buttons, Approve, and Deny can unmount while they have focus.
   // Focus then moves to the composer, which stays in the drawer in every state.
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const keepFocusInComposer = useFocusFallback(composerRef);
@@ -91,8 +95,10 @@ export default function AssistantDrawer() {
   });
 
   // A new session or a reopened one starts from an empty model.
+  // A refusal belongs to the session that answered it.
   useEffect(() => {
     setModel(emptyModel());
+    setRefusal("");
   }, [sid, a.epoch]);
 
   const state = model.state ?? session?.state ?? null;
@@ -107,6 +113,10 @@ export default function AssistantDrawer() {
     const raw = composer;
     const text = raw.trim();
     if (!text) return;
+    // Send turns disabled when the send starts. Browsers differ on where focus
+    // goes from a disabled button, and Safari does not focus a clicked button.
+    // Focus moves to the composer first.
+    composerRef.current?.focus();
     setRefusal("");
     setBusy(true);
     setPending({ text, afterSeq: model.lastSeq, sending: true });
@@ -128,9 +138,9 @@ export default function AssistantDrawer() {
         void queryClient.invalidateQueries({ queryKey: ["assistant-session", sid] });
       }
     } catch (err) {
-      fail(err instanceof ApiError && err.status === 409
-        ? "This conversation cannot continue. Start a new conversation."
-        : "The message was not sent.");
+      const spent = err instanceof ApiError && err.status === 409;
+      if (spent && sid) void queryClient.invalidateQueries({ queryKey: ["assistant-session", sid] });
+      fail(spent ? SPENT_TEXT : "The message was not sent.");
     } finally {
       setBusy(false);
     }
@@ -146,6 +156,14 @@ export default function AssistantDrawer() {
     }
   };
 
+  // Both new conversation buttons drop the spent session and keep the typed message.
+  const startNewConversation = () => {
+    setPending(null);
+    setRefusal("");
+    a.newConversation();
+  };
+  const spent = !!sid && refusal === SPENT_TEXT;
+
   const stop = () => {
     if (sid) void cancelAssistantSession(sid);
   };
@@ -155,20 +173,27 @@ export default function AssistantDrawer() {
   // A layout effect reads the opener before the mount effect moves focus to
   // Close. Its cleanup runs before React removes the drawer from the document.
   // A focus target that the close names in returnToRef goes before the opener.
+  // Safari does not focus a clicked button, so a page button names itself in
+  // openerRef, and that name goes before the focused element.
   const doorRef = a.doorRef;
   const returnToRef = a.returnToRef;
+  const openerRef = a.openerRef;
   useLayoutEffect(() => {
     const drawer = sectionRef.current;
     const active = document.activeElement;
-    const opener = active instanceof HTMLElement && active !== document.body && !drawer?.contains(active) ? active : null;
-    // The mount clears a target that the opening click named, which keeps the StrictMode double-run clean.
+    const focused = active instanceof HTMLElement && active !== document.body && !drawer?.contains(active) ? active : null;
+    const opener = openerRef.current ?? focused;
+    // The mount clears the targets that the opening click named, which keeps the StrictMode double-run clean.
+    openerRef.current = null;
     returnToRef.current = null;
     return () => {
       const returnTo = returnToRef.current;
       returnToRef.current = null;
+      // A page button that names itself while the drawer is open does not become the opener.
+      openerRef.current = null;
       returnFocus(drawer, opener, doorRef.current, returnTo);
     };
-  }, [doorRef, returnToRef]);
+  }, [doorRef, returnToRef, openerRef]);
 
   // Below 640px the drawer is a modal sheet: Tab stays inside it and the page
   // behind does not scroll.
@@ -226,7 +251,7 @@ export default function AssistantDrawer() {
       <header className={styles.header}>
         <span className={styles.chip} title={contextLabel(ctx)}>{contextLabel(ctx)}</span>
         {sid && ctxDiffers && (
-          <Button ref={keepFocusInComposer} variant="ghost" size="sm" className={styles.headerBtn} onClick={() => { setPending(null); a.newConversation(); }}>
+          <Button ref={keepFocusInComposer} variant="ghost" size="sm" className={styles.headerBtn} onClick={startNewConversation}>
             <MessageSquarePlus size={14} aria-hidden="true" />
             New conversation for this page
           </Button>
@@ -313,6 +338,12 @@ export default function AssistantDrawer() {
       />
 
       {refusal && <p role="alert" className={styles.error}>{refusal}</p>}
+      {spent && (
+        <Button ref={keepFocusInComposer} size="sm" className={styles.startOver} onClick={startNewConversation}>
+          <MessageSquarePlus size={14} aria-hidden="true" />
+          Start a new conversation
+        </Button>
+      )}
 
       <form
         className={styles.composer}

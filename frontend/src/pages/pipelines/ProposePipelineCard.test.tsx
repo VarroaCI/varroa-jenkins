@@ -142,6 +142,15 @@ describe("ProposePipelineCard", () => {
     expect(await screen.findByText("The assistant is reading the repository. Steps: 2.")).toBeInTheDocument();
   });
 
+  it("names Open in the assistant as the drawer opener", async () => {
+    mockList.mockResolvedValue({ items: [{ id: "s-1" }], nextCursor: null });
+    mockGet.mockResolvedValue(detail("running"));
+    renderCard();
+    const open = await screen.findByRole("button", { name: "Open in the assistant" });
+    fireEvent.click(open);
+    expect(mockOpen).toHaveBeenCalledWith("s-1", open);
+  });
+
   it("renders each file as text, never as markup", async () => {
     mockList.mockResolvedValue({ items: [{ id: "s-1" }], nextCursor: null });
     mockGet.mockResolvedValue(detail("waiting_approval", [pending()]));

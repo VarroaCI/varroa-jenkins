@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useEffect } from "react";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "../../test/render-utils";
 import { NotesCard } from "./NotesCard";
-import { AssistantProvider } from "../../components/assistant/AssistantProvider";
+import { AssistantProvider, useAssistant } from "../../components/assistant/AssistantProvider";
 import * as client from "../../api/client";
 import { createRunNote, createMyAssistant } from "../../test/assistantFactories";
 
@@ -20,6 +21,15 @@ vi.mock("../../api/client", async (orig) => {
 });
 
 const perms = { global: { "*": { "*": true } } } as never;
+
+/** OpenerProbe reports the opener that the provider holds when the drawer opens. */
+function OpenerProbe({ onOpen }: { onOpen(el: HTMLElement | null): void }) {
+  const a = useAssistant();
+  useEffect(() => {
+    if (a.drawerOpen) onOpen(a.openerRef.current);
+  }, [a.drawerOpen, a.openerRef, onOpen]);
+  return null;
+}
 
 function renderCard(node: React.ReactNode, route = "/pipelines/payments/payments%2Fapi/r1") {
   return renderWithProviders(<AssistantProvider>{node}</AssistantProvider>, { permissions: perms, route });
@@ -71,6 +81,20 @@ describe("NotesCard run mode", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Explain this failure/ }));
     await waitFor(() => expect(client.createAssistantSession).toHaveBeenCalled());
     expect(vi.mocked(client.createAssistantSession).mock.calls[0][0]).toMatchObject({ prompt: "explain-failure" });
+  });
+
+  it("names Explain this failure as the drawer opener", async () => {
+    vi.mocked(client.listRunNotes).mockResolvedValue({ items: [] });
+    const onOpen = vi.fn();
+    renderCard(
+      <>
+        <NotesCard mode="run" runId="r1" canWrite={false} hasDigest />
+        <OpenerProbe onOpen={onOpen} />
+      </>,
+    );
+    const explain = await screen.findByRole("button", { name: /Explain this failure/ });
+    fireEvent.click(explain);
+    await waitFor(() => expect(onOpen).toHaveBeenCalledWith(explain));
   });
 
   it("shows Ask again and scrolls to the newest assistant answer", async () => {

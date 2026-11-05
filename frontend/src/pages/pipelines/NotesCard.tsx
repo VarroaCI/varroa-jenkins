@@ -3,7 +3,7 @@
 // In job mode it sits on a job page, lists the newest ten notes, and takes
 // no note. A note from an assistant session and a note a person wrote share
 // one list.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
@@ -68,6 +68,8 @@ function RunNotes({ runId, canWrite, hasDigest }: { runId: string; canWrite: boo
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [askAgain, setAskAgain] = useState<string | null>(null);
+  // Ask again unmounts after its click, so both buttons name Explain as the drawer opener.
+  const explainRef = useRef<HTMLButtonElement | null>(null);
 
   const notes = useQuery({
     queryKey: ["run-notes", runId],
@@ -105,11 +107,11 @@ function RunNotes({ runId, canWrite, hasDigest }: { runId: string; canWrite: boo
       setAskAgain(newestAnswer.id);
       return;
     }
-    assistant.explainRun(runId, routeContext(location.pathname, assistant.hint));
+    assistant.explainRun(runId, routeContext(location.pathname, assistant.hint), explainRef.current ?? undefined);
   };
 
   const askAgainNow = () => {
-    assistant.explainRun(runId, routeContext(location.pathname, assistant.hint));
+    assistant.explainRun(runId, routeContext(location.pathname, assistant.hint), explainRef.current ?? undefined);
     setAskAgain(null);
   };
 
@@ -120,7 +122,7 @@ function RunNotes({ runId, canWrite, hasDigest }: { runId: string; canWrite: boo
       {assistant.paused && <PausedBanner />}
       {hasDigest && assistant.canUse && (
         <div className={styles.explainRow}>
-          <Button variant="ghost" size="sm" disabled={assistant.paused} onClick={explain}>
+          <Button ref={explainRef} variant="ghost" size="sm" disabled={assistant.paused} onClick={explain}>
             <Sparkles size={14} aria-hidden /> Explain this failure
           </Button>
           {askAgain && (
