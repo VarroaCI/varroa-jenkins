@@ -400,6 +400,30 @@ describe("Settings provisioning tab without varroa-defaults", () => {
     expect(screen.queryByText(/Another user or tool changed these defaults/)).not.toBeInTheDocument();
     expect(mockGetConfig).toHaveBeenCalledTimes(2);
   });
+
+  it("keeps the typed value when the save fails", async () => {
+    mockGetConfig.mockResolvedValue(
+      createProvisioningConfig({ metadata: { name: "varroa-defaults", resourceVersion: "1" }, spec: { storageClass: "standard" } }),
+    );
+    mockUpdateConfig.mockRejectedValueOnce(new ApiError(500, "Varroa could not complete the request."));
+    renderSettings();
+
+    const input = await screen.findByLabelText("Storage Class");
+    await userEvent.clear(input);
+    await userEvent.type(input, "fast");
+    await userEvent.click(screen.getByText("Save"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Varroa could not complete the request.");
+    expect(screen.getByLabelText("Storage Class")).toHaveValue("fast");
+    expect(screen.getByText("Save")).toBeInTheDocument();
+
+    mockUpdateConfig.mockResolvedValueOnce(createProvisioningConfig());
+    await userEvent.click(screen.getByText("Save"));
+
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });
 
 describe("Settings provisioning tab cluster selector on a read error", () => {

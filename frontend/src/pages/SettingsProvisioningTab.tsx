@@ -32,6 +32,7 @@ function annotationRows(spec: ProvisioningDefaultsSpec): { key: string; value: s
 export default function SettingsProvisioningTab() {
   const [config, setConfig] = useState<ProvisioningDefaults | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [missing, setMissing] = useState(false);
@@ -46,6 +47,7 @@ export default function SettingsProvisioningTab() {
   useEffect(() => {
     setConfig(null);
     setError(null);
+    setSaveError(null);
     setSaved(false);
     setMissing(false);
     setConflict(false);
@@ -109,6 +111,8 @@ export default function SettingsProvisioningTab() {
     if (!config) return;
     setSaving(true);
     setSaved(false);
+    setSaveError(null);
+    setConflict(false);
     try {
       const annMap: Record<string, string> = {};
       for (const a of annotations) {
@@ -133,7 +137,7 @@ export default function SettingsProvisioningTab() {
         setConflict(true);
         return;
       }
-      setError(e instanceof Error ? e.message : String(e));
+      setSaveError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
@@ -202,6 +206,9 @@ export default function SettingsProvisioningTab() {
             <p>{CONFLICT_NOTE}</p>
             <Button type="button" onClick={() => setReloadKey((k) => k + 1)}>Reload</Button>
           </div>
+        )}
+        {saveError && (
+          <div role="alert" className={styles.errorMsg}>Error: {saveError}</div>
         )}
         {saved && <span className={styles.saved}>Saved.</span>}
         {canSave ? (
