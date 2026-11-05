@@ -569,6 +569,8 @@ func TestPlace_VoluntaryMove_BusyFolderWaits(t *testing.T) {
 	// move, not an evacuation.
 	mismatched := readyCell("cell-a")
 	mismatched.ResolvedProfile = "other-profile"
+	// A pod runs, so only the folder test decides the drain.
+	mismatched.Instance = "uid-cell-a"
 	mismatched.AppliedTenants = []string{"payments"} // still applying the old state
 	other := readyCell("cell-b")
 	in.Cells = []CellCandidate{mismatched, other}
@@ -608,6 +610,8 @@ func TestPlace_VoluntaryMove_DrainedCompletes(t *testing.T) {
 	in := testInputs()
 	mismatched := readyCell("cell-a")
 	mismatched.ResolvedProfile = "other-profile"
+	// A pod runs, so only the folder test decides the drain.
+	mismatched.Instance = "uid-cell-a"
 	// AppliedTenants no longer names the tenant, and there is no pending
 	// deletion for its folder: the drain has completed.
 	other := readyCell("cell-b")
@@ -636,6 +640,8 @@ func TestPlace_VoluntaryMove_PendingDeletionWaits(t *testing.T) {
 	in := testInputs()
 	mismatched := readyCell("cell-a")
 	mismatched.ResolvedProfile = "other-profile"
+	// A pod runs, so only the folder test decides the drain.
+	mismatched.Instance = "uid-cell-a"
 	mismatched.PendingDeletionPaths = []string{"payments/api"}
 	other := readyCell("cell-b")
 	in.Cells = []CellCandidate{mismatched, other}
@@ -652,6 +658,36 @@ func TestPlace_VoluntaryMove_PendingDeletionWaits(t *testing.T) {
 	}
 	if status.Placement.Cell != "cell-a" {
 		t.Fatalf("a pending deletion under the tenant folder must delay the move: %+v", status.Placement)
+	}
+}
+
+// TestPlace_VoluntaryMove_NoPodOldCellCompletes asserts slot 0's old cell
+// that runs no pod does not hold the move. The cell still names the folder
+// and a pending deletion, so only the no-pod rule counts it drained.
+func TestPlace_VoluntaryMove_NoPodOldCellCompletes(t *testing.T) {
+	in := testInputs()
+	mismatched := readyCell("cell-a", "payments")
+	mismatched.ResolvedProfile = "other-profile"
+	mismatched.AppliedTenants = []string{"payments"}
+	mismatched.PendingDeletionPaths = []string{"payments/api"}
+	mismatched.Instance = ""
+	in.Cells = []CellCandidate{mismatched, readyCell("cell-b")}
+	tenant := testTenant()
+	status := placedStatus(1)
+	setMoving(status)
+
+	out, err := Place(context.Background(), in, tenant, status)
+	if err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if status.Placement.Cell != "cell-b" || status.Placement.Generation != 2 {
+		t.Fatalf("an old cell with no pod must not hold the move: %+v", status.Placement)
+	}
+	if !dropsTenant(patchFor(out, "cell-a")) {
+		t.Errorf("cell-a: want a patch that drops the tenant, got %+v", patchFor(out, "cell-a"))
+	}
+	if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TenantReasonTenantMoved {
+		t.Errorf("want TenantMoved, got %+v", cond)
 	}
 }
 
