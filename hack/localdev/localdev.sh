@@ -35,6 +35,12 @@ KIND_CONFIG="$REPO_ROOT/hack/localdev/kind-config.yaml"
 BUNDLE_DIR="$REPO_ROOT/hack/localdev/bundle"
 MANIFEST_DIR="$REPO_ROOT/hack/localdev/manifests"
 SAMPLE_READY=1
+SAMPLE_NOTE="not ready"
+# Sample wait budgets in seconds. A running image pull extends the base budget.
+SAMPLE_WAIT_SECONDS=600
+SAMPLE_PULL_GRACE_SECONDS=300
+SAMPLE_WAIT_MAX_SECONDS=1200
+SAMPLE_POLL_SECONDS=5
 
 K() { kubectl --context "$CTX" "$@"; }
 
@@ -205,12 +211,81 @@ baseline_pack_tag() {
 }
 
 # controller_blockers prints "<type>: <reason> - <message>" for each True
-# condition of the sample Controller that can hold provisioning. Ready,
-# progress, connection, and fallback notices are left out.
+# condition of the sample Controller that holds provisioning or the Jenkins pod.
+# The type list is an allowlist, so an informational condition never shows here.
 controller_blockers() {
   K -n "$WORKLOAD_NS" get controller getting-started \
     -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type}{": "}{.reason}{" - "}{.message}{"\n"}{end}' 2>/dev/null \
-    | grep -vE '^(BundleResolved|ClassResolved|MiteConnected|OverlayActive|Provisioning|Ready|UpdateCenterFallback): ' || true
+    | grep -E '^(BundleFailed|ConfigApplyFailed|Degraded|Failed|JenkinsBootFailed|MiteStreamDegraded|PluginConflict|PluginRollFailed|ReconcileBlocked|VersionUpgradeBlocked|WaitingForUpdateCenter): ' || true
+}
+
+# sample_pull_running succeeds while the sample Jenkins pod waits on an image
+# pull. A pull runs when a Pulling event names an image that no Pulled event
+# names yet. A container that waits on a pull or start error stops the check.
+# The pod name carries the first eight characters of the Controller UID.
+sample_pull_running() {
+  local uid pod reasons pulling pulled img
+  uid=$(K -n "$WORKLOAD_NS" get controller getting-started \
+    -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+  if [ -z "$uid" ]; then
+    return 1
+  fi
+  pod=$(K -n "$WORKLOAD_NS" get pods -l app.kubernetes.io/managed-by=varroa-operator \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+  pod=$(tr ' ' '\n' <<<"$pod" | grep -m1 "^getting-started-${uid:0:8}-[0-9]*$" || true)
+  if [ -z "$pod" ]; then
+    return 1
+  fi
+  reasons=$(K -n "$WORKLOAD_NS" get pod "$pod" \
+    -o jsonpath='{range .status.initContainerStatuses[*]}{.state.waiting.reason}{"\n"}{end}{range .status.containerStatuses[*]}{.state.waiting.reason}{"\n"}{end}' 2>/dev/null || true)
+  if grep -qE '^(ErrImagePull|ImagePullBackOff|InvalidImageName|CrashLoopBackOff|CreateContainerError|CreateContainerConfigError)$' <<<"$reasons"; then
+    return 1
+  fi
+  pulling=$(K -n "$WORKLOAD_NS" get events --field-selector "involvedObject.name=$pod,reason=Pulling" \
+    -o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null \
+    | sed -n 's/^Pulling image "\(.*\)"$/\1/p' || true)
+  pulled=$(K -n "$WORKLOAD_NS" get events --field-selector "involvedObject.name=$pod,reason=Pulled" \
+    -o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null || true)
+  while IFS= read -r img; do
+    if [ -n "$img" ] && ! grep -qF "\"$img\"" <<<"$pulled"; then
+      return 0
+    fi
+  done <<<"$pulling"
+  return 1
+}
+
+# wait_for_sample waits until the sample Controller reaches phase Connected
+# with no blocking condition. Connected reports the mite stream only, and the
+# Jenkins container runs beside the mite, so the blocker check is needed.
+# The base budget is SAMPLE_WAIT_SECONDS. A running image pull moves the
+# deadline SAMPLE_PULL_GRACE_SECONDS forward. The wait never passes
+# SAMPLE_WAIT_MAX_SECONDS.
+wait_for_sample() {
+  local start now deadline cap phase extended=0
+  start=$(date +%s)
+  deadline=$((start + SAMPLE_WAIT_SECONDS))
+  cap=$((start + SAMPLE_WAIT_MAX_SECONDS))
+  while :; do
+    phase=$(K -n "$WORKLOAD_NS" get controller getting-started -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    if [ "$phase" = "Connected" ] && [ -z "$(controller_blockers)" ]; then
+      return 0
+    fi
+    now=$(date +%s)
+    if [ "$now" -ge "$cap" ]; then
+      return 1
+    fi
+    if [ "$now" -ge "$deadline" ]; then
+      if ! sample_pull_running; then
+        return 1
+      fi
+      deadline=$((now + SAMPLE_PULL_GRACE_SECONDS))
+      if [ "$extended" -eq 0 ]; then
+        log "an image pull for the sample Jenkins pod is in progress. The wait continues for at most $((SAMPLE_WAIT_MAX_SECONDS / 60)) minutes in total."
+        extended=1
+      fi
+    fi
+    sleep "$SAMPLE_POLL_SECONDS"
+  done
 }
 
 build_images() {
@@ -402,27 +477,25 @@ phase_controller() {
     || die "localdev git server did not become ready"
   K apply -f "$MANIFEST_DIR/sample-controller.yaml" >/dev/null
 
-  # Non-fatal bounded waits (~10 min total): the control plane stays usable
-  # even if Jenkins is slow to pull/boot.
+  # The waits are bounded and non-fatal. The control plane stays usable when
+  # Jenkins is slow to pull or boot.
   local ok=1
   wait_for "ComposedBundle getting-started Ready" 24 5 \
     bash -c "kubectl --context $CTX -n $WORKLOAD_NS get composedbundle getting-started -o jsonpath='{.status.phase}' | grep -qx Ready" || ok=0
   if [ "$ok" -eq 1 ]; then
-    wait_for "Controller getting-started Running/Connected" 60 5 \
-      bash -c "kubectl --context $CTX -n $WORKLOAD_NS get controller getting-started -o jsonpath='{.status.phase}' | grep -Eqx 'Running|Connected'" || ok=0
-  fi
-  if [ "$ok" -eq 1 ]; then
-    # The StatefulSet name carries a UID-derived prefix (<name>-<uid8>-jenkins)
-    # — discover it instead of guessing.
-    # Generous budget: a cold cluster pulls the Jenkins image + plugins (~8 min).
-    wait_for "sample Jenkins StatefulSet ready" 96 5 \
-      bash -c "kubectl --context $CTX -n $WORKLOAD_NS get sts -o jsonpath='{.items[?(@.status.readyReplicas==1)].metadata.name}' | grep -q jenkins" || ok=0
+    wait_for_sample || ok=0
   fi
   SAMPLE_READY=$ok
   if [ "$ok" -ne 1 ]; then
     local phase blockers line
     phase=$(K -n "$WORKLOAD_NS" get controller getting-started -o jsonpath='{.status.phase}' 2>/dev/null || true)
-    echo "WARN: the sample controller is not ready yet (phase: ${phase:-unknown}). The control plane is still usable." >&2
+    if sample_pull_running; then
+      SAMPLE_NOTE="still starting"
+      echo "WARN: the sample controller is still starting (phase: ${phase:-unknown}). An image pull is in progress. The control plane is still usable." >&2
+    else
+      SAMPLE_NOTE="not ready"
+      echo "WARN: the sample controller is not ready yet (phase: ${phase:-unknown}). The control plane is still usable." >&2
+    fi
     blockers=$(controller_blockers)
     if [ -n "$blockers" ]; then
       echo "      Blocking conditions:" >&2
@@ -452,7 +525,7 @@ EOF
     if [ "$SAMPLE_READY" = "1" ]; then
       echo " Jenkins     https://getting-started.$DOMAIN"
     else
-      echo " Jenkins     https://getting-started.$DOMAIN (not ready, see WARN above)"
+      echo " Jenkins     https://getting-started.$DOMAIN ($SAMPLE_NOTE, see WARN above)"
     fi
   fi
   cat <<EOF
