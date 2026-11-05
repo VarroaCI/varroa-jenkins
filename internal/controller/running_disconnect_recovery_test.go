@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -106,6 +107,49 @@ func TestHandleRunning_TimeoutAppliesAfterReprovision(t *testing.T) {
 	_ = rec.handleRunning(context.Background(), cr)
 	if cr.Status.Phase != v1alpha1.ControllerPhaseFailed {
 		t.Fatalf("phase = %s, want Failed", cr.Status.Phase)
+	}
+}
+
+// TestHandleRunning_TimeoutCreditsImagePull: a Running controller whose
+// provisioning pull used most of the budget is not failed by the mite-connect timeout.
+func TestHandleRunning_TimeoutCreditsImagePull(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	rec, _ := newTestReconcilerForGate(client)
+
+	cr := runningCtrl("pulled")
+	started := time.Now().Add(-8 * time.Minute)
+	startedAt := metav1.NewTime(started)
+	cr.Status.ProvisioningStartedAt = &startedAt
+
+	client.controllerPod = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "pulled-0", Namespace: "ns", UID: testUID},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "plugins-init", Image: "jenkins/jenkins:2.528"}},
+			Containers:     []corev1.Container{{Name: "jenkins", Image: "jenkins/jenkins:2.528"}},
+		},
+		Status: corev1.PodStatus{
+			InitContainerStatuses: []corev1.ContainerStatus{{
+				Name: "plugins-init",
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					ExitCode:  0,
+					StartedAt: metav1.NewTime(started.Add(5 * time.Minute)),
+				}},
+			}},
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name:  "jenkins",
+				State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(started.Add(5 * time.Minute))}},
+			}},
+		},
+	}
+	client.pullEvents = []corev1.Event{{
+		Reason:         "Pulling",
+		InvolvedObject: corev1.ObjectReference{UID: testUID, FieldPath: "spec.initContainers{plugins-init}"},
+		LastTimestamp:  metav1.NewTime(started.Add(5 * time.Second)),
+	}}
+
+	_ = rec.handleRunning(context.Background(), cr)
+	if cr.Status.Phase != v1alpha1.ControllerPhaseRunning {
+		t.Fatalf("phase = %s, want Running", cr.Status.Phase)
 	}
 }
 

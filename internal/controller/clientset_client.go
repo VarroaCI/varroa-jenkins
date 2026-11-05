@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -5539,6 +5540,20 @@ func (c *ClientsetClient) GetControllerPod(ctx context.Context, namespace, name 
 		return nil, err
 	}
 	return pod, nil
+}
+
+// ListPodPullEvents returns the Pulling events that name the pod with podUID.
+// ResourceVersion 0 serves the list from the API server cache.
+func (c *ClientsetClient) ListPodPullEvents(ctx context.Context, namespace string, podUID types.UID) ([]corev1.Event, error) {
+	selector := fields.AndSelectors(
+		fields.OneTermEqualSelector("involvedObject.uid", string(podUID)),
+		fields.OneTermEqualSelector("reason", "Pulling")).String()
+	list, err := c.clientset.CoreV1().Events(namespace).List(ctx,
+		metav1.ListOptions{FieldSelector: selector, ResourceVersion: "0"})
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
 }
 
 // ListPodPhases answers the phase of every pod in namespace, keyed by the

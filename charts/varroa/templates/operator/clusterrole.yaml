@@ -116,6 +116,11 @@ rules:
     resources: ["events"]
     verbs: ["create", "patch"]
   {{- if not .Values.managedNamespaces }}
+  # Read-only event list: the provisioning budget reads Pulling events of the
+  # Jenkins pod. Scoped mode grants the same verb in operator/role.yaml.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
   # Preflight checks (bus-initiated controller create runs operator-side):
   # list resource quotas to validate headroom. Scoped mode relocates this to
   # the per-namespace Roles (see operator/role.yaml).

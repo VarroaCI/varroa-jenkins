@@ -448,6 +448,9 @@ type controllerDetailResponse struct {
 	// MiteImageStatus projects the actually-running mite image and whether it
 	// is stale vs. the operator-desired image; nil when never observed.
 	MiteImageStatus *MiteImageStatusJSON `json:"miteImageStatus,omitempty"`
+	// ImagePull projects the ImagePulling condition: the image a provisioning
+	// container pulls now. Nil when no pull runs.
+	ImagePull *ImagePullJSON `json:"imagePull,omitempty"`
 	// ReconcileBlocked projects whether the controller's reconcile loop is
 	// currently blocked by an unresolved error (C3). Always present (never nil),
 	// so it is a required field with no omitempty — matches the OpenAPI contract.
@@ -616,6 +619,23 @@ func buildVersionStatus(conds []v1alpha1.ControllerCondition) *VersionStatusJSON
 type MiteImageStatusJSON struct {
 	Image *string `json:"image,omitempty"`
 	Stale *bool   `json:"stale,omitempty"`
+}
+
+// ImagePullJSON is a read-only projection of the ImagePulling condition. The
+// message names the container and image of the pull that runs now.
+type ImagePullJSON struct {
+	Message string `json:"message"`
+}
+
+// buildImagePull projects the ImagePulling condition. Returns nil unless the
+// condition is True.
+func buildImagePull(conds []v1alpha1.ControllerCondition) *ImagePullJSON {
+	for i := range conds {
+		if conds[i].Type == v1alpha1.ConditionImagePulling && conds[i].Status == metav1.ConditionTrue {
+			return &ImagePullJSON{Message: conds[i].Message}
+		}
+	}
+	return nil
 }
 
 // buildMiteImageStatus projects cr.Status.MiteStatus.Image and the

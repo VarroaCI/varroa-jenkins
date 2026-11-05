@@ -11,7 +11,7 @@ varroactl logs <namespace>/<name> --follow
 kubectl get events -n <namespace> --sort-by=.lastTimestamp
 ```
 
-- `Pending` or `Provisioning`: check namespace eligibility, image pull, storage, and ingress events. Correct the missing dependency, then reconcile.
+- `Pending` or `Provisioning`: check namespace eligibility, image pull, storage, and ingress events. Correct the missing dependency, then reconcile. An image pull does not count against the 5-minute provisioning budget. While a pull runs, the `ImagePulling` condition names the image. Provisioning fails after 20 minutes in all cases.
 - Jenkins does not connect: check Pod readiness, gateway reachability, TLS, and network policy.
 - `Running` with the pill Mite unreachable: the mite stream is lost, and the pod stays in place. Check the gateway pods, the pod egress to the gateway on TCP 9090, and the mite log.
 - The operator pod restarts, and its log names the `varroa-ca` or `varroa-mite-signing-key` Secret: the operator could not read or create that Secret at start. It retries for two minutes, then exits. It never replaces a stored CA or signing key. Check the Kubernetes API server and the operator's Secret grants in the release namespace. If the log says a Secret lacks its `tls.crt`, `tls.key`, or `private-key` key, the operator does not repair it.

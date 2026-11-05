@@ -1034,6 +1034,9 @@ const (
 	ReasonPluginRollFailed = "PluginRollFailed"
 	// ReasonJenkinsBootFailed is set when the Jenkins container fails to reach Running.
 	ReasonJenkinsBootFailed = "JenkinsBootFailed"
+	// ReasonImagePullInProgress is set on ImagePulling=True while a provisioning
+	// container waits for its image.
+	ReasonImagePullInProgress = "ImagePullInProgress"
 	// ReasonDownloadURLNotFound is set on UpdateCenterFallback=True when the plugin download
 	// URL answers 404 or 410 for a pinned plugin. The base must be <mirror>/download/plugins.
 	ReasonDownloadURLNotFound = "DownloadURLNotFound"
@@ -1240,6 +1243,9 @@ const (
 	// hold it False, but only a live pod inspection can turn it back off once
 	// it is True.
 	ConditionJenkinsBootFailed ControllerConditionType = "JenkinsBootFailed"
+	// ConditionImagePulling is True while a container of the provisioning pod
+	// waits for its image. The operator removes it when no pull runs.
+	ConditionImagePulling ControllerConditionType = "ImagePulling"
 	// ConditionPluginConflict indicates the requested plugin set conflicts with
 	// the resolved JenkinsVersionProfile/core lock set.
 	ConditionPluginConflict ControllerConditionType = "PluginConflict"

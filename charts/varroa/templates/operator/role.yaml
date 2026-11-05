@@ -46,5 +46,9 @@ rules:
   - apiGroups: [""]
     resources: ["resourcequotas"]
     verbs: ["get", "list"]
+  # Read-only event list for the provisioning budget (Pulling events of a pod).
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
 {{- end }}
 {{- end }}
