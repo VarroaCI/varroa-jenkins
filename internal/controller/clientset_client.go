@@ -3661,9 +3661,21 @@ func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, names
 	return out.GetResourceVersion(), nil
 }
 
+// statusPatchOmittedKeys names every ControllerStatus JSON key that
+// controllerStatusPatch leaves out, and why. The reflection test in
+// clientset_client_test.go fails on a status key that is in neither the patch
+// nor this map, so a new field cannot be dropped silently.
+var statusPatchOmittedKeys = map[string]string{
+	"jenkinsRef":   "no operator writer: no code path sets this field",
+	"hibernated":   "written only by SetHibernated and SetHibernatedAt, never by the blind tick patch",
+	"hibernatedAt": "written only by SetHibernated and SetHibernatedAt, never by the blind tick patch",
+}
+
 // controllerStatusPatch builds the status body of the PatchControllerStatus
 // merge patch. The test client applies the same body to its store, so the
-// two must not diverge.
+// two must not diverge. The patch uses an explicit key list: a key that is
+// not listed here is never written, so add every new status field here or to
+// statusPatchOmittedKeys.
 func controllerStatusPatch(status *v1alpha1.ControllerStatus) map[string]interface{} {
 	conditions := status.Conditions
 	if conditions == nil {
@@ -3673,6 +3685,9 @@ func controllerStatusPatch(status *v1alpha1.ControllerStatus) map[string]interfa
 		"phase":      status.Phase,
 		"conditions": conditions,
 	}
+	// The provisioning budget reads this stamp on every tick, so the patch
+	// must carry it. A nil stamp goes out as null, which clears a stale one.
+	statusPatch["provisioningStartedAt"] = status.ProvisioningStartedAt
 	// hibernated/hibernatedAt are deliberately NOT carried here. This
 	// end-of-reconcile status write is blind, and a JSON merge patch retains
 	// omitted keys — a false value could never clear the flag, and a stale
@@ -3726,6 +3741,9 @@ func controllerStatusPatch(status *v1alpha1.ControllerStatus) map[string]interfa
 	}
 	statusPatch["pendingItemDeletions"] = pendingItemDeletions
 	statusPatch["restartDrain"] = status.RestartDrain
+	// lastImperativeResult is always sent: a merge patch keeps an omitted key,
+	// so a nil result must go out as null to clear a stale one.
+	statusPatch["lastImperativeResult"] = status.LastImperativeResult
 	statusPatch["liveDrift"] = status.LiveDrift
 	if status.LastDesiredPushAt != nil {
 		statusPatch["lastDesiredPushAt"] = status.LastDesiredPushAt
