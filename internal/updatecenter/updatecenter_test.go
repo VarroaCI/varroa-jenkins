@@ -101,6 +101,43 @@ func seedPluginPack(t *testing.T, store oci.BlobStore, ref string, plugins []tes
 	}
 }
 
+// seedRawPluginPack pushes HPI layers, a config blob holding configJSON, and a
+// manifest with artifactType. It skips BuildPluginPack so a test can write a
+// pack that the readers refuse.
+func seedRawPluginPack(t *testing.T, store oci.BlobStore, ref, artifactType, configJSON string, plugins []testPlugin) {
+	t.Helper()
+	ctx := context.Background()
+	layers := make([]oci.Descriptor, 0, len(plugins))
+	for _, p := range plugins {
+		digest, size, err := store.PushBlob(ctx, oci.MediaTypePluginHPI, bytes.NewReader(p.hpiBytes))
+		if err != nil {
+			t.Fatalf("PushBlob hpi: %v", err)
+		}
+		layers = append(layers, oci.Descriptor{
+			MediaType: oci.MediaTypePluginHPI,
+			Digest:    digest,
+			Size:      size,
+			Annotations: map[string]string{
+				oci.AnnPluginName:    p.name,
+				oci.AnnPluginVersion: p.version,
+				oci.AnnPluginSHA256:  digest,
+			},
+		})
+	}
+	cfgDigest, cfgSize, err := store.PushBlob(ctx, oci.MediaTypePackConfig, strings.NewReader(configJSON))
+	if err != nil {
+		t.Fatalf("PushBlob config: %v", err)
+	}
+	manifest := oci.Manifest{
+		ArtifactType: artifactType,
+		Config:       oci.Descriptor{MediaType: oci.MediaTypePackConfig, Digest: cfgDigest, Size: cfgSize},
+		Layers:       layers,
+	}
+	if err := store.Push(ctx, ref, manifest); err != nil {
+		t.Fatalf("Push manifest: %v", err)
+	}
+}
+
 // sha256Hex returns the hex-encoded SHA-256 of data (no "sha256:" prefix).
 func sha256Hex(data []byte) string {
 	h := sha256.Sum256(data)
@@ -118,12 +155,21 @@ func sha256Base64(data []byte) string {
 // (cleaned up by t.Cleanup).
 func buildImportTarball(t *testing.T, ref string, plugins []testPlugin) []byte {
 	t.Helper()
+	return buildImportTarballWith(t, func(t *testing.T, _ string, ls *oci.LayoutStore) {
+		seedPluginPack(t, ls, ref, plugins)
+	})
+}
+
+// buildImportTarballWith runs seed against a fresh OCI layout and packs the
+// layout directory into a .tar.gz. seed receives the layout directory and store.
+func buildImportTarballWith(t *testing.T, seed func(t *testing.T, dir string, ls *oci.LayoutStore)) []byte {
+	t.Helper()
 	dir := t.TempDir()
 	ls, err := oci.NewLayoutStore(dir)
 	if err != nil {
 		t.Fatalf("NewLayoutStore: %v", err)
 	}
-	seedPluginPack(t, ls, ref, plugins)
+	seed(t, dir, ls)
 
 	var buf bytes.Buffer
 	gzw := gzip.NewWriter(&buf)
@@ -638,16 +684,19 @@ func TestImport_ValidTarGz(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if result["status"] != "accepted" {
-		t.Errorf("status: expected accepted, got %v", result["status"])
+	if result["status"] != "imported" {
+		t.Errorf("status: expected imported, got %v", result["status"])
+	}
+	if result["manifests"] != float64(1) {
+		t.Errorf("manifests: expected 1, got %v", result["manifests"])
 	}
 	if result["plugin_count"] != float64(1) {
 		t.Errorf("plugin_count: expected 1, got %v", result["plugin_count"])
@@ -1231,4 +1280,147 @@ func TestPullThrough_TagSafeRef(t *testing.T) {
 	if !found {
 		t.Errorf("plugin %s@%s should appear in inventory after pull-through with tag-safe ref, got %+v", pluginName, pluginVersion, invPayload.Plugins)
 	}
+}
+
+// assertImportStoreEmpty fails when the service store holds any manifest.
+func assertImportStoreEmpty(t *testing.T, ts *testServer) {
+	t.Helper()
+	descs, err := ts.store.ListManifests(context.Background())
+	if err != nil {
+		t.Fatalf("ListManifests: %v", err)
+	}
+	if len(descs) != 0 {
+		t.Errorf("store holds %d manifests after a refused import, want 0", len(descs))
+	}
+}
+
+func TestImport_RejectsUnreadablePack(t *testing.T) {
+	cases := []struct {
+		name       string
+		configJSON string
+		wantSubstr string
+	}{
+		{
+			name:       "no kind",
+			configJSON: `{"jenkinsVersion":"2.479.1","profile":"test-profile","pluginCount":1}`,
+			wantSubstr: "has no kind",
+		},
+		{
+			name:       "unknown kind",
+			configJSON: `{"kind":"bulk","jenkinsVersion":"2.479.1","profile":"test-profile","pluginCount":1}`,
+			wantSubstr: "unknown kind",
+		},
+		{
+			name:       "malformed config",
+			configJSON: `not json`,
+			wantSubstr: "unmarshal config",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newTestStore(t)
+			ts := newTestServer(t, store, WithImportToken("correct-token"))
+
+			tarGz := buildImportTarballWith(t, func(t *testing.T, dir string, ls *oci.LayoutStore) {
+				seedRawPluginPack(t, ls, "import-pack:v1", oci.ArtifactTypePluginPack, tc.configJSON,
+					[]testPlugin{{name: "foo", version: "1.0.0", hpiBytes: newPluginBytes("foo", "1.0.0")}})
+			})
+			postImportExpectRejected(t, ts, tarGz, tc.wantSubstr)
+			if digest := ts.server.findPluginDigest(context.Background(), "foo", "1.0.0"); digest != "" {
+				t.Errorf("refused pack was stored with digest %q", digest)
+			}
+			assertImportStoreEmpty(t, ts)
+		})
+	}
+}
+
+func TestImport_UnreadablePackRejectsWholeRequest(t *testing.T) {
+	store := newTestStore(t)
+	ts := newTestServer(t, store, WithImportToken("correct-token"))
+
+	tarGz := buildImportTarballWith(t, func(t *testing.T, dir string, ls *oci.LayoutStore) {
+		seedPluginPack(t, ls, "good-pack:v1", []testPlugin{
+			{name: "good", version: "1.0.0", hpiBytes: newPluginBytes("good", "1.0.0")},
+		})
+		seedRawPluginPack(t, ls, "old-pack:v1", oci.ArtifactTypePluginPack,
+			`{"jenkinsVersion":"2.479.1","profile":"old","pluginCount":1}`,
+			[]testPlugin{{name: "old", version: "1.0.0", hpiBytes: newPluginBytes("old", "1.0.0")}})
+	})
+	postImportExpectRejected(t, ts, tarGz, "has no kind")
+	assertImportStoreEmpty(t, ts)
+}
+
+func TestImport_RejectsNonPackManifest(t *testing.T) {
+	store := newTestStore(t)
+	ts := newTestServer(t, store, WithImportToken("correct-token"))
+
+	tarGz := buildImportTarballWith(t, func(t *testing.T, dir string, ls *oci.LayoutStore) {
+		seedRawPluginPack(t, ls, "other:v1", "application/vnd.example.other.v1",
+			`{"kind":"profile","profile":"p","pluginCount":0}`, nil)
+	})
+	postImportExpectRejected(t, ts, tarGz, "is not a plugin pack")
+	assertImportStoreEmpty(t, ts)
+}
+
+func TestImport_RejectsEmptyLayout(t *testing.T) {
+	store := newTestStore(t)
+	ts := newTestServer(t, store, WithImportToken("correct-token"))
+
+	tarGz := buildImportTarballWith(t, func(t *testing.T, dir string, ls *oci.LayoutStore) {})
+	postImportExpectRejected(t, ts, tarGz, "holds no manifest")
+	assertImportStoreEmpty(t, ts)
+}
+
+func TestImport_RejectsMissingLayerBlob(t *testing.T) {
+	store := newTestStore(t)
+	ts := newTestServer(t, store, WithImportToken("correct-token"))
+
+	hpi := newPluginBytes("gone", "1.0.0")
+	tarGz := buildImportTarballWith(t, func(t *testing.T, dir string, ls *oci.LayoutStore) {
+		seedPluginPack(t, ls, "gone-pack:v1", []testPlugin{
+			{name: "gone", version: "1.0.0", hpiBytes: hpi},
+		})
+		if err := os.Remove(filepath.Join(dir, "blobs", "sha256", sha256Hex(hpi))); err != nil {
+			t.Fatalf("remove layer blob: %v", err)
+		}
+	})
+	postImportExpectRejected(t, ts, tarGz, "missing blob")
+	assertImportStoreEmpty(t, ts)
+}
+
+func TestImport_RejectsUnsupportedLayerMediaType(t *testing.T) {
+	store := newTestStore(t)
+	ts := newTestServer(t, store, WithImportToken("correct-token"))
+
+	tarGz := buildImportTarballWith(t, func(t *testing.T, dir string, ls *oci.LayoutStore) {
+		hpi := newPluginBytes("odd", "1.0.0")
+		digest, size, err := ls.PushBlob(context.Background(), "application/octet-stream", bytes.NewReader(hpi))
+		if err != nil {
+			t.Fatalf("PushBlob: %v", err)
+		}
+		cfgDigest, cfgSize, err := ls.PushBlob(context.Background(), oci.MediaTypePackConfig,
+			strings.NewReader(`{"kind":"profile","profile":"p","jenkinsVersion":"2.479.1","pluginCount":1}`))
+		if err != nil {
+			t.Fatalf("PushBlob config: %v", err)
+		}
+		manifest := oci.Manifest{
+			ArtifactType: oci.ArtifactTypePluginPack,
+			Config:       oci.Descriptor{MediaType: oci.MediaTypePackConfig, Digest: cfgDigest, Size: cfgSize},
+			Layers: []oci.Descriptor{{
+				MediaType: "application/octet-stream",
+				Digest:    digest,
+				Size:      size,
+				Annotations: map[string]string{
+					oci.AnnPluginName:    "odd",
+					oci.AnnPluginVersion: "1.0.0",
+					oci.AnnPluginSHA256:  digest,
+				},
+			}},
+		}
+		if err := ls.Push(context.Background(), "odd-pack:v1", manifest); err != nil {
+			t.Fatalf("Push manifest: %v", err)
+		}
+	})
+	postImportExpectRejected(t, ts, tarGz, "unsupported layer media type")
+	assertImportStoreEmpty(t, ts)
 }

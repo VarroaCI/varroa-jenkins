@@ -40,6 +40,8 @@ Enable pull-through only when the update center may reach its configured upstrea
 
 `seed.secretRef` names a `.dockerconfigjson` or `username`/`password` Secret in the operator namespace. It holds pull credentials for every ref in `seed.refs`, so it must contain exactly one registry entry.
 
+The operator posts each seed pack to the import endpoint. A pack that the update center rejects sets `SeedImported=False` with reason `ImportFailed`. The message names the ref and the cause. The operator tries the ref again on the next reconcile.
+
 ## Prefetch declared plugins
 
 Pull-through stores a plugin only when a Jenkins pod requests it. A declared pin that no pod requests, such as a pin in an unused profile or an open candidate, stays a gap. Set prefetch to fetch these pins before any request:

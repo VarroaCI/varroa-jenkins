@@ -233,5 +233,6 @@ The controller should reach `Connected`. Run a build that creates an agent pod t
 | Plugins cannot be served | `status.unservable` (reason per plugin) and imported profile packs. |
 | Import returns 401 | Import token and update-center Secret. |
 | Import returns 400 and names a plugin at latest | Export the pack again. A pack must hold concrete versions. |
+| Import returns 400 and names a pack with no kind | The pack comes from an old export. Export it again with the current `varroactl`. |
 
 See [Update Center](../operations/update-center.md) and [Plugin packs](../config/plugin-packs.md).
