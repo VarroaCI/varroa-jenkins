@@ -142,10 +142,42 @@ export default function SettingsVersionsTab() {
 
   useEffect(load, [selectedCluster]);
 
-  if (loading && !promoteTarget) return <LoadingSpinner />;
-  if (error) return <div className={styles.errorBanner}>Error: {error}</div>;
+  // The intro and the cluster selector render in every state, so a user who
+  // picked an unreachable cluster can switch back. The root element stays the
+  // same, which keeps the selector mounted across state changes.
+  const header = (
+    <>
+      <p className={`${styles.muted} ${styles.pageNote}`}>
+        Version profiles are read-only in this UI and scoped to the selected cluster. Each pins a plugin set and optional
+        JCasC overlay to a Jenkins version or LTS line.
+      </p>
+      <ClusterSelector value={selectedCluster} onChange={setSelectedCluster} />
+    </>
+  );
+
+  if (loading && !promoteTarget) {
+    return (
+      <div>
+        {header}
+        <LoadingSpinner />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div>
+        {header}
+        <div className={styles.errorBanner}>Error: {error}</div>
+      </div>
+    );
+  }
   if (!profiles || profiles.length === 0) {
-    return <p className={styles.muted}>No version profiles installed</p>;
+    return (
+      <div>
+        {header}
+        <p className={styles.muted}>No version profiles installed</p>
+      </div>
+    );
   }
 
   const now = new Date();
@@ -165,11 +197,7 @@ export default function SettingsVersionsTab() {
 
   return (
     <div>
-      <p className={`${styles.muted} ${styles.pageNote}`}>
-        Version profiles are read-only in this UI and scoped to the selected cluster. Each pins a plugin set and optional
-        JCasC overlay to a Jenkins version or LTS line.
-      </p>
-      <ClusterSelector value={selectedCluster} onChange={setSelectedCluster} />
+      {header}
       <div className={styles.profileTableWrap}>
         <table className={styles.wideTable}>
           <thead>

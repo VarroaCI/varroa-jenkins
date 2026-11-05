@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -11,7 +11,7 @@ vi.mock("../api/client", () => ({
   getProvisioningDefaults: vi.fn(() => Promise.resolve({ spec: {} })),
 }));
 
-import { getVersionProfiles, listVersionCandidates, promoteVersionCandidate, getProvisioningDefaults } from "../api/client";
+import { getVersionProfiles, listClusters, listVersionCandidates, promoteVersionCandidate, getProvisioningDefaults } from "../api/client";
 import SettingsVersionsTab from "./SettingsVersionsTab";
 import type { VersionProfileDetail, VersionCandidate } from "../types";
 import { ApiError } from "../hooks/useApi";
@@ -20,6 +20,7 @@ const mockGet = getVersionProfiles as ReturnType<typeof vi.fn>;
 const mockListCandidates = listVersionCandidates as ReturnType<typeof vi.fn>;
 const mockPromote = promoteVersionCandidate as ReturnType<typeof vi.fn>;
 const mockGetDefaults = getProvisioningDefaults as ReturnType<typeof vi.fn>;
+const mockListClusters = listClusters as ReturnType<typeof vi.fn>;
 
 function renderTab() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -354,5 +355,37 @@ describe("SettingsVersionsTab upgrade candidates", () => {
 
     await screen.findByText("This candidate is no longer available for promotion — the list has been refreshed.");
     await waitFor(() => expect(mockListCandidates).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("SettingsVersionsTab cluster selector on a read error", () => {
+  beforeEach(() => {
+    mockListClusters.mockResolvedValue([
+      { name: "core", core: true, healthy: true, state: "active" },
+      { name: "member-b", core: false, healthy: true, state: "active" },
+    ]);
+  });
+
+  afterEach(() => {
+    mockListClusters.mockResolvedValue([{ name: "core", core: true }]);
+  });
+
+  it("keeps the cluster selector when the versions read fails", async () => {
+    mockGet.mockImplementation((cluster: string) =>
+      cluster === "member-b"
+        ? Promise.reject(new ApiError(500, "Varroa could not complete the request."))
+        : Promise.resolve([readyLts]),
+    );
+    renderTab();
+
+    await userEvent.selectOptions(await screen.findByRole("combobox"), "member-b");
+
+    expect(await screen.findByText("Error: Varroa could not complete the request.")).toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("member-b");
+
+    await userEvent.selectOptions(screen.getByRole("combobox"), "core");
+
+    expect(await screen.findByText("Ready")).toBeInTheDocument();
+    expect(screen.queryByText(/Error:/)).not.toBeInTheDocument();
   });
 });
