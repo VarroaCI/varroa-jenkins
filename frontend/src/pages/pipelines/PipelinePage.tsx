@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
 import { NotesCard } from "./NotesCard";
 import { TargetApprovalsCard } from "../../components/assistant/TargetApprovalsCard";
@@ -6,7 +6,8 @@ import { useOptionalAuth } from "../../context/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getPipelineJob, listRuns, tenantRunStreamUrl, type ListRunsParams } from "../../api/client";
 import { ApiError, isRecordStoreUnreachable } from "../../hooks/useApi";
-import { useEventStream, type SSEEvent } from "../../hooks/useEventStream";
+import { useEventStream } from "../../hooks/useEventStream";
+import { useFrameQueue } from "../../hooks/useFrameQueue";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage, RecordStoreUnreachablePage } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
 import { usePermissions, canAccessTenantPipeline } from "../../hooks/usePermissions";
@@ -304,16 +305,10 @@ export default function PipelinePage() {
   // The tenant's stream carries every job of that tenant, so the page keeps the
   // frames of its own job only. A wait frame reaches the Waiting card, which
   // reads the job detail.
-  // Stream frames wait in this queue until the drain effect below reads them.
-  // useEventStream calls onEvent once for each frame, also for each frame of a
-  // burst that reaches React as one render. lastEvent keeps only the last
-  // frame of that burst, so the page never reads lastEvent.
-  const runQueueRef = useRef<SSEEvent<RunNotification>[]>([]);
-  const [runTick, setRunTick] = useState(0);
-  const onRunEvent = useCallback((ev: SSEEvent<RunNotification>) => {
-    runQueueRef.current.push(ev);
-    setRunTick((n) => n + 1);
-  }, []);
+  // The queue keeps every stream frame until the drain effect below reads it.
+  // The page never reads lastEvent, because lastEvent drops all but the last
+  // frame of a burst.
+  const { onEvent: onRunEvent, drain: drainRunFrames, tick: runTick } = useFrameQueue<RunNotification>();
   const { readyState } = useEventStream<RunNotification>(
     tenant ? tenantRunStreamUrl(tenant) : null,
     tenant ? `pipelines:${tenant}` : null,
@@ -355,9 +350,8 @@ export default function PipelinePage() {
   // The drain reads every queued frame, and it refetches each read at most
   // once for the burst.
   useEffect(() => {
-    const frames = runQueueRef.current;
+    const frames = drainRunFrames();
     if (frames.length === 0) return;
-    runQueueRef.current = [];
     let refetchRuns = false;
     let refetchJob = false;
     for (const ev of frames) {

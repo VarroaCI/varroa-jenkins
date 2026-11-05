@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, bffFetch } from "./useApi";
-import { useEventStream, type SSEEvent } from "./useEventStream";
+import { useEventStream } from "./useEventStream";
+import { useFrameQueue } from "./useFrameQueue";
 import { BFF_BASE } from "../api/client";
 import {
   mergeEvents,
@@ -74,17 +75,10 @@ export function useActivityFeed(
     staleTime: 5_000,
   });
 
-  // Live frames wait in this queue until the drain effect below merges them.
-  // useEventStream calls onEvent once for each frame, also for each frame of a
-  // burst that reaches React as one render. lastEvent keeps only the last
-  // frame of that burst, so the feed never reads lastEvent.
-  const liveQueueRef = useRef<unknown[]>([]);
-  const [liveTick, setLiveTick] = useState(0);
-  const onEvent = useCallback((ev: SSEEvent<ActivityEvent>) => {
-    if (ev.type !== "activity") return;
-    liveQueueRef.current.push(ev.data);
-    setLiveTick((n) => n + 1);
-  }, []);
+  // The queue keeps every live frame until the drain effect below merges it.
+  // The feed never reads lastEvent, because lastEvent drops all but the last
+  // frame of a burst.
+  const { onEvent, drain: drainLive, clear: clearLive, tick: liveTick } = useFrameQueue<ActivityEvent>();
 
   // EventSource cannot send an Authorization header, so the bearer token is
   // passed as a query param (same pattern as the controller-events stream).
@@ -114,7 +108,7 @@ export function useActivityFeed(
     setBuffer([]); pendingQueueRef.current = []; setPendingCount(0);
     // A frame queued before this effect came from the stream of the previous
     // query. useEventStream closes that stream in the same commit.
-    liveQueueRef.current = [];
+    clearLive();
     // Reset pagination alongside the buffer: nextCursor/hasMore/isLoadingMore
     // describe the PREVIOUS query's scope, so a stale "Load more" must never
     // fire the old cursor against the new query while the new backfill is
@@ -138,13 +132,14 @@ export function useActivityFeed(
 
   // Merge every queued live frame in one buffer update.
   useEffect(() => {
-    const frames = liveQueueRef.current;
+    const frames = drainLive();
     if (frames.length === 0) return;
-    liveQueueRef.current = [];
     // The stream names every frame "activity", but brood telemetry can share
-    // the name. Drop any frame that lacks the ActivityEvent shape, then apply
-    // the defensive scope filter.
+    // the name. Drop any frame of another type or without the ActivityEvent
+    // shape, then apply the defensive scope filter.
     const incoming = frames
+      .filter((ev) => ev.type === "activity")
+      .map((ev): unknown => ev.data)
       .filter(isActivityEvent)
       .filter((e) => !scope || passesScope(e, scope));
     if (incoming.length === 0) return;
