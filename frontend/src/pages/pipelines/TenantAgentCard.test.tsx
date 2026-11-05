@@ -34,6 +34,18 @@ describe("TenantAgentCard", () => {
     expect(screen.queryByText("Tenant agent")).not.toBeInTheDocument();
   });
 
+  it("shows the state label of the last session", async () => {
+    mockGetTenantAgent.mockResolvedValue({
+      namespace: "varroa-system", name: "ta-one", tenant: "acme", cluster: "core",
+      spec: { tenantRef: { name: "acme" }, enabled: true },
+      status: { lastSession: { id: "s1", trigger: "manual", state: "waiting_approval", at: "2026-11-05T10:00:00Z" } },
+      accepted: true, pendingApprovals: 0, spendToday: 0, dayLimit: 100,
+    });
+    renderCard();
+    expect(await screen.findByText(/^Waiting for approval · /)).toBeInTheDocument();
+    expect(screen.queryByText(/waiting_approval/)).toBeNull();
+  });
+
   it("shows the enabled state, pending approvals, and spend today", async () => {
     mockGetTenantAgent.mockResolvedValue({
       namespace: "varroa-system", name: "ta-one", tenant: "acme", cluster: "core",

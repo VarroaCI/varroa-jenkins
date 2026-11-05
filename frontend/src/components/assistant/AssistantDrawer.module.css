@@ -246,6 +246,13 @@
   color: var(--text-2);
 }
 
+.footerFacts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .scrim {
   position: fixed;
   inset: 0;

@@ -1,6 +1,7 @@
 // Labels for every state, skip reason, error code, and HTTP code the
 // assistant returns. missingLabels reports any value with no label, so a
-// test fails when the registry grows past the copy.
+// test fails when the registry grows past the copy. It also builds the footer
+// state line and token line.
 import type {
   AssistantApprovalState,
   AssistantErrorCode,
@@ -80,6 +81,19 @@ export type LabelKind = keyof typeof TABLES;
 export function labelFor(kind: LabelKind, value: string): string {
   const table = TABLES[kind] as Record<string, string>;
   return table[value] ?? value;
+}
+
+/** stateLine is the footer state text. A skipped session also names its skip reason. */
+export function stateLine(state: string | null, skipReason: string | null): string {
+  if (!state) return "No session";
+  const text = `State: ${labelFor("sessionStates", state)}`;
+  return state === "skipped" && skipReason ? `${text} · ${labelFor("skipReasons", skipReason)}` : text;
+}
+
+/** tokenLine is the footer text of the session token counts. An estimate carries a mark. */
+export function tokenLine(promptTokens: number, completionTokens: number, estimated: boolean): string {
+  const text = `Tokens: ${promptTokens} prompt · ${completionTokens} completion`;
+  return estimated ? `${text} (estimated)` : text;
 }
 
 /** missingLabels lists "kind:value" for each registry value with no label. */

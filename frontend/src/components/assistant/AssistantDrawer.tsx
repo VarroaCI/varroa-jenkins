@@ -31,7 +31,7 @@ import { Button } from "../Button";
 import { age } from "../activityTimeline.util";
 import { TranscriptView } from "./TranscriptView";
 import { TranscriptStream } from "./TranscriptStream";
-import { labelFor } from "./labels";
+import { labelFor, stateLine, tokenLine } from "./labels";
 import { unechoedPending, type PendingMessage } from "./activity";
 import { returnFocus } from "./focusReturn";
 import { useFocusFallback } from "./useFocusFallback";
@@ -385,7 +385,10 @@ export default function AssistantDrawer() {
       </form>
 
       <footer className={styles.footer}>
-        <span aria-live="polite">{state ? `State: ${labelFor("sessionStates", state)}` : "No session"}</span>
+        <div className={styles.footerFacts}>
+          <span aria-live="polite">{stateLine(state, session?.skipReason ?? null)}</span>
+          {session && <span>{tokenLine(session.promptTokens, session.completionTokens, model.usageEstimated)}</span>}
+        </div>
         {running && <Button ref={keepFocusInComposer} size="sm" onClick={stop}>Stop</Button>}
       </footer>
     </section>
