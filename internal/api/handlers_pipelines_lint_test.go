@@ -11,6 +11,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/jenkins/declarativelint"
 	mitesrv "github.com/varroaci/varroa-jenkins/internal/mite"
 )
 
@@ -193,5 +194,30 @@ func TestLintJenkinsfile_HandlerRejectsOversizeBody(t *testing.T) {
 	fx.srv.handleLintJenkinsfile(rec, req)
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413", rec.Code)
+	}
+}
+
+// scriptedLintReply is the declarative linter's answer for a file with no
+// pipeline block. The linter writes the whole file into the message.
+const scriptedLintReply = `{"status":"ok","data":{"result":"failure","errors":[` +
+	`{"error":"Jenkinsfile content 'node {\n  load 'ci/pipeline.groovy'\n}\n' did not contain the 'pipeline' step"}]}}`
+
+// TestLintJenkinsfile_ScriptedAnswersDeclarativeOnly asserts a scripted
+// Jenkinsfile answers one jenkins error that names the declarative-only
+// rule, and never repeats the file text.
+func TestLintJenkinsfile_ScriptedAnswersDeclarativeOnly(t *testing.T) {
+	fx := newLintFixture(t, v1alpha1.ControllerPhaseConnected, scriptedLintReply, http.StatusOK)
+	body, serr := lintCall(t, fx, "node {\n  load 'ci/pipeline.groovy'\n}\n")
+	if serr != nil {
+		t.Fatalf("serr = %v", serr)
+	}
+	if body.Valid {
+		t.Fatalf("valid = true, want false")
+	}
+	if len(body.Errors) != 1 {
+		t.Fatalf("errors = %+v, want one", body.Errors)
+	}
+	if e := body.Errors[0]; e.Source != "jenkins" || e.Message != declarativelint.ScriptedMessage {
+		t.Errorf("error = %+v, want the scripted message", e)
 	}
 }

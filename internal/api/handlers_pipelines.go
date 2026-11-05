@@ -337,16 +337,53 @@ func (s *Server) resolveTenantTenants(ctx context.Context, claims *auth.Claims, 
 	return refs, nil
 }
 
-// tenantForJob returns the first of refs the caller may read at jobPath.
-// Resolve already checked the whole-tenant grant; a concrete job path
-// meets the grant's globs on its own, per design D1a.
-func (s *Server) tenantForJob(claims *auth.Claims, refs []TenantRef, jobPath string) (TenantRef, bool) {
+// qualifyJobPath answers the folder-qualified form of jobPath for refs. A
+// path inside a ref's folder is the long form and stays as it is. A path
+// outside every folder is the short form: the ref whose folder equals tenant
+// holds it below that folder. Any other path stays as it is, and the tenant
+// check then refuses it. Every pipelines path that takes a job path uses this
+// rule, so the read and write paths accept the same two forms.
+func qualifyJobPath(refs []TenantRef, tenant, jobPath string) string {
+	if jobPath == "" {
+		return ""
+	}
 	for _, ref := range refs {
-		if s.canReadPipeline(claims, ref, jobPath) {
-			return ref, true
+		if withinFolder(ref.Folder, jobPath) {
+			return jobPath
 		}
 	}
-	return TenantRef{}, false
+	for _, ref := range refs {
+		if ref.Folder != "" && ref.Folder == tenant {
+			return ref.Folder + "/" + jobPath
+		}
+	}
+	return jobPath
+}
+
+// tenantForJob returns the first of refs the caller may read at jobPath and
+// the folder-qualified job path. Resolve already checked the whole-tenant
+// grant; a concrete job path meets the grant's globs on its own, per design D1a.
+func (s *Server) tenantForJob(claims *auth.Claims, refs []TenantRef, tenant, jobPath string) (TenantRef, string, bool) {
+	path := qualifyJobPath(refs, tenant, jobPath)
+	for _, ref := range refs {
+		if s.canReadPipeline(claims, ref, path) {
+			return ref, path, true
+		}
+	}
+	return TenantRef{}, "", false
+}
+
+// readableJobTenants returns every ref of refs the caller may read at jobPath
+// and the folder-qualified job path.
+func (s *Server) readableJobTenants(claims *auth.Claims, refs []TenantRef, tenant, jobPath string) ([]TenantRef, string) {
+	path := qualifyJobPath(refs, tenant, jobPath)
+	var admitted []TenantRef
+	for _, ref := range refs {
+		if s.canReadPipeline(claims, ref, path) {
+			admitted = append(admitted, ref)
+		}
+	}
+	return admitted, path
 }
 
 // buildRunSummary converts a record-store run into the API's condensed
@@ -716,7 +753,7 @@ func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 		s.writeServiceError(w, serr)
 		return
 	}
-	ref, ok := s.tenantForJob(claims, refs, jobPath)
+	ref, jobPath, ok := s.tenantForJob(claims, refs, tenant, jobPath)
 	if !ok {
 		s.writeJSONError(w, http.StatusNotFound, "job not found")
 		return
@@ -1022,12 +1059,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		s.writeServiceError(w, serr)
 		return
 	}
-	var admitted []TenantRef
-	for _, ref := range refs {
-		if s.canReadPipeline(claims, ref, jobPath) {
-			admitted = append(admitted, ref)
-		}
-	}
+	admitted, jobPath := s.readableJobTenants(claims, refs, tenant, jobPath)
 	if len(admitted) == 0 {
 		s.writeJSONError(w, http.StatusNotFound, "job not found")
 		return
@@ -1136,12 +1168,7 @@ func (s *Server) handleListJobTestCaseHistory(w http.ResponseWriter, r *http.Req
 		s.writeServiceError(w, serr)
 		return
 	}
-	var admitted []TenantRef
-	for _, ref := range refs {
-		if s.canReadPipeline(claims, ref, jobPath) {
-			admitted = append(admitted, ref)
-		}
-	}
+	admitted, jobPath := s.readableJobTenants(claims, refs, tenant, jobPath)
 	if len(admitted) == 0 {
 		s.writeJSONError(w, http.StatusNotFound, "job not found")
 		return

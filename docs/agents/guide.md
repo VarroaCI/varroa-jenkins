@@ -60,6 +60,12 @@ A pipelines tenant is a Tenant on a cell. `get_tenant_cell` returns its cell, it
 
 A run has a `status`: `QUEUED`, `RUNNING`, or `COMPLETED`. A completed run has a `result`, such as `SUCCESS`, `FAILURE`, `ABORTED`, or `INTERRUPTED`. `TRIGGER_FAILED` means no build exists, and `triggerError` gives the cause. An `INTERRUPTED` run names its `interruptedReason`: `cell-lost`, `cell-rolled`, `tenant-moved`, `start-lost`, `heartbeat-lost`, `resume-timeout`, or `resume-failed`.
 
+## Pipeline arguments
+
+- A job path is `<tenant>/<job>`. With `tenant` set, a tool also accepts the path below the tenant folder.
+- `lint_jenkinsfile` checks declarative pipelines only.
+- A fleet lock is the `varroaLock(name: '<lock>')` step. A cell has no `lock` step.
+
 ## Investigation order
 
 1. Status: `get_controller` for the phase and `status`.

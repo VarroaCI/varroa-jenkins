@@ -355,12 +355,12 @@ func (s *Server) PostNote(ctx context.Context, claims *auth.Claims, a PostNoteAr
 		if serr != nil || len(refs) == 0 {
 			return recordstore.RunNotePostResponse{}, &ServiceError{Status: http.StatusNotFound, Message: "tenant not found"}
 		}
-		ref, ok := s.tenantForJob(claims, refs, a.Job)
+		ref, jobPath, ok := s.tenantForJob(claims, refs, a.Tenant, a.Job)
 		if !ok {
 			return recordstore.RunNotePostResponse{}, &ServiceError{Status: http.StatusNotFound, Message: "tenant not found"}
 		}
 		post.Tenant = a.Tenant
-		post.JobPath = a.Job
+		post.JobPath = jobPath
 		post.Cluster = ref.Cluster
 		if inSession && sess.Cluster != "" {
 			post.Cluster = sess.Cluster

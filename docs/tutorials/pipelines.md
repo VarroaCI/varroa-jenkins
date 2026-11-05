@@ -303,7 +303,7 @@ tick. See [Anonymous build badges](../operations/multi-tenancy.md#anonymous-buil
 
 ## Lint a Jenkinsfile
 
-Send a Jenkinsfile to the tenant's cell before you commit it. The cell runs the Jenkins declarative linter. The lint checks declarative syntax only. A cell-hosted tenant also runs the Varroa cell rules, such as `no-job-dsl`, which reject a Job DSL step.
+Send a Jenkinsfile to the tenant's cell before you commit it. The cell runs the Jenkins declarative linter. The lint checks declarative pipelines only. A scripted Jenkinsfile, such as a loader that calls `load`, answers one `jenkins` error that says the file is scripted. A cell-hosted tenant also runs the Varroa cell rules, such as `no-job-dsl`, which reject a Job DSL step.
 
 Post the file text to `POST /api/v1/pipelines/{tenant}/lint` as the `jenkinsfile` field. The file is at most 256 KiB. The answer carries `valid` and an `errors` list. Each error has a `source` (`jenkins` or `varroa`), a `message`, and, when the linter gives one, a `line` and a `column`.
 

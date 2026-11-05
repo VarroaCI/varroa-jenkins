@@ -379,7 +379,10 @@
       no command. It never wakes a cell: a hibernated or stopped cell answers
       409. A cell-hosted tenant also
       runs the Varroa cell script rules, which report with source varroa.
-      The linter checks declarative syntax only. A lint failure is data in
+      The linter checks declarative pipelines only. A scripted Jenkinsfile
+      answers one jenkins error with the message "The linter accepts
+      declarative pipelines only. This Jenkinsfile has no pipeline block, so
+      the linter reads it as scripted." A lint failure is data in
       a 200 answer, not a transport error.
     parameters:
       - $ref: '../components/parameters.yaml#/tenant'

@@ -36,6 +36,15 @@ type Finding struct {
 // writes into its message text.
 var linterLocation = regexp.MustCompile(`@ line (\d+), column (\d+)\.`)
 
+// ScriptedMessage replaces the declarative linter's finding for a file with no
+// pipeline block. The linter writes the whole file into that finding.
+const ScriptedMessage = "The linter accepts declarative pipelines only. This Jenkinsfile has no pipeline block, so the linter reads it as scripted."
+
+const (
+	noPipelineStepPrefix = "Jenkinsfile content '"
+	noPipelineStepSuffix = "' did not contain the 'pipeline' step"
+)
+
 // UnreachableError is a transport failure of the linter call. Error stays
 // generic, because a caller may show it to a user. Unwrap returns the
 // transport cause for the log.
@@ -107,7 +116,12 @@ func ParseReply(body []byte) ([]Finding, error) {
 	}
 	for _, e := range reply.Data.Errors {
 		for _, msg := range linterMessages(e.Error) {
-			f := Finding{Source: "jenkins", Message: strings.TrimSpace(msg)}
+			msg = strings.TrimSpace(msg)
+			if strings.HasPrefix(msg, noPipelineStepPrefix) && strings.HasSuffix(msg, noPipelineStepSuffix) {
+				out = append(out, Finding{Source: "jenkins", Message: ScriptedMessage})
+				continue
+			}
+			f := Finding{Source: "jenkins", Message: msg}
 			if m := linterLocation.FindStringSubmatch(msg); m != nil {
 				f.Line, _ = strconv.Atoi(m[1])
 				f.Column, _ = strconv.Atoi(m[2])

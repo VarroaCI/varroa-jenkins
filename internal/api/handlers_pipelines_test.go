@@ -1385,3 +1385,68 @@ func TestHandleGetPipelineJob_UnknownForgeStaysAbsent(t *testing.T) {
 		t.Errorf("forge leaked for a job with no forge hint: %s", body)
 	}
 }
+
+// TestQualifyJobPath pins the two job path forms that every pipelines
+// path accepts. The long form stays as it is; the short form gains the
+// folder of the ref that equals the tenant.
+func TestQualifyJobPath(t *testing.T) {
+	payments := []TenantRef{{Tenant: "payments", Folder: "payments"}}
+	cases := []struct {
+		name string
+		refs []TenantRef
+		ten  string
+		job  string
+		want string
+	}{
+		{"long form", payments, "payments", "payments/api", "payments/api"},
+		{"short form", payments, "payments", "api", "payments/api"},
+		{"nested short form", payments, "payments", "apps/api", "payments/apps/api"},
+		{"folder alone", payments, "payments", "payments", "payments"},
+		{"empty job", payments, "payments", "", ""},
+		{"empty folder keeps path", []TenantRef{{Tenant: "app-a"}}, "app-a", "api", "api"},
+		{"folder disagrees with tenant", []TenantRef{{Tenant: "checkout", Folder: "team-a"}}, "payments", "checkout", "checkout"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := qualifyJobPath(tc.refs, tc.ten, tc.job); got != tc.want {
+				t.Fatalf("qualifyJobPath(%q) = %q, want %q", tc.job, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHandleListRuns_AcceptsTheShortFormJobPath reads a run list with the
+// job path below the tenant folder. The response names the job by its
+// folder-qualified path.
+func TestHandleListRuns_AcceptsTheShortFormJobPath(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
+	}
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
+	authz := NewAuthorizer(testResolver(pipelinesRoles(), []*v1alpha1.VarroaRoleBinding{
+		pipelineBinding("b", "payments"),
+	}), false)
+	reader := newFakeRecordReader()
+	reader.addRun(recordstore.Run{
+		RunID: "r1", Cluster: "core", Tenant: "payments", JobPath: "payments/release",
+		Status: "COMPLETED", CreatedAt: time.Now().UTC(),
+	})
+	srv := pipelinesTestServer(client, authz, reader, nil)
+
+	rec := doPipelinesRequest(t, srv.handleListRuns, "/pipelines/payments/jobs/release/runs",
+		map[string]string{"tenant": "payments", "job": "release"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp runListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(resp.Items))
+	}
+	if got := resp.Items[0].JobPath; got != "payments/release" {
+		t.Errorf("jobPath = %q, want payments/release", got)
+	}
+}

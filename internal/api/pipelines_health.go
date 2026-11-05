@@ -134,7 +134,7 @@ func (s *Server) JobHealth(ctx context.Context, claims *auth.Claims, tenant, job
 	if serr != nil {
 		return JobHealthResult{}, serr
 	}
-	ref, ok := s.tenantForJob(claims, refs, jobPath)
+	ref, jobPath, ok := s.tenantForJob(claims, refs, tenant, jobPath)
 	if !ok {
 		return JobHealthResult{}, &ServiceError{Status: http.StatusNotFound, Message: "job not found"}
 	}

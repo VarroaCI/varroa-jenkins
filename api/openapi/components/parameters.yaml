@@ -78,7 +78,9 @@ job:
   name: job
   in: path
   description: >
-    Percent-encoded job path, one path segment. The router reads it with
+    Percent-encoded job path, one path segment. The full path starts with
+    the tenant folder, such as payments/api. A path that omits the tenant
+    folder, such as api, names the same job. The router reads it with
     PathValue, which returns the decoded value, so the job path's slashes
     reach the handler intact.
   required: true

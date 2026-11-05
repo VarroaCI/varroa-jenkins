@@ -135,3 +135,41 @@ func TestGetJobHealthToolCarriesQualityTrend(t *testing.T) {
 		t.Fatalf("qualityTrend = %+v, want one jacoco point at 90", payload.QualityTrend)
 	}
 }
+
+// TestGetJobHealthToolAcceptsTheShortFormJobPath reads a job health with the
+// job path below the tenant folder. The answer names the folder-qualified job.
+func TestGetJobHealthToolAcceptsTheShortFormJobPath(t *testing.T) {
+	reader := newFakePipelineReader()
+	build := int64(7)
+	reader.summaries["team-a/app-a"] = recordstore.JobSummary{
+		JobPath: "team-a/app-a",
+		RecentRuns: []recordstore.HealthRun{
+			{RunID: "run-7", BuildNumber: &build, Result: "SUCCESS"},
+		},
+	}
+	deps := &api.Dependencies{
+		RecordStore:    reader,
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", TenantName: "team-a", Folder: "team-a"}}},
+		Authorizer:     pipelinesTestAuthorizer("read"),
+	}
+
+	tr := callPipelineTool(t, deps, "get_job_health", map[string]interface{}{"tenant": "team-a", "job": "app-a"})
+	if tr.IsError {
+		t.Fatalf("get_job_health returned error: %v", tr.Content)
+	}
+	var payload struct {
+		JobPath string `json:"jobPath"`
+		Trend   []struct {
+			RunID string `json:"runId"`
+		} `json:"trend"`
+	}
+	if err := json.Unmarshal(tr.StructuredContent, &payload); err != nil {
+		t.Fatalf("unmarshal structuredContent: %v", err)
+	}
+	if payload.JobPath != "team-a/app-a" {
+		t.Errorf("jobPath = %q, want team-a/app-a", payload.JobPath)
+	}
+	if len(payload.Trend) != 1 || payload.Trend[0].RunID != "run-7" {
+		t.Errorf("trend = %+v, want run-7", payload.Trend)
+	}
+}
