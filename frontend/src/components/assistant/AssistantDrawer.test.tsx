@@ -316,6 +316,34 @@ describe("AssistantDrawer", () => {
     expect(MockEventSource.instances.length).toBe(count);
   });
 
+  it("moves focus from Approve to the message box when the approval resolves", async () => {
+    const { es, at } = await openWaitingApproval();
+    const approve = await screen.findByRole("button", { name: "Approve" });
+    act(() => approve.focus());
+    fireEvent.click(approve);
+    await waitFor(() => expect(client.approveAssistantApproval).toHaveBeenCalledWith("ap1"));
+
+    act(() => {
+      es.emitNamedEvent("approval_resolved", JSON.stringify({ approval_id: "ap1", state: "approved", created_at: at }), "5");
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Approve" })).toBeNull());
+    expect(document.activeElement).toBe(screen.getByLabelText("Message"));
+  });
+
+  it("moves focus from Deny to the message box when the approval resolves", async () => {
+    const { es, at } = await openWaitingApproval();
+    const deny = await screen.findByRole("button", { name: "Deny" });
+    act(() => deny.focus());
+    fireEvent.click(deny);
+    await waitFor(() => expect(client.denyAssistantApproval).toHaveBeenCalledWith("ap1", {}));
+
+    act(() => {
+      es.emitNamedEvent("approval_resolved", JSON.stringify({ approval_id: "ap1", state: "denied", created_at: at }), "5");
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Deny" })).toBeNull());
+    expect(document.activeElement).toBe(screen.getByLabelText("Message"));
+  });
+
   it("restores the message when the send fails", async () => {
     vi.mocked(client.getAssistantSession).mockResolvedValue({ session: { ...session, state: "completed" }, approvals: [] });
     vi.mocked(client.postAssistantMessage).mockRejectedValueOnce(new Error("network down"));
@@ -521,5 +549,50 @@ describe("AssistantDrawer focus return", () => {
     resizeViewport(800);
     expect(screen.queryByRole("separator", { name: "Resize the assistant drawer" })).toBeNull();
     expect(document.activeElement).toBe(opener);
+  });
+
+  it.each(["completed", "cancelled"])("moves focus from Stop to the message box when the session ends as %s", async (state) => {
+    stubViewport(1280);
+    renderFocusProbe();
+    await openFrom("explain");
+    const stop = await screen.findByRole("button", { name: "Stop" });
+    act(() => stop.focus());
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+    act(() => {
+      es.emitNamedEvent("done", JSON.stringify({ state, created_at: "2026-11-05T10:00:00Z" }), "1");
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull());
+    expect(document.activeElement).toBe(screen.getByLabelText("Message"));
+  });
+
+  it("keeps focus on Close when Stop goes away without focus", async () => {
+    stubViewport(1280);
+    renderFocusProbe();
+    await openFrom("explain");
+    await screen.findByRole("button", { name: "Stop" });
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+    act(() => {
+      es.emitNamedEvent("done", JSON.stringify({ state: "completed", created_at: "2026-11-05T10:00:00Z" }), "1");
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
+  });
+
+  it("moves focus from New conversation for this page to the message box", async () => {
+    vi.mocked(client.getAssistantSession).mockResolvedValue({
+      session: { ...session, context: { route: "tenant", tenant: "payments" } },
+      approvals: [],
+    });
+    stubViewport(1280);
+    renderFocusProbe();
+    await openFrom("explain");
+    const newConversation = await screen.findByRole("button", { name: "New conversation for this page" });
+    act(() => newConversation.focus());
+    fireEvent.click(newConversation);
+    expect(screen.queryByRole("button", { name: "New conversation for this page" })).toBeNull();
+    expect(screen.getByText("No session")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByLabelText("Message"));
   });
 });
