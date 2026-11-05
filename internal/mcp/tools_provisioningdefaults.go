@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -236,24 +237,79 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 				return deps.ConfigBrood.CreateVersionProfile(ctx, cluster, name, obj)
 			},
 		},
-		{
-			"update_jenkins_version_profile",
-			kindUpdate,
-			"Update a JenkinsVersionProfile CRD",
-			func(claims *auth.Claims) bool {
-				return deps.Authorizer != nil && deps.Authorizer.CanUpdateVersionProfile(claims)
-			},
-			func(ctx context.Context, cluster, name string, obj json.RawMessage) (json.RawMessage, error) {
-				if deps.ConfigBrood == nil {
-					return nil, fmt.Errorf("config brood not configured")
-				}
-				return deps.ConfigBrood.UpdateVersionProfile(ctx, cluster, name, obj)
-			},
-		},
 	} {
 		tool := mcp.NewTool(spec.name, mcp.WithDescription(spec.desc), mcp.WithString("name", mcp.Required()), mcp.WithString("object"), mcp.WithString("cluster"))
 		addTool(mcpServer, spec.kind, tool, writeProfile(strings.TrimSuffix(spec.name, "_jenkins_version_profile"), spec.auth, spec.call))
 	}
+
+	updateJVP := mcp.NewTool("update_jenkins_version_profile",
+		mcp.WithDescription("Update a JenkinsVersionProfile CRD. The tool merges object onto the stored profile as a JSON merge patch: a key you name replaces the stored value, null removes it, and a key you leave out keeps the stored value. The tool ignores metadata.resourceVersion in object. When another writer changes the profile during the call, the tool reads it again and merges again, up to three times."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Profile name")),
+		mcp.WithString("object", mcp.Description("A JSON merge patch for the profile, for example {\"spec\":{\"recommended\":true}}")),
+		mcp.WithString("cluster", mcp.Description("Target cluster (default: local cluster)")),
+	)
+	addTool(mcpServer, kindUpdate, updateJVP, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.ConfigBrood == nil {
+			return mcp.NewToolResultError("config brood not configured"), nil
+		}
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
+		if deps.Authorizer == nil || !deps.Authorizer.CanUpdateVersionProfile(claims) {
+			return mcp.NewToolResultError("access denied: missing version-profiles:update permission"), nil
+		}
+		args := getArgs(req)
+		name, cluster := strArg(args, "name"), clusterOrDefault(args)
+		patch := []byte("{}")
+		noChange := true
+		if raw := strArg(args, "object"); raw != "" {
+			var probe map[string]any
+			if err := json.Unmarshal([]byte(raw), &probe); err != nil {
+				return mcp.NewToolResultError("invalid object JSON: " + err.Error()), nil
+			}
+			if probe == nil {
+				return mcp.NewToolResultError("invalid object JSON: the patch must be a JSON object"), nil
+			}
+			patch = []byte(raw)
+			noChange = len(probe) == 0
+		}
+		if noChange {
+			// An empty patch changes nothing. Answer the stored profile and write nothing.
+			base, err := deps.ConfigBrood.GetVersionProfile(ctx, cluster, name)
+			if err != nil {
+				return mcp.NewToolResultError(versionProfileReadError(err)), nil
+			}
+			return resultJSON(base)
+		}
+		var out json.RawMessage
+		for attempt := 1; ; attempt++ {
+			// Each round reads the profile again, so a conflict merges onto the newer object.
+			base, err := deps.ConfigBrood.GetVersionProfile(ctx, cluster, name)
+			if err != nil {
+				return mcp.NewToolResultError(versionProfileReadError(err)), nil
+			}
+			obj, err := mergeVersionProfileObject(base, patch, name)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			out, err = deps.ConfigBrood.UpdateVersionProfile(ctx, cluster, name, obj)
+			if err == nil {
+				break
+			}
+			if !isConflictErr(err) {
+				return mcp.NewToolResultError("failed to update version profile: " + err.Error()), nil
+			}
+			if attempt == updateWriteAttempts {
+				return mcp.NewToolResultError(fmt.Sprintf("version profile %s on cluster %s changed during each of %d attempts: call update_jenkins_version_profile again", name, cluster, updateWriteAttempts)), nil
+			}
+		}
+		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
+			Type:    "versionprofile.updated",
+			Message: "JenkinsVersionProfile " + name + " updated",
+		})
+		return resultJSON(out)
+	})
 
 	deleteJVP := mcp.NewTool("delete_jenkins_version_profile", mcp.WithDescription("Delete a JenkinsVersionProfile CRD"), mcp.WithString("name", mcp.Required()), mcp.WithString("cluster"))
 	addTool(mcpServer, kindDelete, deleteJVP, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -357,6 +413,50 @@ func isNotFoundErr(err error) bool {
 	}
 	var be *api.BroodError
 	return apierrors.IsNotFound(err) || (errors.As(err, &be) && be.Code == bus.CodeNotFound)
+}
+
+// versionProfileReadError words a failed read of a version profile. Only a
+// not-found answer says the profile is missing. Any other failure says the read failed.
+func versionProfileReadError(err error) string {
+	if isNotFoundErr(err) {
+		return "version profile not found: " + err.Error()
+	}
+	return "failed to read version profile: " + err.Error()
+}
+
+// mergeVersionProfileObject applies patch to base as a JSON merge patch. The
+// result keeps the name and the resourceVersion of base, so the write fences
+// on the read whatever patch holds.
+func mergeVersionProfileObject(base json.RawMessage, patch []byte, name string) (json.RawMessage, error) {
+	var read struct {
+		Metadata struct {
+			ResourceVersion string `json:"resourceVersion"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(base, &read); err != nil {
+		return nil, fmt.Errorf("decode version profile: %w", err)
+	}
+	merged, err := jsonpatch.MergePatch(base, patch)
+	if err != nil {
+		return nil, fmt.Errorf("invalid object JSON: %w", err)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(merged, &obj); err != nil {
+		return nil, fmt.Errorf("decode merged version profile: %w", err)
+	}
+	if obj == nil {
+		return nil, fmt.Errorf("invalid object JSON: the patch must be a JSON object")
+	}
+	md, ok := obj["metadata"].(map[string]any)
+	if !ok {
+		md = map[string]any{}
+		obj["metadata"] = md
+	}
+	md["name"] = name
+	md["resourceVersion"] = read.Metadata.ResourceVersion
+	obj["apiVersion"] = "varroa.dev/v1alpha1"
+	obj["kind"] = "JenkinsVersionProfile"
+	return json.Marshal(obj)
 }
 
 // versionProfileSummary is the default projection for

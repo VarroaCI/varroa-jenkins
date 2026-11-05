@@ -82,6 +82,13 @@
     operationId: updateCatalogSource
     tags: [catalog]
     summary: Updates a catalog source.
+    description: >-
+      Send the metadata.resourceVersion of your read. The write then changes only that
+      version. A stale version, or a catalog source deleted after the read, answers 409 and
+      writes nothing. A body without metadata.resourceVersion only creates the catalog
+      source. That body needs the create permission as well as the update permission, and
+      answers 403 without it. When the catalog source exists, that body answers 409 and
+      writes nothing. The body replaces the stored catalog source, so start from your read.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/ns'
@@ -107,6 +114,8 @@
         $ref: '../components/responses.yaml#/NotFound'
       "409":
         $ref: '../components/responses.yaml#/Conflict'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
   delete:
     operationId: deleteCatalogSource
     tags: [catalog]

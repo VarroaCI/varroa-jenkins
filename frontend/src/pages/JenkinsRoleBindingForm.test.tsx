@@ -270,3 +270,48 @@ describe("JenkinsRoleBindingForm — edit mode", () => {
     });
   });
 });
+
+describe("JenkinsRoleBindingForm — the version of the read", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = "my-jenkins-binding";
+    mockListJenkinsRoles.mockResolvedValue({ items: availableJenkinsRoles });
+  });
+
+  it("sends the resourceVersion and labels of the read on an update", async () => {
+    mockGetJenkinsRoleBinding.mockResolvedValue(createJenkinsRoleBinding({
+      metadata: { name: "my-jenkins-binding", resourceVersion: "7", labels: { owner: "ops" } },
+      spec: { subjects: [{ kind: "User", name: "alice" }], roleRef: "jenkins-admin" },
+    }));
+    mockUpdateJenkinsRoleBinding.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleBindingForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role Binding: my-jenkins-binding")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockUpdateJenkinsRoleBinding).toHaveBeenCalledTimes(1);
+    });
+    expect(mockUpdateJenkinsRoleBinding.mock.calls[0][2].metadata).toEqual(
+      expect.objectContaining({ name: "my-jenkins-binding", resourceVersion: "7", labels: { owner: "ops" } }),
+    );
+  });
+
+  it("shows the conflict note when another writer changed the binding", async () => {
+    mockGetJenkinsRoleBinding.mockResolvedValue(existingBinding);
+    mockUpdateJenkinsRoleBinding.mockRejectedValueOnce(new ApiError(409, "conflict"));
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleBindingForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role Binding: my-jenkins-binding")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText(/Another user or tool changed this Jenkins role binding after you opened it/)).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});

@@ -426,6 +426,11 @@ func (s *Server) handleMiteStreamSSE(w http.ResponseWriter, r *http.Request, clu
 	sse.HandleMiteStream(s.deps.Broadcaster, cluster, ns, name)(w, r)
 }
 
+// createOnlyPutForbidden is the 403 text of a config PUT without
+// metadata.resourceVersion from a caller without the create verb. Such a PUT
+// only creates the object.
+const createOnlyPutForbidden = "forbidden: a body without metadata.resourceVersion only creates the object, which needs the create permission"
+
 // writeConfigBroodError maps config brood errors to HTTP status codes (DP3).
 // not_found → 404, conflict → 409, invalid → 400, internal → 500,
 // ErrClusterUnreachable → 502 with {error: "cluster <name> unreachable"}.
@@ -788,6 +793,10 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 				s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
 				return
 			}
+			if cb.ResourceVersion == "" && !s.deps.Authorizer.CanWriteComposedBundlesInNamespace(claims, "create", ns) {
+				s.writeJSONError(w, http.StatusForbidden, createOnlyPutForbidden)
+				return
+			}
 			cb.Namespace = ns
 			cb.Name = name
 			cb.APIVersion = "varroa.dev/v1alpha1"
@@ -1029,6 +1038,10 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 			s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
+		if src.ResourceVersion == "" && !s.deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "create", ns) {
+			s.writeJSONError(w, http.StatusForbidden, createOnlyPutForbidden)
+			return
+		}
 		src.Namespace = ns
 		src.Name = name
 		src.APIVersion = "varroa.dev/v1alpha1"
@@ -1194,6 +1207,10 @@ func (s *Server) dispatchJenkinsRoles(w http.ResponseWriter, r *http.Request, cl
 			s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
+		if role.ResourceVersion == "" && !s.deps.Authorizer.CanCreateJenkinsRole(claims) {
+			s.writeJSONError(w, http.StatusForbidden, createOnlyPutForbidden)
+			return
+		}
 		role.Name = name
 		role.APIVersion = "varroa.dev/v1alpha1"
 		role.Kind = "JenkinsRole"
@@ -1303,6 +1320,10 @@ func (s *Server) dispatchJenkinsRoleBindings(w http.ResponseWriter, r *http.Requ
 		var binding v1alpha1.JenkinsRoleBinding
 		if err := json.NewDecoder(r.Body).Decode(&binding); err != nil {
 			s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		if binding.ResourceVersion == "" && !s.deps.Authorizer.CanCreateJenkinsRoleBinding(claims) {
+			s.writeJSONError(w, http.StatusForbidden, createOnlyPutForbidden)
 			return
 		}
 		binding.Name = name

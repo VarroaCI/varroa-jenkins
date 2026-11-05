@@ -202,6 +202,12 @@ When the `VarroaRole` is deleted, no status changes. The BFF log shows
 The dashboard Roles page shows a count of failed hives next to a role with
 entries.
 
+## Change a Jenkins role or binding through the API
+
+Change a Jenkins role with `PUT /api/v1/clusters/{cluster}/jenkinsroles/{name}`. Change a Jenkins role binding with `PUT /api/v1/clusters/{cluster}/jenkinsrolebindings/{name}`. The body replaces the stored object. Start from your read, and send its `metadata.resourceVersion`. The [API reference](../api-reference.md#update-a-configuration-object) gives the `409` and `403` rules.
+
+The dashboard Jenkins role and binding editors send the version of their read. Save stops with a conflict note when another writer changed the object after the editor read it. Reload the page, then make the change again.
+
 ## Troubleshoot
 
 | Symptom | Check |

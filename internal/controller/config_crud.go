@@ -634,11 +634,7 @@ func (c *ConfigCRUD) HandleProvisioningDefaultsUpdate(data []byte) []byte {
 	createOnly := cr.ResourceVersion == ""
 	if err := crdstore.ApplyAt[v1alpha1.ProvisioningDefaults](ctx, c.Store, &cr); err != nil {
 		if apierrors.IsConflict(err) {
-			msg := fmt.Sprintf("provisioningdefaults %q changed after it was read: read it again and retry", req.Name)
-			if createOnly {
-				msg = fmt.Sprintf("provisioningdefaults %q was created after it was read: read it again and retry", req.Name)
-			}
-			return c.configReply(bus.ConfigApplyResponse{Error: msg, Code: bus.CodeConflict})
+			return c.configReply(bus.ConfigApplyResponse{Error: crdstore.ApplyAtConflictMessage("provisioningdefaults", req.Name, createOnly), Code: bus.CodeConflict})
 		}
 		return c.configReply(bus.ConfigApplyResponse{Error: err.Error(), Code: k8sConfigErrToCode(err)})
 	}
@@ -716,6 +712,9 @@ func (c *ConfigCRUD) HandleVersionProfilesCreate(data []byte) []byte {
 }
 
 // HandleVersionProfilesUpdate handles operator.<cluster>.versionprofiles.update.
+// An object with a resourceVersion updates only that version; a stale or deleted
+// read answers conflict. An object without one only creates the object; when the
+// object exists, that write answers conflict.
 func (c *ConfigCRUD) HandleVersionProfilesUpdate(data []byte) []byte {
 	var req bus.ConfigApplyRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -730,7 +729,11 @@ func (c *ConfigCRUD) HandleVersionProfilesUpdate(data []byte) []byte {
 	cr.Name = req.Name
 	cr.APIVersion = "varroa.dev/v1alpha1"
 	cr.Kind = "JenkinsVersionProfile"
-	if err := crdstore.Update[v1alpha1.JenkinsVersionProfile](ctx, c.Store, &cr); err != nil {
+	createOnly := cr.ResourceVersion == ""
+	if err := crdstore.ApplyAt[v1alpha1.JenkinsVersionProfile](ctx, c.Store, &cr); err != nil {
+		if apierrors.IsConflict(err) {
+			return c.configReply(bus.ConfigApplyResponse{Error: crdstore.ApplyAtConflictMessage("version profile", req.Name, createOnly), Code: bus.CodeConflict})
+		}
 		return c.configReply(bus.ConfigApplyResponse{Error: err.Error(), Code: k8sConfigErrToCode(err)})
 	}
 	raw, err := marshalCR(&cr)
@@ -840,6 +843,9 @@ func (c *ConfigCRUD) HandleBundlesCreate(data []byte) []byte {
 }
 
 // HandleBundlesUpdate handles operator.<cluster>.bundles.update.
+// An object with a resourceVersion updates only that version; a stale or deleted
+// read answers conflict. An object without one only creates the object; when the
+// object exists, that write answers conflict.
 func (c *ConfigCRUD) HandleBundlesUpdate(data []byte) []byte {
 	var req bus.ConfigApplyRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -860,7 +866,11 @@ func (c *ConfigCRUD) HandleBundlesUpdate(data []byte) []byte {
 	cr.APIVersion = "varroa.dev/v1alpha1"
 	cr.Kind = "ComposedBundle"
 
-	if err := crdstore.Update[v1alpha1.ComposedBundle](ctx, c.Store, &cr); err != nil {
+	createOnly := cr.ResourceVersion == ""
+	if err := crdstore.ApplyAt[v1alpha1.ComposedBundle](ctx, c.Store, &cr); err != nil {
+		if apierrors.IsConflict(err) {
+			return c.configReply(bus.ConfigApplyResponse{Error: crdstore.ApplyAtConflictMessage("composed bundle", req.Namespace+"/"+req.Name, createOnly), Code: bus.CodeConflict})
+		}
 		return c.configReply(bus.ConfigApplyResponse{
 			Error: fmt.Sprintf("failed to update bundle: %s", err.Error()),
 			Code:  k8sConfigErrToCode(err),
@@ -916,6 +926,9 @@ func (c *ConfigCRUD) HandleSourcesCreate(data []byte) []byte {
 }
 
 // HandleSourcesUpdate handles operator.<cluster>.catalog.sourceupdate.
+// An object with a resourceVersion updates only that version; a stale or deleted
+// read answers conflict. An object without one only creates the object; when the
+// object exists, that write answers conflict.
 func (c *ConfigCRUD) HandleSourcesUpdate(data []byte) []byte {
 	var req bus.ConfigApplyRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -935,7 +948,11 @@ func (c *ConfigCRUD) HandleSourcesUpdate(data []byte) []byte {
 	cr.APIVersion = "varroa.dev/v1alpha1"
 	cr.Kind = "CatalogSource"
 
-	if err := crdstore.Update[v1alpha1.CatalogSource](ctx, c.Store, &cr); err != nil {
+	createOnly := cr.ResourceVersion == ""
+	if err := crdstore.ApplyAt[v1alpha1.CatalogSource](ctx, c.Store, &cr); err != nil {
+		if apierrors.IsConflict(err) {
+			return c.configReply(bus.ConfigApplyResponse{Error: crdstore.ApplyAtConflictMessage("catalog source", req.Namespace+"/"+req.Name, createOnly), Code: bus.CodeConflict})
+		}
 		return c.configReply(bus.ConfigApplyResponse{
 			Error: fmt.Sprintf("failed to update catalogsource: %s", err.Error()),
 			Code:  k8sConfigErrToCode(err),
@@ -990,6 +1007,9 @@ func (c *ConfigCRUD) HandleRolesCreate(data []byte) []byte {
 }
 
 // HandleRolesUpdate handles operator.<cluster>.rbac.roleupdate.
+// An object with a resourceVersion updates only that version; a stale or deleted
+// read answers conflict. An object without one only creates the object; when the
+// object exists, that write answers conflict.
 func (c *ConfigCRUD) HandleRolesUpdate(data []byte) []byte {
 	var req bus.ConfigApplyRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -1008,7 +1028,11 @@ func (c *ConfigCRUD) HandleRolesUpdate(data []byte) []byte {
 	cr.APIVersion = "varroa.dev/v1alpha1"
 	cr.Kind = "JenkinsRole"
 
-	if err := crdstore.Update[v1alpha1.JenkinsRole](ctx, c.Store, &cr); err != nil {
+	createOnly := cr.ResourceVersion == ""
+	if err := crdstore.ApplyAt[v1alpha1.JenkinsRole](ctx, c.Store, &cr); err != nil {
+		if apierrors.IsConflict(err) {
+			return c.configReply(bus.ConfigApplyResponse{Error: crdstore.ApplyAtConflictMessage("Jenkins role", req.Name, createOnly), Code: bus.CodeConflict})
+		}
 		return c.configReply(bus.ConfigApplyResponse{
 			Error: fmt.Sprintf("failed to update jenkinsrole: %s", err.Error()),
 			Code:  k8sConfigErrToCode(err),
@@ -1063,6 +1087,9 @@ func (c *ConfigCRUD) HandleBindingsCreate(data []byte) []byte {
 }
 
 // HandleBindingsUpdate handles operator.<cluster>.rbac.bindingupdate.
+// An object with a resourceVersion updates only that version; a stale or deleted
+// read answers conflict. An object without one only creates the object; when the
+// object exists, that write answers conflict.
 func (c *ConfigCRUD) HandleBindingsUpdate(data []byte) []byte {
 	var req bus.ConfigApplyRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -1081,7 +1108,11 @@ func (c *ConfigCRUD) HandleBindingsUpdate(data []byte) []byte {
 	cr.APIVersion = "varroa.dev/v1alpha1"
 	cr.Kind = "JenkinsRoleBinding"
 
-	if err := crdstore.Update[v1alpha1.JenkinsRoleBinding](ctx, c.Store, &cr); err != nil {
+	createOnly := cr.ResourceVersion == ""
+	if err := crdstore.ApplyAt[v1alpha1.JenkinsRoleBinding](ctx, c.Store, &cr); err != nil {
+		if apierrors.IsConflict(err) {
+			return c.configReply(bus.ConfigApplyResponse{Error: crdstore.ApplyAtConflictMessage("Jenkins role binding", req.Name, createOnly), Code: bus.CodeConflict})
+		}
 		return c.configReply(bus.ConfigApplyResponse{
 			Error: fmt.Sprintf("failed to update jenkinsrolebinding: %s", err.Error()),
 			Code:  k8sConfigErrToCode(err),

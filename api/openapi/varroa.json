@@ -21341,6 +21341,7 @@
         ]
       },
       "put": {
+        "description": "Send the metadata.resourceVersion of your read. The write then changes only that version. A stale version, or a catalog source deleted after the read, answers 409 and writes nothing. A body without metadata.resourceVersion only creates the catalog source. That body needs the create permission as well as the update permission, and answers 403 without it. When the catalog source exists, that body answers 409 and writes nothing. The body replaces the stored catalog source, so start from your read.",
         "operationId": "updateCatalogSource",
         "parameters": [
           {
@@ -21379,6 +21380,9 @@
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
@@ -21697,6 +21701,7 @@
         ]
       },
       "put": {
+        "description": "Send the metadata.resourceVersion of your read. The write then changes only that version. A stale version, or a bundle deleted after the read, answers 409 and writes nothing. A body without metadata.resourceVersion only creates the bundle. That body needs the create permission as well as the update permission, and answers 403 without it. When the bundle exists, that body answers 409 and writes nothing. The body replaces the stored bundle, so start from your read.",
         "operationId": "updateComposedBundle",
         "parameters": [
           {
@@ -21736,8 +21741,14 @@
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Updates a composed bundle.",
@@ -23484,6 +23495,7 @@
         ]
       },
       "put": {
+        "description": "Send the metadata.resourceVersion of your read. The write then changes only that version. A stale version, or a Jenkins role binding deleted after the read, answers 409 and writes nothing. A body without metadata.resourceVersion only creates the Jenkins role binding. When the Jenkins role binding exists, that body answers 409 and writes nothing. The body replaces the stored Jenkins role binding, so start from your read. A body without metadata.resourceVersion also needs the create permission, and answers 403 without it.",
         "operationId": "updateJenkinsRoleBinding",
         "parameters": [
           {
@@ -23525,6 +23537,9 @@
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Updates a JenkinsRoleBinding.",
@@ -23687,6 +23702,7 @@
         ]
       },
       "put": {
+        "description": "Send the metadata.resourceVersion of your read. The write then changes only that version. A stale version, or a Jenkins role deleted after the read, answers 409 and writes nothing. A body without metadata.resourceVersion only creates the Jenkins role. When the Jenkins role exists, that body answers 409 and writes nothing. The body replaces the stored Jenkins role, so start from your read. A body without metadata.resourceVersion also needs the create permission, and answers 403 without it.",
         "operationId": "updateJenkinsRole",
         "parameters": [
           {
@@ -23728,6 +23744,9 @@
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Updates a JenkinsRole.",
@@ -24032,6 +24051,7 @@
         ]
       },
       "put": {
+        "description": "Send the metadata.resourceVersion of your read. The write then changes only that version. A stale version, or a version profile deleted after the read, answers 409 and writes nothing. A body without metadata.resourceVersion only creates the version profile. That body needs the create permission as well as the update permission, and answers 403 without it. When the version profile exists, that body answers 409 and writes nothing. The body replaces the stored version profile, so start from your read.",
         "operationId": "updateVersionProfile",
         "parameters": [
           {
@@ -24067,6 +24087,9 @@
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"

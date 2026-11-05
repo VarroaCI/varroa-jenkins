@@ -14,12 +14,14 @@ the authoritative reference for available names and arguments.
 
 Varroa create and update tools are declarative. The create tools for controllers, groups, roles,
 role bindings, Jenkins roles, Jenkins role bindings, catalog sources, composed bundles, and users refuse a name that
-already exists. An identical create for an existing controller returns that controller. Use the update tool to change an existing object. When another writer changes the object during the call, an update tool reads the object again and merges again, up to three times. This applies to the update tools for composed bundles, catalog sources, roles, role bindings, Jenkins roles, Jenkins role bindings, and provisioning defaults. Updates for most
-resources replace omitted fields. Two tools are sparse instead.
+already exists. An identical create for an existing controller returns that controller. Use the update tool to change an existing object. When another writer changes the object during the call, an update tool reads the object again and merges again, up to three times. This applies to the update tools for composed bundles, catalog sources, roles, role bindings, Jenkins roles, Jenkins role bindings, Jenkins version profiles, and provisioning defaults. Updates for most
+resources replace omitted fields. Three tools are sparse instead.
 `update_controller` is a sparse patch with separate ownership rules. Read
 [Writing through MCP](writing.md) before using it. `update_cell_pool` writes
 only the dials the call names, which is why it alone among the write tools
 reports `destructiveHint: false`.
+
+`update_jenkins_version_profile` applies its `object` argument as a JSON merge patch. A key that `object` leaves out keeps its stored value, and a `null` value removes the key. A call that names no object, or an empty object, changes nothing and writes nothing.
 
 `call_jenkins_tool` is open-world because the target Jenkins plugin defines the
 remote tool's effect. Review its discovered schema for every controller.

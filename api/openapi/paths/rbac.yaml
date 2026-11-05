@@ -309,6 +309,13 @@
     operationId: updateJenkinsRole
     tags: [rbac]
     summary: Updates a JenkinsRole.
+    description: >-
+      Send the metadata.resourceVersion of your read. The write then changes only that
+      version. A stale version, or a Jenkins role deleted after the read, answers 409 and
+      writes nothing. A body without metadata.resourceVersion only creates the Jenkins role.
+      When the Jenkins role exists, that body answers 409 and writes nothing. The body
+      replaces the stored Jenkins role, so start from your read.
+      A body without metadata.resourceVersion also needs the create permission, and answers 403 without it.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/name'
@@ -333,6 +340,8 @@
         $ref: '../components/responses.yaml#/Forbidden'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
   delete:
     operationId: deleteJenkinsRole
     tags: [rbac]
@@ -427,6 +436,13 @@
     operationId: updateJenkinsRoleBinding
     tags: [rbac]
     summary: Updates a JenkinsRoleBinding.
+    description: >-
+      Send the metadata.resourceVersion of your read. The write then changes only that
+      version. A stale version, or a Jenkins role binding deleted after the read, answers 409
+      and writes nothing. A body without metadata.resourceVersion only creates the Jenkins
+      role binding. When the Jenkins role binding exists, that body answers 409 and writes
+      nothing. The body replaces the stored Jenkins role binding, so start from your read.
+      A body without metadata.resourceVersion also needs the create permission, and answers 403 without it.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/name'
@@ -451,6 +467,8 @@
         $ref: '../components/responses.yaml#/Forbidden'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
   delete:
     operationId: deleteJenkinsRoleBinding
     tags: [rbac]

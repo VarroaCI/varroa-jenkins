@@ -134,7 +134,9 @@ func Create[T any](ctx context.Context, b Backend, obj *T) error {
 	return nil
 }
 
-// Update persists a typed CRD. The object must carry a valid resourceVersion.
+// Update persists a typed CRD at the resourceVersion the caller read. An obj
+// without a resourceVersion is an error: a read-modify-write sends the read's
+// version, or uses Mutate or ApplyAt.
 func Update[T any](ctx context.Context, b Backend, obj *T) error {
 	info, err := gvrInfo[T]()
 	if err != nil {
@@ -145,15 +147,8 @@ func Update[T any](ctx context.Context, b Backend, obj *T) error {
 		return err
 	}
 	ns := namespaceFromObj(u, info)
-	// Callers (config-authoring forms) often reconstruct objects without
-	// server metadata; stamp the live resourceVersion so the update is not
-	// rejected, matching the pre-crdstore per-kind Update methods.
 	if u.GetResourceVersion() == "" {
-		existing, getErr := b.GetObject(ctx, info.gvr, ns, u.GetName())
-		if getErr != nil {
-			return fmt.Errorf("get existing %s for update: %w", info.gvr.Resource, getErr)
-		}
-		u.SetResourceVersion(existing.GetResourceVersion())
+		return fmt.Errorf("update %s %q: resourceVersion is required; use Mutate or ApplyAt for a write without a read", info.gvr.Resource, u.GetName())
 	}
 	created, err := b.UpdateObject(ctx, info.gvr, ns, u)
 	if err != nil {
@@ -468,6 +463,16 @@ func ApplyAt[T any](ctx context.Context, b Backend, obj *T) error {
 	}
 	mergeCreateResult(obj, updated)
 	return nil
+}
+
+// ApplyAtConflictMessage is the conflict text of a write through ApplyAt.
+// createOnly is true when the object carried no resourceVersion. The BFF
+// returns the text in a 409 body. The operator returns it in a conflict reply.
+func ApplyAtConflictMessage(kind, name string, createOnly bool) string {
+	if createOnly {
+		return fmt.Sprintf("%s %q exists: read it, then send its metadata.resourceVersion", kind, name)
+	}
+	return fmt.Sprintf("%s %q changed or was deleted after it was read: read it again and retry. If the read answers 404, create it without metadata.resourceVersion", kind, name)
 }
 
 // Delete deletes a typed CRD by name and namespace. namespace "" for

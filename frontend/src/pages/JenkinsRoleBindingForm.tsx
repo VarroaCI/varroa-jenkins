@@ -22,6 +22,8 @@ interface LabelEntry {
   value: string;
 }
 
+const JENKINS_ROLE_BINDING_CONFLICT_NOTE = "Another user or tool changed this Jenkins role binding after you opened it. Reload the page, then make the change again.";
+
 export default function JenkinsRoleBindingForm() {
   const { name } = useParams();
   const navigate = useNavigate();
@@ -48,6 +50,8 @@ export default function JenkinsRoleBindingForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fetching, setFetching] = useState(true);
+  // The binding as the editor read it. A save sends its metadata, which carries the resourceVersion that fences the write.
+  const [loaded, setLoaded] = useState<JenkinsRoleBinding | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -57,6 +61,7 @@ export default function JenkinsRoleBindingForm() {
         setRoleOptions(roles.items || []);
         if (!name) { setFetching(false); return; }
         const binding = await getJenkinsRoleBinding(cluster, name);
+        setLoaded(binding);
         setBindingName(binding.metadata.name);
         setSubjects(binding.spec.subjects || []);
         setRoleRef(binding.spec.roleRef || "");
@@ -117,7 +122,7 @@ export default function JenkinsRoleBindingForm() {
     const binding: JenkinsRoleBinding = {
       apiVersion: "varroa.dev/v1alpha1",
       kind: "JenkinsRoleBinding",
-      metadata: { name: bindingName },
+      metadata: loaded ? { ...loaded.metadata } : { name: bindingName },
       spec: {
         subjects: subjects.filter((s) => s.name.trim().length > 0),
         roleRef,
@@ -143,7 +148,11 @@ export default function JenkinsRoleBindingForm() {
       }
       navigate(`/access/jenkins-role-bindings${clusterQuery(cluster)}`);
     } catch (err: any) {
-      setError(!isEdit && err instanceof ApiError && err.status === 409 ? "A Jenkins role binding with this name already exists." : err.message);
+      if (err instanceof ApiError && err.status === 409) {
+        setError(isEdit ? JENKINS_ROLE_BINDING_CONFLICT_NOTE : "A Jenkins role binding with this name already exists.");
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
