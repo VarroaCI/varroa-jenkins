@@ -883,3 +883,226 @@ func TestMCPUpdateProvisioningDefaults_StoreFallbackRetriesAConflict(t *testing.
 		t.Errorf("rootDomain = %q, want the stored value kept", got.Spec.RootDomain)
 	}
 }
+
+// vpRoutedBrood serves one JenkinsVersionProfile and records every read and
+// write. A conflict first stores afterConflict, as a second writer would have.
+type vpRoutedBrood struct {
+	api.ConfigBrood
+	stored        json.RawMessage
+	getErr        error
+	reads         int
+	writes        int
+	bodies        []json.RawMessage
+	conflicts     int
+	afterConflict json.RawMessage
+}
+
+func (b *vpRoutedBrood) GetVersionProfile(_ context.Context, _, _ string) (json.RawMessage, error) {
+	b.reads++
+	if b.getErr != nil {
+		return nil, b.getErr
+	}
+	return b.stored, nil
+}
+
+func (b *vpRoutedBrood) UpdateVersionProfile(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	b.writes++
+	b.bodies = append(b.bodies, obj)
+	if b.conflicts > 0 {
+		b.conflicts--
+		b.stored = b.afterConflict
+		return nil, &api.BroodError{Code: bus.CodeConflict, Msg: "changed or was deleted after it was read"}
+	}
+	return obj, nil
+}
+
+// vpProfileRaw returns a stored profile named 2.479 at resourceVersion rv.
+func vpProfileRaw(t *testing.T, rv string, spec v1alpha1.JenkinsVersionProfileSpec) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(v1alpha1.JenkinsVersionProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "2.479", ResourceVersion: rv},
+		Spec:       spec,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return raw
+}
+
+// vpBody decodes the name, resourceVersion and spec of a forwarded profile.
+func vpBody(t *testing.T, raw json.RawMessage) (name, rv string, spec v1alpha1.JenkinsVersionProfileSpec) {
+	t.Helper()
+	var body v1alpha1.JenkinsVersionProfile
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	return body.Name, body.ResourceVersion, body.Spec
+}
+
+func updateVPCall(t *testing.T, deps *api.Dependencies, args map[string]interface{}) toolResult {
+	t.Helper()
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+		"name":      "update_jenkins_version_profile",
+		"arguments": args,
+	}, mcpAdminClaims)
+	return parseToolResult(t, resp.Result)
+}
+
+func TestUpdateJenkinsVersionProfile_SendsReadVersionAndMerges(t *testing.T) {
+	deps := adminDeps()
+	brood := &vpRoutedBrood{stored: vpProfileRaw(t, "5", v1alpha1.JenkinsVersionProfileSpec{Channel: "lts"})}
+	deps.ConfigBrood = brood
+
+	tr := updateVPCall(t, deps, map[string]interface{}{
+		"name": "2.479", "object": `{"spec":{"recommended":true}}`,
+	})
+	if tr.IsError {
+		t.Fatalf("tool errored: %v", tr.Content)
+	}
+	if brood.writes != 1 {
+		t.Fatalf("writes = %d, want 1", brood.writes)
+	}
+	_, rv, spec := vpBody(t, brood.bodies[0])
+	if rv != "5" {
+		t.Errorf("write resourceVersion = %q, want the read's 5", rv)
+	}
+	if spec.Channel != "lts" {
+		t.Errorf("channel = %q, want the stored lts", spec.Channel)
+	}
+	if !spec.Recommended {
+		t.Errorf("recommended = false, want the merged true")
+	}
+}
+
+func TestUpdateJenkinsVersionProfile_MergesAgainAfterConflict(t *testing.T) {
+	deps := adminDeps()
+	brood := &vpRoutedBrood{
+		stored:        vpProfileRaw(t, "5", v1alpha1.JenkinsVersionProfileSpec{Channel: "lts"}),
+		conflicts:     1,
+		afterConflict: vpProfileRaw(t, "6", v1alpha1.JenkinsVersionProfileSpec{Channel: "lts", EOL: "2030-01-01"}),
+	}
+	deps.ConfigBrood = brood
+
+	tr := updateVPCall(t, deps, map[string]interface{}{
+		"name": "2.479", "object": `{"spec":{"recommended":true}}`,
+	})
+	if tr.IsError {
+		t.Fatalf("tool errored: %v", tr.Content)
+	}
+	if brood.reads != 2 || brood.writes != 2 {
+		t.Fatalf("reads = %d, writes = %d, want 2 and 2", brood.reads, brood.writes)
+	}
+	_, rv, spec := vpBody(t, brood.bodies[1])
+	if rv != "6" {
+		t.Errorf("second write resourceVersion = %q, want the newer 6", rv)
+	}
+	if spec.EOL != "2030-01-01" {
+		t.Errorf("second write lost the other writer's eol: %q", spec.EOL)
+	}
+	if !spec.Recommended {
+		t.Errorf("second write recommended = false, want the merged true")
+	}
+}
+
+// Every round conflicts, so the tool stops after the bounded attempts and asks
+// the caller to run the call again.
+func TestUpdateJenkinsVersionProfile_StopsAfterThreeConflicts(t *testing.T) {
+	deps := adminDeps()
+	brood := &vpRoutedBrood{
+		stored:        vpProfileRaw(t, "5", v1alpha1.JenkinsVersionProfileSpec{Channel: "lts"}),
+		conflicts:     10,
+		afterConflict: vpProfileRaw(t, "6", v1alpha1.JenkinsVersionProfileSpec{Channel: "lts"}),
+	}
+	deps.ConfigBrood = brood
+
+	tr := updateVPCall(t, deps, map[string]interface{}{"name": "2.479", "object": `{"spec":{"recommended":true}}`})
+	if !tr.IsError {
+		t.Fatalf("tool succeeded, want an error after the bounded attempts")
+	}
+	if !strings.Contains(toolText(tr), "changed during each of 3 attempts: call update_jenkins_version_profile again") {
+		t.Errorf("error %q, want the retry request", toolText(tr))
+	}
+	if brood.writes != 3 {
+		t.Errorf("writes = %d, want 3", brood.writes)
+	}
+}
+
+func TestUpdateJenkinsVersionProfile_NotFoundWritesNothing(t *testing.T) {
+	deps := adminDeps()
+	brood := &vpRoutedBrood{getErr: &api.BroodError{Code: bus.CodeNotFound, Msg: "not found"}}
+	deps.ConfigBrood = brood
+
+	tr := updateVPCall(t, deps, map[string]interface{}{"name": "2.479", "object": `{"spec":{}}`})
+	if !tr.IsError {
+		t.Fatalf("tool succeeded, want a not-found error")
+	}
+	if !strings.HasPrefix(toolText(tr), "version profile not found") {
+		t.Errorf("error %q, want the not-found prefix", toolText(tr))
+	}
+	if brood.writes != 0 {
+		t.Errorf("writes = %d, want 0", brood.writes)
+	}
+}
+
+func TestUpdateJenkinsVersionProfile_IgnoresObjectVersion(t *testing.T) {
+	deps := adminDeps()
+	brood := &vpRoutedBrood{stored: vpProfileRaw(t, "5", v1alpha1.JenkinsVersionProfileSpec{Channel: "lts"})}
+	deps.ConfigBrood = brood
+
+	tr := updateVPCall(t, deps, map[string]interface{}{
+		"name": "2.479", "object": `{"metadata":{"resourceVersion":"1"},"spec":{"recommended":true}}`,
+	})
+	if tr.IsError {
+		t.Fatalf("tool errored: %v", tr.Content)
+	}
+	_, rv, _ := vpBody(t, brood.bodies[0])
+	if rv != "5" {
+		t.Errorf("write resourceVersion = %q, want the read's 5, not the object's 1", rv)
+	}
+}
+
+func TestMergeVersionProfileObject(t *testing.T) {
+	base := vpProfileRaw(t, "5", v1alpha1.JenkinsVersionProfileSpec{Channel: "lts", EOL: "2030-01-01"})
+
+	merged, err := mergeVersionProfileObject(base, []byte(`{"spec":{"eol":null}}`), "2.479")
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	_, rv, spec := vpBody(t, merged)
+	if spec.EOL != "" {
+		t.Errorf("eol = %q, want the null patch to remove it", spec.EOL)
+	}
+	if spec.Channel != "lts" || rv != "5" {
+		t.Errorf("channel %q rv %q, want the stored lts and 5", spec.Channel, rv)
+	}
+
+	forced, err := mergeVersionProfileObject(base, []byte(`{"metadata":{"name":"other"}}`), "2.479")
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if name, _, _ := vpBody(t, forced); name != "2.479" {
+		t.Errorf("name = %q, want the addressed 2.479", name)
+	}
+
+	if _, err := mergeVersionProfileObject(base, []byte(`[1]`), "2.479"); err == nil {
+		t.Errorf("a non-object patch merged without error")
+	}
+	if _, err := mergeVersionProfileObject(base, []byte(`null`), "2.479"); err == nil {
+		t.Errorf("a null patch merged without error")
+	}
+}
+
+// An update that names no object changes nothing, so it writes nothing.
+func TestUpdateJenkinsVersionProfile_EmptyPatchWritesNothing(t *testing.T) {
+	deps := adminDeps()
+	brood := &vpRoutedBrood{stored: vpProfileRaw(t, "5", v1alpha1.JenkinsVersionProfileSpec{Channel: "lts"})}
+	deps.ConfigBrood = brood
+
+	tr := updateVPCall(t, deps, map[string]interface{}{"name": "2.479"})
+	if tr.IsError {
+		t.Fatalf("tool errored: %v", tr.Content)
+	}
+	if brood.writes != 0 {
+		t.Errorf("writes = %d, want 0 for an empty patch", brood.writes)
+	}
+}

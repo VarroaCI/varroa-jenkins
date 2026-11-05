@@ -1117,3 +1117,37 @@ func TestApplyAt_WithoutResourceVersionConflictsWhenTheObjectExists(t *testing.T
 		t.Errorf("rootDomain = %q, want the stored %q", got.Spec.RootDomain, "stored.example")
 	}
 }
+
+func TestApplyAtConflictMessage(t *testing.T) {
+	created := ApplyAtConflictMessage("role", "viewer", true)
+	if !strings.Contains(created, "exists") || !strings.Contains(created, "metadata.resourceVersion") {
+		t.Errorf("create-only message = %q, want the exists text", created)
+	}
+	read := ApplyAtConflictMessage("role", "viewer", false)
+	if !strings.Contains(read, "changed or was deleted after it was read") {
+		t.Errorf("read message = %q, want the changed-or-deleted text", read)
+	}
+}
+
+func TestUpdateRequiresResourceVersion(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "cat", Namespace: "ns"},
+		Spec:       v1alpha1.CatalogSourceSpec{RepoURL: "https://example.test/a"},
+	})
+	obj := &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "cat", Namespace: "ns"},
+		Spec:       v1alpha1.CatalogSourceSpec{RepoURL: "https://example.test/b"},
+	}
+	if err := Update(ctx, f, obj); err == nil {
+		t.Fatal("Update without a resourceVersion succeeded, want an error")
+	}
+	got, err := Get[v1alpha1.CatalogSource](ctx, f, "cat", "ns")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Spec.RepoURL != "https://example.test/a" {
+		t.Errorf("repoURL = %q, want the stored value", got.Spec.RepoURL)
+	}
+}

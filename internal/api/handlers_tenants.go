@@ -669,7 +669,7 @@ func (s *Server) handleUpdateTenant(w http.ResponseWriter, r *http.Request, name
 	case stored == nil || stored.ResourceVersion != version:
 		// The version check runs before the tenant-owned field check, so a
 		// stale body answers 409 and never 403.
-		s.writeJSONError(w, http.StatusConflict, applyAtConflictMessage("tenant", name, createOnly))
+		s.writeJSONError(w, http.StatusConflict, crdstore.ApplyAtConflictMessage("tenant", name, createOnly))
 		return
 	default:
 		if !isAdmin && !tenantSpecEqualExceptTenantOwned(stored.Spec, spec) {
@@ -689,7 +689,7 @@ func (s *Server) handleUpdateTenant(w http.ResponseWriter, r *http.Request, name
 
 	if err := crdstore.ApplyAt[v1alpha1.Tenant](ctx, s.deps.Store, tenant); err != nil {
 		if apierrors.IsConflict(err) {
-			s.writeJSONError(w, http.StatusConflict, applyAtConflictMessage("tenant", name, createOnly))
+			s.writeJSONError(w, http.StatusConflict, crdstore.ApplyAtConflictMessage("tenant", name, createOnly))
 			return
 		}
 		if k8sErrorToHTTP(err) == http.StatusBadRequest {

@@ -14,6 +14,8 @@ import { useConfigurationCluster } from "../hooks/useConfigurationCluster";
 
 const ROLE_TYPES: JenkinsRoleType[] = ["Global", "Item", "Agent"];
 
+const JENKINS_ROLE_CONFLICT_NOTE = "Another user or tool changed this Jenkins role after you opened it. Reload the page, then make the change again.";
+
 export default function JenkinsRoleForm() {
   const { name } = useParams();
   const navigate = useNavigate();
@@ -30,12 +32,15 @@ export default function JenkinsRoleForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fetching, setFetching] = useState(isEdit);
+  // The role as the editor read it. A save sends its metadata, which carries the resourceVersion that fences the write.
+  const [loaded, setLoaded] = useState<JenkinsRole | null>(null);
 
   useEffect(() => {
     if (!cluster) return;
     if (!name) { setFetching(false); return; }
     getJenkinsRole(cluster, name)
       .then((r) => {
+        setLoaded(r);
         setRoleName(r.metadata.name);
         setRoleType(r.spec.roleType || "Global");
         setPermissions((r.spec.permissions || []).join("\n"));
@@ -58,7 +63,7 @@ export default function JenkinsRoleForm() {
     const role: JenkinsRole = {
       apiVersion: "varroa.dev/v1alpha1",
       kind: "JenkinsRole",
-      metadata: { name: roleName },
+      metadata: loaded ? { ...loaded.metadata } : { name: roleName },
       spec: { roleType, permissions: perms, ...(description ? { description } : {}) },
     };
 
@@ -70,7 +75,11 @@ export default function JenkinsRoleForm() {
       }
       navigate(`/access/jenkins-roles${clusterQuery(cluster)}`);
     } catch (err: any) {
-      setError(!isEdit && err instanceof ApiError && err.status === 409 ? "A Jenkins role with this name already exists." : err.message);
+      if (err instanceof ApiError && err.status === 409) {
+        setError(isEdit ? JENKINS_ROLE_CONFLICT_NOTE : "A Jenkins role with this name already exists.");
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }

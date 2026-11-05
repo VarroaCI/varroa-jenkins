@@ -143,15 +143,19 @@ func expectedSourceFor(name string) string {
 	return "mcp"
 }
 
-// guardConfigBrood implements the five ConfigBrood methods the mutating tools
-// reach. It embeds the interface so the other 28 need no body; an unexpected
-// call nil-panics, which the per-tool subtest isolates to one row.
+// guardConfigBrood implements the ConfigBrood methods the mutating tools reach.
+// It embeds the interface so the rest need no body; an unexpected call
+// nil-panics, which the per-tool subtest isolates to one row.
 type guardConfigBrood struct{ api.ConfigBrood }
 
 func (g *guardConfigBrood) SyncCatalogSource(_ context.Context, _, _, _ string) error { return nil }
 
 func (g *guardConfigBrood) CreateVersionProfile(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
 	return obj, nil
+}
+
+func (g *guardConfigBrood) GetVersionProfile(_ context.Context, _, name string) (json.RawMessage, error) {
+	return json.RawMessage(`{"apiVersion":"varroa.dev/v1alpha1","kind":"JenkinsVersionProfile","metadata":{"name":"` + name + `","resourceVersion":"1"},"spec":{}}`), nil
 }
 
 func (g *guardConfigBrood) UpdateVersionProfile(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
@@ -402,7 +406,7 @@ func guardArgsFor(name string) map[string]interface{} {
 		// ProvisioningDefaults + JenkinsVersionProfiles (cluster-scoped, config brood)
 		"update_provisioning_defaults":   {"name": obj},
 		"create_jenkins_version_profile": {"name": obj},
-		"update_jenkins_version_profile": {"name": obj},
+		"update_jenkins_version_profile": {"name": obj, "object": `{"spec":{"recommended":true}}`},
 		"delete_jenkins_version_profile": {"name": obj},
 		// Users (namespaced, admin-only)
 		"create_user": {"namespace": "varroa-system", "name": "obj-new", "password": "pw-12345678"},

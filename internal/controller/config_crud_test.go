@@ -1484,7 +1484,7 @@ func TestHandleProvisioningDefaultsUpdateStaleVersionConflicts(t *testing.T) {
 	if resp.Code != bus.CodeConflict {
 		t.Fatalf("stale write code = %q, want %q (error %q)", resp.Code, bus.CodeConflict, resp.Error)
 	}
-	if !strings.Contains(resp.Error, "changed after it was read") {
+	if !strings.Contains(resp.Error, "changed or was deleted after it was read") {
 		t.Fatalf("stale write error = %q, want it to say the object changed after it was read", resp.Error)
 	}
 	got, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, store, "varroa-defaults", "")
@@ -1549,8 +1549,8 @@ func TestHandleProvisioningDefaultsUpdateWithoutVersionCreatedAfterReadConflicts
 	if resp.Code != bus.CodeConflict {
 		t.Fatalf("write without a version over a raced create: code %q, want %q (error %q)", resp.Code, bus.CodeConflict, resp.Error)
 	}
-	if !strings.Contains(resp.Error, "created after it was read") {
-		t.Errorf("error %q, want the create-after-read message", resp.Error)
+	if !strings.Contains(resp.Error, "exists") {
+		t.Errorf("error %q, want the create-only message", resp.Error)
 	}
 	got, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, store, "varroa-defaults", "")
 	if err != nil {
@@ -1558,5 +1558,256 @@ func TestHandleProvisioningDefaultsUpdateWithoutVersionCreatedAfterReadConflicts
 	}
 	if got.Spec.RootDomain != "other.example.com" {
 		t.Fatalf("rootDomain %q, want the other writer's other.example.com", got.Spec.RootDomain)
+	}
+}
+
+// configUpdateCase is one operator-routed config update that writes through
+// crdstore.ApplyAt. field is the spec key the test reads back as a marker.
+type configUpdateCase struct {
+	kind   string
+	ns     string
+	name   string
+	field  string
+	gvr    schema.GroupVersionResource
+	handle func(*ConfigCRUD, []byte) []byte
+	seed   func(st *crdstore.Fake)
+}
+
+func mustConfigGVR[T any](t *testing.T) schema.GroupVersionResource {
+	t.Helper()
+	gvr, err := crdstore.GVRFor[T]()
+	if err != nil {
+		t.Fatalf("gvr: %v", err)
+	}
+	return gvr
+}
+
+func configUpdateCases(t *testing.T) []configUpdateCase {
+	t.Helper()
+	return []configUpdateCase{
+		{
+			kind: "ComposedBundle", ns: "ns-a", name: "b1", field: "displayName",
+			gvr:    mustConfigGVR[v1alpha1.ComposedBundle](t),
+			handle: (*ConfigCRUD).HandleBundlesUpdate,
+			seed: func(st *crdstore.Fake) {
+				crdstore.MustSeed(st, &v1alpha1.ComposedBundle{
+					ObjectMeta: metav1.ObjectMeta{Name: "b1", Namespace: "ns-a"},
+					Spec:       v1alpha1.ComposedBundleSpec{DisplayName: "old"},
+				})
+			},
+		},
+		{
+			kind: "CatalogSource", ns: "ns-a", name: "s1", field: "path",
+			gvr:    mustConfigGVR[v1alpha1.CatalogSource](t),
+			handle: (*ConfigCRUD).HandleSourcesUpdate,
+			seed: func(st *crdstore.Fake) {
+				crdstore.MustSeed(st, &v1alpha1.CatalogSource{
+					ObjectMeta: metav1.ObjectMeta{Name: "s1", Namespace: "ns-a"},
+					Spec:       v1alpha1.CatalogSourceSpec{Path: "old"},
+				})
+			},
+		},
+		{
+			kind: "JenkinsRole", name: "r1", field: "description",
+			gvr:    mustConfigGVR[v1alpha1.JenkinsRole](t),
+			handle: (*ConfigCRUD).HandleRolesUpdate,
+			seed: func(st *crdstore.Fake) {
+				crdstore.MustSeed(st, &v1alpha1.JenkinsRole{
+					ObjectMeta: metav1.ObjectMeta{Name: "r1"},
+					Spec:       v1alpha1.JenkinsRoleSpec{Description: "old"},
+				})
+			},
+		},
+		{
+			kind: "JenkinsRoleBinding", name: "rb1", field: "roleRef",
+			gvr:    mustConfigGVR[v1alpha1.JenkinsRoleBinding](t),
+			handle: (*ConfigCRUD).HandleBindingsUpdate,
+			seed: func(st *crdstore.Fake) {
+				crdstore.MustSeed(st, &v1alpha1.JenkinsRoleBinding{
+					ObjectMeta: metav1.ObjectMeta{Name: "rb1"},
+					Spec:       v1alpha1.JenkinsRoleBindingSpec{RoleRef: "old"},
+				})
+			},
+		},
+		{
+			kind: "JenkinsVersionProfile", name: "p1", field: "channel",
+			gvr:    mustConfigGVR[v1alpha1.JenkinsVersionProfile](t),
+			handle: (*ConfigCRUD).HandleVersionProfilesUpdate,
+			seed: func(st *crdstore.Fake) {
+				crdstore.MustSeed(st, &v1alpha1.JenkinsVersionProfile{
+					ObjectMeta: metav1.ObjectMeta{Name: "p1"},
+					Spec:       v1alpha1.JenkinsVersionProfileSpec{Channel: "old"},
+				})
+			},
+		},
+	}
+}
+
+// body builds a request that sets the case's marker field to "new". An empty rv
+// sends no metadata.resourceVersion.
+func (cc configUpdateCase) body(t *testing.T, rv string) []byte {
+	t.Helper()
+	md := map[string]any{"name": cc.name}
+	if cc.ns != "" {
+		md["namespace"] = cc.ns
+	}
+	if rv != "" {
+		md["resourceVersion"] = rv
+	}
+	obj := map[string]any{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       cc.kind,
+		"metadata":   md,
+		"spec":       map[string]any{cc.field: "new"},
+	}
+	return jsonMarshal(t, bus.ConfigApplyRequest{Namespace: cc.ns, Name: cc.name, Object: jsonMarshal(t, obj)})
+}
+
+// marker reads the case's marker field from the stored object.
+func (cc configUpdateCase) marker(t *testing.T, store *crdstore.Fake) string {
+	t.Helper()
+	u, err := store.GetObject(context.Background(), cc.gvr, cc.ns, cc.name)
+	if err != nil {
+		t.Fatalf("get %s %s: %v", cc.kind, cc.name, err)
+	}
+	spec, _ := u.Object["spec"].(map[string]any)
+	v, _ := spec[cc.field].(string)
+	return v
+}
+
+// version reads the stored object's resourceVersion.
+func (cc configUpdateCase) version(t *testing.T, store *crdstore.Fake) string {
+	t.Helper()
+	u, err := store.GetObject(context.Background(), cc.gvr, cc.ns, cc.name)
+	if err != nil {
+		t.Fatalf("get %s %s: %v", cc.kind, cc.name, err)
+	}
+	return u.GetResourceVersion()
+}
+
+func applyReply(t *testing.T, raw []byte) bus.ConfigApplyResponse {
+	t.Helper()
+	var resp bus.ConfigApplyResponse
+	jsonUnmarshal(t, raw, &resp)
+	return resp
+}
+
+// TestHandleConfigUpdatesWithoutVersionAreCreateOnly pins that an update without
+// a resourceVersion does not overwrite an existing object.
+func TestHandleConfigUpdatesWithoutVersionAreCreateOnly(t *testing.T) {
+	for _, cc := range configUpdateCases(t) {
+		t.Run(cc.kind, func(t *testing.T) {
+			store := crdstore.NewFake()
+			c := &ConfigCRUD{Store: store, Logger: testLogger()}
+			cc.seed(store)
+			resp := applyReply(t, cc.handle(c, cc.body(t, "")))
+			if resp.Code != bus.CodeConflict {
+				t.Fatalf("code %q, want %q (error %q)", resp.Code, bus.CodeConflict, resp.Error)
+			}
+			if !strings.Contains(resp.Error, "exists") {
+				t.Errorf("error %q, want the create-only message", resp.Error)
+			}
+			if got := cc.marker(t, store); got != "old" {
+				t.Errorf("marker %q, want the stored %q", got, "old")
+			}
+		})
+	}
+}
+
+// TestHandleConfigUpdatesWithoutVersionCreateMissingObject pins that an update
+// without a resourceVersion creates an object that does not exist.
+func TestHandleConfigUpdatesWithoutVersionCreateMissingObject(t *testing.T) {
+	for _, cc := range configUpdateCases(t) {
+		t.Run(cc.kind, func(t *testing.T) {
+			store := crdstore.NewFake()
+			c := &ConfigCRUD{Store: store, Logger: testLogger()}
+			resp := applyReply(t, cc.handle(c, cc.body(t, "")))
+			if resp.Code != "" {
+				t.Fatalf("code %q, want success (error %q)", resp.Code, resp.Error)
+			}
+			if got := cc.marker(t, store); got != "new" {
+				t.Errorf("marker %q, want %q", got, "new")
+			}
+		})
+	}
+}
+
+// TestHandleConfigUpdatesStaleVersionConflicts pins that a read version that
+// another writer has since changed answers conflict and keeps that writer's value.
+func TestHandleConfigUpdatesStaleVersionConflicts(t *testing.T) {
+	ctx := context.Background()
+	for _, cc := range configUpdateCases(t) {
+		t.Run(cc.kind, func(t *testing.T) {
+			store := crdstore.NewFake()
+			c := &ConfigCRUD{Store: store, Logger: testLogger()}
+			cc.seed(store)
+			rv := cc.version(t, store)
+
+			u, err := store.GetObject(ctx, cc.gvr, cc.ns, cc.name)
+			if err != nil {
+				t.Fatalf("second writer get: %v", err)
+			}
+			spec, _ := u.Object["spec"].(map[string]any)
+			spec[cc.field] = "other"
+			if _, err := store.UpdateObject(ctx, cc.gvr, cc.ns, u); err != nil {
+				t.Fatalf("second writer update: %v", err)
+			}
+
+			resp := applyReply(t, cc.handle(c, cc.body(t, rv)))
+			if resp.Code != bus.CodeConflict {
+				t.Fatalf("stale write code %q, want %q (error %q)", resp.Code, bus.CodeConflict, resp.Error)
+			}
+			if !strings.Contains(resp.Error, "changed or was deleted after it was read") {
+				t.Errorf("error %q, want the changed-or-deleted message", resp.Error)
+			}
+			if got := cc.marker(t, store); got != "other" {
+				t.Errorf("marker %q, want the second writer's %q", got, "other")
+			}
+		})
+	}
+}
+
+// TestHandleConfigUpdatesDeletedAfterReadConflicts pins that a read version that a
+// delete has since removed answers conflict and does not recreate the object.
+func TestHandleConfigUpdatesDeletedAfterReadConflicts(t *testing.T) {
+	ctx := context.Background()
+	for _, cc := range configUpdateCases(t) {
+		t.Run(cc.kind, func(t *testing.T) {
+			store := crdstore.NewFake()
+			c := &ConfigCRUD{Store: store, Logger: testLogger()}
+			cc.seed(store)
+			rv := cc.version(t, store)
+			if err := store.DeleteObject(ctx, cc.gvr, cc.ns, cc.name); err != nil {
+				t.Fatalf("delete: %v", err)
+			}
+
+			resp := applyReply(t, cc.handle(c, cc.body(t, rv)))
+			if resp.Code != bus.CodeConflict {
+				t.Fatalf("write after delete code %q, want %q (error %q)", resp.Code, bus.CodeConflict, resp.Error)
+			}
+			if _, err := store.GetObject(ctx, cc.gvr, cc.ns, cc.name); !apierrors.IsNotFound(err) {
+				t.Fatalf("get after conflict = %v, want NotFound", err)
+			}
+		})
+	}
+}
+
+// TestHandleConfigUpdatesCurrentVersionWrites pins that a read version that is
+// still current writes the update.
+func TestHandleConfigUpdatesCurrentVersionWrites(t *testing.T) {
+	for _, cc := range configUpdateCases(t) {
+		t.Run(cc.kind, func(t *testing.T) {
+			store := crdstore.NewFake()
+			c := &ConfigCRUD{Store: store, Logger: testLogger()}
+			cc.seed(store)
+			rv := cc.version(t, store)
+			resp := applyReply(t, cc.handle(c, cc.body(t, rv)))
+			if resp.Code != "" {
+				t.Fatalf("code %q, want success (error %q)", resp.Code, resp.Error)
+			}
+			if got := cc.marker(t, store); got != "new" {
+				t.Errorf("marker %q, want %q", got, "new")
+			}
+		})
 	}
 }

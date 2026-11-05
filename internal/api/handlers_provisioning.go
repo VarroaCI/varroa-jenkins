@@ -453,6 +453,10 @@ func (s *Server) handleVersionProfileResource(w http.ResponseWriter, r *http.Req
 			s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
+		if cr.ResourceVersion == "" && !s.deps.Authorizer.CanCreateVersionProfile(claims) {
+			s.writeJSONError(w, http.StatusForbidden, createOnlyPutForbidden)
+			return
+		}
 		cr.Name = name
 		cr.APIVersion = "varroa.dev/v1alpha1"
 		cr.Kind = "JenkinsVersionProfile"

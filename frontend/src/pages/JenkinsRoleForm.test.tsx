@@ -192,3 +192,47 @@ describe("JenkinsRoleForm — edit mode", () => {
     });
   });
 });
+
+describe("JenkinsRoleForm — the version of the read", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = "jenkins-viewer";
+  });
+
+  it("sends the resourceVersion and labels of the read on an update", async () => {
+    mockGetJenkinsRole.mockResolvedValue(createJenkinsRole({
+      metadata: { name: "jenkins-viewer", resourceVersion: "7", labels: { owner: "ops" } },
+      spec: { roleType: "Global", permissions: ["hudson.model.Hudson.Read"] },
+    }));
+    mockUpdateJenkinsRole.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role: jenkins-viewer")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockUpdateJenkinsRole).toHaveBeenCalledTimes(1);
+    });
+    expect(mockUpdateJenkinsRole.mock.calls[0][2].metadata).toEqual(
+      expect.objectContaining({ name: "jenkins-viewer", resourceVersion: "7", labels: { owner: "ops" } }),
+    );
+  });
+
+  it("shows the conflict note when another writer changed the role", async () => {
+    mockGetJenkinsRole.mockResolvedValue(existingRole);
+    mockUpdateJenkinsRole.mockRejectedValueOnce(new ApiError(409, "conflict"));
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role: jenkins-viewer")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText(/Another user or tool changed this Jenkins role after you opened it/)).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});

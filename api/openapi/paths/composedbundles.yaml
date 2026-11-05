@@ -134,6 +134,13 @@
     operationId: updateComposedBundle
     tags: [composedbundles]
     summary: Updates a composed bundle.
+    description: >-
+      Send the metadata.resourceVersion of your read. The write then changes only that
+      version. A stale version, or a bundle deleted after the read, answers 409 and writes
+      nothing. A body without metadata.resourceVersion only creates the bundle. That body
+      needs the create permission as well as the update permission, and answers 403
+      without it. When the bundle exists, that body answers 409 and writes nothing. The
+      body replaces the stored bundle, so start from your read.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/ns'
@@ -157,6 +164,10 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
   delete:
     operationId: deleteComposedBundle
     tags: [composedbundles]

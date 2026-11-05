@@ -141,6 +141,13 @@
     operationId: updateVersionProfile
     tags: [provisioning]
     summary: Updates a JenkinsVersionProfile on a cluster.
+    description: >-
+      Send the metadata.resourceVersion of your read. The write then changes only that
+      version. A stale version, or a version profile deleted after the read, answers 409 and
+      writes nothing. A body without metadata.resourceVersion only creates the version
+      profile. That body needs the create permission as well as the update permission, and
+      answers 403 without it. When the version profile exists, that body answers 409 and
+      writes nothing. The body replaces the stored version profile, so start from your read.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/name'
@@ -163,6 +170,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
       "409":
         $ref: '../components/responses.yaml#/Conflict'
   delete:
