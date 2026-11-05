@@ -163,6 +163,7 @@ To end a build that does not stop, approve the deferred deletion. See
 [Control removal](../config/items.md#control-removal).
 
 Deleting a pool drains its free cells. It keeps its finalizer while a free cell waits for a build.
+Each pass of the delete writes the status counts. A nonzero `departedBuildCells` shows a cell that holds the finalizer. `PoolReady` keeps the value it had before the delete.
 A placed cell keeps every label and lives on as an ordinary
 cell, resolving its capacity from its own `spec.cell.maxTenants` or from `cells.maxTenantsPerCell`.
 

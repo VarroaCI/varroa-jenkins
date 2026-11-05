@@ -2120,6 +2120,173 @@ func TestCellPool_DeletedPoolHoldsTheFinalizerWhileACellRunsADepartedBuild(t *te
 	}
 }
 
+// TestCellPool_DeletedPoolReportsAHeldCell covers the status of a pool delete
+// while a cell holds the finalizer. Every pass writes the counts, and the
+// stored PoolReady condition keeps its value.
+func TestCellPool_DeletedPoolReportsAHeldCell(t *testing.T) {
+	store := crdstore.NewFake()
+	deleting := newPool(0)
+	deleting.Generation = 3
+	now := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	deleting.DeletionTimestamp = &now
+	deleting.Finalizers = []string{v1alpha1.CellPoolFinalizerDrain}
+	storedAt := metav1.NewTime(time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC))
+	deleting.Status = v1alpha1.CellPoolStatus{
+		ObservedGeneration: 2,
+		WarmCells:          2,
+		PlacedCells:        1,
+		Conditions: []metav1.Condition{{
+			Type:               v1alpha1.CellPoolConditionPoolReady,
+			Status:             metav1.ConditionTrue,
+			Reason:             v1alpha1.CellPoolReasonReady,
+			ObservedGeneration: 2,
+			LastTransitionTime: storedAt,
+		}},
+	}
+	crdstore.MustSeed(store, newProfile(), deleting,
+		departedBuildCell("cell-lts-2-555-0", nil, nil),
+		departedBuildCell("cell-lts-2-555-1", nil, []string{"team-b"}),
+		poolCellNamed("cell-lts-2-555-2", testProfileName, []string{"team-b"}))
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	ctx := context.Background()
+
+	// Tick 1: the clean cell is drained and the held cell survives.
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile tick 1: %v", err)
+	}
+	if cellExists(t, store, "cell-lts-2-555-0") {
+		t.Fatal("the clean free cell must be drained")
+	}
+	pool := getPool(t, store, testProfileName)
+	if !hasDrainFinalizer(pool) {
+		t.Fatal("the finalizer must hold while a held cell survives")
+	}
+	st := pool.Status
+	if st.WarmCells != 1 || st.DepartedBuildCells != 1 || st.PlacedCells != 1 {
+		t.Errorf("counts = warm %d departed %d placed %d, want 1 1 1",
+			st.WarmCells, st.DepartedBuildCells, st.PlacedCells)
+	}
+	if st.FreeTenantSlots != 9 || st.UnreadyCells != 2 {
+		t.Errorf("FreeTenantSlots %d UnreadyCells %d, want 9 and 2", st.FreeTenantSlots, st.UnreadyCells)
+	}
+	if len(st.Tenants) != 1 || st.Tenants[0] != "team-b" {
+		t.Errorf("Tenants = %v, want [team-b]", st.Tenants)
+	}
+	if st.ObservedGeneration != 3 {
+		t.Errorf("ObservedGeneration = %d, want 3", st.ObservedGeneration)
+	}
+	cond := findPoolReady(t, pool)
+	if cond.Status != metav1.ConditionTrue || cond.Reason != v1alpha1.CellPoolReasonReady {
+		t.Errorf("PoolReady = %+v, want True/Ready", cond)
+	}
+	if cond.ObservedGeneration != 2 || !cond.LastTransitionTime.Time.Equal(storedAt.Time) {
+		t.Errorf("PoolReady was rewritten during the delete: %+v", cond)
+	}
+
+	// Tick 2: the hold continues and the counts stay the same.
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile tick 2: %v", err)
+	}
+	pool = getPool(t, store, testProfileName)
+	if !hasDrainFinalizer(pool) {
+		t.Fatal("the finalizer must still hold on tick 2")
+	}
+	if pool.Status.WarmCells != 1 || pool.Status.DepartedBuildCells != 1 {
+		t.Errorf("tick 2 counts = warm %d departed %d, want 1 1",
+			pool.Status.WarmCells, pool.Status.DepartedBuildCells)
+	}
+
+	// Tick 3: the build ends, the cell drains, and the final pass writes the
+	// status before the finalizer goes.
+	crdstore.MustSeed(store, departedBuildCell("cell-lts-2-555-1", nil, nil))
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile tick 3: %v", err)
+	}
+	if cellExists(t, store, "cell-lts-2-555-1") {
+		t.Fatal("the cell must be drained once its build ends")
+	}
+	pool = getPool(t, store, testProfileName)
+	if hasDrainFinalizer(pool) {
+		t.Fatal("the finalizer must be removed once the drain completes")
+	}
+	if pool.Status.WarmCells != 0 || pool.Status.DepartedBuildCells != 0 || pool.Status.PlacedCells != 1 {
+		t.Errorf("final counts = warm %d departed %d placed %d, want 0 0 1",
+			pool.Status.WarmCells, pool.Status.DepartedBuildCells, pool.Status.PlacedCells)
+	}
+}
+
+// TestCellPool_DeletedPoolStatusWriteFailureStillReleasesTheFinalizer covers
+// a refused status write: the drain still completes and removes the finalizer.
+func TestCellPool_DeletedPoolStatusWriteFailureStillReleasesTheFinalizer(t *testing.T) {
+	store := crdstore.NewFake()
+	deleting := newPool(0)
+	now := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	deleting.DeletionTimestamp = &now
+	deleting.Finalizers = []string{v1alpha1.CellPoolFinalizerDrain}
+	crdstore.MustSeed(store, newProfile(), deleting,
+		poolCellNamed("cell-lts-2-555-0", testProfileName, nil))
+
+	gvr, err := crdstore.GVRFor[v1alpha1.CellPool]()
+	if err != nil {
+		t.Fatalf("GVRFor: %v", err)
+	}
+	store.FailAlways("patchstatus", gvr, errors.New("status write refused"))
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if cellExists(t, store, "cell-lts-2-555-0") {
+		t.Error("the clean free cell must be drained")
+	}
+	if hasDrainFinalizer(getPool(t, store, testProfileName)) {
+		t.Fatal("a refused status write must not hold the finalizer")
+	}
+}
+
+// TestCellPool_DeletedPoolStatusIsWrittenBeforeTheFinalizerRelease covers a
+// refused finalizer removal: the status the same pass wrote still reads the
+// counts after the drain. The fake cannot observe write order.
+func TestCellPool_DeletedPoolStatusIsWrittenBeforeTheFinalizerRelease(t *testing.T) {
+	store := crdstore.NewFake()
+	deleting := newPool(0)
+	now := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	deleting.DeletionTimestamp = &now
+	deleting.Finalizers = []string{v1alpha1.CellPoolFinalizerDrain}
+	crdstore.MustSeed(store, newProfile(), deleting,
+		departedBuildCell("cell-lts-2-555-0", nil, nil),
+		poolCellNamed("cell-lts-2-555-1", testProfileName, []string{"team-a"}))
+
+	gvr, err := crdstore.GVRFor[v1alpha1.CellPool]()
+	if err != nil {
+		t.Fatalf("GVRFor: %v", err)
+	}
+	store.FailAlways("patchmeta", gvr, errors.New("finalizer write refused"))
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	pool := getPool(t, store, testProfileName)
+	if pool.Status.WarmCells != 0 || pool.Status.PlacedCells != 1 {
+		t.Errorf("status = warm %d placed %d, want 0 1 after the drain",
+			pool.Status.WarmCells, pool.Status.PlacedCells)
+	}
+}
+
+// findPoolReady returns the PoolReady condition of pool, or fails the test.
+func findPoolReady(t *testing.T, pool *v1alpha1.CellPool) metav1.Condition {
+	t.Helper()
+	for _, c := range pool.Status.Conditions {
+		if c.Type == v1alpha1.CellPoolConditionPoolReady {
+			return c
+		}
+	}
+	t.Fatal("PoolReady condition missing")
+	return metav1.Condition{}
+}
+
 // hasDrainFinalizer reports whether the pool still holds the drain finalizer.
 func hasDrainFinalizer(pool *v1alpha1.CellPool) bool {
 	for _, f := range pool.Finalizers {
