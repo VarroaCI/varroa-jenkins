@@ -60,7 +60,7 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 	})
 
 	updatePD := mcp.NewTool("update_provisioning_defaults",
-		mcp.WithDescription("Update provisioning defaults configuration"),
+		mcp.WithDescription("Update provisioning defaults configuration. The tool sets only the fields you name. When another writer changes the object during the call, the tool reads it again and merges again, up to three times."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Provisioning defaults name")),
 		mcp.WithString("rootDomain", mcp.Description("Root domain for auto-derived ingress hosts")),
 		mcp.WithString("storageClass", mcp.Description("Default storage class")),
@@ -83,42 +83,30 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 		}
 		args := getArgs(req)
 		name, cluster := strArg(args, "name"), clusterOrDefault(args)
-		existing, err := readProvisioningDefaultsBase(ctx, deps, cluster, name)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to read provisioning defaults: %v", err)), nil
+		var out json.RawMessage
+		for attempt := 1; ; attempt++ {
+			// Each round reads the target again, so a conflict merges onto the newer object.
+			existing, err := readProvisioningDefaultsBase(ctx, deps, cluster, name)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("failed to read provisioning defaults: %v", err)), nil
+			}
+			mergeProvisioningDefaultsArgs(&existing.Spec, args)
+			out, err = writeProvisioningDefaults(ctx, deps, cluster, name, existing)
+			if err == nil {
+				break
+			}
+			if !isConflictErr(err) {
+				return mcp.NewToolResultError(fmt.Sprintf("failed to update provisioning defaults: %v", err)), nil
+			}
+			if attempt == pdWriteAttempts {
+				return mcp.NewToolResultError(fmt.Sprintf("provisioning defaults %s on cluster %s changed during each of %d attempts: call update_provisioning_defaults again", name, cluster, pdWriteAttempts)), nil
+			}
 		}
-		if v := strArg(args, "rootDomain"); v != "" {
-			existing.Spec.RootDomain = v
-		}
-		if v := strArg(args, "storageClass"); v != "" {
-			existing.Spec.StorageClass = v
-		}
-		if v := strArg(args, "defaultStorage"); v != "" {
-			existing.Spec.DefaultStorage = v
-		}
-		if v := strArg(args, "defaultVersion"); v != "" {
-			existing.Spec.DefaultVersion = v
-		}
-		if v := strArg(args, "defaultCPU"); v != "" {
-			existing.Spec.DefaultCPU = v
-		}
-		if v := strArg(args, "defaultMemory"); v != "" {
-			existing.Spec.DefaultMemory = v
-		}
-		raw, _ := json.Marshal(existing)
 		// routed records whether the write actually reached the named cluster.
 		// The else branch writes to the local store whatever cluster the caller
 		// asked for, so stamping it would invent a mutation on a cluster that
 		// was never touched.
 		routed := deps.ConfigBrood != nil
-		if routed {
-			raw, err = deps.ConfigBrood.UpdateProvisioningDefaults(ctx, cluster, name, raw)
-		} else {
-			err = crdstore.Apply[v1alpha1.ProvisioningDefaults](ctx, deps.Store, existing)
-		}
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to update provisioning defaults: %v", err)), nil
-		}
 		ev := activity.Event{
 			Type:    "provisioningdefaults.updated",
 			Message: "ProvisioningDefaults " + name + " updated",
@@ -128,7 +116,7 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 		} else {
 			emitActivity(ctx, deps, claims, ev)
 		}
-		return resultJSON(json.RawMessage(raw))
+		return resultJSON(out)
 	})
 
 	listJVP := mcp.NewTool("list_jenkins_version_profile",
@@ -291,6 +279,59 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 		})
 		return mcp.NewToolResultText("version profile " + name + " deleted"), nil
 	})
+}
+
+// pdWriteAttempts bounds the read-merge-write rounds of update_provisioning_defaults.
+// Each round reads the target again, so a conflict merges onto the newer object.
+const pdWriteAttempts = 3
+
+// mergeProvisioningDefaultsArgs sets each spec field that the caller named.
+// A field the caller leaves out keeps the stored value.
+func mergeProvisioningDefaultsArgs(spec *v1alpha1.ProvisioningDefaultsSpec, args map[string]any) {
+	if v := strArg(args, "rootDomain"); v != "" {
+		spec.RootDomain = v
+	}
+	if v := strArg(args, "storageClass"); v != "" {
+		spec.StorageClass = v
+	}
+	if v := strArg(args, "defaultStorage"); v != "" {
+		spec.DefaultStorage = v
+	}
+	if v := strArg(args, "defaultVersion"); v != "" {
+		spec.DefaultVersion = v
+	}
+	if v := strArg(args, "defaultCPU"); v != "" {
+		spec.DefaultCPU = v
+	}
+	if v := strArg(args, "defaultMemory"); v != "" {
+		spec.DefaultMemory = v
+	}
+}
+
+// writeProvisioningDefaults writes pd to the target cluster, or to the local
+// store when no config brood is wired. The write carries pd's resourceVersion.
+func writeProvisioningDefaults(ctx context.Context, deps *api.Dependencies, cluster, name string, pd *v1alpha1.ProvisioningDefaults) (json.RawMessage, error) {
+	if deps.ConfigBrood != nil {
+		raw, err := json.Marshal(pd)
+		if err != nil {
+			return nil, err
+		}
+		return deps.ConfigBrood.UpdateProvisioningDefaults(ctx, cluster, name, raw)
+	}
+	if err := crdstore.ApplyAt[v1alpha1.ProvisioningDefaults](ctx, deps.Store, pd); err != nil {
+		return nil, err
+	}
+	return json.Marshal(pd)
+}
+
+// isConflictErr reports a conflict answer from the local store or from a
+// member cluster over the bus.
+func isConflictErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var be *api.BroodError
+	return apierrors.IsConflict(err) || (errors.As(err, &be) && be.Code == bus.CodeConflict)
 }
 
 // readProvisioningDefaultsBase returns the stored spec that a patch merges onto.

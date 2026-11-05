@@ -614,6 +614,8 @@ func (c *ConfigCRUD) HandleProvisioningDefaultsGet(data []byte) []byte {
 }
 
 // HandleProvisioningDefaultsUpdate handles operator.<cluster>.provisioningdefaults.update.
+// An object with a resourceVersion updates only that version; a stale or deleted
+// read answers conflict. An object without one is an upsert.
 func (c *ConfigCRUD) HandleProvisioningDefaultsUpdate(data []byte) []byte {
 	var req bus.ConfigApplyRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -628,7 +630,13 @@ func (c *ConfigCRUD) HandleProvisioningDefaultsUpdate(data []byte) []byte {
 	cr.Name = req.Name
 	cr.APIVersion = "varroa.dev/v1alpha1"
 	cr.Kind = "ProvisioningDefaults"
-	if err := crdstore.Apply[v1alpha1.ProvisioningDefaults](ctx, c.Store, &cr); err != nil {
+	if err := crdstore.ApplyAt[v1alpha1.ProvisioningDefaults](ctx, c.Store, &cr); err != nil {
+		if apierrors.IsConflict(err) {
+			return c.configReply(bus.ConfigApplyResponse{
+				Error: fmt.Sprintf("provisioningdefaults %q changed after it was read: read it again and retry", req.Name),
+				Code:  bus.CodeConflict,
+			})
+		}
 		return c.configReply(bus.ConfigApplyResponse{Error: err.Error(), Code: k8sConfigErrToCode(err)})
 	}
 	raw, err := marshalCR(&cr)

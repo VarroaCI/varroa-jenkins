@@ -11,6 +11,7 @@ import styles from "./settings.module.css";
 
 const EMPTY_ANNOTATION = { key: "", value: "" };
 const MISSING_NOTE = "This cluster has no provisioning defaults. Save creates them.";
+const CONFLICT_NOTE = "Another user or tool changed these defaults after this page read them. Select Reload to read the new values, then make your change again. Reload discards your unsaved edits.";
 
 function emptyDefaults(): ProvisioningDefaults {
   return {
@@ -34,6 +35,8 @@ export default function SettingsProvisioningTab() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [missing, setMissing] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [selectedCluster, setSelectedCluster] = useState("core");
   const { permissions } = useAuth();
   const [annotations, setAnnotations] = useState<
@@ -45,6 +48,7 @@ export default function SettingsProvisioningTab() {
     setError(null);
     setSaved(false);
     setMissing(false);
+    setConflict(false);
     getProvisioningDefaults(selectedCluster)
       .then((cfg) => {
         setConfig(cfg);
@@ -59,7 +63,7 @@ export default function SettingsProvisioningTab() {
         }
         setError(e.message);
       });
-  }, [selectedCluster]);
+  }, [selectedCluster, reloadKey]);
 
   // The intro and the cluster selector render in every state, so a user who
   // picked an unreachable cluster can switch back. The form root stays the
@@ -125,6 +129,10 @@ export default function SettingsProvisioningTab() {
       setMissing(false);
       setSaved(true);
     } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 409) {
+        setConflict(true);
+        return;
+      }
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
@@ -189,6 +197,12 @@ export default function SettingsProvisioningTab() {
       <Button type="button" variant="ghost" onClick={() => setAnnotations((prev) => [...prev, { ...EMPTY_ANNOTATION }])} className={`${styles.backLink} ${styles.addAction}`}>+ Add Annotation</Button>
 
       <div className={styles.formGroup}>
+        {conflict && (
+          <div role="alert" className={styles.errorMsg}>
+            <p>{CONFLICT_NOTE}</p>
+            <Button type="button" onClick={() => setReloadKey((k) => k + 1)}>Reload</Button>
+          </div>
+        )}
         {saved && <span className={styles.saved}>Saved.</span>}
         {canSave ? (
           <Button type="submit" variant="primary" disabled={saving}>{saving ? "Saving..." : "Save"}</Button>

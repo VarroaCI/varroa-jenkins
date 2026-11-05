@@ -364,6 +364,42 @@ describe("Settings provisioning tab without varroa-defaults", () => {
     expect(second.metadata.resourceVersion).toBe("1");
     expect(second.spec.storageClass).toBe("fast");
   });
+
+
+  it("shows the conflict note and keeps the form on a 409 save", async () => {
+    mockGetConfig.mockResolvedValue(
+      createProvisioningConfig({ metadata: { name: "varroa-defaults", resourceVersion: "1" }, spec: { storageClass: "fast" } }),
+    );
+    mockUpdateConfig.mockRejectedValue(new ApiError(409, "changed after it was read"));
+    renderSettings();
+
+    await userEvent.type(await screen.findByLabelText("Storage Class"), "x");
+    await userEvent.click(screen.getByText("Save"));
+
+    expect(await screen.findByText(/Another user or tool changed these defaults/)).toBeInTheDocument();
+    expect(screen.getByText("Save")).toBeInTheDocument();
+    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
+  });
+
+  it("reloads the defaults when Reload is clicked after a conflict", async () => {
+    mockGetConfig
+      .mockResolvedValueOnce(
+        createProvisioningConfig({ metadata: { name: "varroa-defaults", resourceVersion: "1" }, spec: { storageClass: "fast" } }),
+      )
+      .mockResolvedValueOnce(
+        createProvisioningConfig({ metadata: { name: "varroa-defaults", resourceVersion: "2" }, spec: { storageClass: "rotated" } }),
+      );
+    mockUpdateConfig.mockRejectedValue(new ApiError(409, "changed after it was read"));
+    renderSettings();
+
+    await userEvent.type(await screen.findByLabelText("Storage Class"), "x");
+    await userEvent.click(screen.getByText("Save"));
+    await userEvent.click(await screen.findByRole("button", { name: "Reload" }));
+
+    await waitFor(() => expect(screen.getByLabelText("Storage Class")).toHaveValue("rotated"));
+    expect(screen.queryByText(/Another user or tool changed these defaults/)).not.toBeInTheDocument();
+    expect(mockGetConfig).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("Settings provisioning tab cluster selector on a read error", () => {

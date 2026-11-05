@@ -22,6 +22,10 @@
     operationId: updateProvisioningDefaults
     tags: [provisioning]
     summary: Updates provisioning defaults for a cluster.
+    description: >-
+      The body can carry metadata.resourceVersion. A stale version, or an object
+      deleted after the read, answers 409 and writes nothing. A body without one
+      creates or replaces the object.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/name'
@@ -44,6 +48,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
 
 /api/v1/clusters/{cluster}/provisioning/config:
   get:
