@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { BFF_BASE, getMyAssistant, listApiKeys } from "../api/client";
@@ -24,12 +24,15 @@ export function ConnectClientTile() {
   const assistant = useQuery({ queryKey: ["me-assistant"], queryFn: getMyAssistant, retry: false });
   const [tab, setTab] = useState<string>(MCP_CLIENT_SNIPPETS[0].id);
   const [copied, setCopied] = useState(false);
+  const revertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 2000);
-    return () => clearTimeout(timer);
-  }, [copied]);
+  // Clears a pending revert on unmount only. It never runs on a copy, so it cannot cancel a live label.
+  useEffect(
+    () => () => {
+      if (revertTimer.current !== null) clearTimeout(revertTimer.current);
+    },
+    []
+  );
 
   const assistantOn = !!(assistant.data?.available && assistant.data?.enabled);
   if (!keys.isSuccess || keys.data.items.length > 0 || assistant.isPending || assistantOn) {
@@ -43,6 +46,12 @@ export function ConnectClientTile() {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
+      // Each copy restarts the revert timer, so a second copy keeps the label for a full 2000 ms.
+      if (revertTimer.current !== null) clearTimeout(revertTimer.current);
+      revertTimer.current = setTimeout(() => {
+        revertTimer.current = null;
+        setCopied(false);
+      }, 2000);
     } catch {
       // The address stays selectable on screen when the clipboard is blocked.
     }

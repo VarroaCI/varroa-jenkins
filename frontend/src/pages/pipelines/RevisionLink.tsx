@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Copy, Check } from "lucide-react";
 import { Button } from "../../components/Button";
 import { revisionHref } from "./forgeLink";
@@ -24,12 +24,15 @@ interface RevisionLinkProps {
 export function RevisionLink({ revision, repoUrl, forge, length }: RevisionLinkProps) {
   const href = revisionHref(repoUrl, forge, revision);
   const [copied, setCopied] = useState(false);
+  const revertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), COPIED_NOTE_MS);
-    return () => clearTimeout(timer);
-  }, [copied]);
+  // Clears a pending revert on unmount only. It never runs on a copy, so it cannot cancel a live label.
+  useEffect(
+    () => () => {
+      if (revertTimer.current !== null) clearTimeout(revertTimer.current);
+    },
+    []
+  );
 
   if (href) {
     return (
@@ -49,6 +52,12 @@ export function RevisionLink({ revision, repoUrl, forge, length }: RevisionLinkP
     try {
       await navigator.clipboard.writeText(revision);
       setCopied(true);
+      // Each copy restarts the revert timer, so a second copy keeps the label for a full window.
+      if (revertTimer.current !== null) clearTimeout(revertTimer.current);
+      revertTimer.current = setTimeout(() => {
+        revertTimer.current = null;
+        setCopied(false);
+      }, COPIED_NOTE_MS);
     } catch {
       setCopied(false);
     }
