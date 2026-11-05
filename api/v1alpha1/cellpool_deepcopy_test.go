@@ -42,6 +42,7 @@ func TestCellPoolDeepCopyIsolatesSubObjects(t *testing.T) {
 			PlacedCells:        1,
 			UnreadyCells:       0,
 			FreeTenantSlots:    3,
+			DepartedBuildCells: 1,
 			Tenants:            []string{"alpha", "beta"},
 			Conditions: []metav1.Condition{
 				{Type: "PoolReady", Status: metav1.ConditionTrue, Reason: "Ready"},

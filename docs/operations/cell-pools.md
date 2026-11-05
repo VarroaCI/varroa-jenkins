@@ -34,6 +34,7 @@ change would orphan every one of them. To serve another profile, create another 
 | `placedCells` | owned cells that hold at least one tenant |
 | `unreadyCells` | owned cells whose `CellReady` condition is not `True` |
 | `freeTenantSlots` | spare capacity of the placed cells only |
+| `departedBuildCells` | warm cells that still run a build of a tenant that left them; `warmCells` counts them too |
 | `tenants` | every tenant on the pool, sorted |
 
 `PoolReady` reasons:
@@ -154,6 +155,8 @@ pool keeps that cell until the build ends, and drains another free cell first. I
 
 - `status.cell.appliedTenants` names the tenant until the next items walk.
 - `status.pendingItemDeletions` names the folder while its build runs.
+
+The pool status counts these cells in `departedBuildCells`.
 
 The pool does not keep a cell with `status.cell.evacuate` set, because its builds are already lost.
 To end a build that does not stop, approve the deferred deletion. See

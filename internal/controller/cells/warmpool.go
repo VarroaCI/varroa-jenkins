@@ -1019,7 +1019,9 @@ func (r *WarmPoolReconciler) deleteFreeCell(ctx context.Context, pool *v1alpha1.
 	return true
 }
 
-// writeStatus computes and patches the pool status (design D6). owned is nil
+// writeStatus computes and patches the pool status (design D6). It counts a
+// warm cell in DepartedBuildCells with cellHoldsDepartedBuild, the rule the
+// drain and the re-stamp use, so the count and the drain agree. owned is nil
 // when the pass stopped before it listed anything, which happens only for a
 // missing profile. version is the version the pass tested against the fill
 // gate, empty on the missing-profile path, used only by the
@@ -1032,6 +1034,9 @@ func (r *WarmPoolReconciler) writeStatus(ctx context.Context, pool *v1alpha1.Cel
 		count := cellTenantCount(cell)
 		if count == 0 {
 			status.WarmCells++
+			if cellHoldsDepartedBuild(cell) {
+				status.DepartedBuildCells++
+			}
 		} else {
 			status.PlacedCells++
 			capacity := resolveCellCapacity(cellMaxTenants(cell), &summary, r.chartMaxTenants())

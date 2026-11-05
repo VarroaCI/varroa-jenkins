@@ -6686,6 +6686,11 @@ components:
           items:
             $ref: '#/components/schemas/components_schemas_CellPoolCondition'
           type: array
+        departedBuildCells:
+          description: Warm cells that still run a build of a tenant that left them.
+            The drain skips these cells. warmCells also counts them.
+          format: int32
+          type: integer
         freeTenantSlots:
           description: Spare capacity of the placed cells only. warmCells already
             reports the empty ones.
@@ -6716,6 +6721,7 @@ components:
       - placedCells
       - unreadyCells
       - freeTenantSlots
+      - departedBuildCells
       type: object
     components_schemas_CellSignatureRequester:
       additionalProperties: false

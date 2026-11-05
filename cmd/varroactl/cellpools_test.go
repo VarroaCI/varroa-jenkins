@@ -22,7 +22,8 @@ func cellPoolJSON(warm int) map[string]any {
 		},
 		"status": map[string]any{
 			"warmCells": warm, "placedCells": 1, "unreadyCells": 0, "freeTenantSlots": 9,
-			"tenants": []string{"alpha", "beta"},
+			"departedBuildCells": 1,
+			"tenants":            []string{"alpha", "beta"},
 			"conditions": []map[string]any{
 				{"type": "PoolReady", "status": "True", "reason": "Ready"},
 			},
@@ -97,7 +98,7 @@ func TestCellPools_Describe(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	text := out.String()
-	for _, want := range []string{"alpha", "beta", "PoolReady", "Ready"} {
+	for _, want := range []string{"alpha", "beta", "PoolReady", "Ready", "Warm cells kept for a build: 1"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("describe output missing %q:\n%s", want, text)
 		}

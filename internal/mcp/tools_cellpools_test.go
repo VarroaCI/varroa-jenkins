@@ -31,7 +31,7 @@ func cellPoolDeps(t *testing.T, verbs ...string) (*api.Dependencies, *crdstore.F
 					PodOverrides: &v1alpha1.PodOverrides{NodeSelector: map[string]string{"pool": "cells"}},
 				},
 			},
-			Status: v1alpha1.CellPoolStatus{WarmCells: 1},
+			Status: v1alpha1.CellPoolStatus{WarmCells: 1, DepartedBuildCells: 1},
 		},
 		&v1alpha1.CellPool{
 			ObjectMeta: metav1.ObjectMeta{Name: "big"},
@@ -99,6 +99,9 @@ func TestListCellPools(t *testing.T) {
 	}
 	if got.WarmCells != 1 {
 		t.Errorf("the summary must carry every status count, got %+v", got)
+	}
+	if got.DepartedBuildCells != 1 {
+		t.Errorf("the summary must carry departedBuildCells, got %+v", got)
 	}
 }
 

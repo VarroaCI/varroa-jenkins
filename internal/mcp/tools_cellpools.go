@@ -92,7 +92,7 @@ func registerCellPoolTools(mcpServer *server.MCPServer, deps *api.Dependencies) 
 
 	getPool := mcp.NewTool("get_cell_pool",
 		mcp.WithDescription("Get one CellPool's spec and status. status reports warmCells, "+
-			"placedCells, unreadyCells, freeTenantSlots, the tenant list, and the PoolReady "+
+			"placedCells, unreadyCells, freeTenantSlots, departedBuildCells, the tenant list, and the PoolReady "+
 			"condition. The result names the pool's cluster."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("CellPool name")),
 		mcp.WithString("cluster", mcp.Description("Cluster that holds the pool. Default: the core cluster.")),
@@ -168,6 +168,7 @@ type cellPoolSummary struct {
 	MaxRunsPerTenant   int32    `json:"maxRunsPerTenant"`
 	UnreadyGracePeriod string   `json:"unreadyGracePeriod,omitempty"`
 	WarmCells          int32    `json:"warmCells"`
+	DepartedBuildCells int32    `json:"departedBuildCells"`
 	PlacedCells        int32    `json:"placedCells"`
 	UnreadyCells       int32    `json:"unreadyCells"`
 	FreeTenantSlots    int32    `json:"freeTenantSlots"`
@@ -181,18 +182,19 @@ func summarizeCellPool(cluster string, pool *v1alpha1.CellPool) cellPoolSummary 
 		return cellPoolSummary{Cluster: cluster}
 	}
 	s := cellPoolSummary{
-		Cluster:           cluster,
-		Name:              pool.Name,
-		ProfileRef:        pool.Spec.ProfileRef,
-		Warm:              pool.Spec.Warm,
-		MaxCells:          pool.Spec.MaxCells,
-		MaxTenantsPerCell: pool.Spec.MaxTenantsPerCell,
-		MaxRunsPerTenant:  pool.Spec.MaxRunsPerTenant,
-		WarmCells:         pool.Status.WarmCells,
-		PlacedCells:       pool.Status.PlacedCells,
-		UnreadyCells:      pool.Status.UnreadyCells,
-		FreeTenantSlots:   pool.Status.FreeTenantSlots,
-		Tenants:           pool.Status.Tenants,
+		Cluster:            cluster,
+		Name:               pool.Name,
+		ProfileRef:         pool.Spec.ProfileRef,
+		Warm:               pool.Spec.Warm,
+		MaxCells:           pool.Spec.MaxCells,
+		MaxTenantsPerCell:  pool.Spec.MaxTenantsPerCell,
+		MaxRunsPerTenant:   pool.Spec.MaxRunsPerTenant,
+		WarmCells:          pool.Status.WarmCells,
+		DepartedBuildCells: pool.Status.DepartedBuildCells,
+		PlacedCells:        pool.Status.PlacedCells,
+		UnreadyCells:       pool.Status.UnreadyCells,
+		FreeTenantSlots:    pool.Status.FreeTenantSlots,
+		Tenants:            pool.Status.Tenants,
 	}
 	if pool.Spec.UnreadyGracePeriod != nil {
 		s.UnreadyGracePeriod = pool.Spec.UnreadyGracePeriod.Duration.String()
@@ -216,6 +218,7 @@ var cellPoolListOutputSchema = withClustersProperty(listOutputSchema("Default su
 	{Name: "maxRunsPerTenant", Type: "integer", Desc: "Cap on the builds one tenant runs at once on one cell of the pool. 0 means no cap. Set it on the CellPool object, not through update_cell_pool."},
 	{Name: "unreadyGracePeriod", Type: "string", Desc: "How long a pool cell may stay unready before the operator rolls its pod."},
 	{Name: "warmCells", Type: "integer", Desc: "Owned cells that hold no tenant."},
+	{Name: "departedBuildCells", Type: "integer", Desc: "Warm cells that still run a build of a tenant that left them. The drain skips them."},
 	{Name: "placedCells", Type: "integer", Desc: "Owned cells that hold at least one tenant."},
 	{Name: "unreadyCells", Type: "integer", Desc: "Owned cells whose CellReady condition is not True."},
 	{Name: "freeTenantSlots", Type: "integer", Desc: "Spare capacity of the placed cells only."},

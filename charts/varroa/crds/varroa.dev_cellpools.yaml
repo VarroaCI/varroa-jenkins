@@ -3842,7 +3842,7 @@ spec:
                 || self.maxCells >= self.warm'
           status:
             description: |-
-              CellPoolStatus reports the pool's live cell and tenant counts. The four
+              CellPoolStatus reports the pool's live cell and tenant counts. The five
               counters carry no omitempty, so a merge patch writes a count that falls
               to zero.
             properties:
@@ -3903,6 +3903,14 @@ spec:
                   - type
                   type: object
                 type: array
+              departedBuildCells:
+                description: |-
+                  DepartedBuildCells counts the warm cells that still run a build of a
+                  tenant that left them. The drain skips these cells. WarmCells also
+                  counts them. The schema does not require the field, so a pool stored
+                  before the field existed stays valid.
+                format: int32
+                type: integer
               freeTenantSlots:
                 description: |-
                   FreeTenantSlots sums the spare capacity of the placed cells only.

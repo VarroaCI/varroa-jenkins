@@ -74,6 +74,7 @@ function pool(overrides?: Partial<CellPool>): CellPool {
       placedCells: 2,
       unreadyCells: 0,
       freeTenantSlots: 8,
+      departedBuildCells: 1,
       conditions: [{ type: "PoolReady", status: "True", reason: "Ready" }],
     },
     ...overrides,
@@ -157,6 +158,12 @@ describe("The pool block", () => {
     renderPage();
     expect(screen.getByText("Warm cells")).toBeInTheDocument();
     expect(screen.getByText("Free slots on placed cells")).toBeInTheDocument();
+  });
+
+  it("states the warm cells kept for a build", () => {
+    renderPage();
+    const label = screen.getByText("Warm cells kept for a build");
+    expect(label.nextElementSibling?.textContent).toBe("1");
   });
 
   it("states the profile, the caps, and the PoolReady reason", () => {
@@ -629,6 +636,7 @@ function notReadyPool(): CellPool {
       placedCells: 0,
       unreadyCells: 0,
       freeTenantSlots: 0,
+      departedBuildCells: 0,
       conditions: [
         {
           type: "PoolReady",

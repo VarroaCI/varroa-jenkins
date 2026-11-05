@@ -56,6 +56,7 @@ and the pool, for example `east / lts-2-588`. Each block states:
 | Value | Meaning |
 |---|---|
 | Warm cells | Cells that hold no tenant |
+| Warm cells kept for a build | Warm cells that still run a build of a tenant that left them. The drain skips them. |
 | Placed cells | Cells that hold at least one tenant |
 | Unready cells | Cells whose `CellReady` condition is not True |
 | Free slots on placed cells | The spare capacity of the placed cells only |

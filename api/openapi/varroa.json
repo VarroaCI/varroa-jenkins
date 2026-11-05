@@ -8920,6 +8920,11 @@
             },
             "type": "array"
           },
+          "departedBuildCells": {
+            "description": "Warm cells that still run a build of a tenant that left them. The drain skips these cells. warmCells also counts them.",
+            "format": "int32",
+            "type": "integer"
+          },
           "freeTenantSlots": {
             "description": "Spare capacity of the placed cells only. warmCells already reports the empty ones.",
             "format": "int32",
@@ -8956,7 +8961,8 @@
           "warmCells",
           "placedCells",
           "unreadyCells",
-          "freeTenantSlots"
+          "freeTenantSlots",
+          "departedBuildCells"
         ],
         "type": "object"
       },
