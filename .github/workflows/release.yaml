@@ -319,7 +319,14 @@ jobs:
           # CLI must not need a matching libc.
           # Windows gets a .exe inside a .zip. Every other target gets a
           # .tar.gz with a bare binary.
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+          # hack/check-varroactl-platforms.sh holds the one platform list.
+          # The PR Checks job builds the same list.
+          targets=$(bash hack/check-varroactl-platforms.sh --list)
+          if [ -z "$targets" ]; then
+            echo "FATAL: the varroactl platform list is empty" >&2
+            exit 1
+          fi
+          for target in $targets; do
             os="${target%/*}"; arch="${target#*/}"
             bin=varroactl
             if [ "$os" = windows ]; then bin=varroactl.exe; fi
@@ -362,12 +369,17 @@ jobs:
           # Enumerate the exact expected assets, never `dist/*` — the same
           # no-glob rule the chart push follows. A stray file in dist/ must
           # fail the upload loudly, not ship as a release asset.
+          # The platform list comes from the same script as the build step.
+          targets=$(bash hack/check-varroactl-platforms.sh --list)
           assets=()
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+          for target in $targets; do
             os="${target%/*}"; arch="${target#*/}"
-            assets+=("dist/varroactl_${VERSION}_${os}_${arch}.tar.gz")
+            if [ "$os" = windows ]; then
+              assets+=("dist/varroactl_${VERSION}_${os}_${arch}.zip")
+            else
+              assets+=("dist/varroactl_${VERSION}_${os}_${arch}.tar.gz")
+            fi
           done
-          assets+=("dist/varroactl_${VERSION}_windows_amd64.zip")
           assets+=(dist/SHA256SUMS)
 
           # Shared by both branches below: appended under release-please's
