@@ -77,6 +77,15 @@ func (f *fakeProvisioningClient) GetConfigMap(_ context.Context, name, _ string)
 	return nil, k8serrors.NewNotFound(v1alpha1.Resource("configmaps"), name)
 }
 
+// serveRoutedProvisioningConfig sends method to the cluster-scoped provisioning
+// config route through NewRouter, the path the server really serves.
+func serveRoutedProvisioningConfig(deps *Dependencies, method string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, "/api/v1/clusters/core/provisioning/config", nil)
+	w := httptest.NewRecorder()
+	NewRouter(deps).ServeHTTP(w, req)
+	return w
+}
+
 func TestHandleProvisioningConfig(t *testing.T) {
 	t.Run("all fields present", func(t *testing.T) {
 		client := &fakeProvisioningClient{
@@ -102,10 +111,7 @@ func TestHandleProvisioningConfig(t *testing.T) {
 			Logger:        slog.Default(),
 			DashboardHost: "varroa.example.com",
 		}
-		srv := NewServer(deps)
-		req := httptest.NewRequest(http.MethodGet, "/provisioning/config", nil)
-		w := httptest.NewRecorder()
-		srv.HandleProvisioningConfig(w, req)
+		w := serveRoutedProvisioningConfig(deps, http.MethodGet)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -148,10 +154,7 @@ func TestHandleProvisioningConfig(t *testing.T) {
 			},
 		}
 		deps := &Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default()}
-		srv := NewServer(deps)
-		req := httptest.NewRequest(http.MethodGet, "/provisioning/config", nil)
-		w := httptest.NewRecorder()
-		srv.HandleProvisioningConfig(w, req)
+		w := serveRoutedProvisioningConfig(deps, http.MethodGet)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d", w.Code)
@@ -178,10 +181,7 @@ func TestHandleProvisioningConfig(t *testing.T) {
 			fakeResourceClient: *newFakeResourceClient(),
 		}
 		deps := &Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default()}
-		srv := NewServer(deps)
-		req := httptest.NewRequest(http.MethodGet, "/provisioning/config", nil)
-		w := httptest.NewRecorder()
-		srv.HandleProvisioningConfig(w, req)
+		w := serveRoutedProvisioningConfig(deps, http.MethodGet)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d", w.Code)
@@ -205,10 +205,7 @@ func TestHandleProvisioningConfig(t *testing.T) {
 			},
 		}
 		deps := &Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default()}
-		srv := NewServer(deps)
-		req := httptest.NewRequest(http.MethodGet, "/provisioning/config", nil)
-		w := httptest.NewRecorder()
-		srv.HandleProvisioningConfig(w, req)
+		w := serveRoutedProvisioningConfig(deps, http.MethodGet)
 
 		var resp provisioningConfigResponse
 		json.Unmarshal(w.Body.Bytes(), &resp)
@@ -220,15 +217,43 @@ func TestHandleProvisioningConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("repeated namespace entries are listed once", func(t *testing.T) {
+		client := &fakeProvisioningClient{
+			fakeResourceClient: *newFakeResourceClient(),
+			provisioning: &v1alpha1.ProvisioningDefaults{
+				ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+				Spec: v1alpha1.ProvisioningDefaultsSpec{
+					DefaultNamespace: "varroa",
+					Namespaces:       []string{"a", "b", "a", "varroa"},
+				},
+			},
+		}
+		deps := &Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default()}
+		w := serveRoutedProvisioningConfig(deps, http.MethodGet)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp provisioningConfigResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		want := []string{"varroa", "a", "b"}
+		if len(resp.Namespaces) != len(want) {
+			t.Fatalf("namespaces: got %v, want %v", resp.Namespaces, want)
+		}
+		for i := range want {
+			if resp.Namespaces[i] != want[i] {
+				t.Errorf("namespaces[%d]: got %q, want %q (full: %v)", i, resp.Namespaces[i], want[i], resp.Namespaces)
+			}
+		}
+	})
+
 	t.Run("method not allowed", func(t *testing.T) {
 		client := &fakeProvisioningClient{
 			fakeResourceClient: *newFakeResourceClient(),
 		}
 		deps := &Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default()}
-		srv := NewServer(deps)
-		req := httptest.NewRequest(http.MethodPost, "/provisioning/config", nil)
-		w := httptest.NewRecorder()
-		srv.HandleProvisioningConfig(w, req)
+		w := serveRoutedProvisioningConfig(deps, http.MethodPost)
 		if w.Code != http.StatusMethodNotAllowed {
 			t.Errorf("expected 405, got %d", w.Code)
 		}
@@ -268,9 +293,7 @@ func TestBuildVersionCatalog_EntryAdditions(t *testing.T) {
 			Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.570", Channel: "weekly"},
 		},
 	}
-	client := &fakeProvisioningClient{fakeResourceClient: *newFakeResourceClient(), profiles: profiles}
-	srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default()})
-	entries := srv.buildVersionCatalog(context.Background())
+	entries := buildVersionCatalogFromProfiles(profiles)
 
 	byName := map[string]VersionCatalogEntry{}
 	for _, e := range entries {
@@ -323,9 +346,7 @@ func TestBuildVersionCatalog_OrderingDesc(t *testing.T) {
 	}
 	// Shuffled input.
 	profiles := []*v1alpha1.JenkinsVersionProfile{mk("2.540"), mk("2.570"), mk("2.552"), mk("2.552.3")}
-	client := &fakeProvisioningClient{fakeResourceClient: *newFakeResourceClient(), profiles: profiles}
-	srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default()})
-	entries := srv.buildVersionCatalog(context.Background())
+	entries := buildVersionCatalogFromProfiles(profiles)
 
 	got := make([]string, 0, len(entries))
 	for _, e := range entries {
