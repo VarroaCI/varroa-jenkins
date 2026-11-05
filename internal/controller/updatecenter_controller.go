@@ -117,6 +117,78 @@ type UpdateCenterReconciler struct {
 	// tiers maps an LTS core to the stable tier that upstream publishes metadata
 	// for. A nil index keeps the core-version URL.
 	tiers *ucmeta.TierIndex
+
+	// seedMu guards seedRefused. seedRefused maps a seed ref to the digest that the
+	// update center refused. It is process-local, so a restart or a leader change
+	// tries each refused ref once more.
+	seedMu      sync.Mutex
+	seedRefused map[string]seedRefusal
+}
+
+// seedRefusal records one refused seed digest and the status text that reports it.
+type seedRefusal struct {
+	digest  string
+	failure string
+}
+
+// seedImportRefusal is an import answer that refuses the pack content.
+type seedImportRefusal struct {
+	code int
+	body string
+}
+
+func (e *seedImportRefusal) Error() string {
+	return fmt.Sprintf("import rejected: HTTP %d: %s", e.code, e.body)
+}
+
+// refusesSeedContent reports whether an import status refuses the pack content.
+// A 400 or 413 depends only on the posted layout, so a new digest is the only
+// change that can clear it. Other codes can clear without a new digest.
+func refusesSeedContent(code int) bool {
+	return code == http.StatusBadRequest || code == http.StatusRequestEntityTooLarge
+}
+
+// refusedSeed reports the stored failure for a ref whose refused digest is still
+// current. A refusal for another digest is dropped, so the ref is pulled again.
+func (r *UpdateCenterReconciler) refusedSeed(ref, digest string) (string, bool) {
+	r.seedMu.Lock()
+	defer r.seedMu.Unlock()
+	refusal, ok := r.seedRefused[ref]
+	if !ok {
+		return "", false
+	}
+	if refusal.digest != digest {
+		delete(r.seedRefused, ref)
+		return "", false
+	}
+	return refusal.failure, true
+}
+
+// rememberSeedRefusal stores a refused digest for a ref. The map is created on
+// first use, because some tests build the reconciler as a struct literal.
+func (r *UpdateCenterReconciler) rememberSeedRefusal(ref, digest, failure string) {
+	r.seedMu.Lock()
+	defer r.seedMu.Unlock()
+	if r.seedRefused == nil {
+		r.seedRefused = make(map[string]seedRefusal)
+	}
+	r.seedRefused[ref] = seedRefusal{digest: digest, failure: failure}
+}
+
+// keepSeedRefusals drops every refusal whose ref is not in refs. A ref removed
+// from spec.seed.refs must not keep its refusal after it is declared again.
+func (r *UpdateCenterReconciler) keepSeedRefusals(refs []string) {
+	r.seedMu.Lock()
+	defer r.seedMu.Unlock()
+	keep := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		keep[ref] = true
+	}
+	for ref := range r.seedRefused {
+		if !keep[ref] {
+			delete(r.seedRefused, ref)
+		}
+	}
 }
 
 // SetUpstreamTiers sets the tier index that maps each LTS core to its metadata
@@ -299,9 +371,11 @@ func (r *UpdateCenterReconciler) checkOCIStorage(ctx context.Context, uc *v1alph
 
 // reconcileSeedImport iterates spec.seed.refs, resolves each to a digest,
 // skips already-imported digests, pulls + tars + POSTs new ones, and updates
-// status.seedImportedDigests.
+// status.seedImportedDigests. A digest that the update center refused with a
+// 400 or 413 is not pulled again until the ref resolves to another digest.
 func (r *UpdateCenterReconciler) reconcileSeedImport(ctx context.Context, uc *v1alpha1.UpdateCenter, status *v1alpha1.UpdateCenterStatus, logger *slog.Logger) {
 	refs := uc.Spec.Seed.Refs
+	r.keepSeedRefusals(refs)
 
 	// Vacuous case: empty refs → SeedImported=True.
 	if len(refs) == 0 {
@@ -395,8 +469,23 @@ func (r *UpdateCenterReconciler) reconcileSeedImport(ctx context.Context, uc *v1
 			continue
 		}
 
+		// A refused digest is not pulled again. Only the registry HEAD ran above.
+		if failure, ok := r.refusedSeed(ref, digest); ok {
+			failures = append(failures, failure)
+			refLogger.Debug("seed digest was refused, skipping the pull", "digest", digest)
+			continue
+		}
+
 		// §3.3b — fetch + POST: pull, tar, POST to import endpoint.
 		if err := r.importSeedRef(ctx, ref, token, credentialConfigPath); err != nil {
+			var refusal *seedImportRefusal
+			if errors.As(err, &refusal) {
+				failure := fmt.Sprintf("%s: import refused for %s, retried when the digest changes: %v", ref, digest, err)
+				r.rememberSeedRefusal(ref, digest, failure)
+				failures = append(failures, failure)
+				refLogger.Warn("update center refused seed ref", "digest", digest, "error", err)
+				continue
+			}
 			failures = append(failures, fmt.Sprintf("%s: import: %v", ref, err))
 			refLogger.Warn("failed to import seed ref", "error", err)
 			continue
@@ -446,7 +535,8 @@ func (r *UpdateCenterReconciler) resolveSeedRef(ctx context.Context, ref, creden
 }
 
 // importSeedRef pulls a ref into a temp OCI layout, tars it, and POSTs to
-// the update-center import endpoint. §3.3b.
+// the update-center import endpoint. §3.3b. A refused pack returns a
+// *seedImportRefusal; every other failure returns a plain error.
 func (r *UpdateCenterReconciler) importSeedRef(ctx context.Context, ref, token, credentialConfigPath string) error {
 	// 1. Create a RegistryStore for the source ref.
 	srcStore, err := r.newRegistryStore(ref, oci.RegistryOptions{CredentialConfigPath: credentialConfigPath})
@@ -494,7 +584,11 @@ func (r *UpdateCenterReconciler) importSeedRef(ctx context.Context, ref, token, 
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("import rejected: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		msg := strings.TrimSpace(string(body))
+		if refusesSeedContent(resp.StatusCode) {
+			return &seedImportRefusal{code: resp.StatusCode, body: msg}
+		}
+		return fmt.Errorf("import rejected: HTTP %d: %s", resp.StatusCode, msg)
 	}
 
 	return nil
