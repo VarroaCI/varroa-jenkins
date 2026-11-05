@@ -1,6 +1,10 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -94,8 +98,8 @@ spec:
 	if !ok {
 		t.Fatal("metadata missing from PUT doc")
 	}
-	if _, ok := meta["resourceVersion"]; ok {
-		t.Error("resourceVersion should have been stripped")
+	if got, _ := meta["resourceVersion"].(string); got != "12345" {
+		t.Errorf("PUT resourceVersion = %q, want the version the GET read (12345)", got)
 	}
 	if _, ok := meta["uid"]; ok {
 		t.Error("uid should have been stripped")
@@ -316,7 +320,7 @@ spec:
 	}
 
 	// These must be stripped
-	for _, k := range []string{"resourceVersion", "uid", "generation", "creationTimestamp", "managedFields"} {
+	for _, k := range []string{"uid", "generation", "creationTimestamp", "managedFields"} {
 		if _, ok := meta[k]; ok {
 			t.Errorf("%s should have been stripped", k)
 		}
@@ -382,3 +386,91 @@ func copyBuffer(buf *strings.Builder, r *os.File) error {
 }
 
 // ---------------------------------------------------------------------------
+
+// TestEditProvisioningDefaults_SendsResourceVersion verifies that the PUT
+// body carries the resourceVersion the editor's GET returned, and that the
+// editor buffer does not show it.
+func TestEditProvisioningDefaults_SendsResourceVersion(t *testing.T) {
+	testSetup(t)
+	var putBody string
+	var editorBuf string
+	srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPut {
+			b, _ := io.ReadAll(r.Body)
+			putBody = string(b)
+			_, _ = fmt.Fprint(w, `{}`)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"metadata":{"name":"varroa-defaults","resourceVersion":"7"},"spec":{"rootDomain":"a.example"}}`)
+	})
+	defer srv.Close()
+
+	origEditor := runEditorC3
+	runEditorC3 = func(path string) error {
+		raw, _ := os.ReadFile(path)
+		editorBuf = string(raw)
+		return os.WriteFile(path, []byte("metadata:\n  name: varroa-defaults\nspec:\n  rootDomain: b.example\n"), 0644)
+	}
+	defer func() { runEditorC3 = origEditor }()
+
+	root := newRootCmd()
+	root.SetArgs([]string{"edit", "provisioningdefaults"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("edit provisioningdefaults failed: %v", err)
+	}
+	if strings.Contains(editorBuf, "resourceVersion") {
+		t.Errorf("editor buffer must not show resourceVersion, got:\n%s", editorBuf)
+	}
+	var sent struct {
+		Metadata struct {
+			ResourceVersion string `json:"resourceVersion"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal([]byte(putBody), &sent); err != nil {
+		t.Fatalf("PUT body is not JSON: %v: %s", err, putBody)
+	}
+	if sent.Metadata.ResourceVersion != "7" {
+		t.Errorf("PUT resourceVersion = %q, want 7; body: %s", sent.Metadata.ResourceVersion, putBody)
+	}
+}
+
+// TestEditProvisioningDefaults_ConflictExitsNonZero verifies that a 409 from
+// the server stops the edit with the conflict message on stderr.
+func TestEditProvisioningDefaults_ConflictExitsNonZero(t *testing.T) {
+	testSetup(t)
+	srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = fmt.Fprint(w, `{"error":"provisioningdefaults changed after it was read"}`)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"metadata":{"name":"varroa-defaults","resourceVersion":"7"},"spec":{"rootDomain":"a.example"}}`)
+	})
+	defer srv.Close()
+
+	origEditor := runEditorC3
+	runEditorC3 = runEditorStub{writeContent: "metadata:\n  name: varroa-defaults\nspec:\n  rootDomain: b.example\n"}.edit
+	defer func() { runEditorC3 = origEditor }()
+
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	root := newRootCmd()
+	root.SetArgs([]string{"edit", "provisioningdefaults"})
+	err := root.Execute()
+
+	_ = w.Close()
+	os.Stderr = oldStderr
+	var stderrBuf strings.Builder
+	_ = copyBuffer(&stderrBuf, r)
+
+	if err == nil {
+		t.Fatal("expected a non-zero exit on a conflict")
+	}
+	if !strings.Contains(stderrBuf.String(), "the object changed while you edited it; run the edit again") {
+		t.Errorf("expected conflict message on stderr, got: %s", stderrBuf.String())
+	}
+}

@@ -154,6 +154,8 @@ varroactl logs 0192f0a1-1c2d-7abc-9def-0123456789ab -f
 
 `edit`, `patch`, and `power` can encounter field-ownership conflicts. Use `--force` only after reviewing [field conflict recovery](operations/lifecycle.md#resolve-field-conflicts). For plugin-pack and air-gap workflows, use [Plugin packs](config/plugin-packs.md) and [Air-gapped installation](install/air-gapped.md). Use `varroactl logout --revoke` when a stored key must be revoked.
 
+When the server returns a `resourceVersion` for the object, `edit` sends the version it read. If another writer changes the object during your edit, the edit stops with the message `the object changed while you edited it; run the edit again` and exits 1.
+
 ## Scale a cell pool
 
 `cellpool` is a cluster-scoped noun (alias `cellpools`) serving `get` and `describe`, plus the

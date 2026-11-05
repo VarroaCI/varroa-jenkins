@@ -66,7 +66,19 @@ func errFromResponse(body []byte, statusCode int) error {
 				" — retry with --force to take ownership"
 		}
 	}
-	return fmt.Errorf("error from server (%d): %s", statusCode, msg)
+	return &httpStatusError{code: statusCode, msg: msg}
+}
+
+// httpStatusError is a non-2xx answer from the server. Its text is the same
+// as the message errFromResponse always printed; callers test code to act on
+// one status, such as a 409 on an edit.
+type httpStatusError struct {
+	code int
+	msg  string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("error from server (%d): %s", e.code, e.msg)
 }
 
 // apiErrorf wraps a *client.APIError into a standard error message.

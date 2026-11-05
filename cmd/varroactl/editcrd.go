@@ -1,13 +1,19 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
 
 	"sigs.k8s.io/yaml"
 )
+
+// editConflictMessage is printed when the server refuses the write because
+// another writer changed the object after the edit read it.
+const editConflictMessage = "the object changed while you edited it; run the edit again"
 
 // runEditorC3 is the injectable editor invocation used by editLoop.
 // Tests can replace it with a stub.
@@ -37,8 +43,11 @@ var runEditorC3 = func(path string) error {
 //
 // Before presenting to the editor, status and selected metadata fields
 // (managedFields, resourceVersion, uid, generation, creationTimestamp)
-// are stripped. After the user edits, the file is re-parsed and if changed,
-// put is called with the stripped fetched document and the edited document.
+// are stripped. The resourceVersion the fetch returned is kept aside and
+// set on the edited document before put runs, so the write carries the
+// version the editor read. After the user edits, the file is re-parsed and
+// if changed, put is called with the stripped fetched document and the
+// edited document (which carries that resourceVersion).
 // A noun with no patch callback sends put's second argument as a
 // full-replace PUT and ignores the first; a noun with a patch callback
 // computes the merge patch between the two and sends that instead.
@@ -47,6 +56,10 @@ func editLoop(fetch func() (map[string]any, error), put func(orig, mod map[strin
 	if err != nil {
 		return err
 	}
+
+	// The version the editor read. The buffer never shows it; the write
+	// sends it back so the server can refuse a stale edit.
+	resourceVersion := metadataString(doc, "resourceVersion")
 
 	// Strip noise keys before presenting to the editor
 	stripEditNoise(doc)
@@ -99,9 +112,22 @@ func editLoop(fetch func() (map[string]any, error), put func(orig, mod map[strin
 		return nil
 	}
 
+	// Only mod carries the version the editor read. A merge patch built from
+	// orig and mod then includes metadata.resourceVersion. A noun whose fetch
+	// returns no version sends none.
+	if resourceVersion != "" {
+		setMetadataField(mod, "resourceVersion", resourceVersion)
+	}
+
 	// Send the change: a full-replace PUT, or a merge patch when the noun
 	// supplies a patch callback (put decides which).
 	if err := put(doc, mod); err != nil {
+		var statusErr *httpStatusError
+		if errors.As(err, &statusErr) && statusErr.code == http.StatusConflict {
+			_, _ = fmt.Fprintln(os.Stderr, editConflictMessage)
+			_, _ = fmt.Fprintf(os.Stderr, "Edits saved to %s\n", tmpPath)
+			return fmt.Errorf("edit conflict")
+		}
 		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		_, _ = fmt.Fprintf(os.Stderr, "Edits saved to %s\n", tmpPath)
 		return fmt.Errorf("edit failed")
@@ -110,6 +136,26 @@ func editLoop(fetch func() (map[string]any, error), put func(orig, mod map[strin
 	_ = os.Remove(tmpPath)
 	fmt.Printf("%s %q edited\n", kind, name)
 	return nil
+}
+
+// metadataString returns metadata.<key> of doc, or "" when it is absent.
+func metadataString(doc map[string]any, key string) string {
+	meta, ok := doc["metadata"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	v, _ := meta[key].(string)
+	return v
+}
+
+// setMetadataField sets metadata.<key> of doc, creating metadata when absent.
+func setMetadataField(doc map[string]any, key, value string) {
+	meta, ok := doc["metadata"].(map[string]any)
+	if !ok {
+		meta = map[string]any{}
+		doc["metadata"] = meta
+	}
+	meta[key] = value
 }
 
 // stripEditNoise removes keys that should never be presented to the editor
