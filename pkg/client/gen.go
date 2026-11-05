@@ -626,6 +626,12 @@ const (
 	ComponentsSchemasProposePipelineResponseForgeGithub ComponentsSchemasProposePipelineResponseForge = "github"
 )
 
+// Defines values for ComponentsSchemasProvisioningDefaultsSpecUpgradePolicy.
+const (
+	ComponentsSchemasProvisioningDefaultsSpecUpgradePolicyAuto   ComponentsSchemasProvisioningDefaultsSpecUpgradePolicy = "auto"
+	ComponentsSchemasProvisioningDefaultsSpecUpgradePolicyManual ComponentsSchemasProvisioningDefaultsSpecUpgradePolicy = "manual"
+)
+
 // Defines values for ComponentsSchemasRBACGroupBindingRole.
 const (
 	Admin     ComponentsSchemasRBACGroupBindingRole = "admin"
@@ -763,8 +769,8 @@ const (
 
 // Defines values for ComponentsSchemasTenantAgentSessionKeySource.
 const (
-	Chart ComponentsSchemasTenantAgentSessionKeySource = "chart"
-	User  ComponentsSchemasTenantAgentSessionKeySource = "user"
+	ComponentsSchemasTenantAgentSessionKeySourceChart ComponentsSchemasTenantAgentSessionKeySource = "chart"
+	ComponentsSchemasTenantAgentSessionKeySourceUser  ComponentsSchemasTenantAgentSessionKeySource = "user"
 )
 
 // Defines values for ComponentsSchemasTenantAgentSessionKind.
@@ -1440,6 +1446,9 @@ type ComponentsSchemasBroodOperationDetailStatusTargetsState string
 type ComponentsSchemasBroodPolicy struct {
 	// ExecuteGroovy Governs the executeGroovy verb. Every field absent means enabled — a policy object that only some clusters carry must not change behaviour by its absence.
 	ExecuteGroovy *ComponentsSchemasExecuteGroovyPolicy `json:"executeGroovy,omitempty"`
+
+	// Upgrade Governs the upgrade verb. Every field absent means enabled, the same rule as the executeGroovy policy.
+	Upgrade *ComponentsSchemasBroodUpgradePolicy `json:"upgrade,omitempty"`
 }
 
 // ComponentsSchemasBroodPreviewResponse Per-cluster preview result with targets.
@@ -1583,6 +1592,15 @@ type ComponentsSchemasBroodScheduleSpec struct {
 
 // ComponentsSchemasBroodScheduleSpecConcurrencyPolicy How to handle overlapping executions.
 type ComponentsSchemasBroodScheduleSpecConcurrencyPolicy string
+
+// ComponentsSchemasBroodUpgradePolicy Governs the upgrade verb. Every field absent means enabled, the same rule as the executeGroovy policy.
+type ComponentsSchemasBroodUpgradePolicy struct {
+	// AllowedNamespaces Namespaces that may host an upgrade BroodOperation, matched against the operation's own namespace rather than its targets'. Empty means all, when enabled is not false.
+	AllowedNamespaces *[]string `json:"allowedNamespaces,omitempty"`
+
+	// Enabled Absent means enabled.
+	Enabled *bool `json:"enabled,omitempty"`
+}
 
 // ComponentsSchemasBuiltinRoleRef A built-in VarroaRole with resolved Jenkins permissions.
 type ComponentsSchemasBuiltinRoleRef struct {
@@ -4281,7 +4299,13 @@ type ComponentsSchemasProvisioningDefaultsSpec struct {
 	RootDomain             *string                        `json:"rootDomain,omitempty"`
 	SizePresets            *[]ComponentsSchemasSizePreset `json:"sizePresets,omitempty"`
 	StorageClass           *string                        `json:"storageClass,omitempty"`
+
+	// UpgradePolicy Governs whether a profile-driven version roll proceeds automatically. Absent or auto proceeds. Manual holds the roll until a person releases it. It does not affect resourceOverlay image changes or the core-compatibility gate.
+	UpgradePolicy *ComponentsSchemasProvisioningDefaultsSpecUpgradePolicy `json:"upgradePolicy,omitempty"`
 }
+
+// ComponentsSchemasProvisioningDefaultsSpecUpgradePolicy Governs whether a profile-driven version roll proceeds automatically. Absent or auto proceeds. Manual holds the roll until a person releases it. It does not affect resourceOverlay image changes or the core-compatibility gate.
+type ComponentsSchemasProvisioningDefaultsSpecUpgradePolicy string
 
 // ComponentsSchemasProvisioningDefaultsStatus Observed state of ProvisioningDefaults.
 type ComponentsSchemasProvisioningDefaultsStatus struct {

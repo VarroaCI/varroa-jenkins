@@ -2645,6 +2645,13 @@ ProvisioningDefaultsSpec:
       type: string
     broodPolicy:
       $ref: '#/BroodPolicy'
+    upgradePolicy:
+      type: string
+      enum: [auto, manual]
+      description: >-
+        Governs whether a profile-driven version roll proceeds automatically. Absent
+        or auto proceeds. Manual holds the roll until a person releases it. It does
+        not affect resourceOverlay image changes or the core-compatibility gate.
   additionalProperties: false
 
 BroodPolicy:
@@ -2655,6 +2662,8 @@ BroodPolicy:
   properties:
     executeGroovy:
       $ref: '#/ExecuteGroovyPolicy'
+    upgrade:
+      $ref: '#/BroodUpgradePolicy'
   additionalProperties: false
 
 ExecuteGroovyPolicy:
@@ -2672,6 +2681,25 @@ ExecuteGroovyPolicy:
         Namespaces that may host an executeGroovy BroodOperation, matched against
         the operation's own namespace rather than its targets'. Empty means all,
         when enabled is not false.
+      items:
+        type: string
+  additionalProperties: false
+
+BroodUpgradePolicy:
+  type: object
+  description: >-
+    Governs the upgrade verb. Every field absent means enabled, the same rule
+    as the executeGroovy policy.
+  properties:
+    enabled:
+      type: boolean
+      description: Absent means enabled.
+    allowedNamespaces:
+      type: array
+      description: >-
+        Namespaces that may host an upgrade BroodOperation, matched against the
+        operation's own namespace rather than its targets'. Empty means all, when
+        enabled is not false.
       items:
         type: string
   additionalProperties: false

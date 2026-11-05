@@ -3245,6 +3245,15 @@ components:
           type: array
         storageClass:
           type: string
+        upgradePolicy:
+          description: Governs whether a profile-driven version roll proceeds automatically.
+            Absent or auto proceeds. Manual holds the roll until a person releases
+            it. It does not affect resourceOverlay image changes or the core-compatibility
+            gate.
+          enum:
+          - auto
+          - manual
+          type: string
       type: object
     RecentBuild:
       additionalProperties: false
@@ -5656,6 +5665,8 @@ components:
       properties:
         executeGroovy:
           $ref: '#/components/schemas/components_schemas_ExecuteGroovyPolicy'
+        upgrade:
+          $ref: '#/components/schemas/components_schemas_BroodUpgradePolicy'
       type: object
     components_schemas_BroodPreviewResponse:
       description: Per-cluster preview result with targets.
@@ -5925,6 +5936,22 @@ components:
       required:
       - schedule
       - template
+      type: object
+    components_schemas_BroodUpgradePolicy:
+      additionalProperties: false
+      description: Governs the upgrade verb. Every field absent means enabled, the
+        same rule as the executeGroovy policy.
+      properties:
+        allowedNamespaces:
+          description: Namespaces that may host an upgrade BroodOperation, matched
+            against the operation's own namespace rather than its targets'. Empty
+            means all, when enabled is not false.
+          items:
+            type: string
+          type: array
+        enabled:
+          description: Absent means enabled.
+          type: boolean
       type: object
     components_schemas_BuiltinRoleRef:
       additionalProperties: false
@@ -10825,6 +10852,15 @@ components:
             $ref: '#/components/schemas/components_schemas_SizePreset'
           type: array
         storageClass:
+          type: string
+        upgradePolicy:
+          description: Governs whether a profile-driven version roll proceeds automatically.
+            Absent or auto proceeds. Manual holds the roll until a person releases
+            it. It does not affect resourceOverlay image changes or the core-compatibility
+            gate.
+          enum:
+          - auto
+          - manual
           type: string
       type: object
     components_schemas_ProvisioningDefaultsStatus:
