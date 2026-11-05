@@ -41,8 +41,13 @@ type MemberBinding struct {
 	LastSeenAt *time.Time
 	// Stale is true when this member's cell fails the keep rule: it serves
 	// another profile or belongs to another pool. A stale member keeps its
-	// place until a replacement exists. A stale standby never takes a slot.
+	// place until a replacement exists and its cell has drained. A stale
+	// standby never takes a slot.
 	Stale bool
+	// Draining is true while this member's cell drops the tenant's folder
+	// before the pass releases it. A draining member keeps its role and
+	// slot, and the announcement still names it.
+	Draining bool
 }
 
 // slotValue answers a member's slot index, and -1 for a standby.
@@ -63,6 +68,7 @@ func memberKey(namespace, cell string) string { return namespace + "/" + cell }
 //
 // slotZero is the tenant's scalar binding, which the existing keep and
 // move path decides. A nil slotZero means the tenant holds no cell yet.
+// A dropped member keeps its place, marked Draining, until its cell drains.
 func desiredMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus,
 	slotZero *CellCandidate, nowT time.Time) ([]MemberBinding, string) {
 	wantedSlots := tenant.Spec.Pipelines.EffectiveMembers()
@@ -93,9 +99,16 @@ func desiredMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantS
 		if held[memberKey(s.Namespace, s.Cell)] {
 			continue
 		}
+		wasDraining := s.Draining
+		s.Draining = false
 		if s.Stale {
-			// A stale standby keeps its cell until a fresh candidate exists.
-			if candidate := selectCandidateExcluding(in, tenant, held); candidate != nil {
+			// A stale standby keeps its cell until a fresh candidate exists,
+			// and its cell has drained. The candidate binds on the drained tick.
+			candidate := selectCandidateExcluding(in, tenant, held)
+			switch {
+			case !memberCellDrained(in, tenant, s):
+				s.Draining = wasDraining || candidate != nil
+			case candidate != nil:
 				held[memberKey(candidate.Namespace, candidate.Name)] = true
 				keptStandby = append(keptStandby, newMember(in, tenant, *candidate,
 					v1alpha1.TenantMemberRoleStandby, nil, nowT))
@@ -117,6 +130,7 @@ func desiredMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantS
 			v1alpha1.TenantMemberRoleStandby, nil, nowT))
 	}
 	out = append(out, keptStandby...)
+	out = append(out, departingMembers(in, tenant, surviving, standbys, held)...)
 
 	return out, memberReason(out, wantedSlots, wantedStandby)
 }
@@ -140,7 +154,15 @@ func bindSlot(in Inputs, tenant *v1alpha1.Tenant, slot int32, slotZero *CellCand
 			refreshed = newMember(in, tenant, cell, v1alpha1.TenantMemberRoleActive, &slot, nowT)
 			refreshed.AppliedAt = keepAppliedAt(existing.AppliedAt, refreshed.Applied, nowT)
 		}
+		refreshed.Draining = false
 		if !refreshed.Stale {
+			return &refreshed
+		}
+		// A stale holder keeps the slot until its cell has drained and a
+		// replacement exists. The cell drains first, so a build that still
+		// runs there keeps its cloud, its credential and its agent Service.
+		if !memberCellDrained(in, tenant, refreshed) {
+			refreshed.Draining = existing.Draining || replacementExists(in, tenant, *standbys, held)
 			return &refreshed
 		}
 		// A stale holder keeps the slot until a replacement exists, so the
@@ -177,11 +199,11 @@ func replaceSlotHolder(in Inputs, tenant *v1alpha1.Tenant, slot int32, standbys 
 // cell name ascending. A newer applied time means a fresher folder. It
 // answers nil when no applied standby remains. A stale standby is never a
 // promotion source, because it would bind the slot to a cell of the old
-// profile or pool.
+// profile or pool. A draining standby is never a promotion source either.
 func takePromotionSource(standbys *[]MemberBinding, held map[string]bool) *MemberBinding {
 	best := -1
 	for i, s := range *standbys {
-		if !s.Applied || s.Stale || held[memberKey(s.Namespace, s.Cell)] {
+		if !s.Applied || s.Stale || s.Draining || held[memberKey(s.Namespace, s.Cell)] {
 			continue
 		}
 		if best < 0 || newerApplied(s, (*standbys)[best]) {
@@ -211,6 +233,60 @@ func newerApplied(a, b MemberBinding) bool {
 	}
 }
 
+// memberCellDrained reports whether a member's cell holds no running build
+// of the tenant: the cell is gone, evacuates, runs no pod, or has dropped
+// the tenant's folder. A cell with no pod holds nothing, because its builds
+// stopped with the pod.
+func memberCellDrained(in Inputs, tenant *v1alpha1.Tenant, m MemberBinding) bool {
+	cell, found := lookupCell(in.Cells, m.Cell, m.Namespace)
+	if !found || cell.Evacuate || cell.Instance == "" {
+		return true
+	}
+	return cellDrainedTenant(cell, tenant.Name)
+}
+
+// replacementExists reports whether a stale slot holder has a replacement:
+// an applied standby that is not stale and not draining, or a candidate of
+// the selection rule. It changes nothing.
+func replacementExists(in Inputs, tenant *v1alpha1.Tenant, standbys []MemberBinding, held map[string]bool) bool {
+	for _, s := range standbys {
+		if s.Applied && !s.Stale && !s.Draining && !held[memberKey(s.Namespace, s.Cell)] {
+			return true
+		}
+	}
+	return selectCandidateExcluding(in, tenant, held) != nil
+}
+
+// departingMembers answers each surviving member that holds no place this
+// tick and whose cell has not drained. Each keeps its role and slot, marked
+// Draining, so the pass releases its cell only after the cell drops the
+// tenant's folder. A scale-down reaches this path.
+func departingMembers(in Inputs, tenant *v1alpha1.Tenant, surviving map[int32]MemberBinding,
+	standbys []MemberBinding, held map[string]bool) []MemberBinding {
+	slots := make([]int32, 0, len(surviving))
+	for slot := range surviving {
+		slots = append(slots, slot)
+	}
+	sort.Slice(slots, func(i, j int) bool { return slots[i] < slots[j] })
+	var out []MemberBinding
+	keep := func(m MemberBinding) {
+		key := memberKey(m.Namespace, m.Cell)
+		if held[key] || memberCellDrained(in, tenant, m) {
+			return
+		}
+		held[key] = true
+		m.Draining = true
+		out = append(out, m)
+	}
+	for _, slot := range slots {
+		keep(surviving[slot])
+	}
+	for _, s := range standbys {
+		keep(s)
+	}
+	return out
+}
+
 // survivingMembers answers the tenant's current active members by slot and
 // its current standbys, dropping every member whose cell left the
 // candidate set or is evacuating. A member whose cell fails the keep rule
@@ -235,6 +311,7 @@ func survivingMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.Tenan
 		}
 		bound := newMember(in, tenant, cell, role, m.Slot, nowT)
 		bound.AppliedAt = keepAppliedAt(memberAppliedAt(in, m.CellNamespace, m.Cell), bound.Applied, nowT)
+		bound.Draining = m.Draining
 		if role == v1alpha1.TenantMemberRoleStandby {
 			standbys = append(standbys, bound)
 			continue
@@ -396,7 +473,7 @@ func memberStatuses(members []MemberBinding) []v1alpha1.TenantMemberStatus {
 	for _, m := range members {
 		entry := v1alpha1.TenantMemberStatus{
 			Cell: m.Cell, CellNamespace: m.Namespace, Role: m.Role, Applied: m.Applied,
-			Stale: m.Stale,
+			Stale: m.Stale, Draining: m.Draining,
 		}
 		if m.Slot != nil {
 			s := *m.Slot
