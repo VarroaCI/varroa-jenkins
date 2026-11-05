@@ -9895,6 +9895,46 @@
         ],
         "type": "object"
       },
+      "components_schemas_Condition": {
+        "additionalProperties": false,
+        "description": "A Kubernetes status condition (metav1.Condition). The BFF serves it from the CRD status without change.",
+        "properties": {
+          "lastTransitionTime": {
+            "description": "The time of the last status change.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "message": {
+            "description": "Text about the last change. It can be empty.",
+            "type": "string"
+          },
+          "observedGeneration": {
+            "description": "The metadata.generation that the condition reports on.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "A CamelCase word that names the cause of the last change.",
+            "type": "string"
+          },
+          "status": {
+            "description": "One of True, False, or Unknown.",
+            "type": "string"
+          },
+          "type": {
+            "description": "The condition type, for example Ready.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "status",
+          "lastTransitionTime",
+          "reason",
+          "message"
+        ],
+        "type": "object"
+      },
       "components_schemas_ConflictItem": {
         "additionalProperties": false,
         "description": "A single field conflict detail.",
@@ -9994,7 +10034,7 @@
             "properties": {
               "conditions": {
                 "items": {
-                  "$ref": "#/components/schemas/components_schemas_ObjectMeta"
+                  "$ref": "#/components/schemas/components_schemas_Condition"
                 },
                 "type": "array"
               }

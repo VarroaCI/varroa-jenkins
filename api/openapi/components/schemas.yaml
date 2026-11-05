@@ -2814,6 +2814,35 @@ VersionProfileDetail:
         $ref: '#/VersionProfileCondition'
   additionalProperties: false
 
+Condition:
+  type: object
+  description: >-
+    A Kubernetes status condition (metav1.Condition). The BFF serves it from
+    the CRD status without change.
+  required: [type, status, lastTransitionTime, reason, message]
+  properties:
+    type:
+      type: string
+      description: The condition type, for example Ready.
+    status:
+      type: string
+      description: One of True, False, or Unknown.
+    observedGeneration:
+      type: integer
+      format: int64
+      description: The metadata.generation that the condition reports on.
+    lastTransitionTime:
+      type: string
+      format: date-time
+      description: The time of the last status change.
+    reason:
+      type: string
+      description: A CamelCase word that names the cause of the last change.
+    message:
+      type: string
+      description: Text about the last change. It can be empty.
+  additionalProperties: false
+
 ControllerClass:
   type: object
   description: A ControllerClass CRD (cluster-scoped). Layers cluster-level defaults between ProvisioningDefaults and each Controller via spec.className.
@@ -2835,7 +2864,7 @@ ControllerClass:
         conditions:
           type: array
           items:
-            $ref: '#/ObjectMeta'
+            $ref: '#/Condition'
       additionalProperties: true
   additionalProperties: true
 
