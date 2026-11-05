@@ -301,9 +301,12 @@ export default function CatalogItemDetail() {
 
       {/* A pipeline-template item's content is a PipelineTemplate document,
           not items YAML (pipeline-template-catalog-items). Its dedicated
-          card below replaces the generic raw-content preview. */}
+          card below replaces the generic raw-content preview. The key remounts
+          the card when the content changes. This clears the form values and
+          the Copied label. Do not clear them in an effect, because a late
+          effect can cancel the Copied label. */}
       {spec.type === "pipeline-template" ? (
-        <PipelineTemplateCard content={status?.content} />
+        <PipelineTemplateCard key={status?.contentHash ?? ""} content={status?.content} />
       ) : (
         status?.content && (
           <div className={styles.section}>
@@ -374,13 +377,6 @@ function PipelineTemplateCard({ content }: { content?: string }) {
   const doc = useMemo(() => parseTemplateDocument(content), [content]);
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [copied, setCopied] = useState(false);
-
-  // A different item's content replaces this one's entered values rather
-  // than carrying them over.
-  useEffect(() => {
-    setValues({});
-    setCopied(false);
-  }, [content]);
 
   if (!doc) {
     return (

@@ -342,16 +342,23 @@ describe("CatalogItemDetail — pipeline-template item", () => {
     renderPage();
 
     await waitFor(() => expect(screen.getByText(/template: go-service/)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("template: go-service"));
-
-    // The label reverts to "Copy" 1500 ms after the write resolves. The test
-    // resolves the write inside act and reads the label in the same tick, so
-    // a stalled runner cannot move the check past that window.
-    await act(async () => {
-      resolveWrite();
-    });
-    expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+    // Install the fake clock after waitFor, because waitFor waits on a real setTimeout.
+    // The fake clock holds the 1500 ms revert. A slow runner cannot reset the label before the read.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining("template: go-service"));
+      await act(async () => {
+        resolveWrite();
+      });
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+      expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows an error banner when the template content does not parse", async () => {
