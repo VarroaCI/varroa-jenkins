@@ -14,7 +14,6 @@ import {
   resultMeta,
   passesLane,
   passesSource,
-  passesSelection,
   isAgentRow,
   activityTypeMeta,
   SOURCE_COLORS,
@@ -40,8 +39,6 @@ function streamLabel(readyState: string, paused: boolean): string {
 interface ActivityTimelineProps {
   /** The page's one feed. The page calls useActivityFeed once and passes the result here. */
   feed: UseActivityFeedResult;
-  selectedControllers?: Set<string>;
-  hidePicker?: boolean;
 }
 
 // ── Lane/source chip definitions ───────────────────────────────────────────
@@ -67,11 +64,7 @@ const SOURCE_CHIP_TO_VALUE: Record<string, "All" | string> = {
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export default function ActivityTimeline({
-  feed,
-  selectedControllers,
-  hidePicker: _hidePicker,
-}: ActivityTimelineProps) {
+export default function ActivityTimeline({ feed }: ActivityTimelineProps) {
   const { data: clusters } = useClusters();
   const core = coreOf(clusters);
   const {
@@ -95,53 +88,45 @@ export default function ActivityTimeline({
     new Set(),
   );
 
-  // ── Scope-filtered events (controller selection applies on activity page) ──
-  const scopedEvents = useMemo(() => {
-    if (selectedControllers) {
-      return events.filter((e) => passesSelection(e, selectedControllers));
-    }
-    return events;
-  }, [events, selectedControllers]);
-
   // ── Counts per axis (independent of the other axis) ──────────────────────
   const laneCounts = useMemo(() => {
     const counts: Record<string, number> = {
-      All: scopedEvents.length,
+      All: events.length,
       control: 0,
       builds: 0,
     };
-    for (const e of scopedEvents) {
+    for (const e of events) {
       const l = laneFor(e);
       counts[l] = (counts[l] ?? 0) + 1;
     }
     return counts;
-  }, [scopedEvents]);
+  }, [events]);
 
   const sourceCounts = useMemo(() => {
     const counts: Record<string, number> = {
-      All: scopedEvents.length,
+      All: events.length,
       operator: 0,
       mite: 0,
       user: 0,
       jenkins: 0,
     };
-    for (const e of scopedEvents) {
+    for (const e of events) {
       const s = e.source;
       counts[s] = (counts[s] ?? 0) + 1;
     }
-    counts.agents = scopedEvents.filter(isAgentRow).length;
+    counts.agents = events.filter(isAgentRow).length;
     return counts;
-  }, [scopedEvents]);
+  }, [events]);
 
   // ── Visible events (lane × source AND composition) ──────────────────────
   const activeLane = LANE_TO_FILTER[laneChip];
   const activeSource = SOURCE_CHIP_TO_VALUE[sourceChip];
 
   const visibleEvents = useMemo(() => {
-    return scopedEvents.filter(
+    return events.filter(
       (e) => passesLane(e, activeLane) && passesSource(e, activeSource),
     );
-  }, [scopedEvents, activeLane, activeSource]);
+  }, [events, activeLane, activeSource]);
 
   // ── Build groups ─────────────────────────────────────────────────────────
   const renderRows = useMemo(
@@ -606,13 +591,13 @@ export default function ActivityTimeline({
           </div>
 
           {/* Empty states */}
-          {renderRows.length === 0 && scopedEvents.length === 0 && (
+          {renderRows.length === 0 && events.length === 0 && (
             <div className={styles.emptyState}>
               No activity yet. Events will appear when mites connect, controllers
               change phase, or users take action.
             </div>
           )}
-          {renderRows.length === 0 && scopedEvents.length > 0 && (
+          {renderRows.length === 0 && events.length > 0 && (
             <div className={styles.emptyState}>
               No events match the current filters.
             </div>

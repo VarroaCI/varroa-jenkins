@@ -1,40 +1,21 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useControllers } from "../hooks/useControllers";
-import { deleteController } from "../api/client";
 import { BroodControllerPicker } from "../components/BroodControllerPicker";
 import { ClusterFanoutNotice } from "../components/ClusterFanoutNotice";
 import { BroodOperationModal } from "../components/BroodOperationModal";
 import { Button } from "../components/Button";
 import { useAuth } from "../context/AuthContext";
 import { canDoAnywhere } from "../hooks/usePermissions";
-import type { ControllerListItem } from "../hooks/useControllers";
 import type { BroodRun } from "../types";
 import styles from "./Controllers.module.css";
 
 export default function Controllers() {
   const navigate = useNavigate();
-  const { refetch } = useControllers();
   const { permissions } = useAuth();
   const canManage = canDoAnywhere(permissions, "controllers", "manage");
 
   const [selected, setSelected] = useState<string[]>([]);
   const [broodModalOpen, setBroodModalOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<ControllerListItem | null>(null);
-  const [deleting, setDeleting] = useState(false);
-
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      await deleteController(deleteTarget.cluster, deleteTarget.name, deleteTarget.namespace);
-      setDeleteTarget(null);
-      refetch();
-    } catch {
-      // keep dialog open on failure
-    }
-    setDeleting(false);
-  };
 
   const handleBroodSubmitted = (result: BroodRun) => {
     setBroodModalOpen(false);
@@ -75,25 +56,6 @@ export default function Controllers() {
           onClose={() => setBroodModalOpen(false)}
           onSubmitted={handleBroodSubmitted}
         />
-      )}
-
-      {/* Delete confirmation overlay */}
-      {deleteTarget && (
-        <div className={styles.overlay} onClick={() => setDeleteTarget(null)}>
-          <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.dialogTitle}>Delete Controller</div>
-            <p className={styles.dialogBody}>
-              Are you sure you want to delete <b>{deleteTarget.name}</b>?
-              This action cannot be undone.
-            </p>
-            <div className={styles.dialogActions}>
-              <Button onClick={() => setDeleteTarget(null)}>Cancel</Button>
-              <Button variant="primary" onClick={handleDelete} disabled={deleting}>
-                {deleting ? "Deleting..." : "Delete"}
-              </Button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

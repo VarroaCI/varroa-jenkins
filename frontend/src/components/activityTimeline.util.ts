@@ -270,18 +270,6 @@ export function passesScope(
   return e.namespace === scope.namespace && e.controller === scope.name;
 }
 
-export function passesSelection(
-  e: ActivityEvent,
-  selection: Set<string>,
-): boolean {
-  if (selection.size === 0) return true;
-  if (e.controller) {
-    return selection.has((e.cluster ?? "") + "/" + (e.namespace ?? "") + "/" + e.controller);
-  }
-  // No controller → only show if __global__ is selected
-  return selection.has("__global__");
-}
-
 export function passesLane(
   e: ActivityEvent,
   lane: "All" | Lane,

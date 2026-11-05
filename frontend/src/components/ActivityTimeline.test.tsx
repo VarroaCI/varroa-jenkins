@@ -86,25 +86,19 @@ function createEvent(overrides: Partial<ActivityEvent>): ActivityEvent {
 }
 
 // The page calls useActivityFeed once and passes the result to the timeline.
-function Harness({ scope, selectedControllers }: {
-  scope?: { namespace: string; name: string };
-  selectedControllers?: Set<string>;
-}) {
+function Harness({ scope }: { scope?: { namespace: string; name: string } }) {
   const feed = useActivityFeed(scope);
-  return <ActivityTimeline feed={feed} selectedControllers={selectedControllers} />;
+  return <ActivityTimeline feed={feed} />;
 }
 
-function renderTimeline(props?: {
-  scope?: { namespace: string; name: string };
-  selectedControllers?: Set<string>;
-}) {
+function renderTimeline(props?: { scope?: { namespace: string; name: string } }) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <Harness scope={props?.scope} selectedControllers={props?.selectedControllers} />
+        <Harness scope={props?.scope} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
