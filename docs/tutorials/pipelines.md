@@ -43,7 +43,7 @@ Select the pill to open the card. The card names the cell, its pool, its version
 Jenkins version. It also reports the free tenant slots on the cell, the length of the cell's build
 queue, and your own running builds.
 
-The card lists each member cell of the tenant and its role. A member on a cell of another profile or pool shows **Waiting to move**.
+The card lists each member cell of the tenant and its role. A member on a cell of another profile or pool shows **Waiting to move**. A member whose cell drops the tenant folder shows **Draining**.
 
 One line counts the other tenants on the cell without naming them, and shows none of their jobs,
 builds, or counts.

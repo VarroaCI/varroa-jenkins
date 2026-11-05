@@ -40,7 +40,7 @@ kubectl get tenant payments -o jsonpath='{.status.placement.members}'
 A member on a cell of another profile or pool carries `stale: true`.
 
 A member that leaves its cell carries `draining: true`. That cell drops the tenant folder, and the
-pass releases the cell when no build of the tenant runs there.
+pass releases the cell when no build of the tenant runs there. The tenant home shows **Draining** for such a member.
 
 ## Every job has one home slot
 

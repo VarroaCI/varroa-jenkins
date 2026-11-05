@@ -625,18 +625,26 @@ export interface TenantMember {
   applied?: boolean;
   /** True when the member's cell serves another profile or pool. */
   stale?: boolean;
+  /** True while the member's cell drops the tenant folder before the pass releases it. */
+  draining?: boolean;
 }
 
 /**
  * tenantMemberLabel renders one member for a listing: the cell name, the
- * slot or the standby role, and "waiting to move" for a stale member. A
- * tenant with no member list falls back to the scalar placement, so a
- * single-member tenant reads as it always has.
+ * slot or the standby role, and the state of a draining or a stale member.
+ * A draining member reads "draining" and no "waiting to move". A tenant with
+ * no member list falls back to the scalar placement, so a single-member
+ * tenant reads as it always has.
  */
 export function tenantMemberLabel(member: TenantMember): string {
   const role = member.role === "standby" ? "standby" : `slot ${member.slot ?? 0}`;
-  const stale = member.stale ? ", waiting to move" : "";
-  return `${member.cell ?? "?"} (${role}${stale})`;
+  let state = "";
+  if (member.draining) {
+    state = ", draining";
+  } else if (member.stale) {
+    state = ", waiting to move";
+  }
+  return `${member.cell ?? "?"} (${role}${state})`;
 }
 
 /**
@@ -2930,6 +2938,8 @@ export interface TenantCellMember {
   role: string;
   /** True when the member's cell serves another profile or pool. */
   stale: boolean;
+  /** True while the member's cell drops the tenant folder before the pass releases it. */
+  draining: boolean;
   runningNow: number;
   runsLast24h: number;
   failedLast24h: number;
