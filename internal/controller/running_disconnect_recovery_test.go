@@ -153,6 +153,46 @@ func TestHandleRunning_TimeoutCreditsImagePull(t *testing.T) {
 	}
 }
 
+// TestHandleRunning_TimeoutCreditsPluginDownload: a Running controller whose
+// first plugins-init run downloaded plugins for most of the budget is not
+// failed by the mite-connect timeout.
+func TestHandleRunning_TimeoutCreditsPluginDownload(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	rec, _ := newTestReconcilerForGate(client)
+
+	cr := runningCtrl("downloaded")
+	started := time.Now().Add(-8 * time.Minute)
+	startedAt := metav1.NewTime(started)
+	cr.Status.ProvisioningStartedAt = &startedAt
+
+	client.controllerPod = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "downloaded-0", Namespace: "ns", UID: testUID},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "plugins-init", Image: "jenkins/jenkins:2.528"}},
+			Containers:     []corev1.Container{{Name: "jenkins", Image: "jenkins/jenkins:2.528"}},
+		},
+		Status: corev1.PodStatus{
+			InitContainerStatuses: []corev1.ContainerStatus{{
+				Name: "plugins-init",
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					ExitCode:   0,
+					StartedAt:  metav1.NewTime(started.Add(30 * time.Second)),
+					FinishedAt: metav1.NewTime(started.Add(6*time.Minute + 30*time.Second)),
+				}},
+			}},
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name:  "jenkins",
+				State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(started.Add(6*time.Minute + 31*time.Second))}},
+			}},
+		},
+	}
+
+	_ = rec.handleRunning(context.Background(), cr)
+	if cr.Status.Phase != v1alpha1.ControllerPhaseRunning {
+		t.Fatalf("phase = %s, want Running", cr.Status.Phase)
+	}
+}
+
 // TestHandleRunning_ReconnectAfterStreamLostSetsRestored asserts that a
 // reconnect returns the controller to Connected and records StreamRestored.
 func TestHandleRunning_ReconnectAfterStreamLostSetsRestored(t *testing.T) {

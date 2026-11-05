@@ -252,7 +252,7 @@ describe("Settings page", () => {
 
     await screen.findByText("Provisioning Timeout (seconds)");
     expect(screen.getByDisplayValue("900")).toBeInTheDocument();
-    expect(screen.getByText(/Image pull time does not count/)).toBeInTheDocument();
+    expect(screen.getByText(/Image pulls and the plugin download do not count/)).toBeInTheDocument();
   });
 
   it("saves the provisioning timeout as a number", async () => {

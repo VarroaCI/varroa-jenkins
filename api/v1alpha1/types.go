@@ -1034,9 +1034,12 @@ const (
 	ReasonPluginRollFailed = "PluginRollFailed"
 	// ReasonJenkinsBootFailed is set when the Jenkins container fails to reach Running.
 	ReasonJenkinsBootFailed = "JenkinsBootFailed"
-	// ReasonImagePullInProgress is set on ImagePulling=True while a provisioning
+	// ReasonImagePullInProgress is set on ProvisioningStep=True while a provisioning
 	// container waits for its image.
 	ReasonImagePullInProgress = "ImagePullInProgress"
+	// ReasonPluginDownloadInProgress is set on ProvisioningStep=True while the
+	// first run of plugins-init downloads plugins.
+	ReasonPluginDownloadInProgress = "PluginDownloadInProgress"
 	// ReasonDownloadURLNotFound is set on UpdateCenterFallback=True when the plugin download
 	// URL answers 404 or 410 for a pinned plugin. The base must be <mirror>/download/plugins.
 	ReasonDownloadURLNotFound = "DownloadURLNotFound"
@@ -1243,9 +1246,10 @@ const (
 	// hold it False, but only a live pod inspection can turn it back off once
 	// it is True.
 	ConditionJenkinsBootFailed ControllerConditionType = "JenkinsBootFailed"
-	// ConditionImagePulling is True while a container of the provisioning pod
-	// waits for its image. The operator removes it when no pull runs.
-	ConditionImagePulling ControllerConditionType = "ImagePulling"
+	// ConditionProvisioningStep is True while the provisioning pod runs a step that
+	// does not count against the provisioning budget: an image pull or the plugin
+	// download. The reason names the step. The operator removes it when no such step runs.
+	ConditionProvisioningStep ControllerConditionType = "ProvisioningStep"
 	// ConditionPluginConflict indicates the requested plugin set conflicts with
 	// the resolved JenkinsVersionProfile/core lock set.
 	ConditionPluginConflict ControllerConditionType = "PluginConflict"
@@ -2845,7 +2849,7 @@ type ProvisioningDefaultsSpec struct {
 	// ImagePullSecrets is a list of image pull secret names to attach to StatefulSet pods.
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
 	// ProvisioningTimeoutSec is the provisioning budget of a controller, in seconds.
-	// The budget runs until the mite connects. Image-pull time does not count, up to 15 minutes.
+	// The budget runs until the mite connects. Image pulls and the plugins-init download do not count, up to 15 minutes.
 	// Unset means 300.
 	// +kubebuilder:validation:Minimum=60
 	// +kubebuilder:validation:Maximum=86400

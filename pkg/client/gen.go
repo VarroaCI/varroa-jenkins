@@ -632,6 +632,12 @@ const (
 	ComponentsSchemasProvisioningDefaultsSpecUpgradePolicyManual ComponentsSchemasProvisioningDefaultsSpecUpgradePolicy = "manual"
 )
 
+// Defines values for ComponentsSchemasProvisioningStepStep.
+const (
+	ImagePull      ComponentsSchemasProvisioningStepStep = "imagePull"
+	PluginDownload ComponentsSchemasProvisioningStepStep = "pluginDownload"
+)
+
 // Defines values for ComponentsSchemasRBACGroupBindingRole.
 const (
 	Admin     ComponentsSchemasRBACGroupBindingRole = "admin"
@@ -2469,12 +2475,9 @@ type ComponentsSchemasControllerDetail struct {
 	Hibernated *bool `json:"hibernated,omitempty"`
 
 	// HibernatedAt When the controller was last hibernated (status.hibernatedAt, RFC 3339).
-	HibernatedAt *string `json:"hibernatedAt,omitempty"`
-
-	// ImagePull Read-only projection of the provisioning image pull that runs now. Absent when no pull runs.
-	ImagePull      *ComponentsSchemasImagePull `json:"imagePull,omitempty"`
-	JenkinsHealth  *string                     `json:"jenkinsHealth,omitempty"`
-	JenkinsVersion *string                     `json:"jenkinsVersion,omitempty"`
+	HibernatedAt   *string `json:"hibernatedAt,omitempty"`
+	JenkinsHealth  *string `json:"jenkinsHealth,omitempty"`
+	JenkinsVersion *string `json:"jenkinsVersion,omitempty"`
 
 	// Kind Mirrors v1alpha1.IsCell. Present for every controller.
 	Kind ComponentsSchemasControllerDetailKind `json:"kind"`
@@ -2514,7 +2517,10 @@ type ComponentsSchemasControllerDetail struct {
 
 	// PowerState The controller's spec.powerState intent (Running or Stopped).
 	PowerState *string `json:"powerState,omitempty"`
-	RbacHash   *string `json:"rbacHash,omitempty"`
+
+	// ProvisioningStep Read-only projection of the provisioning step that runs now and does not count against the provisioning budget. Absent when no such step runs.
+	ProvisioningStep *ComponentsSchemasProvisioningStep `json:"provisioningStep,omitempty"`
+	RbacHash         *string                            `json:"rbacHash,omitempty"`
 
 	// ReconcileBlocked Read-only projection of whether the controller's reconcile loop is currently blocked by an unresolved error.
 	ReconcileBlocked ComponentsSchemasReconcileBlocked `json:"reconcileBlocked"`
@@ -3166,11 +3172,6 @@ type ComponentsSchemasIdentitySettings struct {
 
 // ComponentsSchemasIdentitySettingsMode defines model for ComponentsSchemasIdentitySettings.Mode.
 type ComponentsSchemasIdentitySettingsMode string
-
-// ComponentsSchemasImagePull Read-only projection of the provisioning image pull that runs now. Absent when no pull runs.
-type ComponentsSchemasImagePull struct {
-	Message string `json:"message"`
-}
 
 // ComponentsSchemasIngressSpec Ingress configuration (transcribed from v1alpha1.IngressSpec).
 type ComponentsSchemasIngressSpec struct {
@@ -4294,7 +4295,7 @@ type ComponentsSchemasProvisioningDefaultsSpec struct {
 	PluginUpdateCenterDownloadURL *string                                `json:"pluginUpdateCenterDownloadURL,omitempty"`
 	PluginUpdateCenterURL         *string                                `json:"pluginUpdateCenterURL,omitempty"`
 
-	// ProvisioningTimeoutSec Provisioning budget in seconds. Image-pull time does not count, up to 15 minutes. Unset means 300.
+	// ProvisioningTimeoutSec Provisioning budget in seconds. Image pulls and the plugins-init download do not count, up to 15 minutes. Unset means 300.
 	ProvisioningTimeoutSec *int                           `json:"provisioningTimeoutSec,omitempty"`
 	RootDomain             *string                        `json:"rootDomain,omitempty"`
 	SizePresets            *[]ComponentsSchemasSizePreset `json:"sizePresets,omitempty"`
@@ -4311,6 +4312,15 @@ type ComponentsSchemasProvisioningDefaultsSpecUpgradePolicy string
 type ComponentsSchemasProvisioningDefaultsStatus struct {
 	Conditions *[]ComponentsSchemasProvisioningDefaultsCondition `json:"conditions,omitempty"`
 }
+
+// ComponentsSchemasProvisioningStep Read-only projection of the provisioning step that runs now and does not count against the provisioning budget. Absent when no such step runs.
+type ComponentsSchemasProvisioningStep struct {
+	Message string                                `json:"message"`
+	Step    ComponentsSchemasProvisioningStepStep `json:"step"`
+}
+
+// ComponentsSchemasProvisioningStepStep defines model for ComponentsSchemasProvisioningStep.Step.
+type ComponentsSchemasProvisioningStepStep string
 
 // ComponentsSchemasQualityCounter One covered and total count of a coverage report.
 type ComponentsSchemasQualityCounter struct {

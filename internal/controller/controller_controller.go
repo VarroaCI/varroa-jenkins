@@ -62,9 +62,10 @@ const (
 	// provisioningTimeout is the base provisioning budget when
 	// ProvisioningDefaults sets no provisioningTimeoutSec.
 	provisioningTimeout = 5 * time.Minute
-	// maxImagePullCredit bounds the image-pull time that does not count
-	// against the budget, so a pull that never ends cannot hold provisioning forever.
-	maxImagePullCredit          = 15 * time.Minute
+	// maxProvisioningCredit bounds the image-pull and plugin-download time that
+	// does not count against the budget, so a step that never ends cannot hold
+	// provisioning forever.
+	maxProvisioningCredit       = 15 * time.Minute
 	pluginRollTimeout           = 10 * time.Minute
 	finalizerName               = "varroa.dev/finalizer"
 	annotationAllowAdminLockout = "varroa.dev/allow-admin-lockout"
@@ -2784,7 +2785,7 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 
 	r.refreshMiteImageStaleness(ctx, cr)
 	if cr.Status.Phase != v1alpha1.ControllerPhaseProvisioning {
-		cr.Status.Conditions = removeConditionByType(cr.Status.Conditions, v1alpha1.ConditionImagePulling)
+		cr.Status.Conditions = removeConditionByType(cr.Status.Conditions, v1alpha1.ConditionProvisioningStep)
 	}
 
 	var err error
@@ -3916,15 +3917,21 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 		cr.Status.ProvisioningStartedAt = &now
 	}
 	// One pod read serves the budget and both failure checks. A failed read
-	// returns the error, so no verdict is spent without the pull credit.
+	// returns the error, so no verdict is spent without the image-pull and
+	// plugin-download credits.
 	pod, err := r.client.GetControllerPod(ctx, cr.Namespace, cr.Name)
 	if err != nil {
 		r.persistStatusDiagnostics(ctx, cr)
 		return fmt.Errorf("read controller pod for provisioning budget: %w", err)
 	}
 	budget := r.provisioningBudgetFor(ctx, cr, pod, provisioningLimitsFrom(defaults), time.Now())
+	// The plugins-init failure check runs before the verdict, so a plugins-init
+	// that fails past the base budget shows PluginRollFailed on the tick it fails.
+	if pod != nil {
+		r.applyProvisioningPluginInitFailure(cr, pod)
+	}
 	if budget.exceeded() {
-		setImagePullingCondition(cr, nil)
+		setProvisioningStepCondition(cr, provisioningBudget{})
 		cr.Status.Phase = v1alpha1.ControllerPhaseFailed
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type:    v1alpha1.ConditionFailed,
@@ -3937,12 +3944,11 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 		r.persistStatusDiagnostics(ctx, cr)
 		return fmt.Errorf("provisioning timeout exceeded")
 	}
-	setImagePullingCondition(cr, budget.Pull)
+	setProvisioningStepCondition(cr, budget)
 
-	// Surface plugins-init failures during initial provisioning. Without this, a
+	// Surface a Jenkins boot failure during initial provisioning. Without this, a
 	// bad plugin pin leaves the controller in Provisioning with no visible cause.
 	if pod != nil {
-		r.applyProvisioningPluginInitFailure(cr, pod)
 		r.applyJenkinsBootFailure(ctx, cr, pod)
 	}
 
@@ -5286,12 +5292,12 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 	// so an operator restart doesn't immediately fail long-lived controllers.
 	// A stream lost after the last provisioning run is not a connect timeout:
 	// ProvisioningStartedAt predates the loss, so the guard skips it.
-	// The verdict applies the image-pull credit of the pod read above.
+	// The verdict applies the image-pull and plugin-download credits of the pod read above.
 	// The guard reads ProvisioningDefaults on each tick, so a changed budget applies at once.
 	if started := cr.Status.ProvisioningStartedAt; started != nil && !streamLostSince(cr, started.Time) {
 		limits := r.currentProvisioningLimits(ctx)
 		if time.Since(started.Time) > limits.Base {
-			// A failed read skips the verdict for this tick, so no pull credit is lost.
+			// A failed read skips the verdict for this tick, so no credit is lost.
 			if podErr != nil && r.Logger != nil {
 				r.Logger.Warn("skip mite connect timeout: pod read failed",
 					"controller", cr.Namespace+"/"+cr.Name, "error", podErr)
