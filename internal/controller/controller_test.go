@@ -1635,6 +1635,16 @@ func provisionPullPod(pullStart time.Time) (*corev1.Pod, corev1.Event) {
 	return pod, ev
 }
 
+// provisionPulledEvent returns a Pulled event of the first init container of
+// the pod that provisionPullPod returns.
+func provisionPulledEvent(at time.Time) corev1.Event {
+	return corev1.Event{
+		Reason:         "Pulled",
+		InvolvedObject: corev1.ObjectReference{UID: testUID, FieldPath: "spec.initContainers{plugins-init}"},
+		LastTimestamp:  metav1.NewTime(at),
+	}
+}
+
 func provisionPullCtrl(started time.Time) *v1alpha1.Controller {
 	startedAt := metav1.NewTime(started)
 	return &v1alpha1.Controller{
@@ -1723,6 +1733,33 @@ func TestProvisioningTimeoutCountsWaitWithoutPullEvent(t *testing.T) {
 	}
 	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionImagePulling); c != nil {
 		t.Errorf("ImagePulling = %+v, want absent", c)
+	}
+}
+
+// TestProvisioningTimeoutCountsWaitAfterPulled: a wait that follows a Pulled
+// event is not a pull, so only the 30 seconds of the finished pull is credited.
+func TestProvisioningTimeoutCountsWaitAfterPulled(t *testing.T) {
+	client := newTestClientWithBundle()
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-6 * time.Minute)
+	pod, ev := provisionPullPod(started.Add(5 * time.Second))
+	client.controllerPod = pod
+	client.pullEvents = []corev1.Event{ev, provisionPulledEvent(started.Add(35 * time.Second))}
+	cr := provisionPullCtrl(started)
+
+	_ = rec.reconcileController(context.Background(), cr)
+	if cr.Status.Phase != v1alpha1.ControllerPhaseFailed {
+		t.Fatalf("phase = %s, want Failed", cr.Status.Phase)
+	}
+	f := findCondition(cr.Status.Conditions, v1alpha1.ConditionFailed)
+	if f == nil || f.Reason != "ProvisioningTimeout" || !strings.Contains(f.Message, "not counting 30s of image pulls") {
+		t.Fatalf("Failed = %+v, want ProvisioningTimeout not counting 30s of image pulls", f)
+	}
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionImagePulling); c != nil {
+		t.Errorf("ImagePulling = %+v, want absent once the pull ended", c)
 	}
 }
 

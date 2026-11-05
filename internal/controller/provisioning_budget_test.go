@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -42,11 +41,11 @@ func TestImagePullWait(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		pod        *corev1.Pod
-		pullStarts map[string]time.Time
-		wantWait   time.Duration
-		wantPull   *imagePull
+		name     string
+		pod      *corev1.Pod
+		pulls    map[string]pullWindow
+		wantWait time.Duration
+		wantPull *imagePull
 	}{
 		{
 			name: "first init container pulls now",
@@ -54,9 +53,9 @@ func TestImagePullWait(t *testing.T) {
 				Spec:   corev1.PodSpec{InitContainers: initSpec},
 				Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{waitingStatus("plugins-init", "PodInitializing")}},
 			},
-			pullStarts: map[string]time.Time{"plugins-init": since.Add(5 * time.Second)},
-			wantWait:   8*time.Minute - 5*time.Second,
-			wantPull:   &imagePull{Container: "plugins-init", Image: "jenkins/jenkins:2.528"},
+			pulls:    map[string]pullWindow{"plugins-init": {Start: since.Add(5 * time.Second)}},
+			wantWait: 8*time.Minute - 5*time.Second,
+			wantPull: &imagePull{Container: "plugins-init", Image: "jenkins/jenkins:2.528"},
 		},
 		{
 			name: "create wait without a Pulling event is not a pull",
@@ -75,9 +74,9 @@ func TestImagePullWait(t *testing.T) {
 					terminatedStatus("init-groovy", since.Add(3*time.Minute)),
 				}},
 			},
-			pullStarts: map[string]time.Time{
-				"plugins-init": since,
-				"init-groovy":  since.Add(2 * time.Minute),
+			pulls: map[string]pullWindow{
+				"plugins-init": {Start: since},
+				"init-groovy":  {Start: since.Add(2 * time.Minute)},
 			},
 			wantWait: 2 * time.Minute,
 		},
@@ -87,8 +86,8 @@ func TestImagePullWait(t *testing.T) {
 				Spec:   corev1.PodSpec{InitContainers: initSpec},
 				Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{waitingStatus("plugins-init", "ImagePullBackOff")}},
 			},
-			pullStarts: map[string]time.Time{"plugins-init": since.Add(5 * time.Second)},
-			wantWait:   0,
+			pulls:    map[string]pullWindow{"plugins-init": {Start: since.Add(5 * time.Second)}},
+			wantWait: 0,
 		},
 		{
 			name: "window that starts before the budget is clipped",
@@ -96,8 +95,8 @@ func TestImagePullWait(t *testing.T) {
 				Spec:   corev1.PodSpec{InitContainers: initSpec},
 				Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{terminatedStatus("plugins-init", since.Add(time.Minute))}},
 			},
-			pullStarts: map[string]time.Time{"plugins-init": since.Add(-2 * time.Minute)},
-			wantWait:   time.Minute,
+			pulls:    map[string]pullWindow{"plugins-init": {Start: since.Add(-2 * time.Minute)}},
+			wantWait: time.Minute,
 		},
 		{
 			name: "restarted container earns no credit",
@@ -109,8 +108,8 @@ func TestImagePullWait(t *testing.T) {
 					return s
 				}()}},
 			},
-			pullStarts: map[string]time.Time{"plugins-init": since},
-			wantWait:   0,
+			pulls:    map[string]pullWindow{"plugins-init": {Start: since}},
+			wantWait: 0,
 		},
 		{
 			name: "finished pull of a restarted container earns no credit",
@@ -122,8 +121,8 @@ func TestImagePullWait(t *testing.T) {
 					return s
 				}()}},
 			},
-			pullStarts: map[string]time.Time{"plugins-init": since},
-			wantWait:   0,
+			pulls:    map[string]pullWindow{"plugins-init": {Start: since}},
+			wantWait: 0,
 		},
 		{
 			name: "restarted container that pulls again after its last exit is credited",
@@ -139,9 +138,9 @@ func TestImagePullWait(t *testing.T) {
 					return s
 				}()}},
 			},
-			pullStarts: map[string]time.Time{"plugins-init": since.Add(2 * time.Minute)},
-			wantWait:   6 * time.Minute,
-			wantPull:   &imagePull{Container: "plugins-init", Image: "jenkins/jenkins:2.528"},
+			pulls:    map[string]pullWindow{"plugins-init": {Start: since.Add(2 * time.Minute)}},
+			wantWait: 6 * time.Minute,
+			wantPull: &imagePull{Container: "plugins-init", Image: "jenkins/jenkins:2.528"},
 		},
 		{
 			name: "pull before a restart is credited up to the previous run start",
@@ -158,8 +157,8 @@ func TestImagePullWait(t *testing.T) {
 					return s
 				}()}},
 			},
-			pullStarts: map[string]time.Time{"plugins-init": since},
-			wantWait:   time.Minute,
+			pulls:    map[string]pullWindow{"plugins-init": {Start: since}},
+			wantWait: time.Minute,
 		},
 		{
 			name: "main container pulls after the init containers finish",
@@ -176,14 +175,89 @@ func TestImagePullWait(t *testing.T) {
 					ContainerStatuses: []corev1.ContainerStatus{waitingStatus("mite", "ContainerCreating")},
 				},
 			},
-			pullStarts: map[string]time.Time{"mite": since.Add(2 * time.Minute)},
-			wantWait:   6 * time.Minute,
-			wantPull:   &imagePull{Container: "mite", Image: "mite:2"},
+			pulls:    map[string]pullWindow{"mite": {Start: since.Add(2 * time.Minute)}},
+			wantWait: 6 * time.Minute,
+			wantPull: &imagePull{Container: "mite", Image: "mite:2"},
+		},
+		{
+			name: "create wait after a Pulled event earns credit up to the Pulled event",
+			pod: &corev1.Pod{
+				Spec:   corev1.PodSpec{InitContainers: initSpec},
+				Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{waitingStatus("plugins-init", "PodInitializing")}},
+			},
+			pulls:    map[string]pullWindow{"plugins-init": {Start: since.Add(5 * time.Second), End: since.Add(2 * time.Minute)}},
+			wantWait: 2*time.Minute - 5*time.Second,
+		},
+		{
+			name: "Pulled event in the Pulling second ends the pull",
+			pod: &corev1.Pod{
+				Spec:   corev1.PodSpec{InitContainers: initSpec},
+				Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{waitingStatus("plugins-init", "PodInitializing")}},
+			},
+			pulls:    map[string]pullWindow{"plugins-init": {Start: since.Add(time.Minute), End: since.Add(time.Minute)}},
+			wantWait: 0,
+		},
+		{
+			name: "Pulled event before the container start caps the credit",
+			pod: &corev1.Pod{
+				Spec:   corev1.PodSpec{InitContainers: initSpec},
+				Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{terminatedStatus("plugins-init", since.Add(3*time.Minute))}},
+			},
+			pulls:    map[string]pullWindow{"plugins-init": {Start: since, End: since.Add(time.Minute)}},
+			wantWait: time.Minute,
+		},
+		{
+			name: "Pulled event after the container start keeps the start as the end",
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{InitContainers: initSpec},
+				Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{{
+					Name:  "plugins-init",
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(since.Add(time.Minute))}},
+				}}},
+			},
+			pulls:    map[string]pullWindow{"plugins-init": {Start: since, End: since.Add(2 * time.Minute)}},
+			wantWait: time.Minute,
+		},
+		{
+			name: "pull before one restart ends at its Pulled event",
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{InitContainers: initSpec},
+				Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{func() corev1.ContainerStatus {
+					s := waitingStatus("plugins-init", "CrashLoopBackOff")
+					s.RestartCount = 1
+					s.LastTerminationState = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+						ExitCode:   1,
+						StartedAt:  metav1.NewTime(since.Add(3 * time.Minute)),
+						FinishedAt: metav1.NewTime(since.Add(4 * time.Minute)),
+					}}
+					return s
+				}()}},
+			},
+			pulls:    map[string]pullWindow{"plugins-init": {Start: since, End: since.Add(time.Minute)}},
+			wantWait: time.Minute,
+		},
+		{
+			name: "main container that waits after its Pulled event names no pull",
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					InitContainers: initSpec,
+					Containers:     []corev1.Container{{Name: "mite", Image: "mite:2"}},
+				},
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{
+						terminatedStatus("plugins-init", since),
+						terminatedStatus("init-groovy", since.Add(time.Minute)),
+					},
+					ContainerStatuses: []corev1.ContainerStatus{waitingStatus("mite", "ContainerCreating")},
+				},
+			},
+			pulls:    map[string]pullWindow{"mite": {Start: since.Add(2 * time.Minute), End: since.Add(3 * time.Minute)}},
+			wantWait: time.Minute,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			wait, pull := imagePullWait(tc.pod, tc.pullStarts, since, now)
+			wait, pull := imagePullWait(tc.pod, tc.pulls, since, now)
 			if wait != tc.wantWait {
 				t.Errorf("wait = %v, want %v", wait, tc.wantWait)
 			}
@@ -197,30 +271,54 @@ func TestImagePullWait(t *testing.T) {
 	}
 }
 
-func TestPullStartsByContainer(t *testing.T) {
+func TestPullWindowsByContainer(t *testing.T) {
 	base := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
+	initPlugins := "spec.initContainers{plugins-init}"
 	events := []corev1.Event{
-		{Reason: "Pulling", InvolvedObject: corev1.ObjectReference{FieldPath: "spec.initContainers{plugins-init}"},
+		{Reason: "Pulling", InvolvedObject: corev1.ObjectReference{FieldPath: initPlugins},
 			LastTimestamp: metav1.NewTime(base.Add(time.Minute))},
-		{Reason: "Pulling", InvolvedObject: corev1.ObjectReference{FieldPath: "spec.initContainers{plugins-init}"},
+		{Reason: "Pulling", InvolvedObject: corev1.ObjectReference{FieldPath: initPlugins},
 			LastTimestamp: metav1.NewTime(base.Add(2 * time.Minute))},
+		{Reason: "Pulled", InvolvedObject: corev1.ObjectReference{FieldPath: initPlugins},
+			LastTimestamp: metav1.NewTime(base.Add(90 * time.Second))},
+		{Reason: "Pulled", InvolvedObject: corev1.ObjectReference{FieldPath: initPlugins},
+			LastTimestamp: metav1.NewTime(base.Add(5 * time.Minute))},
+		{Reason: "Pulled", InvolvedObject: corev1.ObjectReference{FieldPath: initPlugins},
+			LastTimestamp: metav1.NewTime(base.Add(4 * time.Minute))},
+		{Reason: "Created", InvolvedObject: corev1.ObjectReference{FieldPath: initPlugins},
+			LastTimestamp: metav1.NewTime(base.Add(3 * time.Minute))},
+		{Reason: "Pulled", InvolvedObject: corev1.ObjectReference{FieldPath: initPlugins}},
 		{Reason: "Pulling", InvolvedObject: corev1.ObjectReference{FieldPath: "spec.containers{mite}"},
 			EventTime: metav1.NewMicroTime(base.Add(3 * time.Minute))},
+		{Reason: "Pulled", InvolvedObject: corev1.ObjectReference{FieldPath: "spec.containers{mite}"},
+			LastTimestamp: metav1.NewTime(base.Add(time.Minute))},
+		{Reason: "Pulling", InvolvedObject: corev1.ObjectReference{FieldPath: "spec.initContainers{init-groovy}"},
+			LastTimestamp: metav1.NewTime(base.Add(6 * time.Minute))},
+		{Reason: "Pulled", InvolvedObject: corev1.ObjectReference{FieldPath: "spec.initContainers{init-groovy}"},
+			LastTimestamp: metav1.NewTime(base.Add(6 * time.Minute))},
+		{Reason: "Pulled", InvolvedObject: corev1.ObjectReference{FieldPath: "spec.containers{jenkins}"},
+			LastTimestamp: metav1.NewTime(base)},
 		{Reason: "Pulling", InvolvedObject: corev1.ObjectReference{FieldPath: "spec.initContainers{"}, LastTimestamp: metav1.NewTime(base)},
 		{Reason: "Pulling", InvolvedObject: corev1.ObjectReference{FieldPath: "spec.containers{}"}, LastTimestamp: metav1.NewTime(base)},
 		{Reason: "Pulling", InvolvedObject: corev1.ObjectReference{FieldPath: "pod"}, LastTimestamp: metav1.NewTime(base)},
-		{Reason: "Pulled", InvolvedObject: corev1.ObjectReference{FieldPath: "spec.containers{jenkins}"}, LastTimestamp: metav1.NewTime(base)},
 		{Reason: "Pulling", InvolvedObject: corev1.ObjectReference{FieldPath: "spec.containers{casc}"}},
 	}
-	got := pullStartsByContainer(events)
-	if len(got) != 2 {
-		t.Fatalf("got %d containers, want 2: %v", len(got), got)
+	got := pullWindowsByContainer(events)
+	if len(got) != 3 {
+		t.Fatalf("got %d containers, want 3: %v", len(got), got)
 	}
-	if !got["plugins-init"].Equal(base.Add(2 * time.Minute)) {
-		t.Errorf("plugins-init = %v, want the latest event", got["plugins-init"])
+	want := map[string]pullWindow{
+		"plugins-init": {Start: base.Add(2 * time.Minute), End: base.Add(4 * time.Minute)},
+		"mite":         {Start: base.Add(3 * time.Minute)},
+		"init-groovy":  {Start: base.Add(6 * time.Minute), End: base.Add(6 * time.Minute)},
 	}
-	if !got["mite"].Equal(base.Add(3 * time.Minute)) {
-		t.Errorf("mite = %v, want the EventTime fallback", got["mite"])
+	for name, w := range want {
+		if !got[name].Start.Equal(w.Start) || !got[name].End.Equal(w.End) {
+			t.Errorf("%s = %+v, want %+v", name, got[name], w)
+		}
+	}
+	if _, ok := got["jenkins"]; ok {
+		t.Errorf("jenkins has only a Pulled event and must have no window")
 	}
 }
 
@@ -386,26 +484,34 @@ func TestProvisioningLimitsFrom(t *testing.T) {
 	}
 }
 
-func TestListPodPullEventsSelectsPodAndReason(t *testing.T) {
+func TestListPodPullEventsKeepsPullReasons(t *testing.T) {
 	cs := fake.NewClientset()
 	var gotNS, gotFields string
 	cs.PrependReactor("list", "events", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		gotNS = action.GetNamespace()
 		la := action.(clienttesting.ListAction)
 		gotFields = la.GetListRestrictions().Fields.String()
-		return true, &corev1.EventList{}, nil
+		return true, &corev1.EventList{Items: []corev1.Event{
+			{Reason: "Scheduled"},
+			{Reason: "Pulling"},
+			{Reason: "Pulled"},
+			{Reason: "Created"},
+			{Reason: "Started"},
+		}}, nil
 	})
 	c := &ClientsetClient{clientset: cs}
 	uid := types.UID("pod-uid-1")
-	if _, err := c.ListPodPullEvents(context.Background(), "ns", uid); err != nil {
+	events, err := c.ListPodPullEvents(context.Background(), "ns", uid)
+	if err != nil {
 		t.Fatalf("ListPodPullEvents: %v", err)
 	}
 	if gotNS != "ns" {
 		t.Errorf("namespace = %q, want ns", gotNS)
 	}
-	for _, want := range []string{"involvedObject.uid=pod-uid-1", "reason=Pulling"} {
-		if !strings.Contains(gotFields, want) {
-			t.Errorf("field selector %q lacks %q", gotFields, want)
-		}
+	if want := "involvedObject.uid=pod-uid-1"; gotFields != want {
+		t.Errorf("field selector = %q, want %q", gotFields, want)
+	}
+	if len(events) != 2 || events[0].Reason != "Pulling" || events[1].Reason != "Pulled" {
+		t.Fatalf("events = %+v, want the Pulling and Pulled events", events)
 	}
 }
