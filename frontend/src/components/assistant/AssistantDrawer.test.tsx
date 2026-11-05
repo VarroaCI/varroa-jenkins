@@ -64,7 +64,7 @@ function Probe() {
   return (
     <>
       <button type="button" onClick={() => a.openSession("s1")}>open</button>
-      <button type="button" onClick={a.toggleDrawer}>toggle</button>
+      <button type="button" onClick={() => a.toggleDrawer()}>toggle</button>
       <span>{a.drawerOpen ? "drawer open" : "drawer closed"}</span>
       {a.drawerOpen && <AssistantDrawer />}
     </>
@@ -378,7 +378,7 @@ function FocusProbe() {
   const navigate = useNavigate();
   return (
     <>
-      <button ref={a.registerDoor} type="button" onClick={a.toggleDrawer}>door</button>
+      <button ref={a.registerDoor} type="button" onClick={(e) => a.toggleDrawer(e.currentTarget)}>door</button>
       <Routes>
         <Route path="/" element={<button type="button" onClick={() => a.openSession("s1")}>explain</button>} />
         <Route path="*" element={<p>other page</p>} />
@@ -488,5 +488,38 @@ describe("AssistantDrawer focus return", () => {
     expect(screen.getByText("drawer open")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Close" })).toBe(close);
     expect(document.activeElement).toBe(close);
+  });
+
+  it.each([1280, 800, 500])("keeps focus on the door when a click on it does not focus it at %i px", async (width) => {
+    stubViewport(width);
+    renderFocusProbe();
+    const door = screen.getByRole("button", { name: "door" });
+    await openFrom("explain");
+    // jsdom, like Safari, does not focus a button on click.
+    fireEvent.click(door);
+    expect(screen.getByText("drawer closed")).toBeTruthy();
+    expect(document.activeElement).toBe(door);
+  });
+
+  it.each([800, 500])("moves focus from the docked handle to Close when the viewport shrinks to %i px", async (width) => {
+    stubViewport(1280);
+    renderFocusProbe();
+    await openFrom("explain");
+    const handle = screen.getByRole("separator", { name: "Resize the assistant drawer" });
+    act(() => handle.focus());
+    resizeViewport(width);
+    expect(screen.queryByRole("separator", { name: "Resize the assistant drawer" })).toBeNull();
+    expect(screen.getByText("drawer open")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
+  });
+
+  it("keeps focus outside the drawer when the docked handle unmounts", async () => {
+    stubViewport(1280);
+    renderFocusProbe();
+    const opener = await openFrom("explain");
+    act(() => opener.focus());
+    resizeViewport(800);
+    expect(screen.queryByRole("separator", { name: "Resize the assistant drawer" })).toBeNull();
+    expect(document.activeElement).toBe(opener);
   });
 });

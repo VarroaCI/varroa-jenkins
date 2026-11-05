@@ -149,13 +149,21 @@ export default function AssistantDrawer() {
 
   // A layout effect reads the opener before the mount effect moves focus to
   // Close. Its cleanup runs before React removes the drawer from the document.
+  // A focus target that the close names in returnToRef goes before the opener.
   const doorRef = a.doorRef;
+  const returnToRef = a.returnToRef;
   useLayoutEffect(() => {
     const drawer = sectionRef.current;
     const active = document.activeElement;
     const opener = active instanceof HTMLElement && active !== document.body && !drawer?.contains(active) ? active : null;
-    return () => returnFocus(drawer, opener, doorRef.current);
-  }, [doorRef]);
+    // The mount clears a target that the opening click named, which keeps the StrictMode double-run clean.
+    returnToRef.current = null;
+    return () => {
+      const returnTo = returnToRef.current;
+      returnToRef.current = null;
+      returnFocus(drawer, opener, doorRef.current, returnTo);
+    };
+  }, [doorRef, returnToRef]);
 
   // Below 640px the drawer is a modal sheet: Tab stays inside it and the page
   // behind does not scroll.
@@ -200,12 +208,14 @@ export default function AssistantDrawer() {
       aria-label="Assistant"
       onKeyDown={onKey}
     >
+      {/* The handle exists only while docked. When a viewport change removes it with focus, focus moves to Close. */}
       {docked && (
         <DrawerResizeHandle
           width={drawerWidth}
           max={maxDrawerWidth(viewport)}
           onResize={setStoredWidth}
           onCommit={writeDrawerWidth}
+          fallbackFocusRef={closeRef}
         />
       )}
       <header className={styles.header}>

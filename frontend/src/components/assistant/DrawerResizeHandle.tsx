@@ -1,6 +1,6 @@
 // DrawerResizeHandle is the left edge of the docked assistant drawer. A
 // pointer drag or the arrow, Home, and End keys change the drawer width.
-import { useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { DRAWER_MIN_WIDTH, dragWidth, keyWidth } from "./drawerWidth";
 import styles from "./DrawerResizeHandle.module.css";
 
@@ -13,14 +13,26 @@ type Props = {
   onResize(px: number): void;
   /** onCommit receives the final width when the change ends. */
   onCommit(px: number): void;
+  /** fallbackFocusRef names the element that takes focus when the handle unmounts while it has focus. */
+  fallbackFocusRef: { readonly current: HTMLElement | null };
 };
 
 type Drag = { x: number; w: number; last: number };
 
 /** DrawerResizeHandle renders the separator that resizes the docked drawer. */
-export function DrawerResizeHandle({ width, max, onResize, onCommit }: Props) {
+export function DrawerResizeHandle({ width, max, onResize, onCommit, fallbackFocusRef }: Props) {
   const [dragging, setDragging] = useState(false);
   const drag = useRef<Drag | null>(null);
+  const handleRef = useRef<HTMLDivElement | null>(null);
+
+  // React runs this cleanup before it removes the handle from the document,
+  // so the handle still has focus when the cleanup checks it.
+  useLayoutEffect(() => {
+    const el = handleRef.current;
+    return () => {
+      if (el !== null && document.activeElement === el) fallbackFocusRef.current?.focus();
+    };
+  }, [fallbackFocusRef]);
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -58,6 +70,7 @@ export function DrawerResizeHandle({ width, max, onResize, onCommit }: Props) {
 
   return (
     <div
+      ref={handleRef}
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize the assistant drawer"
