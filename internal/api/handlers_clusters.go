@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/api/sse"
@@ -448,12 +450,23 @@ func writeConfigBroodError(w http.ResponseWriter, err error, cluster string) {
 		}
 		return
 	}
+	if k8serrors.IsNotFound(err) {
+		writeJSON(w, http.StatusNotFound, body(err.Error()))
+		return
+	}
 	var unreachable *ErrClusterUnreachable
 	if errors.As(err, &unreachable) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "cluster " + cluster + " unreachable"})
 		return
 	}
 	writeJSON(w, http.StatusInternalServerError, body(err.Error()))
+}
+
+// isConfigNotFound reports a missing config object. A local read returns the
+// Kubernetes error. A member read returns a not_found BroodError.
+func isConfigNotFound(err error) bool {
+	var fe *BroodError
+	return k8serrors.IsNotFound(err) || (errors.As(err, &fe) && fe.Code == bus.CodeNotFound)
 }
 
 // --- Config dispatch handlers ---

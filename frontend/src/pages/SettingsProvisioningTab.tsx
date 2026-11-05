@@ -2,19 +2,38 @@ import { useEffect, useState, type FormEvent } from "react";
 import { getProvisioningDefaults, updateProvisioningDefaults } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { canDoGlobal } from "../hooks/usePermissions";
-import type { ProvisioningDefaults } from "../types";
+import { ApiError } from "../hooks/useApi";
+import type { ProvisioningDefaults, ProvisioningDefaultsSpec } from "../types";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ClusterSelector from "../components/ClusterSelector";
 import { Button } from "../components/Button";
 import styles from "./settings.module.css";
 
 const EMPTY_ANNOTATION = { key: "", value: "" };
+const MISSING_NOTE = "This cluster has no provisioning defaults. Save creates them.";
+
+function emptyDefaults(): ProvisioningDefaults {
+  return {
+    apiVersion: "varroa.dev/v1alpha1",
+    kind: "ProvisioningDefaults",
+    metadata: { name: "varroa-defaults" },
+    spec: {},
+  };
+}
+
+function annotationRows(spec: ProvisioningDefaultsSpec): { key: string; value: string }[] {
+  const rows = Object.entries(spec.ingressAnnotations ?? {}).map(
+    ([key, value]) => ({ key, value }),
+  );
+  return rows.length > 0 ? rows : [{ ...EMPTY_ANNOTATION }];
+}
 
 export default function SettingsProvisioningTab() {
   const [config, setConfig] = useState<ProvisioningDefaults | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [missing, setMissing] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState("core");
   const { permissions } = useAuth();
   const [annotations, setAnnotations] = useState<
@@ -24,17 +43,22 @@ export default function SettingsProvisioningTab() {
   useEffect(() => {
     setConfig(null);
     setError(null);
+    setSaved(false);
+    setMissing(false);
     getProvisioningDefaults(selectedCluster)
       .then((cfg) => {
         setConfig(cfg);
-        if (cfg.spec.ingressAnnotations) {
-          const rows = Object.entries(cfg.spec.ingressAnnotations).map(
-            ([key, value]) => ({ key, value }),
-          );
-          setAnnotations(rows.length > 0 ? rows : [{ ...EMPTY_ANNOTATION }]);
-        }
+        setAnnotations(annotationRows(cfg.spec));
       })
-      .catch((e) => setError(e.message));
+      .catch((e) => {
+        if (e instanceof ApiError && e.status === 404) {
+          setConfig(emptyDefaults());
+          setAnnotations([{ ...EMPTY_ANNOTATION }]);
+          setMissing(true);
+          return;
+        }
+        setError(e.message);
+      });
   }, [selectedCluster]);
 
   if (error) return <div className={styles.errorMsg}>Error: {error}</div>;
@@ -71,6 +95,7 @@ export default function SettingsProvisioningTab() {
       };
       const cfg = await updateProvisioningDefaults(selectedCluster, updated);
       setConfig(cfg);
+      setMissing(false);
       setSaved(true);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -89,6 +114,7 @@ export default function SettingsProvisioningTab() {
       </p>
 
       <ClusterSelector value={selectedCluster} onChange={setSelectedCluster} />
+      {missing && <p className={`${styles.muted} ${styles.pageNote}`}>{MISSING_NOTE}</p>}
 
       <div className={styles.formGroup}>
         <label className={styles.formLabel}>Root Domain</label>

@@ -55,6 +55,8 @@ spec:
 kubectl apply -f defaults.yaml
 ```
 
+When the object does not exist, the Settings ▸ Provisioning tab shows an empty form, and Save creates the object.
+
 A subdomain controller without an explicit host then uses `<name>.example.com`.
 
 ## Override One Controller

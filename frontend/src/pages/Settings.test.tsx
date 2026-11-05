@@ -26,6 +26,7 @@ import { useAuth } from "../context/AuthContext";
 import { canDoGlobal } from "../hooks/usePermissions";
 import Settings from "./Settings";
 import { createProvisioningConfig } from "../test/factories";
+import { ApiError } from "../hooks/useApi";
 
 const mockGetConfig = getProvisioningDefaults as ReturnType<typeof vi.fn>;
 const mockUpdateConfig = updateProvisioningDefaults as ReturnType<typeof vi.fn>;
@@ -294,5 +295,72 @@ describe("Settings page", () => {
 
     await screen.findByText("Root Domain");
     expect(screen.getByText("Default Jenkins Version")).toBeInTheDocument();
+  });
+});
+
+describe("Settings provisioning tab without varroa-defaults", () => {
+  const NOTE = "This cluster has no provisioning defaults. Save creates them.";
+
+  it("shows the empty form with a note when the cluster has no provisioning defaults", async () => {
+    mockGetConfig.mockRejectedValue(new ApiError(404, "We could not find that page."));
+    renderSettings();
+
+    expect(await screen.findByText(NOTE)).toBeInTheDocument();
+    expect(screen.queryByText(/Error:/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Storage Class")).toHaveValue("");
+    expect(screen.getByLabelText("Storage Class")).toHaveAttribute("placeholder", "standard");
+    expect(screen.getByLabelText("Provisioning Timeout (seconds)")).toHaveAttribute("placeholder", "300");
+    expect(screen.getByText("Save")).toBeInTheDocument();
+  });
+
+  it("shows the error for a failed read that is not a 404", async () => {
+    mockGetConfig.mockRejectedValue(new ApiError(500, "Varroa could not complete the request."));
+    renderSettings();
+
+    expect(await screen.findByText("Error: Varroa could not complete the request.")).toBeInTheDocument();
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+  });
+
+  it("creates the defaults on the first save of a missing object", async () => {
+    mockGetConfig.mockRejectedValue(new ApiError(404, "We could not find that page."));
+    mockUpdateConfig.mockResolvedValue(
+      createProvisioningConfig({ metadata: { name: "varroa-defaults", resourceVersion: "1" }, spec: { storageClass: "fast" } }),
+    );
+    renderSettings();
+
+    await userEvent.type(await screen.findByLabelText("Storage Class"), "fast");
+    await userEvent.click(screen.getByText("Save"));
+
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    expect(mockUpdateConfig).toHaveBeenCalledTimes(1);
+    expect(mockUpdateConfig).toHaveBeenCalledWith(
+      "core",
+      expect.objectContaining({
+        apiVersion: "varroa.dev/v1alpha1",
+        kind: "ProvisioningDefaults",
+        metadata: { name: "varroa-defaults" },
+        spec: expect.objectContaining({ storageClass: "fast" }),
+      }),
+    );
+    expect(mockUpdateConfig.mock.calls[0][1].spec.ingressAnnotations).toBeUndefined();
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+  });
+
+  it("updates the defaults on a second save after the create", async () => {
+    mockGetConfig.mockRejectedValue(new ApiError(404, "We could not find that page."));
+    mockUpdateConfig.mockResolvedValue(
+      createProvisioningConfig({ metadata: { name: "varroa-defaults", resourceVersion: "1" }, spec: { storageClass: "fast" } }),
+    );
+    renderSettings();
+
+    await userEvent.type(await screen.findByLabelText("Storage Class"), "fast");
+    await userEvent.click(screen.getByText("Save"));
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    await userEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => expect(mockUpdateConfig).toHaveBeenCalledTimes(2));
+    const second = mockUpdateConfig.mock.calls[1][1];
+    expect(second.metadata.resourceVersion).toBe("1");
+    expect(second.spec.storageClass).toBe("fast");
   });
 });

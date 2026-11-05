@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -726,5 +728,81 @@ func TestVersionProfileDetail_JSONShapeUnchanged(t *testing.T) {
 	}
 	if _, present := got2["plugins"]; present {
 		t.Errorf("plugins must keep its omitempty: %s", string(b2))
+	}
+}
+
+func TestWriteConfigBroodErrorMapsLocalNotFound(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"local kubernetes not found", k8serrors.NewNotFound(v1alpha1.Resource("provisioningdefaults"), "varroa-defaults"), http.StatusNotFound},
+		{"member not_found brood error", &BroodError{Code: bus.CodeNotFound, Msg: "not found"}, http.StatusNotFound},
+		{"other error", errors.New("boom"), http.StatusInternalServerError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			writeConfigBroodError(w, tc.err, "core")
+			if w.Code != tc.want {
+				t.Fatalf("expected %d, got %d: %s", tc.want, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestDispatchProvisioningDefaultsLocalMissingAnswers404(t *testing.T) {
+	srv := NewServer(&Dependencies{
+		Logger:      slog.Default(),
+		ConfigBrood: NewBusConfigBrood("core", nil, nil, crdstore.NewFake(), slog.Default()),
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/core/provisioningdefaults/varroa-defaults", nil)
+	srv.handleClusterDispatch(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "not found") {
+		t.Errorf("body should name the missing object: %s", w.Body.String())
+	}
+}
+
+// missingDefaultsBrood reports a member cluster that has no varroa-defaults object.
+type missingDefaultsBrood struct {
+	ConfigBrood
+}
+
+func (missingDefaultsBrood) GetProvisioningDefaults(_ context.Context, _, _ string) (json.RawMessage, error) {
+	return nil, &BroodError{Code: bus.CodeNotFound, Msg: "not found"}
+}
+
+func (missingDefaultsBrood) ListVersionProfiles(_ context.Context, _ string) ([]json.RawMessage, error) {
+	return nil, nil
+}
+
+func TestProvisioningConfigMemberWithoutDefaultsUsesBuiltins(t *testing.T) {
+	srv := NewServer(&Dependencies{
+		Logger:      slog.Default(),
+		ConfigBrood: missingDefaultsBrood{},
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/member-b/provisioning/config", nil)
+	srv.handleProvisioningConfigForCluster(w, req, "member-b")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp provisioningConfigResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.DefaultNamespace != "varroa" {
+		t.Errorf("defaultNamespace: got %q, want %q", resp.DefaultNamespace, "varroa")
+	}
+	if resp.SizePresets == nil || len(resp.SizePresets) != 0 {
+		t.Errorf("sizePresets: want empty non-nil slice, got %#v", resp.SizePresets)
+	}
+	if resp.Versions == nil || len(resp.Versions) != 0 {
+		t.Errorf("versions: want empty non-nil slice, got %#v", resp.Versions)
 	}
 }
