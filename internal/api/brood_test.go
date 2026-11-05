@@ -231,7 +231,7 @@ func (f *fakeBroodClient) DeleteTenantCRD(_ context.Context, _ string) error    
 func (f *fakeBroodClient) PatchTenantStatus(_ context.Context, _ string, _ *v1alpha1.TenantStatus) error {
 	return nil
 }
-func (f *fakeBroodClient) StreamPodLogs(_ context.Context, _, _, _ string, _ int64, _ bool) (io.ReadCloser, error) {
+func (f *fakeBroodClient) StreamPodLogs(_ context.Context, _, _ string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
 	return nil, nil
 }
 func (f *fakeBroodClient) CreateService(_ context.Context, _, _ string, _ int32, _ string) error {

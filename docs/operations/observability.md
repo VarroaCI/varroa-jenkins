@@ -42,6 +42,10 @@ controller, with the sender in `actor`, the kind in `reason`, the job path, the 
 status, and the error text. A person's successful cancel, input answer, or replay publishes
 `command.succeeded` with the same fields; other successes and a deferred restart publish no event.
 
+## Follow controller logs
+
+The controller **Diagnostics** tab and `varroactl logs <namespace>/<name> --follow` stream the `jenkins` and `mite` container logs. Each stream starts with the last 50 lines of each container. Each line carries the time that the container runtime wrote it. `kubectl logs --timestamps` shows the same time. When a pod log read stops, the BFF reads the log again after 10 seconds. The new read starts after the last line that the stream sent, so each line shows one time. A browser or CLI reconnect opens a new stream, which starts with the last 50 lines again. The dashboard and the CLI do not show a line again when it has the same container, time, and text.
+
 ## Read brood health
 
 The dashboard's brood health card summarizes the brood. A bar shows the number of controllers in each phase. Under the bar, the card lists at most eight controllers. Controllers that need attention come first. A running controller that lost its mite comes next. Live controllers follow, then hibernated and stopped controllers. The rest of the brood is on the Controllers page. Each listed row carries:

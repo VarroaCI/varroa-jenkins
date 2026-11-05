@@ -5556,14 +5556,9 @@ func (c *ClientsetClient) ListPodPhases(ctx context.Context, namespace string) (
 	return out, nil
 }
 
-// StreamPodLogs streams stdout+stderr from a container in the named pod.
-func (c *ClientsetClient) StreamPodLogs(ctx context.Context, namespace, podName, container string, tailLines int64, follow bool) (io.ReadCloser, error) {
-	opts := &corev1.PodLogOptions{
-		Container: container,
-		Follow:    follow,
-		TailLines: &tailLines,
-	}
-	return c.clientset.CoreV1().Pods(namespace).GetLogs(podName, opts).Stream(ctx)
+// StreamPodLogs streams stdout and stderr of one container in the named pod.
+func (c *ClientsetClient) StreamPodLogs(ctx context.Context, namespace, podName string, opts corev1.PodLogOptions) (io.ReadCloser, error) {
+	return c.clientset.CoreV1().Pods(namespace).GetLogs(podName, &opts).Stream(ctx)
 }
 
 // ListResourceQuotas lists ResourceQuota objects in the given namespace.

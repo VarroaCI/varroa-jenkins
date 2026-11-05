@@ -252,27 +252,54 @@ func runLogsFollow(cmd *cobra.Command, args []string) error {
 		return cerr
 	}
 
-	var lastPrinted time.Time
+	var seen logLineSeen
 
 	return stream.Stream(ctx, cfg, func(e stream.Event) error {
-		return printLogEntry(e, &lastPrinted)
+		return printLogEntry(e, &seen)
 	})
+}
+
+// logLineSeenMax is the number of printed lines that logLineSeen remembers.
+const logLineSeenMax = 1024
+
+// logLineSeen remembers the last logLineSeenMax printed lines. A reconnect
+// replays the lines of the new stream, so a line that is already known is
+// not printed again.
+type logLineSeen struct {
+	keys  map[string]struct{}
+	order []string
+}
+
+// first reports whether key is new. It records key when it is new.
+func (s *logLineSeen) first(key string) bool {
+	if _, ok := s.keys[key]; ok {
+		return false
+	}
+	if s.keys == nil {
+		s.keys = make(map[string]struct{})
+	}
+	s.keys[key] = struct{}{}
+	s.order = append(s.order, key)
+	if len(s.order) > logLineSeenMax {
+		delete(s.keys, s.order[0])
+		s.order = s.order[1:]
+	}
+	return true
 }
 
 // printLogEntry decodes an SSE frame as a LogEntry and prints it.
 // Uses the generated ComponentsSchemasLogEntry type from pkg/client.
-func printLogEntry(e stream.Event, lastPrinted *time.Time) error {
+func printLogEntry(e stream.Event, seen *logLineSeen) error {
 	var entry client.ComponentsSchemasLogEntry
 	if err := json.Unmarshal(e.Data, &entry); err != nil {
 		_, _ = fmt.Fprintln(os.Stdout, string(e.Data))
 		return nil //nolint:nilerr
 	}
 
-	// Dedupe on reconnect: skip entries with timestamp <= lastPrinted
-	if !lastPrinted.IsZero() && !entry.Timestamp.After(*lastPrinted) {
+	key := entry.Source + "\x00" + entry.Timestamp.UTC().Format(time.RFC3339Nano) + "\x00" + entry.Message
+	if !seen.first(key) {
 		return nil
 	}
-	*lastPrinted = entry.Timestamp
 
 	// Same format as C2 one-shot logs: <timestamp> <message>
 	_, _ = fmt.Fprintf(os.Stdout, "%s %s\n", entry.Timestamp.Format("2006-01-02T15:04:05Z07:00"), entry.Message)

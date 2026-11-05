@@ -12,6 +12,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
@@ -551,7 +552,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			uid = uid[:8]
 		}
 		podName := cr.Name + "-" + uid + "-0"
-		rc, err := deps.Client.StreamPodLogs(ctx, ns, podName, "jenkins", tailLines, false)
+		rc, err := deps.Client.StreamPodLogs(ctx, ns, podName, corev1.PodLogOptions{Container: "jenkins", TailLines: &tailLines})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to stream logs: %v", err)), nil
 		}
