@@ -34,6 +34,7 @@ import { TranscriptStream } from "./TranscriptStream";
 import { labelFor } from "./labels";
 import { unechoedPending, type PendingMessage } from "./activity";
 import { returnFocus } from "./focusReturn";
+import { useFocusFallback } from "./useFocusFallback";
 import styles from "./AssistantDrawer.module.css";
 import type { AssistantSession, AssistantSessionState } from "../../types/assistant";
 
@@ -50,6 +51,10 @@ export default function AssistantDrawer() {
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingMessage | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  // Stop, New conversation, Approve, and Deny can unmount while they have focus.
+  // Focus then moves to the composer, which stays in the drawer in every state.
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const keepFocusInComposer = useFocusFallback(composerRef);
   const narrow = useNarrowViewport();
   // useNarrowViewport answers any media query. Only the docked drawer takes a width handle.
   const docked = useNarrowViewport(DOCKED_QUERY);
@@ -221,7 +226,7 @@ export default function AssistantDrawer() {
       <header className={styles.header}>
         <span className={styles.chip} title={contextLabel(ctx)}>{contextLabel(ctx)}</span>
         {sid && ctxDiffers && (
-          <Button variant="ghost" size="sm" className={styles.headerBtn} onClick={() => { setPending(null); a.newConversation(); }}>
+          <Button ref={keepFocusInComposer} variant="ghost" size="sm" className={styles.headerBtn} onClick={() => { setPending(null); a.newConversation(); }}>
             <MessageSquarePlus size={14} aria-hidden="true" />
             New conversation for this page
           </Button>
@@ -301,8 +306,8 @@ export default function AssistantDrawer() {
         pending={shownPending}
         approvalActions={(id) => (
           <>
-            <Button size="sm" variant="primary" onClick={() => void decide(id, true)}>Approve</Button>
-            <Button size="sm" onClick={() => void decide(id, false)}>Deny</Button>
+            <Button ref={keepFocusInComposer} size="sm" variant="primary" onClick={() => void decide(id, true)}>Approve</Button>
+            <Button ref={keepFocusInComposer} size="sm" onClick={() => void decide(id, false)}>Deny</Button>
           </>
         )}
       />
@@ -317,6 +322,7 @@ export default function AssistantDrawer() {
         }}
       >
         <textarea
+          ref={composerRef}
           aria-label="Message"
           maxLength={8000}
           value={composer}
@@ -333,7 +339,7 @@ export default function AssistantDrawer() {
 
       <footer className={styles.footer}>
         <span aria-live="polite">{state ? `State: ${labelFor("sessionStates", state)}` : "No session"}</span>
-        {running && <Button size="sm" onClick={stop}>Stop</Button>}
+        {running && <Button ref={keepFocusInComposer} size="sm" onClick={stop}>Stop</Button>}
       </footer>
     </section>
   );
