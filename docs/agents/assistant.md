@@ -92,6 +92,8 @@ conversation to change it.
 
 Select **Sessions** to see your recent conversations. Each row shows your first message, the context, the state, and the age. On a phone, the drawer opens full screen.
 
+Select **Close** to close the drawer. Press Escape while focus is inside the drawer to close it too. Focus then returns to the control that opened the drawer. When that control is gone, focus moves to the top-bar button.
+
 On a screen 1024 px or wider, drag the left edge of the drawer to change its width. You can also focus the edge and use the arrow keys. Home and End set the smallest and the largest width. The browser keeps the width for your next visit.
 
 Your message shows in the transcript at once. A status line under it shows what the assistant does now. It thinks, it runs a named tool, or it waits for your approval. The answer text then appears at a steady rate. A conversation that you open again shows all of its text at once. When your system asks for reduced motion, the text and the status line do not move.

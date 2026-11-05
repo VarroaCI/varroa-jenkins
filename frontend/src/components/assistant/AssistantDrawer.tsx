@@ -1,7 +1,7 @@
 // AssistantDrawer is the panel that holds one session. It streams the frames
 // of the open session, shows the transcript and the approvals, and takes the
 // next message. It resumes after the last seq it applied.
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import { History, MessageSquarePlus, X } from "lucide-react";
@@ -33,6 +33,7 @@ import { TranscriptView } from "./TranscriptView";
 import { TranscriptStream } from "./TranscriptStream";
 import { labelFor } from "./labels";
 import { unechoedPending, type PendingMessage } from "./activity";
+import { returnFocus } from "./focusReturn";
 import styles from "./AssistantDrawer.module.css";
 import type { AssistantSession, AssistantSessionState } from "../../types/assistant";
 
@@ -146,17 +147,26 @@ export default function AssistantDrawer() {
 
   const sectionRef = useRef<HTMLElement | null>(null);
 
-  // Below 640px the drawer is a modal sheet: Tab stays inside it, the page
-  // behind does not scroll, and focus returns to the door on close.
+  // A layout effect reads the opener before the mount effect moves focus to
+  // Close. Its cleanup runs before React removes the drawer from the document.
+  const doorRef = a.doorRef;
+  useLayoutEffect(() => {
+    const drawer = sectionRef.current;
+    const active = document.activeElement;
+    const opener = active instanceof HTMLElement && active !== document.body && !drawer?.contains(active) ? active : null;
+    return () => returnFocus(drawer, opener, doorRef.current);
+  }, [doorRef]);
+
+  // Below 640px the drawer is a modal sheet: Tab stays inside it and the page
+  // behind does not scroll.
   useEffect(() => {
     if (!narrow) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previous;
-      a.doorRef.current?.focus();
     };
-  }, [narrow, a.doorRef]);
+  }, [narrow]);
 
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -318,10 +328,11 @@ export default function AssistantDrawer() {
     </section>
   );
 
-  if (!narrow) return panel;
+  // One element shape in every layout keeps the section mounted when the
+  // viewport crosses 640px, so focus and the stream stay in place.
   return (
     <>
-      <div className={styles.scrim} role="presentation" onClick={a.closeDrawer} />
+      {narrow && <div className={styles.scrim} role="presentation" onClick={a.closeDrawer} />}
       {panel}
     </>
   );

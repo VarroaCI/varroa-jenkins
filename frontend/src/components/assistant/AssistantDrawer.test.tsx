@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, waitFor, fireEvent, act, within } from "@testing-library/react";
+import { Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../../test/render-utils";
 import { installMockEventSource, MockEventSource } from "../../test/mockEventSource";
 import { AssistantProvider, useAssistant } from "./AssistantProvider";
@@ -7,6 +8,8 @@ import AssistantDrawer from "./AssistantDrawer";
 import * as client from "../../api/client";
 import type { AssistantSession } from "../../types/assistant";
 import { contextLabel } from "./routeContext";
+import { NARROW_QUERY } from "../../hooks/useNarrowViewport";
+import { DOCKED_QUERY } from "./drawerWidth";
 
 vi.mock("../../hooks/useApi", async (orig) => {
   const actual = await orig<typeof import("../../hooks/useApi")>();
@@ -331,5 +334,159 @@ describe("AssistantDrawer", () => {
     expect((box as HTMLTextAreaElement).value).toBe("retry me");
     expect(Array.from(container.querySelectorAll("p")).some((p) => p.textContent === "retry me")).toBe(false);
     expect(screen.getByRole("status").textContent).toBe("");
+  });
+});
+
+const originalMatchMedia = window.matchMedia;
+const originalWidth = window.innerWidth;
+const mediaListeners = new Set<() => void>();
+let viewportWidth = 1280;
+
+/** stubViewport sets the width and answers the shell's two media queries from it. */
+function stubViewport(width: number) {
+  viewportWidth = width;
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: width, writable: true });
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    get matches() {
+      if (query === NARROW_QUERY) return viewportWidth < 640;
+      if (query === DOCKED_QUERY) return viewportWidth >= 1024;
+      return false;
+    },
+    media: query,
+    addEventListener: (_type: string, fn: () => void) => mediaListeners.add(fn),
+    removeEventListener: (_type: string, fn: () => void) => mediaListeners.delete(fn),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    onchange: null,
+    dispatchEvent: vi.fn(),
+  })) as unknown as typeof window.matchMedia;
+}
+
+/** resizeViewport changes the width and tells every media listener and resize listener. */
+function resizeViewport(width: number) {
+  act(() => {
+    viewportWidth = width;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: width, writable: true });
+    for (const fn of Array.from(mediaListeners)) fn();
+    window.dispatchEvent(new Event("resize"));
+  });
+}
+
+/** FocusProbe holds a page button, a top-bar door, and two routes. */
+function FocusProbe() {
+  const a = useAssistant();
+  const navigate = useNavigate();
+  return (
+    <>
+      <button ref={a.registerDoor} type="button" onClick={a.toggleDrawer}>door</button>
+      <Routes>
+        <Route path="/" element={<button type="button" onClick={() => a.openSession("s1")}>explain</button>} />
+        <Route path="*" element={<p>other page</p>} />
+      </Routes>
+      <button type="button" onClick={() => navigate("/other")}>go</button>
+      <span>{a.drawerOpen ? "drawer open" : "drawer closed"}</span>
+      {a.drawerOpen && <AssistantDrawer />}
+    </>
+  );
+}
+
+function renderFocusProbe() {
+  return renderWithProviders(
+    <AssistantProvider>
+      <FocusProbe />
+    </AssistantProvider>,
+    { permissions: { global: { "*": { "*": true } } } as never },
+  );
+}
+
+/** openFrom opens the drawer from the named button and waits for focus on Close. */
+async function openFrom(name: string) {
+  const opener = screen.getByRole("button", { name });
+  act(() => opener.focus());
+  fireEvent.click(opener);
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" })));
+  return opener;
+}
+
+describe("AssistantDrawer focus return", () => {
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth, writable: true });
+    mediaListeners.clear();
+    document.body.style.overflow = "";
+  });
+
+  it.each([
+    [1280, "complementary"],
+    [800, "complementary"],
+    [500, "dialog"],
+  ])("returns focus to the opener on Close at %i px", async (width, role) => {
+    stubViewport(width);
+    renderFocusProbe();
+    const opener = await openFrom("explain");
+    expect(screen.getByText("drawer open")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByText("drawer closed")).toBeTruthy();
+    expect(screen.queryByRole(role, { name: "Assistant" })).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it.each([
+    [1280, "complementary"],
+    [800, "complementary"],
+    [500, "dialog"],
+  ])("returns focus to the opener on Escape at %i px", async (width, role) => {
+    stubViewport(width);
+    renderFocusProbe();
+    const opener = await openFrom("explain");
+    fireEvent.keyDown(screen.getByRole(role, { name: "Assistant" }), { key: "Escape" });
+    expect(screen.getByText("drawer closed")).toBeTruthy();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("returns focus to the opener on a scrim tap at 500px", async () => {
+    stubViewport(500);
+    renderFocusProbe();
+    const opener = await openFrom("explain");
+    const scrim = screen.getByRole("dialog", { name: "Assistant" }).previousElementSibling as HTMLElement;
+    fireEvent.click(scrim);
+    expect(screen.getByText("drawer closed")).toBeTruthy();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("keeps focus in place on a route change and falls back to the door", async () => {
+    stubViewport(1280);
+    renderFocusProbe();
+    await openFrom("explain");
+    fireEvent.click(screen.getByRole("button", { name: "go" }));
+    expect(await screen.findByText("other page")).toBeTruthy();
+    expect(screen.getByText("drawer open")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
+    fireEvent.keyDown(screen.getByRole("complementary", { name: "Assistant" }), { key: "Escape" });
+    expect(screen.getByText("drawer closed")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "door" }));
+  });
+
+  it("keeps focus on the door when the door closes the drawer", async () => {
+    stubViewport(1280);
+    renderFocusProbe();
+    await openFrom("explain");
+    const door = screen.getByRole("button", { name: "door" });
+    act(() => door.focus());
+    fireEvent.click(door);
+    expect(screen.getByText("drawer closed")).toBeTruthy();
+    expect(document.activeElement).toBe(door);
+  });
+
+  it("keeps focus on Close when the viewport grows from 500px to 800px", async () => {
+    stubViewport(500);
+    renderFocusProbe();
+    await openFrom("explain");
+    const close = screen.getByRole("button", { name: "Close" });
+    resizeViewport(800);
+    expect(screen.getByRole("complementary", { name: "Assistant" })).toBeTruthy();
+    expect(screen.getByText("drawer open")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close" })).toBe(close);
+    expect(document.activeElement).toBe(close);
   });
 });
