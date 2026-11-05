@@ -213,6 +213,37 @@ func TestPlaceDoesNotWaitForAStaleMemberWithNoPod(t *testing.T) {
 	}
 }
 
+// TestPlaceDoesNotWaitForSlotZeroWithNoPod asserts slot 0's old cell that
+// runs no pod does not hold the move. The cell still names the folder and a
+// pending deletion, so only the no-pod rule counts it drained.
+func TestPlaceDoesNotWaitForSlotZeroWithNoPod(t *testing.T) {
+	in := testInputs()
+	tenant := slotTenant(2, 1)
+	a := oldProfileCell("cell-a", "payments")
+	a.PendingDeletionPaths = []string{"payments/api"}
+	a.Instance = ""
+	in.Cells = []CellCandidate{
+		a, drainedOldCell("cell-b"), drainedOldCell("cell-c"),
+		readyCell("cell-d"), readyCell("cell-e"), readyCell("cell-f"),
+	}
+	status := threeMemberStatus("cell-a")
+	setMoving(status)
+
+	out, err := Place(context.Background(), in, tenant, status)
+	if err != nil {
+		t.Fatalf("Place: %v", err)
+	}
+	if status.Placement.Cell != "cell-d" || status.Placement.Generation != 4 {
+		t.Fatalf("placement = %s gen %d, want cell-d gen 4", status.Placement.Cell, status.Placement.Generation)
+	}
+	if !dropsTenant(patchFor(out, "cell-a")) {
+		t.Errorf("cell-a: want a patch that drops the tenant, got %+v", patchFor(out, "cell-a"))
+	}
+	if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TenantReasonTenantMoved {
+		t.Errorf("want TenantMoved, got %+v", cond)
+	}
+}
+
 // TestPlaceKeepsAStaleMemberUntilAReplacementExists asserts a stale slot
 // and a stale standby keep their cells while no free cell exists.
 func TestPlaceKeepsAStaleMemberUntilAReplacementExists(t *testing.T) {

@@ -11,11 +11,12 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
-// smallPoolCell is a cell of the pool "small" that still applies the
-// tenant's folder.
+// smallPoolCell is a cell of the pool "small" that runs a pod and still
+// applies the tenant's folder.
 func smallPoolCell(name string) CellCandidate {
 	c := poolCell(name, "small", "payments")
 	c.AppliedTenants = []string{"payments"}
+	c.Instance = "uid-" + name
 	return c
 }
 

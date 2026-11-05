@@ -929,10 +929,12 @@ func performVoluntaryMove(ctx context.Context, in Inputs, tenant *v1alpha1.Tenan
 	performMove(ctx, in, tenant, status, oldCell, nowT, out)
 }
 
-// voluntaryDrainDone reports whether slot 0's old cell has dropped the
-// tenant's folder and each stale member cell has drained.
+// voluntaryDrainDone reports whether slot 0's old cell and each stale
+// member cell have drained. Every one of those cells takes the
+// memberCellDrained test, so a cell that runs no pod counts as drained.
 func voluntaryDrainDone(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, oldCell CellCandidate) bool {
-	return cellDrainedTenant(oldCell, tenant.Name) && staleMembersDrained(in, tenant, status.Placement)
+	slotZero := MemberBinding{Cell: oldCell.Name, Namespace: oldCell.Namespace}
+	return memberCellDrained(in, tenant, slotZero) && staleMembersDrained(in, tenant, status.Placement)
 }
 
 // moveTarget answers the cell slot 0 moves to: the applied standby that
