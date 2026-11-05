@@ -205,6 +205,8 @@ the current pod. A result from a replaced pod changes nothing.
 The move proceeds when `appliedTenants` no longer names the tenant and the cell has no pending item
 deletion for it. Check `status.pendingItemDeletions` for a stuck delete.
 
+A move to a pool with no free tenant slot starts no drain, and the tenant reports `MembersStale`.
+
 ## Pool secrets
 
 A cell keeps `$JENKINS_HOME` on an `emptyDir`, so each instance would mint its own `secrets/`

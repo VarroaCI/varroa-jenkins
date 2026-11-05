@@ -98,7 +98,7 @@ generation once. A claim that carries the older generation answers `NOT_READY`, 
 never a cancel.
 
 The pool creates the cells that the move needs. A pool at its `maxCells` leaves the remaining
-members on their old cells, and they keep building there. Raise `maxCells` to complete the move.
+members on their old cells, and they keep building there. Raise `maxCells` to complete the move. When the new pool has no ready cell for slot 0, no member drops the folder.
 
 A waiting member carries `stale: true`. `Placed` stays `True` with reason `MembersStale`.
 
