@@ -978,3 +978,114 @@ func TestFromUnstructured_IgnoresUndeclaredSpecFields(t *testing.T) {
 		t.Fatalf("RootDomain = %q, want example.com", got.Spec.RootDomain)
 	}
 }
+
+func TestApplyAt_StaleResourceVersionConflictsAndKeepsTheConcurrentWrite(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "old.example"},
+	})
+
+	stale, err := Get[v1alpha1.ProvisioningDefaults](ctx, f, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	other, err := Get[v1alpha1.ProvisioningDefaults](ctx, f, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("Get second writer: %v", err)
+	}
+	other.Spec.StorageClass = "concurrent"
+	if err := Update(ctx, f, other); err != nil {
+		t.Fatalf("concurrent Update: %v", err)
+	}
+
+	stale.Spec.RootDomain = "stale.example"
+	err = ApplyAt(ctx, f, stale)
+	if !apierrors.IsConflict(err) {
+		t.Fatalf("ApplyAt with a stale resourceVersion = %v, want Conflict", err)
+	}
+	got, err := Get[v1alpha1.ProvisioningDefaults](ctx, f, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("Get after conflict: %v", err)
+	}
+	if got.Spec.StorageClass != "concurrent" {
+		t.Errorf("concurrent storageClass = %q, want %q", got.Spec.StorageClass, "concurrent")
+	}
+	if got.Spec.RootDomain == "stale.example" {
+		t.Errorf("stale write reached the store")
+	}
+}
+
+func TestApplyAt_MatchingResourceVersionUpdates(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "old.example"},
+	})
+
+	read, err := Get[v1alpha1.ProvisioningDefaults](ctx, f, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	read.Spec.RootDomain = "new.example"
+	if err := ApplyAt(ctx, f, read); err != nil {
+		t.Fatalf("ApplyAt with the read version: %v", err)
+	}
+	got, err := Get[v1alpha1.ProvisioningDefaults](ctx, f, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("Get after apply: %v", err)
+	}
+	if got.Spec.RootDomain != "new.example" {
+		t.Errorf("rootDomain = %q, want %q", got.Spec.RootDomain, "new.example")
+	}
+}
+
+func TestApplyAt_DeletedAfterReadIsConflictAndCreatesNothing(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+	})
+
+	read, err := Get[v1alpha1.ProvisioningDefaults](ctx, f, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if err := Delete[v1alpha1.ProvisioningDefaults](ctx, f, "varroa-defaults", ""); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	err = ApplyAt(ctx, f, read)
+	if !apierrors.IsConflict(err) {
+		t.Fatalf("ApplyAt after a delete = %v, want Conflict", err)
+	}
+	if _, err := Get[v1alpha1.ProvisioningDefaults](ctx, f, "varroa-defaults", ""); !apierrors.IsNotFound(err) {
+		t.Errorf("Get after conflict = %v, want NotFound", err)
+	}
+}
+
+func TestApplyAt_WithoutResourceVersionUpserts(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+
+	obj := &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "first.example"},
+	}
+	if err := ApplyAt(ctx, f, obj); err != nil {
+		t.Fatalf("ApplyAt when absent: %v", err)
+	}
+	obj.Spec.RootDomain = "second.example"
+	if err := ApplyAt(ctx, f, obj); err != nil {
+		t.Fatalf("ApplyAt without a version when present: %v", err)
+	}
+	got, err := Get[v1alpha1.ProvisioningDefaults](ctx, f, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Spec.RootDomain != "second.example" {
+		t.Errorf("rootDomain = %q, want %q", got.Spec.RootDomain, "second.example")
+	}
+}

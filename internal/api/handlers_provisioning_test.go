@@ -739,6 +739,8 @@ func TestWriteConfigBroodErrorMapsLocalNotFound(t *testing.T) {
 	}{
 		{"local kubernetes not found", k8serrors.NewNotFound(v1alpha1.Resource("provisioningdefaults"), "varroa-defaults"), http.StatusNotFound},
 		{"member not_found brood error", &BroodError{Code: bus.CodeNotFound, Msg: "not found"}, http.StatusNotFound},
+		{"local kubernetes conflict", k8serrors.NewConflict(v1alpha1.Resource("provisioningdefaults"), "varroa-defaults", errors.New("stale resourceVersion")), http.StatusConflict},
+		{"member conflict brood error", &BroodError{Code: bus.CodeConflict, Msg: "changed after it was read"}, http.StatusConflict},
 		{"other error", errors.New("boom"), http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
@@ -804,5 +806,46 @@ func TestProvisioningConfigMemberWithoutDefaultsUsesBuiltins(t *testing.T) {
 	}
 	if resp.Versions == nil || len(resp.Versions) != 0 {
 		t.Errorf("versions: want empty non-nil slice, got %#v", resp.Versions)
+	}
+}
+
+// conflictDefaultsBrood answers every provisioning defaults write with a conflict
+// and records the body the handler sent.
+type conflictDefaultsBrood struct {
+	ConfigBrood
+	sent json.RawMessage
+}
+
+func (b *conflictDefaultsBrood) UpdateProvisioningDefaults(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	b.sent = obj
+	return nil, &BroodError{Code: bus.CodeConflict, Msg: `provisioningdefaults "varroa-defaults" changed after it was read`}
+}
+
+// TestDispatchProvisioningDefaultsPutConflictAnswers409 pins that a PUT whose
+// body carries a stale resourceVersion reaches the member with that version and
+// answers 409 with the member's message.
+func TestDispatchProvisioningDefaultsPutConflictAnswers409(t *testing.T) {
+	brood := &conflictDefaultsBrood{}
+	srv := NewServer(&Dependencies{
+		Logger:      slog.Default(),
+		Authorizer:  adminTestAuthorizer(),
+		ConfigBrood: brood,
+	})
+	w := httptest.NewRecorder()
+	body := `{"metadata":{"resourceVersion":"7"},"spec":{"rootDomain":"example.com"}}`
+	req := httptest.NewRequest(http.MethodPut, "/clusters/member-b/provisioningdefaults/varroa-defaults", strings.NewReader(body))
+	srv.handleClusterDispatch(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "changed after it was read") {
+		t.Errorf("body should carry the conflict message: %s", w.Body.String())
+	}
+	var sent v1alpha1.ProvisioningDefaults
+	if err := json.Unmarshal(brood.sent, &sent); err != nil {
+		t.Fatalf("unmarshal sent body: %v", err)
+	}
+	if sent.ResourceVersion != "7" {
+		t.Errorf("sent resourceVersion = %q, want 7", sent.ResourceVersion)
 	}
 }

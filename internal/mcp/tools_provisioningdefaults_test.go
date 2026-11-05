@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -544,6 +545,10 @@ type pdRoutedBrood struct {
 	readErr error
 	reads   []string
 	updates []pdUpdate
+	// conflicts is how many writes answer conflict. Each conflict first stores
+	// afterConflict on the cluster, as a second writer would have.
+	conflicts     int
+	afterConflict json.RawMessage
 }
 
 type pdUpdate struct {
@@ -569,13 +574,23 @@ func (b *pdRoutedBrood) UpdateProvisioningDefaults(_ context.Context, cluster, _
 		return nil, err
 	}
 	b.updates = append(b.updates, pdUpdate{cluster: cluster, body: body})
+	if b.conflicts > 0 {
+		b.conflicts--
+		b.stored[cluster] = b.afterConflict
+		return nil, &api.BroodError{Code: bus.CodeConflict, Msg: "changed after it was read"}
+	}
 	return obj, nil
 }
 
 func pdSpecRaw(t *testing.T, name, rootDomain string) json.RawMessage {
 	t.Helper()
+	return pdSpecRawAt(t, name, "", rootDomain)
+}
+
+func pdSpecRawAt(t *testing.T, name, resourceVersion, rootDomain string) json.RawMessage {
+	t.Helper()
 	raw, err := json.Marshal(v1alpha1.ProvisioningDefaults{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		ObjectMeta: metav1.ObjectMeta{Name: name, ResourceVersion: resourceVersion},
 		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: rootDomain},
 	})
 	if err != nil {
@@ -676,5 +691,117 @@ func TestMCPUpdateProvisioningDefaults_TransientReadErrorWritesNothing(t *testin
 	}
 	if len(brood.updates) != 0 {
 		t.Errorf("got %d updates, want none after a failed read", len(brood.updates))
+	}
+}
+
+// A conflict on the write makes the tool read the target again and merge its
+// arguments onto the newer object. The second write carries the newer version.
+func TestMCPUpdateProvisioningDefaults_ConflictReadsAndMergesAgain(t *testing.T) {
+	deps := adminDeps()
+	newer, err := json.Marshal(v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults", ResourceVersion: "2"},
+		Spec: v1alpha1.ProvisioningDefaultsSpec{
+			RootDomain:         "newer.example.com",
+			IngressAnnotations: map[string]string{"kubernetes.io/ingress.class": "other"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	brood := &pdRoutedBrood{
+		stored:        map[string]json.RawMessage{"member-b": pdSpecRawAt(t, "varroa-defaults", "1", "member-b.example.com")},
+		conflicts:     1,
+		afterConflict: newer,
+	}
+	deps.ConfigBrood = brood
+
+	tr := updatePDCall(t, deps, map[string]interface{}{
+		"name": "varroa-defaults", "cluster": "member-b", "storageClass": "fast",
+	})
+	if tr.IsError {
+		t.Fatalf("tool errored: %v", tr.Content)
+	}
+	if len(brood.reads) != 2 {
+		t.Fatalf("base reads = %v, want two reads of member-b", brood.reads)
+	}
+	if len(brood.updates) != 2 {
+		t.Fatalf("got %d updates, want 2", len(brood.updates))
+	}
+	if got := brood.updates[0].body.ResourceVersion; got != "1" {
+		t.Errorf("first write resourceVersion = %q, want 1", got)
+	}
+	second := brood.updates[1].body
+	if second.ResourceVersion != "2" {
+		t.Errorf("second write resourceVersion = %q, want 2", second.ResourceVersion)
+	}
+	if second.Spec.RootDomain != "newer.example.com" {
+		t.Errorf("second write rootDomain = %q, want the newer object's value", second.Spec.RootDomain)
+	}
+	if second.Spec.IngressAnnotations["kubernetes.io/ingress.class"] != "other" {
+		t.Errorf("second write lost the other writer's annotation: %v", second.Spec.IngressAnnotations)
+	}
+	if second.Spec.StorageClass != "fast" {
+		t.Errorf("second write storageClass = %q, want fast", second.Spec.StorageClass)
+	}
+}
+
+// Every round conflicts, so the tool stops after the bounded attempts and asks
+// the caller to run the call again.
+func TestMCPUpdateProvisioningDefaults_ConflictOnEveryAttemptAsksForARetry(t *testing.T) {
+	deps := adminDeps()
+	newer := pdSpecRawAt(t, "varroa-defaults", "2", "newer.example.com")
+	brood := &pdRoutedBrood{
+		stored:        map[string]json.RawMessage{"member-b": pdSpecRawAt(t, "varroa-defaults", "1", "member-b.example.com")},
+		conflicts:     5,
+		afterConflict: newer,
+	}
+	deps.ConfigBrood = brood
+
+	tr := updatePDCall(t, deps, map[string]interface{}{
+		"name": "varroa-defaults", "cluster": "member-b", "storageClass": "fast",
+	})
+	if !tr.IsError {
+		t.Fatalf("want a tool error after every attempt conflicts, got %v", tr.Content)
+	}
+	if len(brood.updates) != pdWriteAttempts {
+		t.Errorf("got %d updates, want %d", len(brood.updates), pdWriteAttempts)
+	}
+	if len(tr.Content) == 0 || !strings.Contains(tr.Content[0].Text, "call update_provisioning_defaults again") {
+		t.Errorf("error text = %v, want it to ask for a new call", tr.Content)
+	}
+}
+
+// Without a config brood the tool writes through the local store, and a conflict
+// from the store is retried in the same way.
+func TestMCPUpdateProvisioningDefaults_StoreFallbackRetriesAConflict(t *testing.T) {
+	deps := adminDeps()
+	fake := deps.Store.(*crdstore.Fake)
+	if err := fake.Seed(&v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "local.example.com"},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	gvr, err := crdstore.GVRFor[v1alpha1.ProvisioningDefaults]()
+	if err != nil {
+		t.Fatalf("GVRFor: %v", err)
+	}
+	fake.FailNext("update", gvr, apierrors.NewConflict(gvr.GroupResource(), "varroa-defaults", errors.New("stale resourceVersion")))
+
+	tr := updatePDCall(t, deps, map[string]interface{}{
+		"name": "varroa-defaults", "storageClass": "fast",
+	})
+	if tr.IsError {
+		t.Fatalf("tool errored after a store conflict: %v", tr.Content)
+	}
+	got, err := crdstore.Get[v1alpha1.ProvisioningDefaults](context.Background(), fake, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Spec.StorageClass != "fast" {
+		t.Errorf("storageClass = %q, want fast", got.Spec.StorageClass)
+	}
+	if got.Spec.RootDomain != "local.example.com" {
+		t.Errorf("rootDomain = %q, want the stored value kept", got.Spec.RootDomain)
 	}
 }

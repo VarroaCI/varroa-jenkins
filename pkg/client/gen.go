@@ -23958,6 +23958,7 @@ type UpdateProvisioningDefaultsResponse struct {
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -33610,6 +33611,13 @@ func ParseUpdateProvisioningDefaultsResponse(rsp *http.Response) (*UpdateProvisi
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 

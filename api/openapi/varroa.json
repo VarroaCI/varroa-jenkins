@@ -23806,6 +23806,7 @@
         ]
       },
       "put": {
+        "description": "The body can carry metadata.resourceVersion. A stale version, or an object deleted after the read, answers 409 and writes nothing. A body without one creates or replaces the object.",
         "operationId": "updateProvisioningDefaults",
         "parameters": [
           {
@@ -23844,6 +23845,9 @@
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Updates provisioning defaults for a cluster.",

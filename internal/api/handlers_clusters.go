@@ -454,6 +454,10 @@ func writeConfigBroodError(w http.ResponseWriter, err error, cluster string) {
 		writeJSON(w, http.StatusNotFound, body(err.Error()))
 		return
 	}
+	if k8serrors.IsConflict(err) {
+		writeJSON(w, http.StatusConflict, body(err.Error()))
+		return
+	}
 	var unreachable *ErrClusterUnreachable
 	if errors.As(err, &unreachable) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "cluster " + cluster + " unreachable"})

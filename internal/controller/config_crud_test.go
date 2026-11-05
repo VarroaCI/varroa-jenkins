@@ -1218,6 +1218,17 @@ func baselinePluginVersion(t *testing.T, artifactID string) string {
 	return ""
 }
 
+// applyPD sends one provisioningdefaults.update request to c and returns the reply.
+func applyPD(t *testing.T, c *ConfigCRUD, obj v1alpha1.ProvisioningDefaults) bus.ConfigApplyResponse {
+	t.Helper()
+	req := bus.ConfigApplyRequest{Name: "varroa-defaults", Object: mustMarshal(t, obj)}
+	var resp bus.ConfigApplyResponse
+	if err := json.Unmarshal(c.HandleProvisioningDefaultsUpdate(mustMarshal(t, req)), &resp); err != nil {
+		t.Fatalf("unmarshal reply: %v", err)
+	}
+	return resp
+}
+
 // TestHandleProvisioningDefaultsUpdateCreatesThenUpdates pins the write path
 // the Settings Provisioning tab uses for a cluster without varroa-defaults:
 // the first apply creates the object, and a second apply updates it.
@@ -1225,13 +1236,7 @@ func TestHandleProvisioningDefaultsUpdateCreatesThenUpdates(t *testing.T) {
 	store := crdstore.NewFake()
 	c := &ConfigCRUD{Store: store, Logger: testLogger()}
 	apply := func(obj v1alpha1.ProvisioningDefaults) bus.ConfigApplyResponse {
-		t.Helper()
-		req := bus.ConfigApplyRequest{Name: "varroa-defaults", Object: mustMarshal(t, obj)}
-		var resp bus.ConfigApplyResponse
-		if err := json.Unmarshal(c.HandleProvisioningDefaultsUpdate(mustMarshal(t, req)), &resp); err != nil {
-			t.Fatalf("unmarshal reply: %v", err)
-		}
-		return resp
+		return applyPD(t, c, obj)
 	}
 	stored := func() string {
 		t.Helper()
@@ -1262,5 +1267,98 @@ func TestHandleProvisioningDefaultsUpdateCreatesThenUpdates(t *testing.T) {
 	}
 	if got := stored(); got != "b.example.com" {
 		t.Fatalf("after update: rootDomain %q, want b.example.com", got)
+	}
+}
+
+// TestHandleProvisioningDefaultsUpdateStaleVersionConflicts pins that a write
+// from a read that another writer has since changed answers conflict and
+// leaves the other writer's change in place.
+func TestHandleProvisioningDefaultsUpdateStaleVersionConflicts(t *testing.T) {
+	ctx := context.Background()
+	store := crdstore.NewFake()
+	c := &ConfigCRUD{Store: store, Logger: testLogger()}
+	created := applyPD(t, c, v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{RootDomain: "a.example.com"}})
+	if created.Code != "" {
+		t.Fatalf("create: code %q: %s", created.Code, created.Error)
+	}
+	var read v1alpha1.ProvisioningDefaults
+	if err := json.Unmarshal(created.Item, &read); err != nil {
+		t.Fatalf("unmarshal item: %v", err)
+	}
+
+	other, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, store, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("get second writer copy: %v", err)
+	}
+	other.Spec.IngressAnnotations = map[string]string{"kubernetes.io/ingress.class": "other"}
+	if err := crdstore.Update(ctx, store, other); err != nil {
+		t.Fatalf("second writer update: %v", err)
+	}
+
+	read.Spec.RootDomain = "stale.example.com"
+	resp := applyPD(t, c, read)
+	if resp.Code != bus.CodeConflict {
+		t.Fatalf("stale write code = %q, want %q (error %q)", resp.Code, bus.CodeConflict, resp.Error)
+	}
+	if !strings.Contains(resp.Error, "changed after it was read") {
+		t.Fatalf("stale write error = %q, want it to say the object changed after it was read", resp.Error)
+	}
+	got, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, store, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("get after conflict: %v", err)
+	}
+	if got.Spec.IngressAnnotations["kubernetes.io/ingress.class"] != "other" {
+		t.Fatalf("second writer annotation lost: %v", got.Spec.IngressAnnotations)
+	}
+	if got.Spec.RootDomain == "stale.example.com" {
+		t.Fatalf("stale write reached the store")
+	}
+}
+
+// TestHandleProvisioningDefaultsUpdateDeletedAfterReadConflicts pins that a
+// write from a read that a delete has since removed answers conflict and does
+// not recreate the object.
+func TestHandleProvisioningDefaultsUpdateDeletedAfterReadConflicts(t *testing.T) {
+	ctx := context.Background()
+	store := crdstore.NewFake()
+	c := &ConfigCRUD{Store: store, Logger: testLogger()}
+	created := applyPD(t, c, v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{RootDomain: "a.example.com"}})
+	if created.Code != "" {
+		t.Fatalf("create: code %q: %s", created.Code, created.Error)
+	}
+	var read v1alpha1.ProvisioningDefaults
+	if err := json.Unmarshal(created.Item, &read); err != nil {
+		t.Fatalf("unmarshal item: %v", err)
+	}
+	if err := crdstore.Delete[v1alpha1.ProvisioningDefaults](ctx, store, "varroa-defaults", ""); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	resp := applyPD(t, c, read)
+	if resp.Code != bus.CodeConflict {
+		t.Fatalf("write after delete code = %q, want %q (error %q)", resp.Code, bus.CodeConflict, resp.Error)
+	}
+	if _, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, store, "varroa-defaults", ""); !apierrors.IsNotFound(err) {
+		t.Fatalf("get after conflict = %v, want NotFound", err)
+	}
+}
+
+// TestHandleProvisioningDefaultsUpdateWithoutVersionUpserts pins that a body
+// without a resourceVersion creates the object and then replaces it.
+func TestHandleProvisioningDefaultsUpdateWithoutVersionUpserts(t *testing.T) {
+	store := crdstore.NewFake()
+	c := &ConfigCRUD{Store: store, Logger: testLogger()}
+	if resp := applyPD(t, c, v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{RootDomain: "a.example.com"}}); resp.Code != "" {
+		t.Fatalf("create without a version: code %q: %s", resp.Code, resp.Error)
+	}
+	if resp := applyPD(t, c, v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{RootDomain: "b.example.com"}}); resp.Code != "" {
+		t.Fatalf("replace without a version: code %q: %s", resp.Code, resp.Error)
+	}
+	got, err := crdstore.Get[v1alpha1.ProvisioningDefaults](context.Background(), store, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Spec.RootDomain != "b.example.com" {
+		t.Fatalf("rootDomain %q, want b.example.com", got.Spec.RootDomain)
 	}
 }

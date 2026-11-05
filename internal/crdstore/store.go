@@ -430,6 +430,35 @@ func Apply[T any](ctx context.Context, b Backend, obj *T) error {
 	return fmt.Errorf("apply %s %q: %w", info.gvr.Resource, name, lastErr)
 }
 
+// ApplyAt writes obj with the caller's read as a precondition. An obj without a
+// resourceVersion is an Apply. An obj with one updates only that version of the
+// live object: a stale version answers Conflict, and an object that a delete
+// removed after the read answers Conflict too. ApplyAt never retries a Conflict
+// and never creates an object for a caller that read one.
+func ApplyAt[T any](ctx context.Context, b Backend, obj *T) error {
+	info, err := gvrInfo[T]()
+	if err != nil {
+		return err
+	}
+	u, err := toUnstructured(obj, info)
+	if err != nil {
+		return err
+	}
+	if u.GetResourceVersion() == "" {
+		return Apply(ctx, b, obj)
+	}
+	updated, err := b.UpdateObject(ctx, info.gvr, namespaceFromObj(u, info), u)
+	if apierrors.IsNotFound(err) {
+		gr := schema.GroupResource{Group: info.gvr.Group, Resource: info.gvr.Resource}
+		err = apierrors.NewConflict(gr, u.GetName(), errors.New("the object was deleted after it was read"))
+	}
+	if err != nil {
+		return fmt.Errorf("update %s: %w", info.gvr.Resource, err)
+	}
+	mergeCreateResult(obj, updated)
+	return nil
+}
+
 // Delete deletes a typed CRD by name and namespace. namespace "" for
 // cluster-scoped kinds. A missing object is not an error.
 func Delete[T any](ctx context.Context, b Backend, name, namespace string) error {
