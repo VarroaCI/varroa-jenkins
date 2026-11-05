@@ -138,6 +138,57 @@ describe("RoleForm — create mode", () => {
   });
 });
 
+describe("RoleForm — the version of the read", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = "my-role";
+  });
+
+  it("sends the resourceVersion, labels, and jenkinsRoleRef of the read on an update", async () => {
+    mockGetRole.mockResolvedValueOnce(
+      createRole({
+        metadata: { name: "my-role", resourceVersion: "7", labels: { owner: "ops" } },
+        spec: { apiRules: [], jenkinsPermissions: [], jenkinsRoleRef: "global-admin" },
+      }),
+    );
+    mockUpdateRole.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    renderWithProviders(<RoleForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Edit Role: my-role")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockUpdateRole).toHaveBeenCalledTimes(1);
+    });
+    const body = mockUpdateRole.mock.calls[0][1];
+    expect(body.metadata).toEqual(
+      expect.objectContaining({ name: "my-role", resourceVersion: "7", labels: { owner: "ops" } }),
+    );
+    expect(body.spec.jenkinsRoleRef).toBe("global-admin");
+    expect(body.status).toBeUndefined();
+  });
+
+  it("shows the conflict note when another writer changed the role", async () => {
+    mockGetRole.mockResolvedValueOnce(createRole({ metadata: { name: "my-role", resourceVersion: "7" } }));
+    mockUpdateRole.mockRejectedValueOnce(new ApiError(409, "conflict"));
+    const user = userEvent.setup();
+    renderWithProviders(<RoleForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Edit Role: my-role")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText(/Another user or tool changed this role after you opened it/),
+    ).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});
+
 describe("RoleForm — edit mode", () => {
   beforeEach(() => {
     vi.clearAllMocks();

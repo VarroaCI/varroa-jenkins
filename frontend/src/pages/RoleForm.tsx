@@ -8,6 +8,9 @@ import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import styles from "./RoleForm.module.css";
 
+const ROLE_CONFLICT_NOTE =
+  "Another user or tool changed this role after you opened it. Reload the page, then make the change again.";
+
 export default function RoleForm() {
   const { name } = useParams();
   const navigate = useNavigate();
@@ -19,11 +22,15 @@ export default function RoleForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fetching, setFetching] = useState(isEdit);
+  // The role as the editor read it. A save sends its metadata and the spec
+  // fields that the form does not edit, so the write keeps them.
+  const [loaded, setLoaded] = useState<VarroaRole | null>(null);
 
   useEffect(() => {
     if (!name) { setFetching(false); return; }
     getRole(name)
       .then((r) => {
+        setLoaded(r);
         setRoleName(r.metadata.name);
         setApiRules(r.spec.apiRules || []);
         setJenkinsPermissions((r.spec.jenkinsPermissions || []).join("\n"));
@@ -42,12 +49,20 @@ export default function RoleForm() {
       .map((p) => p.trim())
       .filter((p) => p.length > 0);
 
-    const role: VarroaRole = {
-      apiVersion: "varroa.dev/v1alpha1",
-      kind: "VarroaRole",
-      metadata: { name: roleName },
-      spec: { apiRules, jenkinsPermissions: perms },
-    };
+    // The read's metadata carries its resourceVersion, which fences the save.
+    const role: VarroaRole = loaded
+      ? {
+          apiVersion: "varroa.dev/v1alpha1",
+          kind: "VarroaRole",
+          metadata: { ...loaded.metadata },
+          spec: { ...loaded.spec, apiRules, jenkinsPermissions: perms },
+        }
+      : {
+          apiVersion: "varroa.dev/v1alpha1",
+          kind: "VarroaRole",
+          metadata: { name: roleName },
+          spec: { apiRules, jenkinsPermissions: perms },
+        };
 
     try {
       if (isEdit) {
@@ -57,7 +72,11 @@ export default function RoleForm() {
       }
       navigate("/access/roles");
     } catch (err: any) {
-      setError(!isEdit && err instanceof ApiError && err.status === 409 ? "A role with this name already exists." : err.message);
+      if (err instanceof ApiError && err.status === 409) {
+        setError(isEdit ? ROLE_CONFLICT_NOTE : "A role with this name already exists.");
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }

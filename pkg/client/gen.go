@@ -25449,7 +25449,7 @@ type UpdateVarroaRoleBindingResponse struct {
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
-	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -25575,7 +25575,7 @@ type UpdateVarroaRoleResponse struct {
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
-	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -36440,12 +36440,12 @@ func ParseUpdateVarroaRoleBindingResponse(rsp *http.Response) (*UpdateVarroaRole
 		}
 		response.JSON403 = &dest
 
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest ComponentsResponsesNotFound
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
-		response.JSON404 = &dest
+		response.JSON409 = &dest
 
 	}
 
@@ -36670,12 +36670,12 @@ func ParseUpdateVarroaRoleResponse(rsp *http.Response) (*UpdateVarroaRoleRespons
 		}
 		response.JSON403 = &dest
 
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest ComponentsResponsesNotFound
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
-		response.JSON404 = &dest
+		response.JSON409 = &dest
 
 	}
 

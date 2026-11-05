@@ -21,6 +21,9 @@ const TENANTS_DISABLED_REASON =
 const OTHERS_DISABLED_REASON =
   "A scope names one dimension. Remove every tenant entry to scope by namespace or by selector.";
 
+const BINDING_CONFLICT_NOTE =
+  "Another user or tool changed this role binding after you opened it. Reload the page, then make the change again.";
+
 export default function RoleBindingForm() {
   const { name } = useParams();
   const navigate = useNavigate();
@@ -43,6 +46,9 @@ export default function RoleBindingForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fetching, setFetching] = useState(true);
+  // The binding as the editor read it. A save sends its metadata, which
+  // carries the resourceVersion that fences the write.
+  const [loaded, setLoaded] = useState<VarroaRoleBinding | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -51,6 +57,7 @@ export default function RoleBindingForm() {
         setRoleOptions(roles.items || []);
         if (!name) { setFetching(false); return; }
         const binding = await getRoleBinding(name);
+        setLoaded(binding);
         setBindingName(binding.metadata.name);
         setSubjects(binding.spec.subjects || []);
         setRoleRef(binding.spec.roleRef || "");
@@ -116,7 +123,7 @@ export default function RoleBindingForm() {
     const binding: VarroaRoleBinding = {
       apiVersion: "varroa.dev/v1alpha1",
       kind: "VarroaRoleBinding",
-      metadata: { name: bindingName },
+      metadata: loaded ? { ...loaded.metadata } : { name: bindingName },
       spec: {
         subjects: subjects.filter((s) => s.name.trim().length > 0),
         roleRef,
@@ -132,7 +139,11 @@ export default function RoleBindingForm() {
       }
       navigate("/access/role-bindings");
     } catch (err: any) {
-      setError(!isEdit && err instanceof ApiError && err.status === 409 ? "A role binding with this name already exists." : err.message);
+      if (err instanceof ApiError && err.status === 409) {
+        setError(isEdit ? BINDING_CONFLICT_NOTE : "A role binding with this name already exists.");
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
