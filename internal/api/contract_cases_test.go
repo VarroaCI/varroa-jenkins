@@ -172,6 +172,7 @@ func init() {
 		contractCase{Name: "deleteVersionProfile", Method: "DELETE", Path: "/api/v1/clusters/core/version-profiles/test-profile", Claims: adminClaims, WantStatus: http.StatusNoContent},
 		contractCase{Name: "listControllerClasses", Method: "GET", Path: "/api/v1/clusters/core/controller-classes", Claims: adminClaims, WantStatus: http.StatusOK},
 		contractCase{Name: "getControllerClass", Method: "GET", Path: "/api/v1/clusters/core/controller-classes/test-class", Claims: adminClaims, WantStatus: http.StatusNotFound},
+		contractCase{Name: "getControllerClass-conditions", Method: "GET", Path: "/api/v1/clusters/core/controller-classes/contract-class", Claims: adminClaims, WantStatus: http.StatusOK},
 		contractCase{Name: "createControllerClass", Method: "POST", Path: "/api/v1/clusters/core/controller-classes", Claims: adminClaims, SkipSpecValidation: true, WantStatus: http.StatusMethodNotAllowed},
 		contractCase{Name: "putControllerClass", Method: "PUT", Path: "/api/v1/clusters/core/controller-classes/test-class", Claims: adminClaims, SkipSpecValidation: true, WantStatus: http.StatusMethodNotAllowed},
 		contractCase{Name: "deleteControllerClass", Method: "DELETE", Path: "/api/v1/clusters/core/controller-classes/test-class", Claims: adminClaims, SkipSpecValidation: true, WantStatus: http.StatusMethodNotAllowed},

@@ -448,6 +448,20 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 			}},
 		},
 	})
+	// The class carries a condition, so the class read responses check the
+	// Condition schema.
+	crdstore.MustSeed(client.crdStore, &v1alpha1.ControllerClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "contract-class", CreationTimestamp: created},
+		Spec:       v1alpha1.ControllerClassSpec{IngressClassName: "nginx"},
+		Status: v1alpha1.ControllerClassStatus{Conditions: []metav1.Condition{{
+			Type:               "Ready",
+			Status:             metav1.ConditionTrue,
+			ObservedGeneration: 1,
+			LastTransitionTime: created,
+			Reason:             "Accepted",
+			Message:            "The class is valid.",
+		}}},
+	})
 
 	// Create a KeyVerifier for API key operations.
 	keyStore := newFakeKeyStore()

@@ -2346,6 +2346,27 @@ type ComponentsSchemasComposedItemRef struct {
 	Variables         *map[string]string `json:"variables,omitempty"`
 }
 
+// ComponentsSchemasCondition A Kubernetes status condition (metav1.Condition). The BFF serves it from the CRD status without change.
+type ComponentsSchemasCondition struct {
+	// LastTransitionTime The time of the last status change.
+	LastTransitionTime time.Time `json:"lastTransitionTime"`
+
+	// Message Text about the last change. It can be empty.
+	Message string `json:"message"`
+
+	// ObservedGeneration The metadata.generation that the condition reports on.
+	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
+
+	// Reason A CamelCase word that names the cause of the last change.
+	Reason string `json:"reason"`
+
+	// Status One of True, False, or Unknown.
+	Status string `json:"status"`
+
+	// Type The condition type, for example Ready.
+	Type string `json:"type"`
+}
+
 // ComponentsSchemasConflictItem A single field conflict detail.
 type ComponentsSchemasConflictItem struct {
 	// Field JSON path to the conflicting field (e.g. ".spec.version").
@@ -2394,8 +2415,8 @@ type ComponentsSchemasControllerClass struct {
 
 // ComponentsSchemasControllerClass_Status ControllerClassStatus with conditions.
 type ComponentsSchemasControllerClass_Status struct {
-	Conditions           *[]ComponentsSchemasObjectMeta `json:"conditions,omitempty"`
-	AdditionalProperties map[string]interface{}         `json:"-"`
+	Conditions           *[]ComponentsSchemasCondition `json:"conditions,omitempty"`
+	AdditionalProperties map[string]interface{}        `json:"-"`
 }
 
 // ComponentsSchemasControllerClassSpec Desired state of a ControllerClass. Fields that map to a corev1 concept use the literal Kubernetes types.
