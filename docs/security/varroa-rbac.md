@@ -258,6 +258,14 @@ spec:
 The shorthand accepts `admin`, `operator`, `developer`, and `viewer`. Use role
 bindings for custom or cross-controller scope.
 
+## Change a role or a binding through the API
+
+Change a role with `PUT /api/v1/roles/{name}`. Change a binding with `PUT /api/v1/rolebindings/{name}`. The body replaces the stored object. Start from your read.
+
+Send the `metadata.resourceVersion` of your read. A stale version answers `409`. A body without `metadata.resourceVersion` only creates the object. It answers `409` when the object exists. On a `409`, read the object again and repeat the change. If that read answers `404`, the object was deleted. Repeat the change with a body that has no `metadata.resourceVersion`. That body creates the object.
+
+The dashboard role and binding editors send the version of their read. Save stops with a conflict note when another writer changed the object after the editor read it. Reload the page, then make the change again.
+
 ## Verify access
 
 ```bash

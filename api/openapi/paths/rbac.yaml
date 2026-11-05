@@ -71,6 +71,12 @@
     operationId: updateVarroaRole
     tags: [rbac]
     summary: Updates a VarroaRole.
+    description: >-
+      Send the metadata.resourceVersion of your read. The write then changes only that
+      version. A stale version, or a role deleted after the read, answers 409 and writes
+      nothing. A body without metadata.resourceVersion only creates the role. When the
+      role exists, that body answers 409 and writes nothing. The body replaces the stored
+      role, so start from your read.
     parameters:
       - $ref: '../components/parameters.yaml#/name'
     requestBody:
@@ -92,8 +98,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
-      "404":
-        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
   delete:
     operationId: deleteVarroaRole
     tags: [rbac]
@@ -181,6 +187,12 @@
     operationId: updateVarroaRoleBinding
     tags: [rbac]
     summary: Updates a VarroaRoleBinding.
+    description: >-
+      Send the metadata.resourceVersion of your read. The write then changes only that
+      version. A stale version, or a binding deleted after the read, answers 409 and writes
+      nothing. A body without metadata.resourceVersion only creates the binding. When the
+      binding exists, that body answers 409 and writes nothing. The body replaces the stored
+      binding, so start from your read.
     parameters:
       - $ref: '../components/parameters.yaml#/name'
     requestBody:
@@ -202,8 +214,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
-      "404":
-        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
   delete:
     operationId: deleteVarroaRoleBinding
     tags: [rbac]

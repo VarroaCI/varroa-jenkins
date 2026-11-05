@@ -91,20 +91,14 @@ func deprovisionUser(ctx context.Context, store crdstore.Backend, user *v1alpha1
 	if err != nil {
 		return fmt.Errorf("list varroa role bindings: %w", err)
 	}
+	// Every binding is read live, so a grant made after the list is stripped
+	// too. A binding with no match writes nothing.
 	for _, rb := range vrbList {
-		remaining := filterSubjects(rb.Spec.Subjects, identifiers)
-		if len(remaining) < len(rb.Spec.Subjects) {
-			if len(remaining) == 0 {
-				if err := crdstore.Delete[v1alpha1.VarroaRoleBinding](ctx, store, rb.Name, ""); err != nil {
-					return fmt.Errorf("delete emptied varroa role binding %s: %w", rb.Name, err)
-				}
-			} else {
-				rb.Spec.Subjects = remaining
-				resetObjectMetaForApply(&rb.ObjectMeta)
-				if err := crdstore.Apply[v1alpha1.VarroaRoleBinding](ctx, store, rb); err != nil {
-					return fmt.Errorf("update varroa role binding %s: %w", rb.Name, err)
-				}
-			}
+		err := stripSubjects(ctx, store, rb.Name, identifiers, func(b *v1alpha1.VarroaRoleBinding) (*metav1.ObjectMeta, *[]v1alpha1.SubjectRef) {
+			return &b.ObjectMeta, &b.Spec.Subjects
+		})
+		if err != nil {
+			return fmt.Errorf("strip varroa role binding %s: %w", rb.Name, err)
 		}
 	}
 
@@ -114,19 +108,11 @@ func deprovisionUser(ctx context.Context, store crdstore.Backend, user *v1alpha1
 		return fmt.Errorf("list jenkins role bindings: %w", err)
 	}
 	for _, rb := range jrbList {
-		remaining := filterSubjects(rb.Spec.Subjects, identifiers)
-		if len(remaining) < len(rb.Spec.Subjects) {
-			if len(remaining) == 0 {
-				if err := crdstore.Delete[v1alpha1.JenkinsRoleBinding](ctx, store, rb.Name, ""); err != nil {
-					return fmt.Errorf("delete emptied jenkins role binding %s: %w", rb.Name, err)
-				}
-			} else {
-				rb.Spec.Subjects = remaining
-				resetObjectMetaForApply(&rb.ObjectMeta)
-				if err := crdstore.Apply[v1alpha1.JenkinsRoleBinding](ctx, store, rb); err != nil {
-					return fmt.Errorf("update jenkins role binding %s: %w", rb.Name, err)
-				}
-			}
+		err := stripSubjects(ctx, store, rb.Name, identifiers, func(b *v1alpha1.JenkinsRoleBinding) (*metav1.ObjectMeta, *[]v1alpha1.SubjectRef) {
+			return &b.ObjectMeta, &b.Spec.Subjects
+		})
+		if err != nil {
+			return fmt.Errorf("strip jenkins role binding %s: %w", rb.Name, err)
 		}
 	}
 
@@ -137,18 +123,69 @@ func deprovisionUser(ctx context.Context, store crdstore.Backend, user *v1alpha1
 			return fmt.Errorf("list groups: %w", err)
 		}
 		for _, g := range groupList {
-			newMembers := removeString(g.Spec.Members, user.Name)
-			if len(newMembers) < len(g.Spec.Members) {
-				g.Spec.Members = newMembers
-				resetObjectMetaForApply(&g.ObjectMeta)
-				if err := crdstore.Apply[v1alpha1.Group](ctx, store, g); err != nil {
-					return fmt.Errorf("update group %s: %w", g.Name, err)
+			_, err := crdstore.Mutate[v1alpha1.Group](ctx, store, g.Name, g.Namespace, func(live *v1alpha1.Group) (bool, error) {
+				next := removeString(live.Spec.Members, user.Name)
+				if len(next) == len(live.Spec.Members) {
+					return false, nil
 				}
+				live.Spec.Members = next
+				return true, nil
+			})
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("update group %s: %w", g.Name, err)
 			}
 		}
 	}
 
 	return nil
+}
+
+// deprovisionDeleteAttempts bounds how often stripSubjects retries after a
+// binding changed between its read and its delete. Each retry reads the live
+// binding again.
+const deprovisionDeleteAttempts = 3
+
+// stripSubjects removes the identifiers from the subjects of the live binding
+// through crdstore.Mutate, so a write since the caller's list survives. A
+// binding left with no subject is deleted only while it keeps the uid and
+// resourceVersion of that read. A missing binding is not an error, and the
+// helper never creates one.
+func stripSubjects[T any](ctx context.Context, store crdstore.Backend, name string, identifiers map[string]bool,
+	fields func(*T) (*metav1.ObjectMeta, *[]v1alpha1.SubjectRef)) error {
+	var lastErr error
+	for attempt := 0; attempt < deprovisionDeleteAttempts; attempt++ {
+		var emptied bool
+		var uid, rv string
+		_, err := crdstore.Mutate[T](ctx, store, name, "", func(obj *T) (bool, error) {
+			meta, subjects := fields(obj)
+			emptied, uid, rv = false, "", ""
+			remaining := filterSubjects(*subjects, identifiers)
+			if len(remaining) == len(*subjects) {
+				return false, nil
+			}
+			if len(remaining) == 0 {
+				emptied, uid, rv = true, string(meta.UID), meta.ResourceVersion
+				return false, nil
+			}
+			*subjects = remaining
+			return true, nil
+		})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil || !emptied {
+			return err
+		}
+		err = crdstore.DeleteIfUnchanged[T](ctx, store, name, "", uid, rv)
+		if err == nil || !apierrors.IsConflict(err) {
+			return err
+		}
+		lastErr = err
+	}
+	return lastErr
 }
 
 // filterSubjects returns a copy of subjects with entries matching any
@@ -165,19 +202,6 @@ func filterSubjects(subjects []v1alpha1.SubjectRef, identifiers map[string]bool)
 		filtered = append(filtered, s)
 	}
 	return filtered
-}
-
-// resetObjectMetaForApply clears fields that would cause a "resourceVersion
-// should not be set on objects to be created" error when an object retrieved
-// from a List/Get is passed to an Apply (create-or-update) method.
-func resetObjectMetaForApply(meta *metav1.ObjectMeta) {
-	meta.ResourceVersion = ""
-	meta.UID = ""
-	meta.Generation = 0
-	meta.CreationTimestamp = metav1.Time{}
-	meta.DeletionTimestamp = nil
-	meta.DeletionGracePeriodSeconds = nil
-	meta.ManagedFields = nil
 }
 
 // liveIdentifierHolders maps each current preferred username, email, and

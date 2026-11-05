@@ -3273,6 +3273,15 @@ func itemsEnvelope(list interface{}) map[string]interface{} {
 	return map[string]interface{}{"items": list}
 }
 
+// applyAtConflictMessage is the 409 text of a PUT that writes through
+// crdstore.ApplyAt. createOnly is true when the body carried no resourceVersion.
+func applyAtConflictMessage(kind, name string, createOnly bool) string {
+	if createOnly {
+		return fmt.Sprintf("%s %q exists: read it, then send its metadata.resourceVersion", kind, name)
+	}
+	return fmt.Sprintf("%s %q changed or was deleted after it was read: read it again and retry. If the read answers 404, create it without metadata.resourceVersion", kind, name)
+}
+
 // writeK8sError logs and writes a Kubernetes API error as JSON.
 func (s *Server) writeK8sError(w http.ResponseWriter, err error) {
 	s.deps.Logger.Error("kubernetes error", "error", err)
@@ -3478,7 +3487,13 @@ func (s *Server) handleVarroaRoleDispatch(w http.ResponseWriter, r *http.Request
 		role.Name = name
 		role.APIVersion = "varroa.dev/v1alpha1"
 		role.Kind = "VarroaRole"
-		if err := crdstore.Apply[v1alpha1.VarroaRole](r.Context(), s.deps.Store, &role); err != nil {
+		// The body's resourceVersion fences the write. A body without one only creates.
+		createOnly := role.ResourceVersion == ""
+		if err := crdstore.ApplyAt[v1alpha1.VarroaRole](r.Context(), s.deps.Store, &role); err != nil {
+			if k8serrors.IsConflict(err) {
+				s.writeJSONError(w, http.StatusConflict, applyAtConflictMessage("role", name, createOnly))
+				return
+			}
 			s.writeK8sError(w, err)
 			return
 		}
@@ -3588,7 +3603,13 @@ func (s *Server) handleVarroaRoleBindingDispatch(w http.ResponseWriter, r *http.
 		binding.Name = name
 		binding.APIVersion = "varroa.dev/v1alpha1"
 		binding.Kind = "VarroaRoleBinding"
-		if err := crdstore.Apply[v1alpha1.VarroaRoleBinding](r.Context(), s.deps.Store, &binding); err != nil {
+		// The body's resourceVersion fences the write. A body without one only creates.
+		createOnly := binding.ResourceVersion == ""
+		if err := crdstore.ApplyAt[v1alpha1.VarroaRoleBinding](r.Context(), s.deps.Store, &binding); err != nil {
+			if k8serrors.IsConflict(err) {
+				s.writeJSONError(w, http.StatusConflict, applyAtConflictMessage("role binding", name, createOnly))
+				return
+			}
 			s.writeK8sError(w, err)
 			return
 		}

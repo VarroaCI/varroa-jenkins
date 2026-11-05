@@ -93,8 +93,9 @@ func TestRESTGroupDelete_RefusedWriteNoActivity(t *testing.T) {
 func TestRESTVarroaRoleWrites_MessageMatchesBuilder(t *testing.T) {
 	srv, sink := publishTestServer(t)
 	create := withClaims(httptest.NewRequest(http.MethodPost, "/roles", strings.NewReader(`{"metadata":{"name":"role-a"}}`)))
-	srv.handleVarroaRoles(httptest.NewRecorder(), create)
-	update := withClaims(httptest.NewRequest(http.MethodPut, "/roles/role-a", strings.NewReader(`{"metadata":{"name":"role-a"}}`)))
+	created := httptest.NewRecorder()
+	srv.handleVarroaRoles(created, create)
+	update := withClaims(httptest.NewRequest(http.MethodPut, "/roles/role-a", strings.NewReader(versionedBody("role-a", createdResourceVersion(t, created)))))
 	srv.handleVarroaRoleDispatch(httptest.NewRecorder(), update)
 	del := withClaims(httptest.NewRequest(http.MethodDelete, "/roles/role-a", nil))
 	srv.handleVarroaRoleDispatch(httptest.NewRecorder(), del)
@@ -107,8 +108,9 @@ func TestRESTVarroaRoleWrites_MessageMatchesBuilder(t *testing.T) {
 func TestRESTVarroaRoleBindingWrites_MessageMatchesBuilder(t *testing.T) {
 	srv, sink := publishTestServer(t)
 	create := withClaims(httptest.NewRequest(http.MethodPost, "/rolebindings", strings.NewReader(`{"metadata":{"name":"binding-a"}}`)))
-	srv.handleVarroaRoleBindings(httptest.NewRecorder(), create)
-	update := withClaims(httptest.NewRequest(http.MethodPut, "/rolebindings/binding-a", strings.NewReader(`{"metadata":{"name":"binding-a"}}`)))
+	created := httptest.NewRecorder()
+	srv.handleVarroaRoleBindings(created, create)
+	update := withClaims(httptest.NewRequest(http.MethodPut, "/rolebindings/binding-a", strings.NewReader(versionedBody("binding-a", createdResourceVersion(t, created)))))
 	srv.handleVarroaRoleBindingDispatch(httptest.NewRecorder(), update)
 	del := withClaims(httptest.NewRequest(http.MethodDelete, "/rolebindings/binding-a", nil))
 	srv.handleVarroaRoleBindingDispatch(httptest.NewRecorder(), del)

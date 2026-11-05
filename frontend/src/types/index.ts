@@ -329,6 +329,7 @@ export interface APIRule {
 export interface VarroaRoleSpec {
   apiRules?: APIRule[];
   jenkinsPermissions?: string[];
+  jenkinsRoleRef?: string;
 }
 
 export interface VarroaRole {

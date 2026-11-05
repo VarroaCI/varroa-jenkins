@@ -214,6 +214,62 @@ describe("RoleBindingForm — create mode", () => {
   });
 });
 
+describe("RoleBindingForm — the version of the read", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = "my-binding";
+    mockListRoles.mockResolvedValue({ items: availableRoles });
+  });
+
+  it("sends the resourceVersion and labels of the read on an update", async () => {
+    mockGetRoleBinding.mockResolvedValueOnce(
+      createRoleBinding({
+        metadata: { name: "my-binding", resourceVersion: "9", labels: { owner: "ops" } },
+        spec: { subjects: [{ kind: "User", name: "alice" }], roleRef: "varroa:admin" },
+      }),
+    );
+    mockUpdateRoleBinding.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    renderWithProviders(<RoleBindingForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Edit Role Binding: my-binding")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockUpdateRoleBinding).toHaveBeenCalledTimes(1);
+    });
+    const body = mockUpdateRoleBinding.mock.calls[0][1];
+    expect(body.metadata).toEqual(
+      expect.objectContaining({ name: "my-binding", resourceVersion: "9", labels: { owner: "ops" } }),
+    );
+    expect(body.status).toBeUndefined();
+  });
+
+  it("shows the conflict note when another writer changed the binding", async () => {
+    mockGetRoleBinding.mockResolvedValueOnce(
+      createRoleBinding({
+        metadata: { name: "my-binding", resourceVersion: "9" },
+        spec: { subjects: [{ kind: "User", name: "alice" }], roleRef: "varroa:admin" },
+      }),
+    );
+    mockUpdateRoleBinding.mockRejectedValueOnce(new ApiError(409, "conflict"));
+    const user = userEvent.setup();
+    renderWithProviders(<RoleBindingForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Edit Role Binding: my-binding")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText(/Another user or tool changed this role binding after you opened it/),
+    ).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});
+
 describe("RoleBindingForm — edit mode", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -350,14 +350,14 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 	client.composedBundles = map[string]*v1alpha1.ComposedBundle{}
 	// Seed one of each for detail/get operations
 	client.roles["admin"] = &v1alpha1.VarroaRole{
-		ObjectMeta: metav1.ObjectMeta{Name: "admin"},
+		ObjectMeta: metav1.ObjectMeta{Name: "admin", ResourceVersion: contractAdminRoleVersion},
 		Spec: v1alpha1.VarroaRoleSpec{
 			APIRules: []v1alpha1.APIRule{{Resources: []string{"*"}, Verbs: []string{"*"}}},
 		},
 	}
 	crdstore.MustSeed(client.crdStore, client.roles["admin"])
 	client.roleBindings["admin-binding"] = &v1alpha1.VarroaRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: "admin-binding"},
+		ObjectMeta: metav1.ObjectMeta{Name: "admin-binding", ResourceVersion: contractAdminBindingVersion},
 		Spec: v1alpha1.VarroaRoleBindingSpec{
 			Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "admins"}},
 			RoleRef:  "admin",
