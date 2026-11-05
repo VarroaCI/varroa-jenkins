@@ -87,19 +87,43 @@ type initObservation struct {
 	// init container exited 0. It is zero otherwise.
 	InitFinishedAt time.Time
 	// Progressing is true while an init container runs, or waits for its
-	// start after an earlier one exited 0, with no init restart, failure,
+	// start after an earlier one exited 0, or is the first init container and
+	// waits while kubelet pulls its image, with no init restart, failure,
 	// or back-off, inside cellInitRollCap of the pod start.
 	Progressing bool
 	// Container is the init container that runs or starts now.
 	Container string
+	// FirstWait names the first init container while it waits to be
+	// created and every other progress test holds. Pod status cannot
+	// show whether kubelet pulls its image, so only a Pulling event decides.
+	FirstWait string
+	// Pull names the image that FirstWait pulls now, or is nil.
+	Pull *imagePull
 	// InitFor is the age of the pod start.
 	InitFor time.Duration
 }
 
+// initContainerImage returns the image of the named init container: the spec
+// image, else the status image, else "".
+func initContainerImage(pod *corev1.Pod, name string) string {
+	for _, c := range pod.Spec.InitContainers {
+		if c.Name == name {
+			return c.Image
+		}
+	}
+	for _, s := range pod.Status.InitContainerStatuses {
+		if s.Name == name {
+			return s.Image
+		}
+	}
+	return ""
+}
+
 // observeInit reads the init state of pod at now. A nil pod answers the zero
 // value. The cap uses status.startTime, because a container startedAt
-// resets on each restart.
-func observeInit(pod *corev1.Pod, now time.Time) initObservation {
+// resets on each restart. pullStarts maps a container name to its latest
+// Pulling event time; it is nil when the events were not read.
+func observeInit(pod *corev1.Pod, now time.Time, pullStarts map[string]time.Time) initObservation {
 	if pod == nil {
 		return initObservation{}
 	}
@@ -145,26 +169,34 @@ func observeInit(pod *corev1.Pod, now time.Time) initObservation {
 			if running == "" {
 				running = s.Name
 			}
-		case s.State.Waiting != nil:
-			switch s.State.Waiting.Reason {
-			case "PodInitializing", "ContainerCreating":
-				if handoff == "" {
-					handoff = s.Name
-				}
-			default:
-				failed = true
+		case isCreateWait(s):
+			if handoff == "" {
+				handoff = s.Name
 			}
+		case s.State.Waiting != nil:
+			failed = true
 		}
 	}
 	if allDone {
 		obs.InitFinishedAt = latest
 	}
+	canProgress := !obs.Terminating && !obs.MainStarted && !failed &&
+		pod.Status.StartTime != nil && obs.InitFor < cellInitRollCap
 	obs.Container = running
 	if obs.Container == "" && anyDone {
 		obs.Container = handoff
 	}
-	obs.Progressing = !obs.Terminating && !obs.MainStarted && !failed && obs.Container != "" &&
-		pod.Status.StartTime != nil && obs.InitFor < cellInitRollCap
+	// The first init container shows the same wait during its image pull
+	// and during a volume or sandbox wait. Only a Pulling event of this pod
+	// separates the two.
+	if obs.Container == "" && handoff != "" && canProgress {
+		obs.FirstWait = handoff
+		if _, ok := pullStarts[handoff]; ok {
+			obs.Container = handoff
+			obs.Pull = &imagePull{Container: handoff, Image: initContainerImage(pod, handoff)}
+		}
+	}
+	obs.Progressing = canProgress && obs.Container != ""
 	return obs
 }
 
@@ -229,7 +261,11 @@ func evaluateCellRoll(cell *v1alpha1.CellStatus, baseReason string, now time.Tim
 	alreadyRolled := cellRolledInPeriod(rolledAt, unreadySince)
 
 	if obs.Progressing {
-		hold := fmt.Sprintf("%s running for %dm", obs.Container, int(obs.InitFor/time.Minute))
+		minutes := int(obs.InitFor / time.Minute)
+		hold := fmt.Sprintf("%s running for %dm", obs.Container, minutes)
+		if obs.Pull != nil {
+			hold = fmt.Sprintf("%s pulling image %s for %dm", obs.Container, obs.Pull.Image, minutes)
+		}
 		result.Message = hold
 		if alreadyRolled {
 			result.Reason = v1alpha1.ReasonCellRolled
@@ -386,7 +422,8 @@ func (r *Reconciler) evaluateCellReadiness(ctx context.Context, cr *v1alpha1.Con
 // unreadySince alone would act: the unready age passes the grace, and the
 // cell has not both rolled and evacuated in this unready period. The roll
 // clock never starts before unreadySince, so no other tick can act. A read
-// error answers the zero value, which keeps the rule on unreadySince.
+// error answers the zero value, which keeps the rule on unreadySince. The
+// Pulling events of the pod are listed only for the first-container wait.
 func (r *Reconciler) observeCellPod(ctx context.Context, cr *v1alpha1.Controller, cell *v1alpha1.CellStatus, now time.Time, grace time.Duration) initObservation {
 	if cell.UnreadySince == nil || now.Sub(cell.UnreadySince.Time) < grace {
 		return initObservation{}
@@ -401,7 +438,29 @@ func (r *Reconciler) observeCellPod(ctx context.Context, cr *v1alpha1.Controller
 		}
 		return initObservation{}
 	}
-	return observeInit(pod, now)
+	obs := observeInit(pod, now, nil)
+	if obs.FirstWait == "" {
+		return obs
+	}
+	return observeInit(pod, now, r.cellPodPullStarts(ctx, cr, pod))
+}
+
+// cellPodPullStarts lists the Pulling events of the cell pod. It answers nil
+// when the client cannot list events or the list fails, and then the first
+// container earns no progress.
+func (r *Reconciler) cellPodPullStarts(ctx context.Context, cr *v1alpha1.Controller, pod *corev1.Pod) map[string]time.Time {
+	lister, ok := r.client.(podPullEventLister)
+	if !ok {
+		return nil
+	}
+	events, err := lister.ListPodPullEvents(ctx, pod.Namespace, pod.UID)
+	if err != nil {
+		if r.Logger != nil {
+			r.Logger.Warn("list cell pod pull events", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+		}
+		return nil
+	}
+	return pullStartsByContainer(events)
 }
 
 // rollCellPod deletes the cell pod. A pod whose main containers have not
