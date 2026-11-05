@@ -12,9 +12,41 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+// syncBuffer is a bytes.Buffer safe for a write from the browser-open goroutine
+// while the test reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// waitForOutput polls the captured stderr until it holds want or a deadline passes.
+func waitForOutput(t *testing.T, buf *syncBuffer, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(buf.String(), want) {
+		if time.Now().After(deadline) {
+			t.Fatalf("stderr lacks %q:\n%s", want, buf.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // login tests
@@ -750,9 +782,9 @@ func TestLogin_BrowserBareHostGetsHTTPS(t *testing.T) {
 	t.Setenv("VARROACTL_SERVER", "")
 	t.Setenv("VARROACTL_API_KEY", "")
 
-	var opened string
+	openedCh := make(chan string, 1)
 	oldBrowser := openBrowser
-	openBrowser = func(u string) error { opened = u; return nil }
+	openBrowser = func(u string) error { openedCh <- u; return nil }
 	t.Cleanup(func() { openBrowser = oldBrowser })
 
 	root := newRootCmd()
@@ -761,6 +793,12 @@ func TestLogin_BrowserBareHostGetsHTTPS(t *testing.T) {
 	err := root.Execute()
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("expected timeout error, got %v", err)
+	}
+	var opened string
+	select {
+	case opened = <-openedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("browser launcher was not called")
 	}
 	if !strings.HasPrefix(opened, "https://varroa.example.invalid/cli-auth?port=") {
 		t.Fatalf("opened URL = %q", opened)
@@ -783,13 +821,15 @@ func TestLogin_BrowserPrintsURLBeforeOpen(t *testing.T) {
 			t.Setenv("VARROACTL_SERVER", "")
 			t.Setenv("VARROACTL_API_KEY", "")
 
-			var buf bytes.Buffer
-			var opened string
-			var printedBeforeOpen bool
+			type openCall struct {
+				url           string
+				printedBefore bool
+			}
+			var buf syncBuffer
+			openedCh := make(chan openCall, 1)
 			oldBrowser := openBrowser
 			openBrowser = func(u string) error {
-				opened = u
-				printedBeforeOpen = strings.Contains(buf.String(), u)
+				openedCh <- openCall{url: u, printedBefore: strings.Contains(buf.String(), u)}
 				return tc.openErr
 			}
 			t.Cleanup(func() { openBrowser = oldBrowser })
@@ -798,28 +838,141 @@ func TestLogin_BrowserPrintsURLBeforeOpen(t *testing.T) {
 			root.SetErr(&buf)
 			root.SetArgs([]string{"login", "--server", "https://varroa.example.invalid", "--timeout", "100ms"})
 			err := root.Execute()
-			if opened == "" {
+			var got openCall
+			select {
+			case got = <-openedCh:
+			case <-time.After(2 * time.Second):
 				t.Fatal("browser launcher was not called")
 			}
-			if !printedBeforeOpen {
+			if !got.printedBefore {
 				t.Fatalf("login URL was not printed before the open; stderr:\n%s", buf.String())
 			}
 			if err == nil || !strings.Contains(err.Error(), "timed out") || !strings.Contains(err.Error(), "--api-key") {
 				t.Fatalf("expected timeout error with headless hint, got %v", err)
 			}
-			out := buf.String()
 			if tc.openErr != nil {
 				want := "Cannot open a browser: launcher exited with status 1\n"
-				if !strings.Contains(out, want) {
-					t.Fatalf("stderr lacks %q:\n%s", want, out)
+				waitForOutput(t, &buf, want)
+				if !strings.Contains(buf.String(), "varroactl login --api-key") {
+					t.Fatalf("stderr lacks the --api-key hint:\n%s", buf.String())
 				}
-				if !strings.Contains(out, "varroactl login --api-key") {
-					t.Fatalf("stderr lacks the --api-key hint:\n%s", out)
+			} else {
+				time.Sleep(50 * time.Millisecond)
+				if strings.Contains(buf.String(), "Cannot open a browser") {
+					t.Fatalf("unexpected open error in stderr:\n%s", buf.String())
 				}
-			} else if strings.Contains(out, "Cannot open a browser") {
-				t.Fatalf("unexpected open error in stderr:\n%s", out)
 			}
 		})
+	}
+}
+
+// TestLogin_DoesNotWaitForBlockingBrowserLauncher proves the flow returns on the
+// timeout while the browser launcher still blocks.
+func TestLogin_DoesNotWaitForBlockingBrowserLauncher(t *testing.T) {
+	t.Setenv("VARROACTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("VARROACTL_SERVER", "")
+	t.Setenv("VARROACTL_API_KEY", "")
+
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseLauncher := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseLauncher)
+
+	started := make(chan struct{}, 1)
+	oldBrowser := openBrowser
+	openBrowser = func(string) error {
+		started <- struct{}{}
+		<-release
+		return nil
+	}
+	t.Cleanup(func() { openBrowser = oldBrowser })
+
+	root := newRootCmd()
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"login", "--server", "https://varroa.example.invalid", "--timeout", "200ms"})
+	errCh := make(chan error, 1)
+	go func() { errCh <- root.Execute() }()
+
+	select {
+	case err := <-errCh:
+		if err == nil || !strings.Contains(err.Error(), "timed out") {
+			t.Fatalf("expected timeout error, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("login did not return on its timeout while the browser launcher was blocked")
+	}
+	select {
+	case <-started:
+	default:
+		t.Fatal("browser launcher was not called")
+	}
+}
+
+// TestLogin_BrowserOpenErrorStillWaitsForCallback proves a failed open does not end the flow.
+func TestLogin_BrowserOpenErrorStillWaitsForCallback(t *testing.T) {
+	t.Setenv("VARROACTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("VARROACTL_API_KEY", "")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/me") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"email": "user@example.com", "subject": "user-1",
+				"authMode": "local", "name": "user",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	t.Setenv("VARROACTL_SERVER", srv.URL)
+
+	openedCh := make(chan string, 1)
+	oldBrowser := openBrowser
+	openBrowser = func(u string) error {
+		openedCh <- u
+		return errors.New("launcher failed")
+	}
+	t.Cleanup(func() { openBrowser = oldBrowser })
+
+	var buf syncBuffer
+	root := newRootCmd()
+	root.SetErr(&buf)
+	root.SetArgs([]string{"login", "--timeout", "5s"})
+	errCh := make(chan error, 1)
+	go func() { errCh <- root.Execute() }()
+
+	var openedURL string
+	select {
+	case openedURL = <-openedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("browser launcher was not called")
+	}
+	waitForOutput(t, &buf, "Cannot open a browser: launcher failed\n")
+	waitForOutput(t, &buf, openedURL)
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("login returned before the callback: %v", err)
+	default:
+	}
+
+	u, _ := url.Parse(openedURL)
+	cbURL := fmt.Sprintf("http://127.0.0.1:%s/callback?state=%s&token=vk_afterfail.abc",
+		u.Query().Get("port"), url.QueryEscape(u.Query().Get("state")))
+	resp, err := http.Get(cbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("login should succeed after the callback, got: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("login did not complete after the callback")
 	}
 }
 

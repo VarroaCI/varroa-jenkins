@@ -52,6 +52,8 @@ varroactl login --server https://varroa.example.com
 
 varroactl prints the login URL before it starts the browser. If no browser window opens, paste the URL into a browser on the same computer.
 
+The login waits for the browser callback or the timeout, not for the browser launcher.
+
 A `--server` value without a scheme gets `https://`, so `--server varroa.example.com` also works. Write `http://` in full for a server without TLS.
 
 For automation, pass an API key through standard input:
