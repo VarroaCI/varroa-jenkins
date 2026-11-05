@@ -4,17 +4,20 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -80,9 +83,9 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 		}
 		args := getArgs(req)
 		name, cluster := strArg(args, "name"), clusterOrDefault(args)
-		existing, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, deps.Store, name, "")
+		existing, err := readProvisioningDefaultsBase(ctx, deps, cluster, name)
 		if err != nil {
-			existing = &v1alpha1.ProvisioningDefaults{ObjectMeta: metav1.ObjectMeta{Name: name}}
+			return mcp.NewToolResultError(fmt.Sprintf("failed to read provisioning defaults: %v", err)), nil
 		}
 		if v := strArg(args, "rootDomain"); v != "" {
 			existing.Spec.RootDomain = v
@@ -288,6 +291,43 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 		})
 		return mcp.NewToolResultText("version profile " + name + " deleted"), nil
 	})
+}
+
+// readProvisioningDefaultsBase returns the stored spec that a patch merges onto.
+// The base comes from the target cluster, so a merge never copies another
+// cluster's spec. A not-found answer yields an empty object. Any other read
+// error fails the call, so a transient error cannot wipe the target's spec.
+func readProvisioningDefaultsBase(ctx context.Context, deps *api.Dependencies, cluster, name string) (*v1alpha1.ProvisioningDefaults, error) {
+	empty := &v1alpha1.ProvisioningDefaults{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	if deps.ConfigBrood == nil {
+		pd, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, deps.Store, name, "")
+		if isNotFoundErr(err) {
+			return empty, nil
+		}
+		return pd, err
+	}
+	raw, err := deps.ConfigBrood.GetProvisioningDefaults(ctx, cluster, name)
+	if isNotFoundErr(err) {
+		return empty, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var pd v1alpha1.ProvisioningDefaults
+	if err := json.Unmarshal(raw, &pd); err != nil {
+		return nil, fmt.Errorf("decode provisioning defaults: %w", err)
+	}
+	return &pd, nil
+}
+
+// isNotFoundErr reports a not-found answer from the local store or from a
+// member cluster over the bus.
+func isNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var be *api.BroodError
+	return apierrors.IsNotFound(err) || (errors.As(err, &be) && be.Code == bus.CodeNotFound)
 }
 
 // versionProfileSummary is the default projection for

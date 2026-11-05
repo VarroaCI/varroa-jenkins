@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -531,5 +533,148 @@ func TestMCPUpdateProvisioningDefaults_StoreFallbackDoesNotStampCluster(t *testi
 	}
 	if got := sink.events[0].Cluster; got != "" {
 		t.Errorf("Cluster = %q, want empty: the write went to the local store, not %q", got, "prod")
+	}
+}
+
+// pdRoutedBrood serves ProvisioningDefaults per cluster and records every
+// read and write, so a test can see which cluster the base was read from.
+type pdRoutedBrood struct {
+	api.ConfigBrood
+	stored  map[string]json.RawMessage
+	readErr error
+	reads   []string
+	updates []pdUpdate
+}
+
+type pdUpdate struct {
+	cluster string
+	body    v1alpha1.ProvisioningDefaults
+}
+
+func (b *pdRoutedBrood) GetProvisioningDefaults(_ context.Context, cluster, _ string) (json.RawMessage, error) {
+	b.reads = append(b.reads, cluster)
+	if b.readErr != nil {
+		return nil, b.readErr
+	}
+	raw, ok := b.stored[cluster]
+	if !ok {
+		return nil, &api.BroodError{Code: bus.CodeNotFound, Msg: "not found"}
+	}
+	return raw, nil
+}
+
+func (b *pdRoutedBrood) UpdateProvisioningDefaults(_ context.Context, cluster, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	var body v1alpha1.ProvisioningDefaults
+	if err := json.Unmarshal(obj, &body); err != nil {
+		return nil, err
+	}
+	b.updates = append(b.updates, pdUpdate{cluster: cluster, body: body})
+	return obj, nil
+}
+
+func pdSpecRaw(t *testing.T, name, rootDomain string) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: rootDomain},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return raw
+}
+
+func updatePDCall(t *testing.T, deps *api.Dependencies, args map[string]interface{}) toolResult {
+	t.Helper()
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+		"name":      "update_provisioning_defaults",
+		"arguments": args,
+	}, mcpAdminClaims)
+	return parseToolResult(t, resp.Result)
+}
+
+// The base must come from the target cluster. Each cluster stores a different
+// root domain, so a merge that copied the wrong base would show up in the body.
+func TestMCPUpdateProvisioningDefaults_BaseReadFromTargetCluster(t *testing.T) {
+	deps := adminDeps()
+	brood := &pdRoutedBrood{stored: map[string]json.RawMessage{
+		"core":     pdSpecRaw(t, "varroa-defaults", "core.example.com"),
+		"member-b": pdSpecRaw(t, "varroa-defaults", "member-b.example.com"),
+	}}
+	deps.ConfigBrood = brood
+
+	tr := updatePDCall(t, deps, map[string]interface{}{
+		"name": "varroa-defaults", "cluster": "member-b", "storageClass": "fast",
+	})
+	if tr.IsError {
+		t.Fatalf("tool errored: %v", tr.Content)
+	}
+	if len(brood.reads) != 1 || brood.reads[0] != "member-b" {
+		t.Fatalf("base read clusters = %v, want [member-b]", brood.reads)
+	}
+	if len(brood.updates) != 1 {
+		t.Fatalf("got %d updates, want 1", len(brood.updates))
+	}
+	u := brood.updates[0]
+	if u.cluster != "member-b" {
+		t.Errorf("update cluster = %q, want member-b", u.cluster)
+	}
+	if u.body.Spec.RootDomain != "member-b.example.com" {
+		t.Errorf("rootDomain = %q, want member-b.example.com (the target's own base)", u.body.Spec.RootDomain)
+	}
+	if u.body.Spec.StorageClass != "fast" {
+		t.Errorf("storageClass = %q, want fast", u.body.Spec.StorageClass)
+	}
+}
+
+// A not-found on the target starts from an empty spec. The local store holds a
+// spec too, and none of it may reach the target.
+func TestMCPUpdateProvisioningDefaults_NotFoundOnTargetStartsEmpty(t *testing.T) {
+	deps := adminDeps()
+	if err := deps.Store.(*crdstore.Fake).Seed(&v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "local.example.com", StorageClass: "local-sc"},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	brood := &pdRoutedBrood{stored: map[string]json.RawMessage{}}
+	deps.ConfigBrood = brood
+
+	tr := updatePDCall(t, deps, map[string]interface{}{
+		"name": "varroa-defaults", "cluster": "member-b", "storageClass": "fast",
+	})
+	if tr.IsError {
+		t.Fatalf("tool errored: %v", tr.Content)
+	}
+	if len(brood.updates) != 1 {
+		t.Fatalf("got %d updates, want 1", len(brood.updates))
+	}
+	body := brood.updates[0].body
+	if body.Spec.RootDomain != "" {
+		t.Errorf("rootDomain = %q, want empty: the local spec must not leak into the target", body.Spec.RootDomain)
+	}
+	if body.Spec.StorageClass != "fast" {
+		t.Errorf("storageClass = %q, want fast", body.Spec.StorageClass)
+	}
+	if body.Name != "varroa-defaults" {
+		t.Errorf("name = %q, want varroa-defaults", body.Name)
+	}
+}
+
+// A transient read error must fail the call. Starting from empty would write
+// an object with only the patch fields over the target's real spec.
+func TestMCPUpdateProvisioningDefaults_TransientReadErrorWritesNothing(t *testing.T) {
+	deps := adminDeps()
+	brood := &pdRoutedBrood{readErr: errors.New("bus timeout")}
+	deps.ConfigBrood = brood
+
+	tr := updatePDCall(t, deps, map[string]interface{}{
+		"name": "varroa-defaults", "cluster": "member-b", "storageClass": "fast",
+	})
+	if !tr.IsError {
+		t.Fatalf("want a tool error on a transient read failure, got %v", tr.Content)
+	}
+	if len(brood.updates) != 0 {
+		t.Errorf("got %d updates, want none after a failed read", len(brood.updates))
 	}
 }

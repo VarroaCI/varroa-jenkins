@@ -14,6 +14,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
@@ -161,6 +162,12 @@ func (g *guardConfigBrood) DeleteVersionProfile(_ context.Context, _, _ string) 
 
 func (g *guardConfigBrood) UpdateProvisioningDefaults(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
 	return obj, nil
+}
+
+// GetProvisioningDefaults answers not-found, so the update starts from an empty
+// spec and reaches its emit call.
+func (g *guardConfigBrood) GetProvisioningDefaults(_ context.Context, _, _ string) (json.RawMessage, error) {
+	return nil, &api.BroodError{Code: bus.CodeNotFound, Msg: "not found"}
 }
 
 // guardReconciler implements controller.ReconcilerAPI for the two controller
