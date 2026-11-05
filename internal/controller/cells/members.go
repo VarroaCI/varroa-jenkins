@@ -13,6 +13,8 @@ import (
 	"sort"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
@@ -243,6 +245,36 @@ func memberCellDrained(in Inputs, tenant *v1alpha1.Tenant, m MemberBinding) bool
 		return true
 	}
 	return cellDrainedTenant(cell, tenant.Name)
+}
+
+// TenantDrainsFromCell reports whether the tenant's folder leaves the cell
+// namespace/name (tenant-isolation spec). The controller reconciler omits
+// the folder from that cell's items while it answers true. A voluntary move
+// drains slot 0's cell and each stale member's cell. A member marked
+// draining drains its own cell. Every other member cell keeps the folder:
+// the standby that takes slot 0 is never stale or draining, so it stays
+// applied through the drain.
+func TenantDrainsFromCell(status *v1alpha1.TenantStatus, namespace, name string) bool {
+	p := status.Placement
+	if p == nil {
+		return false
+	}
+	moving := false
+	for _, c := range status.Conditions {
+		if c.Type == v1alpha1.TenantConditionPlaced {
+			moving = c.Status == metav1.ConditionFalse && c.Reason == v1alpha1.TenantReasonTenantMoving
+			break
+		}
+	}
+	if moving && p.Cell == name && p.CellNamespace == namespace {
+		return true
+	}
+	for _, m := range p.Members {
+		if m.Cell == name && m.CellNamespace == namespace {
+			return m.Draining || (moving && m.Stale)
+		}
+	}
+	return false
 }
 
 // replacementExists reports whether a stale slot holder has a replacement:

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
@@ -306,5 +308,60 @@ func TestPromotionSkipsADrainingStandby(t *testing.T) {
 	}}
 	if got := takePromotionSource(&standbys, map[string]bool{}); got != nil {
 		t.Errorf("a draining standby must not be a promotion source, got %+v", got)
+	}
+}
+
+// TestTenantDrainsFromCell asserts the drain rule: a move drains slot 0's cell
+// and each stale member's cell, and a draining member drains its own cell.
+func TestTenantDrainsFromCell(t *testing.T) {
+	moving := []v1alpha1.TenantCondition{{
+		Type: v1alpha1.TenantConditionPlaced, Status: metav1.ConditionFalse,
+		Reason: v1alpha1.TenantReasonTenantMoving,
+	}}
+	stale := []v1alpha1.TenantCondition{{
+		Type: v1alpha1.TenantConditionPlaced, Status: metav1.ConditionTrue,
+		Reason: v1alpha1.TenantReasonMembersStale,
+	}}
+	members := func(edit func([]v1alpha1.TenantMemberStatus)) []v1alpha1.TenantMemberStatus {
+		list := []v1alpha1.TenantMemberStatus{
+			memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+			memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
+			memberStatus("cell-c", v1alpha1.TenantMemberRoleStandby, nil),
+		}
+		if edit != nil {
+			edit(list)
+		}
+		return list
+	}
+	cases := []struct {
+		name    string
+		conds   []v1alpha1.TenantCondition
+		members []v1alpha1.TenantMemberStatus
+		want    map[string]bool
+	}{
+		{"a move drains slot 0's cell alone", moving, members(nil),
+			map[string]bool{"cell-a": true, "cell-b": false, "cell-c": false, "cell-z": false}},
+		{"a move drains a stale slot", moving, members(func(l []v1alpha1.TenantMemberStatus) { l[1].Stale = true }),
+			map[string]bool{"cell-a": true, "cell-b": true, "cell-c": false}},
+		{"a move drains a stale standby", moving, members(func(l []v1alpha1.TenantMemberStatus) { l[2].Stale = true }),
+			map[string]bool{"cell-a": true, "cell-b": false, "cell-c": true}},
+		{"a draining member drains with no move", stale, members(func(l []v1alpha1.TenantMemberStatus) { l[1].Stale, l[1].Draining = true, true }),
+			map[string]bool{"cell-a": false, "cell-b": true, "cell-c": false}},
+		{"a stale member does not drain with no move", stale, members(func(l []v1alpha1.TenantMemberStatus) { l[2].Stale = true }),
+			map[string]bool{"cell-a": false, "cell-b": false, "cell-c": false}},
+		{"an empty member list reads the scalar cell", moving, nil,
+			map[string]bool{"cell-a": true, "cell-b": false}},
+	}
+	for _, tc := range cases {
+		status := placedWithMembers(tc.members)
+		status.Conditions = tc.conds
+		for cell, want := range tc.want {
+			if got := TenantDrainsFromCell(status, "cells-ns", cell); got != want {
+				t.Errorf("%s: %s drains = %v, want %v", tc.name, cell, got, want)
+			}
+		}
+	}
+	if TenantDrainsFromCell(&v1alpha1.TenantStatus{Conditions: moving}, "cells-ns", "cell-a") {
+		t.Error("a tenant with no placement drains from no cell")
 	}
 }

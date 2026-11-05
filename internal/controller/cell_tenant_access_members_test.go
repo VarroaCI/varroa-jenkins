@@ -25,26 +25,24 @@ func drainingTenant(members []v1alpha1.TenantMemberStatus) *v1alpha1.Tenant {
 	}
 }
 
-// TestTenantIsDrainingFromCellCoversEveryMember asserts a draining tenant
-// loses its folder on every member's cell, so the voluntary move's idle
-// test converges on all of them.
-func TestTenantIsDrainingFromCellCoversEveryMember(t *testing.T) {
+// TestTenantIsDrainingFromCellCoversSlotZeroAndStaleMembers asserts a moving
+// tenant loses its folder on slot 0's cell and on each stale member's cell.
+// A current member's cell keeps the folder, so a standby that takes slot 0
+// stays applied.
+func TestTenantIsDrainingFromCellCoversSlotZeroAndStaleMembers(t *testing.T) {
 	slot0, slot1 := int32(0), int32(1)
 	tenant := drainingTenant([]v1alpha1.TenantMemberStatus{
 		{Cell: "cell-a", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive, Slot: &slot0},
-		{Cell: "cell-b", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive, Slot: &slot1},
+		{Cell: "cell-b", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive, Slot: &slot1, Stale: true},
 		{Cell: "cell-c", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleStandby},
 	})
 
-	for _, name := range []string{"cell-a", "cell-b", "cell-c"} {
+	want := map[string]bool{"cell-a": true, "cell-b": true, "cell-c": false, "cell-z": false}
+	for name, draining := range want {
 		cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "cells-ns"}}
-		if !tenantIsDrainingFromCell(tenant, cr) {
-			t.Errorf("%s does not read the tenant as draining", name)
+		if got := tenantIsDrainingFromCell(tenant, cr); got != draining {
+			t.Errorf("%s draining = %v, want %v", name, got, draining)
 		}
-	}
-	other := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "cell-z", Namespace: "cells-ns"}}
-	if tenantIsDrainingFromCell(tenant, other) {
-		t.Error("a cell holding no member reads the tenant as draining")
 	}
 }
 
