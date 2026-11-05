@@ -622,7 +622,8 @@ func (r *WarmPoolReconciler) ensureFinalizer(ctx context.Context, pool *v1alpha1
 // and it removes no label from any cell. A placed cell therefore keeps its
 // labels and lives on as a cell with no effective owner. A free cell that
 // still runs a build of a tenant that left it holds the finalizer until that
-// build ends.
+// build ends. Each pass writes the pool status before it decides on the
+// finalizer.
 func (r *WarmPoolReconciler) drainDeletedPool(ctx context.Context, pool *v1alpha1.CellPool) {
 	log := r.logger()
 	owned, err := r.ownedCells(ctx, pool)
@@ -644,6 +645,14 @@ func (r *WarmPoolReconciler) drainDeletedPool(ctx context.Context, pool *v1alpha
 		if r.deleteFreeCell(ctx, pool, cell, fenced) {
 			drained++
 		}
+	}
+	// The status reports what the drain left, so it reads a fresh listing.
+	// The write comes before the finalizer removal: the apiserver can remove
+	// the object at once after the finalizer goes.
+	if after, err := r.ownedCells(ctx, pool); err != nil {
+		log.Warn("cell pool: list cells failed", "pool", pool.Name, "error", err)
+	} else {
+		r.writeDeletingStatus(ctx, pool, after)
 	}
 	if drained < len(free) {
 		// A cell this pass could not drain holds the finalizer: releasing it
@@ -1019,14 +1028,11 @@ func (r *WarmPoolReconciler) deleteFreeCell(ctx context.Context, pool *v1alpha1.
 	return true
 }
 
-// writeStatus computes and patches the pool status (design D6). It counts a
-// warm cell in DepartedBuildCells with cellHoldsDepartedBuild, the rule the
-// drain and the re-stamp use, so the count and the drain agree. owned is nil
-// when the pass stopped before it listed anything, which happens only for a
-// missing profile. version is the version the pass tested against the fill
-// gate, empty on the missing-profile path, used only by the
-// ArtifactPluginMissing message.
-func (r *WarmPoolReconciler) writeStatus(ctx context.Context, pool *v1alpha1.CellPool, owned []*v1alpha1.Controller, reason, version string) {
+// poolStatusCounts computes every pool status field except the conditions.
+// It counts a warm cell in DepartedBuildCells with cellHoldsDepartedBuild,
+// the rule the drain and the re-stamp use, so the count and the drain agree.
+// The normal pass and the delete pass both call it.
+func (r *WarmPoolReconciler) poolStatusCounts(pool *v1alpha1.CellPool, owned []*v1alpha1.Controller) *v1alpha1.CellPoolStatus {
 	status := &v1alpha1.CellPoolStatus{ObservedGeneration: pool.Generation}
 	summary := SummarizeCellPool(pool)
 	tenants := map[string]bool{}
@@ -1057,6 +1063,16 @@ func (r *WarmPoolReconciler) writeStatus(ctx context.Context, pool *v1alpha1.Cel
 		status.Tenants = append(status.Tenants, t)
 	}
 	sort.Strings(status.Tenants)
+	return status
+}
+
+// writeStatus computes and patches the pool status (design D6). poolStatusCounts
+// computes the counts. owned is nil when the pass stopped before it listed
+// anything, which happens only for a missing profile. version is the version
+// the pass tested against the fill gate, empty on the missing-profile path,
+// used only by the ArtifactPluginMissing message.
+func (r *WarmPoolReconciler) writeStatus(ctx context.Context, pool *v1alpha1.CellPool, owned []*v1alpha1.Controller, reason, version string) {
+	status := r.poolStatusCounts(pool, owned)
 
 	condStatus := metav1.ConditionTrue
 	message := ""
@@ -1099,6 +1115,18 @@ func (r *WarmPoolReconciler) writeStatus(ctx context.Context, pool *v1alpha1.Cel
 		LastTransitionTime: r.poolReadyTransitionTime(pool, condStatus),
 	}}
 
+	if err := crdstore.PatchStatus[v1alpha1.CellPool](ctx, r.Store, pool.Name, "", status); err != nil {
+		r.logger().Warn("cell pool: patch status failed", "pool", pool.Name, "error", err)
+	}
+}
+
+// writeDeletingStatus patches the status of a pool under deletion. The counts
+// come from poolStatusCounts. The stored PoolReady condition stays as it is:
+// the delete pass tests no fill precondition, and the placement pass reads
+// CellCapReached from that condition.
+func (r *WarmPoolReconciler) writeDeletingStatus(ctx context.Context, pool *v1alpha1.CellPool, owned []*v1alpha1.Controller) {
+	status := r.poolStatusCounts(pool, owned)
+	status.Conditions = pool.Status.Conditions
 	if err := crdstore.PatchStatus[v1alpha1.CellPool](ctx, r.Store, pool.Name, "", status); err != nil {
 		r.logger().Warn("cell pool: patch status failed", "pool", pool.Name, "error", err)
 	}
