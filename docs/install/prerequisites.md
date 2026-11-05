@@ -9,6 +9,7 @@
 | kubectl | Compatible with the cluster |
 | Storage | A default `StorageClass` with dynamic provisioning |
 | Permissions | Ability to install CRDs and cluster-scoped RBAC |
+| Node architecture | `linux/amd64` or `linux/arm64` |
 
 The default installation runs three NATS servers with persistent JetStream storage. Each Jenkins controller also receives a persistent `$JENKINS_HOME` volume. Ensure the cluster can schedule the control plane, Jenkins pods, and build agents.
 
@@ -28,6 +29,8 @@ At least one StorageClass must be marked `(default)` unless every persistent com
 ## Image and Source Access
 
 Nodes must be able to pull Varroa, NATS, Dex when enabled, Jenkins, and agent images. The operator also needs access to configured Git and OCI bundle sources. Jenkins needs access to plugin artifacts unless the in-cluster update center has complete offline coverage.
+
+A cluster can have nodes of both architectures. The release images hold both platforms.
 
 Use internal mirrors and pull secrets when public egress is unavailable. See [Air-gapped installation](air-gapped.md).
 

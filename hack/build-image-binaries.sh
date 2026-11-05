@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds the Go binaries of the backend image into one directory.
-# The Dockerfile source stage and the release workflow both call this script.
-# Usage: hack/build-image-binaries.sh <out-dir>. GIT_SHA sets main.version. The go toolchain's GOARCH selects the arch.
+# The Dockerfile source stage and both release workflows call this script.
+# The release workflows call it once for each target arch.
+# Usage: hack/build-image-binaries.sh <out-dir>. GIT_SHA sets main.version. GOARCH selects the target arch; it defaults to the host arch.
 set -eu
 out="${1:?usage: build-image-binaries.sh <out-dir>}"
 sha="${GIT_SHA:-unknown}"

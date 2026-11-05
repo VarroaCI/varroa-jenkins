@@ -112,6 +112,6 @@ kubectl get ingress -A
 kubectl get pvc -A
 ```
 
-The dashboard Ingress should receive an ALB hostname. DNS and ACM must be ready before browser login succeeds. If a pod reports `exec format error`, use a multi-architecture image or select nodes matching that image architecture.
+The dashboard Ingress should receive an ALB hostname. DNS and ACM must be ready before browser login succeeds. Graviton (arm64) nodes run the published images. A mirrored or overridden image must include the architecture of each node.
 
 Before deleting the cluster, delete controllers and ingress resources. Confirm that ALBs, target groups, security groups, and EBS volumes have been removed to avoid retained AWS charges.
