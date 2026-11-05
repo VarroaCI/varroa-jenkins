@@ -12,12 +12,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -153,10 +155,10 @@ func sha256Base64(data []byte) string {
 // buildImportTarball creates a LayoutStore in a temp dir, seeds it with the
 // given plugin pack, and returns its gzipped-tar bytes and the store path
 // (cleaned up by t.Cleanup).
-func buildImportTarball(t *testing.T, ref string, plugins []testPlugin) []byte {
+func buildImportTarball(t *testing.T, plugins []testPlugin) []byte {
 	t.Helper()
 	return buildImportTarballWith(t, func(t *testing.T, _ string, ls *oci.LayoutStore) {
-		seedPluginPack(t, ls, ref, plugins)
+		seedPluginPack(t, ls, "import-pack:v1", plugins)
 	})
 }
 
@@ -667,7 +669,7 @@ func TestImport_ValidTarGz(t *testing.T) {
 	ts := newTestServer(t, store, WithImportToken("correct-token"))
 
 	// Build a tarball with a plugin pack.
-	tarGz := buildImportTarball(t, "import-pack:v1", []testPlugin{
+	tarGz := buildImportTarball(t, []testPlugin{
 		{name: "imported-p", version: "3.0.0", hpiBytes: newPluginBytes("imported-p", "3.0.0")},
 	})
 
@@ -743,7 +745,7 @@ func TestImport_RejectsLatestVersion(t *testing.T) {
 			store := newTestStore(t)
 			ts := newTestServer(t, store, WithImportToken("correct-token"))
 
-			tarGz := buildImportTarball(t, "import-pack:v1", []testPlugin{
+			tarGz := buildImportTarball(t, []testPlugin{
 				{name: "foo", version: v, hpiBytes: newPluginBytes("foo", "1.0.0")},
 			})
 			postImportExpectRejected(t, ts, tarGz, "foo")
@@ -759,7 +761,7 @@ func TestImport_LatestRejectsWholePack(t *testing.T) {
 	store := newTestStore(t)
 	ts := newTestServer(t, store, WithImportToken("correct-token"))
 
-	tarGz := buildImportTarball(t, "import-pack:v1", []testPlugin{
+	tarGz := buildImportTarball(t, []testPlugin{
 		{name: "good", version: "1.0.0", hpiBytes: newPluginBytes("good", "1.0.0")},
 		{name: "foo", version: "LATEST", hpiBytes: newPluginBytes("foo", "1.0.0")},
 	})
@@ -1423,4 +1425,258 @@ func TestImport_RejectsUnsupportedLayerMediaType(t *testing.T) {
 	})
 	postImportExpectRejected(t, ts, tarGz, "unsupported layer media type")
 	assertImportStoreEmpty(t, ts)
+}
+
+// ---------------------------------------------------------------------------
+// import disk faults and entry conflicts
+// ---------------------------------------------------------------------------
+
+// tarEntry is one entry of a hand-built import tarball.
+type tarEntry struct {
+	name string
+	dir  bool
+	body string
+}
+
+// buildTarGz packs entries into a .tar.gz. A dir entry has no body.
+func buildTarGz(t *testing.T, entries ...tarEntry) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gzw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gzw)
+	for _, e := range entries {
+		hdr := &tar.Header{Name: e.name, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(e.body))}
+		if e.dir {
+			hdr.Typeflag = tar.TypeDir
+			hdr.Mode = 0o755
+			hdr.Size = 0
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("write header %q: %v", e.name, err)
+		}
+		if !e.dir {
+			if _, err := tw.Write([]byte(e.body)); err != nil {
+				t.Fatalf("write body %q: %v", e.name, err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := gzw.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// postImportStatus posts tarGz to /api/v1/import and returns the status and error text.
+func postImportStatus(t *testing.T, ts *testServer, tarGz []byte) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, ts.baseURL+"/api/v1/import", bytes.NewReader(tarGz))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer correct-token")
+	req.Header.Set("Content-Type", "application/gzip")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return resp.StatusCode, body["error"]
+}
+
+// faultyEntryFile is a write target whose Write or Close fails on demand.
+type faultyEntryFile struct {
+	writeErr error
+	closeErr error
+}
+
+func (f *faultyEntryFile) Write(p []byte) (int, error) {
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
+	return len(p), nil
+}
+
+func (f *faultyEntryFile) Close() error { return f.closeErr }
+
+// withOpenImportFile replaces the import entry opener, to inject a disk fault.
+func withOpenImportFile(open func(path string) (io.WriteCloser, error)) Option {
+	return func(s *Server) { s.openImportFile = open }
+}
+
+func TestImport_DiskFaultAnswers500(t *testing.T) {
+	cases := []struct {
+		name    string
+		open    func(path string) (io.WriteCloser, error)
+		want    string
+		errText string
+	}{
+		{
+			name: "create",
+			open: func(string) (io.WriteCloser, error) {
+				return nil, &fs.PathError{Op: "open", Path: "entry", Err: syscall.ENOSPC}
+			},
+			want:    "create ",
+			errText: "no space left on device",
+		},
+		{
+			name: "write",
+			open: func(string) (io.WriteCloser, error) {
+				return &faultyEntryFile{writeErr: syscall.ENOSPC}, nil
+			},
+			want:    "write ",
+			errText: "no space left on device",
+		},
+		{
+			name: "close",
+			open: func(string) (io.WriteCloser, error) {
+				return &faultyEntryFile{closeErr: syscall.EIO}, nil
+			},
+			want: "close ",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newTestStore(t)
+			ts := newTestServer(t, store, WithImportToken("correct-token"), withOpenImportFile(tc.open))
+			tarGz := buildImportTarball(t, []testPlugin{
+				{name: "faulty", version: "1.0.0", hpiBytes: newPluginBytes("faulty", "1.0.0")},
+			})
+			status, msg := postImportStatus(t, ts, tarGz)
+			if status != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500 (message %q)", status, msg)
+			}
+			if !strings.Contains(msg, tc.want) {
+				t.Errorf("message %q does not contain %q", msg, tc.want)
+			}
+			if strings.Contains(msg, "invalid tarball") {
+				t.Errorf("message %q is a 400 tarball refusal", msg)
+			}
+			if tc.errText != "" && !strings.Contains(msg, tc.errText) {
+				t.Errorf("message %q does not contain %q", msg, tc.errText)
+			}
+			assertImportStoreEmpty(t, ts)
+		})
+	}
+}
+
+func TestExtractTarGz_ReadOnlyDestinationIsServerFault(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	s := NewServer(newTestStore(t), testLogger())
+	err := s.extractTarGz(bytes.NewReader(buildTarGz(t, tarEntry{name: "blobs/", dir: true})), dir)
+	var fault *importServerFault
+	if !errors.As(err, &fault) {
+		t.Fatalf("extractTarGz error = %v, want *importServerFault", err)
+	}
+	if fault.op != "mkdir" {
+		t.Errorf("fault.op = %q, want mkdir", fault.op)
+	}
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Errorf("error %v does not wrap fs.ErrPermission", err)
+	}
+}
+
+func TestImport_TempDirFaultAnswers500(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	tarGz := buildImportTarball(t, []testPlugin{
+		{name: "tmpfault", version: "1.0.0", hpiBytes: newPluginBytes("tmpfault", "1.0.0")},
+	})
+	store := newTestStore(t)
+	ts := newTestServer(t, store, WithImportToken("correct-token"))
+
+	roDir := t.TempDir()
+	if err := os.Chmod(roDir, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0o700) })
+	t.Setenv("TMPDIR", roDir)
+
+	status, msg := postImportStatus(t, ts, tarGz)
+	if status != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (message %q)", status, msg)
+	}
+	assertImportStoreEmpty(t, ts)
+}
+
+func TestImport_ConflictingEntriesAnswer400(t *testing.T) {
+	cases := []struct {
+		name    string
+		entries []tarEntry
+	}{
+		{name: "file then child", entries: []tarEntry{{name: "a", body: "x"}, {name: "a/b", body: "y"}}},
+		{name: "file then dir", entries: []tarEntry{{name: "a", body: "x"}, {name: "a/", dir: true}}},
+		{name: "dir then file", entries: []tarEntry{{name: "a/", dir: true}, {name: "a", body: "x"}}},
+		{name: "name too long", entries: []tarEntry{{name: strings.Repeat("n", 300), body: "x"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newTestStore(t)
+			ts := newTestServer(t, store, WithImportToken("correct-token"))
+			status, msg := postImportStatus(t, ts, buildTarGz(t, tc.entries...))
+			if status != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (message %q)", status, msg)
+			}
+			if !strings.Contains(msg, "invalid tarball") {
+				t.Errorf("message %q does not contain %q", msg, "invalid tarball")
+			}
+			assertImportStoreEmpty(t, ts)
+		})
+	}
+}
+
+func TestImport_TruncatedEntryAnswers400(t *testing.T) {
+	var buf bytes.Buffer
+	gzw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gzw)
+	if err := tw.WriteHeader(&tar.Header{Name: "blob", Size: 4096, Typeflag: tar.TypeReg, Mode: 0o644}); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	if _, err := tw.Write(make([]byte, 100)); err != nil {
+		t.Fatalf("write body: %v", err)
+	}
+	// The tar writer is not closed, so the entry is truncated.
+	if err := gzw.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+
+	store := newTestStore(t)
+	ts := newTestServer(t, store, WithImportToken("correct-token"))
+	postImportExpectRejected(t, ts, buf.Bytes(), "read blob")
+}
+
+// TestExtractTarGz_RepeatedEntryTruncates verifies that a repeated regular
+// entry with a shorter body does not keep the tail of the earlier body.
+func TestExtractTarGz_RepeatedEntryTruncates(t *testing.T) {
+	dir := t.TempDir()
+	s := NewServer(newTestStore(t), testLogger())
+	tgz := buildTarGz(t,
+		tarEntry{name: "a", body: "a much longer first body"},
+		tarEntry{name: "a", body: "x"},
+	)
+	if err := s.extractTarGz(bytes.NewReader(tgz), dir); err != nil {
+		t.Fatalf("extractTarGz: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "a"))
+	if err != nil {
+		t.Fatalf("read entry: %v", err)
+	}
+	if string(got) != "x" {
+		t.Errorf("entry body = %q, want %q", got, "x")
+	}
 }
