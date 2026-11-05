@@ -31,6 +31,7 @@ var (
 
 // handleImport handles POST /api/v1/import.
 // Requires Authorization: Bearer <token>. Body is an OCI-layout .tar.gz.
+// The import runs in the request. It answers 200 when every manifest reads and copies.
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -89,32 +90,28 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.rejectLatestPluginVersions(r.Context(), srcStore, srcDescs); err != nil {
-		s.logger.Warn("import rejected: plugin pack carries a latest version", "error", err)
+	pluginCount, err := s.checkImportLayout(r.Context(), srcStore, srcDescs)
+	if err != nil {
+		s.logger.Warn("import rejected", "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	imported := 0
 	for _, d := range srcDescs {
 		ref := d.Annotations["org.opencontainers.image.ref.name"]
 		if ref == "" {
 			ref = d.Digest
 		}
-
 		if err := oci.Copy(r.Context(), srcStore, ref, s.store, ref); err != nil {
-			s.logger.Warn("failed to copy manifest during import", "ref", ref, "error", err)
-			continue
+			s.logger.Error("failed to copy manifest during import", "ref", ref, "error", err)
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("copy pack %q into the store: %v", ref, err))
+			return
 		}
-		imported++
 	}
 
-	// Count plugins in the imported manifests.
-	pluginCount := s.countPluginsInLayout(r.Context(), srcStore, srcDescs)
-
-	writeJSON(w, http.StatusAccepted, map[string]interface{}{
-		"status":       "accepted",
-		"manifests":    imported,
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":       "imported",
+		"manifests":    len(srcDescs),
 		"plugin_count": pluginCount,
 	})
 }
@@ -198,8 +195,13 @@ func (s *Server) extractTarGz(r io.Reader, destDir string) error {
 	return nil
 }
 
-// countPluginsInLayout counts plugins across all manifest refs in the layout.
-func (s *Server) countPluginsInLayout(ctx context.Context, store oci.BlobStore, descs []oci.Descriptor) int {
+// checkImportLayout reads every manifest of the import layout and returns the
+// plugin count. The import calls it before any copy, so a refused layout leaves
+// the store unchanged. A manifest passes only when the update center can serve it.
+func (s *Server) checkImportLayout(ctx context.Context, store oci.BlobStore, descs []oci.Descriptor) (int, error) {
+	if len(descs) == 0 {
+		return 0, errors.New("import layout holds no manifest")
+	}
 	count := 0
 	for _, d := range descs {
 		ref := d.Annotations["org.opencontainers.image.ref.name"]
@@ -208,42 +210,35 @@ func (s *Server) countPluginsInLayout(ctx context.Context, store oci.BlobStore, 
 		}
 		manifest, err := store.Pull(ctx, ref)
 		if err != nil {
-			continue
+			return 0, fmt.Errorf("read manifest %q: %w", ref, err)
 		}
 		if manifest.ArtifactType != oci.ArtifactTypePluginPack {
-			continue
+			return 0, fmt.Errorf("manifest %q is not a plugin pack: artifact type %q, want %q", ref, manifest.ArtifactType, oci.ArtifactTypePluginPack)
+		}
+		if _, _, err := oci.ReadPluginPack(ctx, store, ref); err != nil {
+			return 0, fmt.Errorf("read pack %q: %w", ref, err)
+		}
+		for _, l := range manifest.Layers {
+			if l.MediaType != oci.MediaTypePluginHPI {
+				return 0, fmt.Errorf("pack %q has unsupported layer media type %q", ref, l.MediaType)
+			}
+			rc, err := store.FetchBlob(ctx, l.Digest)
+			if err != nil {
+				return 0, fmt.Errorf("pack %q is missing blob %s: %w", ref, l.Digest, err)
+			}
+			_ = rc.Close()
 		}
 		plugins := pluginLayersFromManifest(manifest, s.logger)
-		count += len(plugins)
-	}
-	return count
-}
-
-// rejectLatestPluginVersions returns an error that names the first plugin
-// layer whose version is not concrete. The import stores nothing when it
-// returns an error.
-func (s *Server) rejectLatestPluginVersions(ctx context.Context, store oci.BlobStore, descs []oci.Descriptor) error {
-	for _, d := range descs {
-		ref := d.Annotations["org.opencontainers.image.ref.name"]
-		if ref == "" {
-			ref = d.Digest
-		}
-		manifest, err := store.Pull(ctx, ref)
-		if err != nil {
-			continue
-		}
-		if manifest.ArtifactType != oci.ArtifactTypePluginPack {
-			continue
-		}
-		for _, info := range pluginLayersFromManifest(manifest, s.logger) {
+		for _, info := range plugins {
 			if ucmeta.IsLatest(info.Version) {
 				subject := info.Name
 				if subject == "" {
 					subject = "layer " + info.LayerDigest
 				}
-				return fmt.Errorf("plugin %q in pack %q has no concrete version (%q): export the pack again with a concrete version", subject, ref, info.Version)
+				return 0, fmt.Errorf("plugin %q in pack %q has no concrete version (%q): export the pack again with a concrete version", subject, ref, info.Version)
 			}
 		}
+		count += len(plugins)
 	}
-	return nil
+	return count, nil
 }

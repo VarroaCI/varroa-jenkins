@@ -211,6 +211,7 @@ func TestUpdateCenterReconciler(t *testing.T) {
 	t.Run("seed-credentials-reach-every-store", testSeedCredentialsReachEveryStore)
 	t.Run("seed-multi-registry-secret-rejected", testSeedMultiRegistrySecretRejected)
 	t.Run("seed-failed-import-is-retried-next-tick", testSeedFailedImportIsRetriedNextTick)
+	t.Run("seed-refused-pack-reports-reason", testSeedRefusedPackReportsReason)
 	t.Run("prefetch-disabled-removes-condition", testPrefetchDisabledRemovesCondition)
 	t.Run("prefetch-posts-servable-gaps-only", testPrefetchPostsServableGapsOnly)
 	t.Run("prefetch-caps-batch-at-20", testPrefetchCapsBatchAt20)
@@ -1906,6 +1907,59 @@ func testSeedFailedImportIsRetriedNextTick(t *testing.T) {
 	cond = findUCCondition(status.Conditions, condTypeSeedImported)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
 		t.Fatalf("expected SeedImported=True after the retry succeeded, got %+v", cond)
+	}
+}
+
+// testSeedRefusedPackReportsReason: the update center refuses a pack it cannot
+// read. The operator must report SeedImported=False with the ref and the cause,
+// and must not record the digest.
+func testSeedRefusedPackReportsReason(t *testing.T) {
+	client := newTestClient()
+	importTokenSecret(client)
+
+	const ref = "registry.example.org/plugins/a:1.0"
+	const digest = "sha256:0000000000000000000000000000000000000000000000000000000000000006"
+
+	uc := updateCenter(updateCenterSingletonName, withSeedRefs(ref))
+	client.updateCenter = uc
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/inventory":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(ucInventoryResponse{Plugins: []inventoryEntry{}})
+		case "/api/v1/import":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"pack \"x\" has no kind: it predates the pack-kind field and must be re-exported"}`))
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(ts.Close)
+
+	fbs := newFakeBlobStore(t, ref, digest)
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	rec.newRegistryStore = func(_ string, _ oci.RegistryOptions) (oci.BlobStore, error) { return fbs, nil }
+
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	status := lastUCStatus(t, client)
+	if len(status.SeedImportedDigests) != 0 {
+		t.Errorf("a refused pack must not be recorded as imported, got %v", status.SeedImportedDigests)
+	}
+	cond := findUCCondition(status.Conditions, condTypeSeedImported)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "ImportFailed" {
+		t.Fatalf("expected SeedImported=False reason ImportFailed, got %+v", cond)
+	}
+	if !strings.Contains(cond.Message, ref) {
+		t.Errorf("condition message %q does not name the ref %q", cond.Message, ref)
+	}
+	if !strings.Contains(cond.Message, "has no kind") {
+		t.Errorf("condition message %q does not name the cause %q", cond.Message, "has no kind")
 	}
 }
 

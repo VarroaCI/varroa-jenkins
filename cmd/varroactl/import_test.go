@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/varroaci/varroa-jenkins/internal/oci"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter"
 )
 
 // ---------------------------------------------------------------------------
@@ -475,6 +477,77 @@ func TestImport_UC_Success(t *testing.T) {
 	}
 	if !gotToken {
 		t.Error("server did not receive the expected token")
+	}
+}
+
+// uc:// import: a pack that ReadPluginPack refuses fails the command and stores nothing.
+func TestImport_UC_RefusedPack(t *testing.T) {
+	srcDir := t.TempDir()
+	srcStore, err := oci.NewLayoutStore(srcDir)
+	if err != nil {
+		t.Fatalf("NewLayoutStore: %v", err)
+	}
+	ctx := t.Context()
+	content := []byte("fake-hpi-for-refused-import")
+	hpiDigest, hpiSize, err := srcStore.PushBlob(ctx, oci.MediaTypePluginHPI, bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("PushBlob hpi: %v", err)
+	}
+	cfgDigest, cfgSize, err := srcStore.PushBlob(ctx, oci.MediaTypePackConfig,
+		strings.NewReader(`{"jenkinsVersion":"2.479.3","profile":"test","pluginCount":1}`))
+	if err != nil {
+		t.Fatalf("PushBlob config: %v", err)
+	}
+	manifest := oci.Manifest{
+		ArtifactType: oci.ArtifactTypePluginPack,
+		Config:       oci.Descriptor{MediaType: oci.MediaTypePackConfig, Digest: cfgDigest, Size: cfgSize},
+		Layers: []oci.Descriptor{{
+			MediaType: oci.MediaTypePluginHPI,
+			Digest:    hpiDigest,
+			Size:      hpiSize,
+			Annotations: map[string]string{
+				oci.AnnPluginName:    "uc-plugin",
+				oci.AnnPluginVersion: "1.0.0",
+				oci.AnnPluginSHA256:  hpiDigest,
+			},
+		}},
+	}
+	if err := srcStore.Push(ctx, srcDir, manifest); err != nil {
+		t.Fatalf("Push manifest: %v", err)
+	}
+
+	ucStore, err := oci.NewLayoutStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLayoutStore uc: %v", err)
+	}
+	srv := updatecenter.NewServer(ucStore, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		updatecenter.WithImportToken("valid-token"))
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+	ucSrv := httptest.NewServer(mux)
+	defer ucSrv.Close()
+
+	t.Setenv("VARROACTL_UC_TOKEN", "valid-token")
+
+	err = importPackCmd(t,
+		"--from", "dir://"+srcDir,
+		"--to", "uc://"+ucSrv.Listener.Addr().String(),
+	)
+	if err == nil {
+		t.Fatal("import of a refused pack succeeded, want a non-zero exit")
+	}
+	if isUsageError(err) {
+		t.Errorf("refused pack reported as a usage error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "has no kind") {
+		t.Errorf("error %q does not name the cause %q", err, "has no kind")
+	}
+	descs, err := ucStore.ListManifests(ctx)
+	if err != nil {
+		t.Fatalf("ListManifests: %v", err)
+	}
+	if len(descs) != 0 {
+		t.Errorf("update center stored %d manifests after a refused import, want 0", len(descs))
 	}
 }
 
