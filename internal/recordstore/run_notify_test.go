@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -83,6 +84,32 @@ func entryCount(n *RunNotifier) int {
 	return len(n.state)
 }
 
+// slotCount returns how many run and kind slots the notifier still holds.
+func slotCount(n *RunNotifier) int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	count := 0
+	for _, slots := range n.state {
+		count += len(slots)
+	}
+	return count
+}
+
+// flushRun flushes every slot of one run, in kind order, so a caller needs
+// no knowledge of the kinds the run used.
+func flushRun(n *RunNotifier, runID string) {
+	n.mu.Lock()
+	kinds := make([]string, 0, len(n.state[runID]))
+	for kind := range n.state[runID] {
+		kinds = append(kinds, kind)
+	}
+	n.mu.Unlock()
+	slices.Sort(kinds)
+	for _, kind := range kinds {
+		n.flush(runID, kind)
+	}
+}
+
 // notifyOne builds a non-terminal notification for one run.
 func notifyOne(runID, kind, status string) RunNotification {
 	return RunNotification{
@@ -95,8 +122,9 @@ func notifyOne(runID, kind, status string) RunNotification {
 	}
 }
 
-// TestRunNotifierCoalescesInsideInterval asserts two notifications that
-// arrive inside the interval publish once, and the newest state wins.
+// TestRunNotifierCoalescesInsideInterval asserts two notifications of one
+// slot that arrive inside the interval publish once, and the newest state
+// wins.
 func TestRunNotifierCoalescesInsideInterval(t *testing.T) {
 	n, sent, _ := newCaptureNotifier(t)
 	defer n.Close()
@@ -107,14 +135,14 @@ func TestRunNotifierCoalescesInsideInterval(t *testing.T) {
 	}
 
 	n.now = func() time.Time { return notifyClockStart.Add(100 * time.Millisecond) }
-	n.Notify(notifyOne("run-1", "stage", ""))
+	n.Notify(notifyOne("run-1", "run", ""))
 	n.Notify(notifyOne("run-1", "run", "QUEUED"))
 	if got := sent.count(); got != 1 {
 		t.Fatalf("published %d notifications inside the interval, want 1", got)
 	}
 
 	n.now = func() time.Time { return notifyClockStart.Add(500 * time.Millisecond) }
-	n.flush("run-1")
+	n.flush("run-1", "run")
 
 	if got := sent.count(); got != 2 {
 		t.Fatalf("published %d notifications in total, want 2", got)
@@ -133,23 +161,25 @@ func TestRunNotifierCoalescesInsideInterval(t *testing.T) {
 		t.Fatalf("published subject = %q, want %q", sent.subject(1), want)
 	}
 
-	n.flush("run-1")
+	n.flush("run-1", "run")
 	if got := sent.count(); got != 2 {
 		t.Fatalf("a second flush published %d notifications in total, want 2", got)
 	}
 }
 
 // TestRunNotifierTerminalPublishesAtOnce asserts a terminal notification
-// publishes at once, and drops the state held for its run.
+// publishes at once, and drops the state held for its run of every kind.
 func TestRunNotifierTerminalPublishesAtOnce(t *testing.T) {
 	n, sent, _ := newCaptureNotifier(t)
 	defer n.Close()
 
 	n.Notify(notifyOne("run-1", "run", "RUNNING"))
-	n.now = func() time.Time { return notifyClockStart.Add(100 * time.Millisecond) }
 	n.Notify(notifyOne("run-1", "stage", ""))
-	if got := sent.count(); got != 1 {
-		t.Fatalf("published %d notifications before the terminal write, want 1", got)
+	n.now = func() time.Time { return notifyClockStart.Add(100 * time.Millisecond) }
+	n.Notify(notifyOne("run-1", "run", ""))
+	n.Notify(notifyOne("run-1", "stage", ""))
+	if got := sent.count(); got != 2 {
+		t.Fatalf("published %d notifications before the terminal write, want 2", got)
 	}
 
 	n.Notify(RunNotification{
@@ -162,19 +192,169 @@ func TestRunNotifierTerminalPublishesAtOnce(t *testing.T) {
 		Result:  "SUCCESS",
 	})
 
-	if got := sent.count(); got != 2 {
-		t.Fatalf("published %d notifications after the terminal write, want 2", got)
+	if got := sent.count(); got != 3 {
+		t.Fatalf("published %d notifications after the terminal write, want 3", got)
 	}
-	if got := sent.payload(1); got.Status != "COMPLETED" || got.Result != "SUCCESS" {
+	if got := sent.payload(2); got.Status != "COMPLETED" || got.Result != "SUCCESS" {
 		t.Fatalf("published %+v, want a COMPLETED/SUCCESS notification", got)
 	}
 	if got := entryCount(n); got != 0 {
 		t.Fatalf("held %d entries after the terminal write, want 0", got)
 	}
 
-	n.flush("run-1")
+	n.flush("run-1", "run")
+	n.flush("run-1", "stage")
+	if got := sent.count(); got != 3 {
+		t.Fatalf("flush after the terminal write published %d notifications in total, want 3", got)
+	}
+}
+
+// TestRunNotifierKeepsAHeldRunFrame asserts a notification of another kind
+// never replaces a held run notification, so the run change reaches a
+// reader that drops the other kind.
+func TestRunNotifierKeepsAHeldRunFrame(t *testing.T) {
+	for _, kind := range []string{"stage", "lock", "input", "wait"} {
+		t.Run(kind, func(t *testing.T) {
+			n, sent, _ := newCaptureNotifier(t)
+			defer n.Close()
+
+			n.Notify(notifyOne("run-1", "run", "QUEUED"))
+			n.now = func() time.Time { return notifyClockStart.Add(100 * time.Millisecond) }
+			n.Notify(notifyOne("run-1", "run", "RUNNING"))
+			n.Notify(notifyOne("run-1", kind, ""))
+			n.Notify(notifyOne("run-1", kind, ""))
+			if got := sent.count(); got != 2 {
+				t.Fatalf("published %d notifications inside the interval, want 2", got)
+			}
+			if got := sent.payload(1).Kind; got != kind {
+				t.Fatalf("published kind = %q, want %q", got, kind)
+			}
+
+			n.now = func() time.Time { return notifyClockStart.Add(500 * time.Millisecond) }
+			n.flush("run-1", "run")
+			if got := sent.count(); got != 3 {
+				t.Fatalf("published %d notifications after the run flush, want 3", got)
+			}
+			if got := sent.payload(2); got.Kind != "run" || got.Status != "RUNNING" {
+				t.Fatalf("held run frame = %s/%q, want run/RUNNING", got.Kind, got.Status)
+			}
+
+			n.flush("run-1", kind)
+			if got := sent.count(); got != 4 {
+				t.Fatalf("published %d notifications after the %s flush, want 4", got, kind)
+			}
+			if got := sent.payload(3).Kind; got != kind {
+				t.Fatalf("held kind = %q, want %q", got, kind)
+			}
+		})
+	}
+}
+
+// TestRunNotifierRunFrameKeepsAHeldStageFrame asserts a run notification
+// never replaces a held stage notification.
+func TestRunNotifierRunFrameKeepsAHeldStageFrame(t *testing.T) {
+	n, sent, _ := newCaptureNotifier(t)
+	defer n.Close()
+
+	n.Notify(notifyOne("run-1", "stage", ""))
+	n.now = func() time.Time { return notifyClockStart.Add(100 * time.Millisecond) }
+	n.Notify(notifyOne("run-1", "stage", ""))
+	n.Notify(notifyOne("run-1", "run", "RUNNING"))
 	if got := sent.count(); got != 2 {
-		t.Fatalf("flush after the terminal write published %d notifications in total, want 2", got)
+		t.Fatalf("published %d notifications inside the interval, want 2", got)
+	}
+
+	n.now = func() time.Time { return notifyClockStart.Add(500 * time.Millisecond) }
+	n.flush("run-1", "stage")
+	if got := sent.count(); got != 3 {
+		t.Fatalf("published %d notifications after the stage flush, want 3", got)
+	}
+	if got := sent.payload(2).Kind; got != "stage" {
+		t.Fatalf("held kind = %q, want stage", got)
+	}
+}
+
+// TestRunNotifierCoalescesAStageBurst asserts a burst of stage writes
+// inside one interval publishes one notification at the interval's end.
+func TestRunNotifierCoalescesAStageBurst(t *testing.T) {
+	n, sent, _ := newCaptureNotifier(t)
+	defer n.Close()
+
+	n.Notify(notifyOne("run-1", "stage", ""))
+	for i := 1; i <= 9; i++ {
+		n.now = func() time.Time { return notifyClockStart.Add(time.Duration(i) * 40 * time.Millisecond) }
+		n.Notify(notifyOne("run-1", "stage", ""))
+	}
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications for the burst, want 1", got)
+	}
+
+	n.now = func() time.Time { return notifyClockStart.Add(500 * time.Millisecond) }
+	n.flush("run-1", "stage")
+	if got := sent.count(); got != 2 {
+		t.Fatalf("published %d notifications in total, want 2", got)
+	}
+	if got := sent.payload(1); got.Kind != "stage" || got.Seq != 2 {
+		t.Fatalf("published %s with seq %d, want stage with seq 2", got.Kind, got.Seq)
+	}
+	if got := slotCount(n); got != 1 {
+		t.Fatalf("held %d slots after the flush, want 1", got)
+	}
+}
+
+// TestRunNotifierSweepDeletesEachIdleKind asserts the sweep deletes an
+// idle slot of one kind, and keeps the run while another slot remains.
+func TestRunNotifierSweepDeletesEachIdleKind(t *testing.T) {
+	n, _, _ := newCaptureNotifier(t)
+	defer n.Close()
+
+	n.Notify(notifyOne("run-1", "run", "RUNNING"))
+	n.now = func() time.Time { return notifyClockStart.Add(4 * time.Minute) }
+	n.Notify(notifyOne("run-1", "stage", ""))
+	if got := slotCount(n); got != 2 {
+		t.Fatalf("held %d slots, want 2", got)
+	}
+
+	n.sweep(notifyClockStart.Add(runNotifyIdle + time.Second))
+	if got := slotCount(n); got != 1 {
+		t.Fatalf("held %d slots after the first sweep, want 1", got)
+	}
+	if got := entryCount(n); got != 1 {
+		t.Fatalf("held %d runs after the first sweep, want 1", got)
+	}
+
+	n.sweep(notifyClockStart.Add(4*time.Minute + runNotifyIdle + time.Second))
+	if got := entryCount(n); got != 0 {
+		t.Fatalf("held %d runs after the second sweep, want 0", got)
+	}
+}
+
+// TestRunNotifierTimerFlushesEachKind asserts the timer of each slot
+// publishes that slot's held notification, without a direct flush.
+func TestRunNotifierTimerFlushesEachKind(t *testing.T) {
+	n, sent, _ := newCaptureNotifier(t)
+	defer n.Close()
+	n.interval = 20 * time.Millisecond
+
+	n.Notify(notifyOne("run-1", "run", "RUNNING"))
+	n.Notify(notifyOne("run-1", "stage", ""))
+	n.Notify(notifyOne("run-1", "run", ""))
+	n.Notify(notifyOne("run-1", "stage", ""))
+	if got := sent.count(); got != 2 {
+		t.Fatalf("published %d notifications before the timers, want 2", got)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for sent.count() < 4 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := sent.count(); got != 4 {
+		t.Fatalf("published %d notifications after the timers, want 4", got)
+	}
+	kinds := []string{sent.payload(2).Kind, sent.payload(3).Kind}
+	slices.Sort(kinds)
+	if want := []string{"run", "stage"}; !slices.Equal(kinds, want) {
+		t.Fatalf("timer kinds = %v, want %v", kinds, want)
 	}
 }
 
@@ -203,30 +383,34 @@ func TestRunNotifierEntryLife(t *testing.T) {
 		}
 	})
 
-	t.Run("close publishes a held notification", func(t *testing.T) {
+	t.Run("close publishes the held notification of every kind", func(t *testing.T) {
 		n, sent, _ := newCaptureNotifier(t)
 
 		n.Notify(notifyOne("run-1", "run", "RUNNING"))
-		n.now = func() time.Time { return notifyClockStart.Add(100 * time.Millisecond) }
 		n.Notify(notifyOne("run-1", "stage", ""))
-		if got := sent.count(); got != 1 {
-			t.Fatalf("published %d notifications before Close, want 1", got)
+		n.now = func() time.Time { return notifyClockStart.Add(100 * time.Millisecond) }
+		n.Notify(notifyOne("run-1", "run", "QUEUED"))
+		n.Notify(notifyOne("run-1", "stage", ""))
+		if got := sent.count(); got != 2 {
+			t.Fatalf("published %d notifications before Close, want 2", got)
 		}
 
 		n.Close()
-		if got := sent.count(); got != 2 {
-			t.Fatalf("published %d notifications after Close, want 2", got)
+		if got := sent.count(); got != 4 {
+			t.Fatalf("published %d notifications after Close, want 4", got)
 		}
-		if got := sent.payload(1); got.Kind != "stage" {
-			t.Fatalf("published kind = %q, want stage", got.Kind)
+		kinds := []string{sent.payload(2).Kind, sent.payload(3).Kind}
+		slices.Sort(kinds)
+		if want := []string{"run", "stage"}; !slices.Equal(kinds, want) {
+			t.Fatalf("published kinds = %v, want %v", kinds, want)
 		}
 		if got := entryCount(n); got != 0 {
 			t.Fatalf("held %d entries after Close, want 0", got)
 		}
 
-		n.flush("run-1")
-		if got := sent.count(); got != 2 {
-			t.Fatalf("flush after Close published %d notifications in total, want 2", got)
+		flushRun(n, "run-1")
+		if got := sent.count(); got != 4 {
+			t.Fatalf("flush after Close published %d notifications in total, want 4", got)
 		}
 	})
 }
@@ -359,7 +543,7 @@ func TestRunNotifierDropsUnusableSubjectToken(t *testing.T) {
 	held := notifyOne("run-1", "run", "QUEUED")
 	held.Tenant = testTenant + ">"
 	n.Notify(held)
-	n.flush("run-1")
+	n.flush("run-1", "run")
 	if got := sent.count(); got != 0 {
 		t.Fatalf("flushing a held notification published %d payloads, want 0", got)
 	}

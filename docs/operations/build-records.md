@@ -142,12 +142,11 @@ The recorder publishes one notification per run change onto the NATS subject
 `runs.<cluster>.<tenant>`.
 
 The BFF serves one stream per tenant at `GET /pipelines/{tenant}/stream`, under the ticket scope
-`pipelines:{tenant}`, with `run` and `stage` events.
+`pipelines:{tenant}`, with `run`, `stage`, `lock`, `input`, and `wait` events.
 
 A page treats a notification as a hint and refetches the record.
 
-The recorder coalesces per run: a change waits at most 500 milliseconds, and a terminal state
-publishes at once.
+The recorder coalesces each kind of a run on its own. A change waits at most 500 milliseconds, and a newer change of the same kind replaces it. A change of another kind never replaces it. A terminal state publishes at once.
 
 With a closed stream, the build page reads a live run's record every 3 seconds.
 

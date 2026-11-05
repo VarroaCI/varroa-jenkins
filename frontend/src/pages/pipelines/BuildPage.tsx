@@ -278,10 +278,9 @@ export default function BuildPage() {
   const { toast } = useToast();
   const requested = !!(location.state as { requested?: boolean } | null)?.requested;
 
-  // The tenant's stream carries every run of the tenant.
-  // The notifier coalesces per run, so a lock frame for this run can stand
-  // in for a stage frame. The page reads its own record on any of them,
-  // wait frames included.
+  // The tenant's stream carries every run of the tenant. Each frame kind
+  // changes a part of this run's record, so the page reads its own record
+  // on a frame of any kind for its run.
   // Stream frames wait in this queue until the drain effect below reads them.
   // useEventStream calls onEvent once for each frame, also for each frame of a
   // burst that reaches React as one render. lastEvent keeps only the last

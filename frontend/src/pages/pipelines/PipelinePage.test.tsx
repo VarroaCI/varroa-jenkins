@@ -857,7 +857,7 @@ describe("PipelinePage — wait events", () => {
     expect(tenantCall?.[2]).toContain("wait");
   });
 
-  it("refetches the job read and the builds table for a wait event of its own job", async () => {
+  it("refetches the job read and not the builds table for a wait event of its own job", async () => {
     renderPage();
     await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(1));
@@ -865,10 +865,13 @@ describe("PipelinePage — wait events", () => {
     emit({ type: "wait", data: notification({ kind: "wait", state: "waiting" }) });
 
     await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(2));
+    // No primitive awaits an absence, so hold the settle window open long
+    // enough that a late runs refetch cannot slip past it.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockListRuns).toHaveBeenCalledTimes(1);
   });
 
-  it("refetches both reads for a wait frame of its job that a frame of another job follows in one burst", async () => {
+  it("refetches the job read for a wait frame of its job that a frame of another job follows in one burst", async () => {
     renderPage();
     await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(1));
@@ -879,7 +882,10 @@ describe("PipelinePage — wait events", () => {
     );
 
     await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(2));
+    // No primitive awaits an absence, so hold the settle window open long
+    // enough that a late runs refetch cannot slip past it.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockListRuns).toHaveBeenCalledTimes(1);
   });
 
   it("ignores a wait event of another job", async () => {

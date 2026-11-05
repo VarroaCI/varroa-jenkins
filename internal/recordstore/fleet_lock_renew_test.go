@@ -327,7 +327,7 @@ func TestFleetLockRenew_PublishesNothing(t *testing.T) {
 			if resp.State != tc.state {
 				t.Fatalf("state: got %q, want %q", resp.State, tc.state)
 			}
-			notifier.flush("run-1")
+			flushRun(notifier, "run-1")
 			if got := sent.count(); got != 0 {
 				t.Fatalf("a renew published %d notifications, want 0", got)
 			}

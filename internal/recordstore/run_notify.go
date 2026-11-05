@@ -13,8 +13,8 @@ import (
 )
 
 // Run notification bounds. A reader sees at most one notification per run
-// per interval, and the state map holds one entry per run that changed in
-// the last idle window.
+// and kind per interval, and the state map holds one slot per run and kind
+// that changed in the last idle window.
 const (
 	runNotifyInterval = 500 * time.Millisecond
 	runNotifyIdle     = 5 * time.Minute
@@ -184,8 +184,11 @@ func completedResult(env IngestEnvelope) string {
 }
 
 // RunNotifier coalesces live run notifications and publishes them on the
-// core-NATS subject the BFF subscribes to. It publishes at most one
-// notification per run per interval, and a terminal one at once.
+// core-NATS subject the BFF subscribes to. Each kind of one run holds its
+// own slot. A notification replaces a held notification of its own slot
+// only, because each kind makes a page refetch a different read. The
+// notifier publishes at most one notification per slot per interval, and a
+// terminal one at once.
 type RunNotifier struct {
 	// send publishes one payload. It is conn.Publish in production, and
 	// a test replaces it.
@@ -203,15 +206,18 @@ type RunNotifier struct {
 
 	// mu guards state and every entry it holds.
 	mu sync.Mutex
-	// state holds one entry per run, keyed by run_id.
-	state map[string]*runNotifyEntry
+	// state holds the slots of each run, keyed by run_id and then by kind.
+	state map[string]map[string]*runNotifyEntry
 }
 
-// runNotifyEntry holds one run's coalescing state.
+// runNotifyEntry holds the coalescing state of one run and kind.
 type runNotifyEntry struct {
 	lastSent time.Time
 	pending  *RunNotification
 	timer    *time.Timer
+	// timerGen numbers each timer the entry arms, so a callback that
+	// fired before a stop cannot act for a later timer.
+	timerGen uint64
 }
 
 // NewRunNotifier returns a notifier that publishes on conn. A nil
@@ -226,7 +232,7 @@ func NewRunNotifier(conn *bus.Conn, logger *slog.Logger) *RunNotifier {
 		interval: runNotifyInterval,
 		idle:     runNotifyIdle,
 		now:      func() time.Time { return time.Now().UTC() },
-		state:    make(map[string]*runNotifyEntry),
+		state:    make(map[string]map[string]*runNotifyEntry),
 	}
 	if conn != nil {
 		n.send = conn.Publish
@@ -234,11 +240,12 @@ func NewRunNotifier(conn *bus.Conn, logger *slog.Logger) *RunNotifier {
 	return n
 }
 
-// Notify publishes n now or holds it for the end of its run's interval.
-// Three rules decide, in this order: a terminal state publishes at once, a
-// run outside its interval publishes at once, and anything else becomes
-// the run's newest held state. A nil notifier publishes nothing, so a
-// caller needs no guard of its own.
+// Notify publishes n now or holds it for the end of its slot's interval. A
+// slot is one run and one kind. Three rules decide, in this order: a
+// terminal state publishes at once and drops every slot of its run, a slot
+// outside its interval publishes at once, and anything else becomes the
+// slot's newest held state. A nil notifier publishes nothing, so a caller
+// needs no guard of its own.
 func (r *RunNotifier) Notify(n RunNotification) {
 	if r == nil {
 		return
@@ -248,23 +255,29 @@ func (r *RunNotifier) Notify(n RunNotification) {
 	// The clock read happens under the lock, so seq and at order
 	// together.
 	now := r.now()
-	entry := r.state[n.RunID]
+	slots := r.state[n.RunID]
 
 	// A terminal state never coalesces: a reader must learn that the run
-	// ended, and the held state is older than this one.
+	// ended. It drops the held state of every kind, because it makes each
+	// page refetch every read that a held state asks for.
 	if isTerminalNotification(n) {
-		if entry != nil {
-			r.dropEntry(n.RunID, entry)
+		if slots != nil {
+			r.dropRun(n.RunID, slots)
 		}
 		r.publish(n, now)
 		return
 	}
 
-	// A run with no entry, or one whose last publish is a full interval
-	// back, publishes at once. The state just published is newer than any
-	// held state, so the held one goes.
+	// A slot with no entry, or one whose last publish is a full interval
+	// back, publishes at once. The state just published is newer than the
+	// slot's held state, so the held one goes.
+	entry := slots[n.Kind]
 	if entry == nil {
-		r.state[n.RunID] = &runNotifyEntry{lastSent: now}
+		if slots == nil {
+			slots = make(map[string]*runNotifyEntry)
+			r.state[n.RunID] = slots
+		}
+		slots[n.Kind] = &runNotifyEntry{lastSent: now}
 		r.publish(n, now)
 		return
 	}
@@ -279,12 +292,15 @@ func (r *RunNotifier) Notify(n RunNotification) {
 		return
 	}
 
-	// Inside the interval: hold the newest state, and arm one timer for
-	// the end of the interval when none runs.
+	// Inside the interval: hold the newest state of this kind, and arm one
+	// timer for the end of the interval when none runs.
 	entry.pending = &n
 	if entry.timer == nil {
 		delay := entry.lastSent.Add(r.interval).Sub(now)
-		entry.timer = time.AfterFunc(delay, func() { r.flush(n.RunID) })
+		runID, kind := n.RunID, n.Kind
+		entry.timerGen++
+		gen := entry.timerGen
+		entry.timer = time.AfterFunc(delay, func() { r.fire(runID, kind, entry, gen) })
 	}
 }
 
@@ -294,15 +310,32 @@ func isTerminalNotification(n RunNotification) bool {
 	return n.Status == "COMPLETED" || n.Result != ""
 }
 
-// flush publishes the notification one run holds. The run's timer calls it,
-// and a test calls it directly with an injected clock.
-func (r *RunNotifier) flush(runID string) {
+// fire is the slot's timer callback. A timer that fired before a stop can
+// wait on the lock after the stop, and a later slot or timer of the same
+// run and kind may then stand in the map. fire flushes only when the entry
+// and the timer generation are both still the ones the timer was armed for.
+func (r *RunNotifier) fire(runID, kind string, entry *runNotifyEntry, gen uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	entry := r.state[runID]
-	if entry == nil {
+	if r.state[runID][kind] != entry || entry.timerGen != gen {
 		return
 	}
+	r.flushEntry(entry)
+}
+
+// flush publishes the notification one slot holds. A test calls it directly
+// with an injected clock.
+func (r *RunNotifier) flush(runID, kind string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if entry := r.state[runID][kind]; entry != nil {
+		r.flushEntry(entry)
+	}
+}
+
+// flushEntry publishes the held notification of one slot. The caller holds
+// the lock.
+func (r *RunNotifier) flushEntry(entry *runNotifyEntry) {
 	entry.timer = nil
 	if entry.pending == nil {
 		return
@@ -314,28 +347,36 @@ func (r *RunNotifier) flush(runID string) {
 	r.publish(n, now)
 }
 
-// dropEntry forgets one run, and stops its timer when one runs. The caller
-// holds the lock.
-func (r *RunNotifier) dropEntry(runID string, entry *runNotifyEntry) {
-	entry.pending = nil
-	if entry.timer != nil {
-		entry.timer.Stop()
-		entry.timer = nil
+// dropRun forgets every slot of one run, and stops each timer that runs.
+// The caller holds the lock.
+func (r *RunNotifier) dropRun(runID string, slots map[string]*runNotifyEntry) {
+	for _, entry := range slots {
+		entry.pending = nil
+		if entry.timer != nil {
+			entry.timer.Stop()
+			entry.timer = nil
+		}
 	}
 	delete(r.state, runID)
 }
 
-// sweep deletes every entry that holds no held notification and whose last
-// publish is older than the idle window. The sweep bounds the map: a run
-// whose writes stay more than one interval apart arms no timer.
+// sweep deletes every slot that holds no held notification and whose last
+// publish is older than the idle window, and every run with no slot left.
+// The sweep bounds the map: a slot whose writes stay more than one interval
+// apart arms no timer.
 func (r *RunNotifier) sweep(now time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for runID, entry := range r.state {
-		if entry.pending != nil {
-			continue
+	for runID, slots := range r.state {
+		for kind, entry := range slots {
+			if entry.pending != nil {
+				continue
+			}
+			if now.Sub(entry.lastSent) >= r.idle {
+				delete(slots, kind)
+			}
 		}
-		if now.Sub(entry.lastSent) >= r.idle {
+		if len(slots) == 0 {
 			delete(r.state, runID)
 		}
 	}
@@ -388,16 +429,18 @@ func (r *RunNotifier) Close() {
 		r.janitor = nil
 	}
 	now := r.now()
-	for runID, entry := range r.state {
-		if entry.timer != nil {
-			entry.timer.Stop()
-			entry.timer = nil
-		}
-		if entry.pending != nil {
-			n := *entry.pending
-			entry.pending = nil
-			entry.lastSent = now
-			r.publish(n, now)
+	for runID, slots := range r.state {
+		for _, entry := range slots {
+			if entry.timer != nil {
+				entry.timer.Stop()
+				entry.timer = nil
+			}
+			if entry.pending != nil {
+				n := *entry.pending
+				entry.pending = nil
+				entry.lastSent = now
+				r.publish(n, now)
+			}
 		}
 		delete(r.state, runID)
 	}
