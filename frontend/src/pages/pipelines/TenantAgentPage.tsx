@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getAssistantSession, getTenantAgent, listTenantAgentSessions } from "../../api/client";
+import { A1_VALUES, STATE_LABELS, labelFor, stateLine } from "../../components/assistant/labels";
 import { ApiError } from "../../hooks/useApi";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { Tabs, tabPanelProps } from "../../components/Tabs";
@@ -102,11 +103,9 @@ function SessionsTab({ tenant, onOpen }: { tenant: string; onOpen: (id: string) 
       headerRight={
         <select aria-label="Filter by state" value={state} onChange={(e) => setState(e.target.value)}>
           <option value="">All states</option>
-          <option value="running">Running</option>
-          <option value="waiting_approval">Waiting for approval</option>
-          <option value="completed">Completed</option>
-          <option value="failed">Failed</option>
-          <option value="skipped">Skipped</option>
+          {A1_VALUES.sessionStates.map((v) => (
+            <option key={v} value={v}>{STATE_LABELS[v]}</option>
+          ))}
         </select>
       }
     >
@@ -136,7 +135,7 @@ function SessionsTab({ tenant, onOpen }: { tenant: string; onOpen: (id: string) 
                   </td>
                   <td>{s.trigger}</td>
                   <td>{job || s.tenant}</td>
-                  <td>{s.state}</td>
+                  <td>{labelFor("sessionStates", s.state)}</td>
                   <td>{s.promptTokens + s.completionTokens}</td>
                   <td>{s.steps}</td>
                 </tr>
@@ -164,7 +163,7 @@ function FullTranscript({ sessionId }: { sessionId: string }) {
     <div className={styles.transcript}>
       <TranscriptStream sessionId={sessionId} resumeFrom={0} onModel={setModel} onDone={() => undefined} />
       <TranscriptView model={model} sessionState={detail.data?.session.state ?? null} />
-      {detail.data && <p className={styles.meta}>State: {detail.data.session.state}</p>}
+      {detail.data && <p className={styles.meta}>{stateLine(detail.data.session.state, detail.data.session.skipReason)}</p>}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import AssistantDrawer from "./AssistantDrawer";
 import * as client from "../../api/client";
 import type { AssistantSession } from "../../types/assistant";
 import { contextLabel } from "./routeContext";
+import { STATE_LABELS, SKIP_LABELS } from "./labels";
 import { NARROW_QUERY } from "../../hooks/useNarrowViewport";
 import { DOCKED_QUERY } from "./drawerWidth";
 
@@ -172,6 +173,66 @@ describe("AssistantDrawer", () => {
     const row = within(list).getByRole("button");
     expect(row.textContent).toContain("Waiting for approval · ");
     expect(row.textContent).not.toContain("waiting_approval");
+  });
+
+  it("shows the token counts of the session in the footer", async () => {
+    vi.mocked(client.getAssistantSession).mockResolvedValue({
+      session: { ...session, state: "completed", promptTokens: 1200, completionTokens: 340 },
+      approvals: [],
+    });
+    renderDrawer();
+    fireEvent.click(screen.getByText("open"));
+    expect(await screen.findByText("Tokens: 1200 prompt · 340 completion")).toBeTruthy();
+  });
+
+  it("marks an estimated token count after a done frame", async () => {
+    vi.mocked(client.getAssistantSession).mockResolvedValue({
+      session: { ...session, state: "completed", promptTokens: 1200, completionTokens: 340 },
+      approvals: [],
+    });
+    renderDrawer();
+    fireEvent.click(screen.getByText("open"));
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+    act(() => {
+      es.emitNamedEvent("done", JSON.stringify({ state: "completed", stop: "", usage_estimated: true, created_at: "2026-10-18T10:00:02Z" }), "1");
+    });
+    expect(await screen.findByText("Tokens: 1200 prompt · 340 completion (estimated)")).toBeTruthy();
+  });
+
+  it("reads the token counts again after a done frame", async () => {
+    renderDrawer();
+    fireEvent.click(screen.getByText("open"));
+    expect(await screen.findByText("Tokens: 0 prompt · 0 completion")).toBeTruthy();
+    vi.mocked(client.getAssistantSession).mockResolvedValue({
+      session: { ...session, state: "completed", promptTokens: 50, completionTokens: 20 },
+      approvals: [],
+    });
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+    act(() => {
+      es.emitNamedEvent("done", JSON.stringify({ state: "completed", stop: "", usage_estimated: false, created_at: "2026-10-18T10:00:02Z" }), "1");
+    });
+    expect(await screen.findByText("Tokens: 50 prompt · 20 completion")).toBeTruthy();
+  });
+
+  it("shows the skip reason label of a skipped session", async () => {
+    vi.mocked(client.getAssistantSession).mockResolvedValue({
+      session: { ...session, state: "skipped", skipReason: "budget_day" },
+      approvals: [],
+    });
+    renderDrawer();
+    fireEvent.click(screen.getByText("open"));
+    expect(await screen.findByText(`State: ${STATE_LABELS.skipped} · ${SKIP_LABELS.budget_day}`)).toBeTruthy();
+    expect(screen.queryByText(/budget_day/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+
+  it("shows no token line without a session", async () => {
+    renderDrawer();
+    fireEvent.click(screen.getByText("toggle"));
+    expect(await screen.findByText("No session")).toBeTruthy();
+    expect(screen.queryByText(/^Tokens:/)).toBeNull();
   });
 
   it("uses the context label as the row title when the first message is empty", async () => {

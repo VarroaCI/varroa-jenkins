@@ -3,6 +3,7 @@
 // spend today. The card renders nothing when the Tenant has no Tenant agent.
 import { useQuery } from "@tanstack/react-query";
 import { getTenantAgent } from "../../api/client";
+import { labelFor } from "../../components/assistant/labels";
 import { ApiError } from "../../hooks/useApi";
 import { Card } from "../../components/Card";
 import { Link } from "react-router-dom";
@@ -28,7 +29,7 @@ export default function TenantAgentCard({ tenant }: { tenant: string }) {
         <dt>Enabled</dt>
         <dd>{ta.spec.enabled === false ? "No" : "Yes"}</dd>
         <dt>Last session</dt>
-        <dd>{last ? `${last.state} · ${new Date(last.at).toLocaleString()}` : "None yet"}</dd>
+        <dd>{last ? `${labelFor("sessionStates", last.state)} · ${new Date(last.at).toLocaleString()}` : "None yet"}</dd>
         <dt>Pending approvals</dt>
         <dd>{ta.pendingApprovals}</dd>
         <dt>Spend today</dt>

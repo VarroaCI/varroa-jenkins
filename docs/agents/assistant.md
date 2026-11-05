@@ -96,6 +96,8 @@ When the assistant is off for your account, the drawer shows a link to your assi
 
 Select **Sessions** to see your recent conversations. Each row shows your first message, the context, the state, and the age. On a phone, the drawer opens full screen.
 
+The drawer footer shows the session state and its prompt and completion token counts. When the provider reports no usage, Varroa estimates the counts and marks them as estimated. A skipped session also shows why it did not run. While a session runs, the footer shows **Stop**. Select it to cancel the session.
+
 Select **Close** to close the drawer. Press Escape while focus is inside the drawer to close it too. Focus then returns to the control that opened the drawer. When that control is gone, focus moves to the top-bar button. When you close the drawer with the top-bar button, focus stays on that button.
 
 On a screen 1024 px or wider, drag the left edge of the drawer to change its width. You can also focus the edge and use the arrow keys. Home and End set the smallest and the largest width. The browser keeps the width for your next visit.
