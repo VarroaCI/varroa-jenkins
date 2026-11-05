@@ -1110,6 +1110,10 @@ function DiagnosticsTab({ ctrl, cluster, namespace, name, isCore, events, activi
   ctrl: ControllerData; cluster: string; namespace: string; name: string; isCore: boolean;
   events: import("../types").ActivityEvent[]; activityReady: string;
 }) {
+  // The chip filter lives here, not in ControllerStream. A controller change
+  // remounts the stream and this tab keeps the chip. A cold load of a controller
+  // unmounts this tab, which resets the chip.
+  const [chip, setChip] = useState<string>("All");
   return (
     <div className={styles.diagnosticTabs} data-testid="diagnostics-tab">
       <div className={styles.diagGrid}>
@@ -1117,13 +1121,17 @@ function DiagnosticsTab({ ctrl, cluster, namespace, name, isCore, events, activi
         <ConditionsPanel ctrl={ctrl} />
       </div>
       <PluginDriftPanel ctrl={ctrl} />
+      {/* A new controller identity remounts the stream, so its lines and dedupe state start empty. */}
       <ControllerStream
+        key={`${cluster}/${namespace}/${name}`}
         cluster={cluster}
         namespace={namespace}
         name={name}
         isCore={isCore}
         events={events}
         activityReady={activityReady}
+        chip={chip}
+        onChipChange={setChip}
       />
       <ApplyHistoryPanel ctrl={ctrl} />
     </div>
@@ -1353,12 +1361,12 @@ interface StreamEntry {
 }
 
 function ControllerStream({
-  cluster, namespace, name, isCore, events, activityReady,
+  cluster, namespace, name, isCore, events, activityReady, chip, onChipChange,
 }: {
   cluster: string; namespace: string; name: string; isCore: boolean;
   events: import("../types").ActivityEvent[]; activityReady: string;
+  chip: string; onChipChange: (chip: string) => void;
 }) {
-  const [chip, setChip] = useState<string>("All");
   const [lines, setLines] = useState<LogEntry[]>([]);
 
   // The queue keeps every log frame until the drain effect below appends it.
@@ -1468,7 +1476,7 @@ function ControllerStream({
               className={`${styles.fchip} ${chip === c ? styles.fchipOn : ""}`}
               aria-pressed={chip === c}
               disabled={disabled}
-              onClick={() => setChip(c)}
+              onClick={() => onChipChange(c)}
             >
               {c}
             </button>

@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import ControllerDetail, { PluginDriftPanel } from "./ControllerDetail";
+import { useEventStream } from "../hooks/useEventStream";
 import type { ActivityEvent } from "../types";
 
 const queryClient = new QueryClient({
@@ -18,11 +19,15 @@ function renderWithProviders(ui: React.ReactElement) {
   );
 }
 
+// The route params are mutable so a test can move the page to another
+// controller without remounting the component tree.
+const routeParams = vi.hoisted(() => ({ cluster: "core", namespace: "my-ns", name: "my-ctrl" }));
+
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual("react-router-dom");
   return {
     ...actual,
-    useParams: () => ({ cluster: "core", namespace: "my-ns", name: "my-ctrl" }),
+    useParams: () => ({ ...routeParams }),
   };
 });
 
@@ -454,6 +459,68 @@ describe("ControllerDetail — Diagnostics panels (8.2)", () => {
     renderWithProviders(<ControllerDetail />);
     await user.click(screen.getByText(/Diagnostics/));
     expect(screen.getAllByText(/stream event \d+/)).toHaveLength(500);
+  });
+});
+
+describe("ControllerDetail — stream on a route change (#2093)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setBundles([]);
+    setCtrl({});
+    setFeed([]);
+    routeParams.cluster = "core";
+    routeParams.namespace = "my-ns";
+    routeParams.name = "my-ctrl";
+  });
+
+  afterEach(() => {
+    routeParams.cluster = "core";
+    routeParams.namespace = "my-ns";
+    routeParams.name = "my-ctrl";
+  });
+
+  function diagnosticsTree() {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/controllers/core/my-ns/my-ctrl?tab=diagnostics"]}>
+          <ControllerDetail />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  function emitLogFrame(message: string, timestamp: string) {
+    const calls = vi.mocked(useEventStream).mock.calls;
+    const options = calls[calls.length - 1][3] as { onEvent: (ev: unknown) => void };
+    act(() => {
+      options.onEvent({ type: "message", data: { timestamp, level: "INFO", source: "jenkins", message } });
+    });
+  }
+
+  it("clears the stream lines when the route moves to another controller", async () => {
+    const { rerender } = render(diagnosticsTree());
+    expect(screen.getByTestId("diagnostics-tab")).toBeInTheDocument();
+
+    emitLogFrame("alpha-line", "2026-07-17T14:00:00Z");
+    emitLogFrame("beta-line", "2026-07-17T14:00:01Z");
+    expect(screen.getByText(/alpha-line/)).toBeInTheDocument();
+    expect(screen.getByText(/beta-line/)).toBeInTheDocument();
+
+    // Move the page to controller B with the same tab selected.
+    routeParams.namespace = "other-ns";
+    routeParams.name = "other-ctrl";
+    setCtrl({ name: "other-ctrl", namespace: "other-ns" });
+    rerender(diagnosticsTree());
+
+    expect(screen.queryByText(/alpha-line/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/beta-line/)).not.toBeInTheDocument();
+    const calls = vi.mocked(useEventStream).mock.calls;
+    expect(calls[calls.length - 1][0]).toContain("/clusters/core/controllers/other-ns/other-ctrl/logs");
+
+    emitLogFrame("gamma-line", "2026-07-17T14:05:00Z");
+    expect(screen.getByText(/gamma-line/)).toBeInTheDocument();
+    expect(screen.queryByText(/alpha-line/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/-line/)).toHaveLength(1);
   });
 });
 
