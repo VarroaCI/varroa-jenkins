@@ -930,6 +930,12 @@ export interface ProvisioningDefaultsSpec {
   provisioningTimeoutSec?: number;
   defaultReconciliationPolicy?: ReconciliationPolicy;
   upgradePolicy?: "auto" | "manual";
+  broodPolicy?: BroodPolicy;
+}
+
+export interface BroodPolicy {
+  executeGroovy?: { enabled?: boolean; allowedNamespaces?: string[] };
+  upgrade?: { enabled?: boolean; allowedNamespaces?: string[] };
 }
 
 export interface ClusterEntry {

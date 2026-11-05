@@ -61,6 +61,8 @@ or via the `promote_version_candidate` MCP tool. Both list and inspect candidate
 
 A brood operation with `spec.action.verb: upgrade` runs the release step across a set of controllers in the same waved fashion as any other brood verb. See [Brood operations](brood-operations.md) for wave sizing and pause/resume mechanics. It applies only to Connected controllers; anything else is skipped, not failed.
 
+The cluster's `ProvisioningDefaults.spec.broodPolicy.upgrade` gate can turn this verb off or limit it to named namespaces. The operator refuses an `upgrade` BroodOperation that the gate denies.
+
 `upgrade` supports two granularities, chosen by whether `spec.action.upgrade.targetVersion` is set:
 
 - **Release** (`targetVersion` omitted): each target keeps whatever version and profile it's already resolving to. The operation computes the image that profile currently resolves to and hands it to the target's version-roll gate, the same gate `upgradePolicy: manual` holds behind. This is how a `manual` cluster releases some or all of its held controllers without flipping the cluster-wide dial back to `auto`.

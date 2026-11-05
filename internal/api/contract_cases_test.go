@@ -177,6 +177,7 @@ func init() {
 		contractCase{Name: "deleteControllerClass", Method: "DELETE", Path: "/api/v1/clusters/core/controller-classes/test-class", Claims: adminClaims, SkipSpecValidation: true, WantStatus: http.StatusMethodNotAllowed},
 		contractCase{Name: "getProvisioningDefaults", Method: "GET", Path: "/api/v1/clusters/core/provisioningdefaults/varroa-defaults", Claims: adminClaims, WantStatus: http.StatusOK},
 		contractCase{Name: "updateProvisioningDefaults", Method: "PUT", Path: "/api/v1/clusters/core/provisioningdefaults/varroa-defaults", Claims: adminClaims, Body: map[string]interface{}{"spec": map[string]interface{}{}}, WantStatus: http.StatusOK},
+		contractCase{Name: "updateProvisioningDefaults-upgradePolicy", Method: "PUT", Path: "/api/v1/clusters/core/provisioningdefaults/varroa-defaults", Claims: adminClaims, Body: map[string]interface{}{"spec": map[string]interface{}{"upgradePolicy": "manual", "broodPolicy": map[string]interface{}{"upgrade": map[string]interface{}{"enabled": false, "allowedNamespaces": []string{"ops"}}}}}, WantStatus: http.StatusOK},
 	)
 
 	// ── activity + streams (7 cases) ─────────────────────────────────────
