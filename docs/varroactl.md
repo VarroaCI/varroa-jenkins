@@ -10,7 +10,7 @@ varroactl <command> --help
 ## Install and connect
 
 Every release publishes `varroactl` binaries for Linux and macOS on amd64 and
-arm64. Download the archive for your platform from the
+arm64, and for Windows on amd64. Download the archive for your platform from the
 [latest release](https://github.com/VarroaCI/varroa-jenkins/releases/latest),
 verify it, and put it on your path:
 
@@ -36,6 +36,16 @@ tar -xzf "varroactl_${VERSION}_${OS}_${ARCH}.tar.gz"
 sudo install -m 0755 varroactl /usr/local/bin/varroactl
 varroactl version --client
 ```
+
+The commands above do not apply on Windows. On Windows, download `varroactl_<version>_windows_amd64.zip` from the same release. In PowerShell, compare its hash with the matching line in `SHA256SUMS`:
+
+```powershell
+$VERSION = "<release version without the leading v>"
+$archive = "varroactl_$($VERSION)_windows_amd64.zip"
+(Get-FileHash ".\$archive" -Algorithm SHA256).Hash
+```
+
+Unzip the archive and put `varroactl.exe` on your `PATH`.
 
 Or build it from a source checkout:
 
