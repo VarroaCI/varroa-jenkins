@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +52,9 @@ func TestCellRollHoldsWhileInitProgressing(t *testing.T) {
 	if cr.Status.Cell.Evacuate {
 		t.Fatal("expected no evacuate while plugins-init progresses, past twice the grace period")
 	}
+	if client.listPullEventsCalls != 0 {
+		t.Fatalf("expected no pull event list while a running init container progresses, got %d", client.listPullEventsCalls)
+	}
 	if cr.Status.Cell.RolledAt != nil {
 		t.Fatalf("expected rolledAt unset, got %v", cr.Status.Cell.RolledAt)
 	}
@@ -82,6 +86,9 @@ func TestCellRollHoldsBetweenInitContainers(t *testing.T) {
 	}
 	if cr.Status.Cell.Evacuate {
 		t.Fatal("expected no evacuate between init containers")
+	}
+	if client.listPullEventsCalls != 0 {
+		t.Fatalf("expected no pull event list between init containers, got %d", client.listPullEventsCalls)
 	}
 	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
 	if !strings.Contains(cond.Message, "init-groovy running for 24m") {
@@ -270,5 +277,188 @@ func TestCellRollNoPodKeepsLegacyRule(t *testing.T) {
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(2*grace+time.Minute))
 	if !cr.Status.Cell.Evacuate {
 		t.Fatal("expected evacuate after twice the grace period with no pod")
+	}
+}
+
+// cellPullPod returns a cell pod whose plugins-init container waits in
+// PodInitializing with no restart, as it does while kubelet pulls the image.
+func cellPullPod(start time.Time) *corev1.Pod {
+	pod := initStagePod(start, corev1.ContainerState{
+		Waiting: &corev1.ContainerStateWaiting{Reason: "PodInitializing"},
+	}, 0)
+	pod.Spec.InitContainers = []corev1.Container{
+		{Name: "plugins-init", Image: "jenkins/jenkins:2.588"},
+		{Name: "init-groovy", Image: "varroa/mite:dev"},
+	}
+	return pod
+}
+
+// cellPullEvent returns a Pulling event of the pod for the container at
+// fieldPath, last seen at at.
+func cellPullEvent(fieldPath string, at time.Time) corev1.Event {
+	return corev1.Event{
+		Reason:         "Pulling",
+		InvolvedObject: corev1.ObjectReference{UID: "pod-uid-1", FieldPath: fieldPath},
+		LastTimestamp:  metav1.NewTime(at),
+	}
+}
+
+func TestObserveInitFirstInitPull(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	pullOfPlugins := map[string]time.Time{"plugins-init": t0}
+	cases := []struct {
+		name        string
+		pod         *corev1.Pod
+		now         time.Time
+		starts      map[string]time.Time
+		progressing bool
+		firstWait   string
+		pull        *imagePull
+	}{
+		{
+			name:        "running init container progresses",
+			pod:         initStagePod(t0, runningInit(t0), 0),
+			now:         t0.Add(5 * time.Minute),
+			progressing: true,
+		},
+		{
+			name:      "first wait without events holds no progress",
+			pod:       cellPullPod(t0),
+			now:       t0.Add(5 * time.Minute),
+			firstWait: "plugins-init",
+		},
+		{
+			name:        "first wait with a pull of plugins-init progresses",
+			pod:         cellPullPod(t0),
+			now:         t0.Add(5 * time.Minute),
+			starts:      pullOfPlugins,
+			progressing: true,
+			firstWait:   "plugins-init",
+			pull:        &imagePull{Container: "plugins-init", Image: "jenkins/jenkins:2.588"},
+		},
+		{
+			name:      "a pull of another container holds no progress",
+			pod:       cellPullPod(t0),
+			now:       t0.Add(5 * time.Minute),
+			starts:    map[string]time.Time{"jenkins": t0},
+			firstWait: "plugins-init",
+		},
+		{
+			name:      "a pull past the init cap holds no progress",
+			pod:       cellPullPod(t0),
+			now:       t0.Add(cellInitRollCap + time.Minute),
+			starts:    pullOfPlugins,
+			firstWait: "",
+		},
+		{
+			name:      "a restart of the first container holds no progress",
+			pod:       initStagePod(t0, corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "PodInitializing"}}, 1),
+			now:       t0.Add(5 * time.Minute),
+			starts:    pullOfPlugins,
+			firstWait: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			obs := observeInit(tc.pod, tc.now, tc.starts)
+			if obs.Progressing != tc.progressing {
+				t.Fatalf("Progressing = %v, want %v", obs.Progressing, tc.progressing)
+			}
+			if obs.FirstWait != tc.firstWait {
+				t.Fatalf("FirstWait = %q, want %q", obs.FirstWait, tc.firstWait)
+			}
+			if (obs.Pull == nil) != (tc.pull == nil) || (tc.pull != nil && *obs.Pull != *tc.pull) {
+				t.Fatalf("Pull = %+v, want %+v", obs.Pull, tc.pull)
+			}
+		})
+	}
+}
+
+func TestCellRollHoldsWhileFirstInitPulls(t *testing.T) {
+	grace := 10 * time.Minute
+	rec, client, cr := readyGateCell(t, grace)
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	client.controllerPod = cellPullPod(t0)
+	client.pullEvents = []corev1.Event{cellPullEvent("spec.initContainers{plugins-init}", t0)}
+
+	for _, at := range []time.Duration{0, 11 * time.Minute, 21 * time.Minute, 25 * time.Minute} {
+		rec.evaluateCellReadiness(context.Background(), cr, t0.Add(at))
+	}
+	if client.deleteControllerPodCalls != 0 || len(client.podGraceDeletes) != 0 {
+		t.Fatalf("expected no delete while the image pulls, got %d plain and %d grace deletes",
+			client.deleteControllerPodCalls, len(client.podGraceDeletes))
+	}
+	if cr.Status.Cell.Evacuate {
+		t.Fatal("expected no evacuate while the image pulls, past twice the grace period")
+	}
+	if cr.Status.Cell.RolledAt != nil {
+		t.Fatalf("expected rolledAt unset, got %v", cr.Status.Cell.RolledAt)
+	}
+	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
+	if cond.Reason != v1alpha1.ReasonNotProvisioned {
+		t.Fatalf("Reason = %q, want NotProvisioned", cond.Reason)
+	}
+	if want := "plugins-init pulling image jenkins/jenkins:2.588 for 25m"; !strings.Contains(cond.Message, want) {
+		t.Fatalf("Message = %q, want it to contain %q", cond.Message, want)
+	}
+	if client.listPullEventsCalls != 3 {
+		t.Fatalf("listPullEventsCalls = %d, want 3 (one per tick past the grace)", client.listPullEventsCalls)
+	}
+}
+
+func TestCellRollFiresOnFirstInitWaitWithoutPull(t *testing.T) {
+	grace := 10 * time.Minute
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cases := map[string]struct {
+		events []corev1.Event
+		err    error
+		pod    *corev1.Pod
+	}{
+		"no event": {pod: cellPullPod(t0)},
+		"pull of another container": {
+			events: []corev1.Event{cellPullEvent("spec.containers{jenkins}", t0)},
+			pod:    cellPullPod(t0),
+		},
+		"failed event list": {
+			err: errors.New("events is forbidden"),
+			pod: cellPullPod(t0),
+		},
+		"restart count 1 with a pull": {
+			events: []corev1.Event{cellPullEvent("spec.initContainers{plugins-init}", t0)},
+			pod:    initStagePod(t0, corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "PodInitializing"}}, 1),
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec, client, cr := readyGateCell(t, grace)
+			client.controllerPod = tc.pod
+			client.pullEvents = tc.events
+			client.pullEventsErr = tc.err
+			rec.evaluateCellReadiness(context.Background(), cr, t0)
+			rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+time.Minute))
+			if len(client.podGraceDeletes) != 1 {
+				t.Fatalf("expected one roll, got %d grace deletes", len(client.podGraceDeletes))
+			}
+			if cr.Status.Cell.RolledAt == nil {
+				t.Fatal("expected rolledAt set after the roll")
+			}
+		})
+	}
+}
+
+func TestCellRollFiresPastInitCapWhilePulling(t *testing.T) {
+	grace := 10 * time.Minute
+	rec, client, cr := readyGateCell(t, grace)
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	client.controllerPod = cellPullPod(t0)
+	client.pullEvents = []corev1.Event{cellPullEvent("spec.initContainers{plugins-init}", t0)}
+
+	rec.evaluateCellReadiness(context.Background(), cr, t0)
+	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(cellInitRollCap+time.Minute))
+	if len(client.podGraceDeletes) != 1 {
+		t.Fatalf("expected one roll past the init cap while pulling, got %d grace deletes", len(client.podGraceDeletes))
+	}
+	if !cr.Status.Cell.Evacuate {
+		t.Fatal("expected evacuate past the init cap and twice the grace period")
 	}
 }

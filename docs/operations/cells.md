@@ -250,7 +250,9 @@ describes how the other members move.
 **Roll.** A cell that reports `CellReady=False` past `cells.unreadyGracePeriod`, for a reason
 other than the three configuration gates, gets its pod deleted once and the reason `CellRolled`.
 The roll waits up to 30 minutes from the pod start while an init container runs without a
-restart. The grace counts from the init finish. A pod that has not started Jenkins gets a
+restart. It also waits while kubelet pulls the image of the first init container, which a
+`Pulling` event of the pod shows. The `CellReady` message then names the image. The grace
+counts from the init finish. A pod that has not started Jenkins gets a
 30-second delete grace.
 
 **Teardown** frees the placement record and the name at once.
