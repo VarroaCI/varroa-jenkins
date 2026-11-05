@@ -2846,7 +2846,12 @@ type ProvisioningDefaultsSpec struct {
 	IngressClassName string `json:"ingressClassName,omitempty"`
 	// ImagePullSecrets is a list of image pull secret names to attach to StatefulSet pods.
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
-	// ProvisioningTimeoutSec is the max seconds to wait for provisioning.
+	// ProvisioningTimeoutSec is the provisioning budget of a controller, in seconds.
+	// The budget runs until the mite connects. Image-pull time does not count, up to 15 minutes.
+	// Unset means 300.
+	// +kubebuilder:validation:Minimum=60
+	// +kubebuilder:validation:Maximum=86400
+	// +optional
 	ProvisioningTimeoutSec int `json:"provisioningTimeoutSec,omitempty"`
 	// CommandDeadlineSec bounds each mite command (desired-state apply). 0 = default (1200s/20m).
 	CommandDeadlineSec int `json:"commandDeadlineSec,omitempty"`

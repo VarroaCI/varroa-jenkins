@@ -135,8 +135,9 @@ export default function SettingsProvisioningTab() {
       </div>
 
       <div className={styles.formGroup}>
-        <label className={styles.formLabel}>Provisioning Timeout (seconds)</label>
-        <input className={styles.formInput} type="number" value={spec.provisioningTimeoutSec ?? ""} onChange={setField("provisioningTimeoutSec")} placeholder="300" />
+        <label className={styles.formLabel} htmlFor="provisioningTimeoutSec">Provisioning Timeout (seconds)</label>
+        <input id="provisioningTimeoutSec" className={styles.formInput} type="number" min={60} max={86400} value={spec.provisioningTimeoutSec ?? ""} onChange={setField("provisioningTimeoutSec")} placeholder="300" />
+        <small className={styles.formHint}>Image pull time does not count against this limit, up to 15 minutes. Empty means 300 seconds.</small>
       </div>
 
       <h3 className={styles.sectionTitle}>Default Resources</h3>

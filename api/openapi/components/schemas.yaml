@@ -2620,6 +2620,9 @@ ProvisioningDefaultsSpec:
         type: string
     provisioningTimeoutSec:
       type: integer
+      minimum: 60
+      maximum: 86400
+      description: Provisioning budget in seconds. Image-pull time does not count, up to 15 minutes. Unset means 300.
     commandDeadlineSec:
       type: integer
     liveFingerprintIntervalSec:

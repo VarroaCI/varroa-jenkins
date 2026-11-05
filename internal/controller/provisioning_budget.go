@@ -11,41 +11,71 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // The provisioning budget counts time spent on image pulls for the
-// current pod as zero. A pull needs no timeout of its own. The hard cap
-// bounds that credit, so a pull that never ends still fails provisioning.
+// current pod as zero, up to maxImagePullCredit. A pull needs no timeout
+// of its own. The hard cap bounds that credit, so a pull that never ends
+// still fails provisioning.
 
 // imagePull names a container whose image kubelet pulls now.
 type imagePull struct{ Container, Image string }
+
+// provisioningLimits holds the two time limits of one provisioning run.
+type provisioningLimits struct {
+	Base time.Duration // budget for the time outside image pulls
+	Hard time.Duration // limit for the whole run, image pulls included
+}
+
+// provisioningLimitsFrom is the one reader of provisioningTimeoutSec. A nil
+// defaults or a value of zero or less gives provisioningTimeout. The hard
+// limit is the base plus maxImagePullCredit, so it is always above the base.
+func provisioningLimitsFrom(defaults *v1alpha1.ProvisioningDefaults) provisioningLimits {
+	base := provisioningTimeout
+	if defaults != nil && defaults.Spec.ProvisioningTimeoutSec > 0 {
+		base = time.Duration(defaults.Spec.ProvisioningTimeoutSec) * time.Second
+	}
+	return provisioningLimits{Base: base, Hard: base + maxImagePullCredit}
+}
+
+// currentProvisioningLimits reads ProvisioningDefaults now. A failed read
+// gives the default limits, the same rule as every optional defaults field.
+func (r *Reconciler) currentProvisioningLimits(ctx context.Context) provisioningLimits {
+	d, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, r.store, provisioningDefaultsName, "")
+	if err != nil {
+		return provisioningLimitsFrom(nil)
+	}
+	return provisioningLimitsFrom(d)
+}
 
 // provisioningBudget is the provisioning timeout verdict of one tick.
 type provisioningBudget struct {
 	Elapsed  time.Duration // since status.provisioningStartedAt
 	PullWait time.Duration // part of Elapsed spent on image pulls of the current pod
 	Pull     *imagePull    // the pull that runs now, or nil
+	Limits   provisioningLimits
 }
 
 // exceeded reports whether provisioning has run out of time.
 func (b provisioningBudget) exceeded() bool {
-	return b.Elapsed > provisioningHardTimeout || b.Elapsed-b.PullWait > provisioningTimeout
+	return b.Elapsed > b.Limits.Hard || b.Elapsed-b.PullWait > b.Limits.Base
 }
 
 // failureMessage describes the verdict for status.conditions.
 func (b provisioningBudget) failureMessage() string {
-	if b.Elapsed > provisioningHardTimeout {
+	if b.Elapsed > b.Limits.Hard {
 		if b.Pull != nil {
 			return fmt.Sprintf("provisioning exceeded %v; container %s still pulls image %s",
-				provisioningHardTimeout, b.Pull.Container, b.Pull.Image)
+				b.Limits.Hard, b.Pull.Container, b.Pull.Image)
 		}
-		return fmt.Sprintf("provisioning exceeded %v", provisioningHardTimeout)
+		return fmt.Sprintf("provisioning exceeded %v", b.Limits.Hard)
 	}
 	if b.PullWait > 0 {
 		return fmt.Sprintf("provisioning exceeded %v, not counting %v of image pulls",
-			provisioningTimeout, b.PullWait.Round(time.Second))
+			b.Limits.Base, b.PullWait.Round(time.Second))
 	}
-	return fmt.Sprintf("provisioning exceeded %v", provisioningTimeout)
+	return fmt.Sprintf("provisioning exceeded %v", b.Limits.Base)
 }
 
 // podPullEventLister lists the Pulling events of one pod. Only the
@@ -59,17 +89,17 @@ var _ podPullEventLister = (*ClientsetClient)(nil)
 
 // provisioningBudgetFor computes the budget of one tick. It reads events only
 // when the answer can change the verdict: a container waits to be created, or
-// the timeout has passed.
-func (r *Reconciler) provisioningBudgetFor(ctx context.Context, cr *v1alpha1.Controller, pod *corev1.Pod, now time.Time) provisioningBudget {
+// the base budget has passed.
+func (r *Reconciler) provisioningBudgetFor(ctx context.Context, cr *v1alpha1.Controller, pod *corev1.Pod, limits provisioningLimits, now time.Time) provisioningBudget {
 	if cr.Status.ProvisioningStartedAt == nil {
-		return provisioningBudget{}
+		return provisioningBudget{Limits: limits}
 	}
 	since := cr.Status.ProvisioningStartedAt.Time
-	b := provisioningBudget{Elapsed: now.Sub(since)}
+	b := provisioningBudget{Elapsed: now.Sub(since), Limits: limits}
 	if pod == nil {
 		return b
 	}
-	if b.Elapsed <= provisioningTimeout && nextStartWaiter(pod) == "" {
+	if b.Elapsed <= limits.Base && nextStartWaiter(pod) == "" {
 		return b
 	}
 	lister, ok := r.client.(podPullEventLister)

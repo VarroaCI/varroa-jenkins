@@ -4275,11 +4275,13 @@ type ComponentsSchemasProvisioningDefaultsSpec struct {
 	PluginInfoURL                 *string                                `json:"pluginInfoURL,omitempty"`
 	PluginUpdateCenterDownloadURL *string                                `json:"pluginUpdateCenterDownloadURL,omitempty"`
 	PluginUpdateCenterURL         *string                                `json:"pluginUpdateCenterURL,omitempty"`
-	ProvisioningTimeoutSec        *int                                   `json:"provisioningTimeoutSec,omitempty"`
-	RootDomain                    *string                                `json:"rootDomain,omitempty"`
-	SizePresets                   *[]ComponentsSchemasSizePreset         `json:"sizePresets,omitempty"`
-	StorageClass                  *string                                `json:"storageClass,omitempty"`
-	StorageSizeGB                 *int                                   `json:"storageSizeGB,omitempty"`
+
+	// ProvisioningTimeoutSec Provisioning budget in seconds. Image-pull time does not count, up to 15 minutes. Unset means 300.
+	ProvisioningTimeoutSec *int                           `json:"provisioningTimeoutSec,omitempty"`
+	RootDomain             *string                        `json:"rootDomain,omitempty"`
+	SizePresets            *[]ComponentsSchemasSizePreset `json:"sizePresets,omitempty"`
+	StorageClass           *string                        `json:"storageClass,omitempty"`
+	StorageSizeGB          *int                           `json:"storageSizeGB,omitempty"`
 }
 
 // ComponentsSchemasProvisioningDefaultsStatus Observed state of ProvisioningDefaults.

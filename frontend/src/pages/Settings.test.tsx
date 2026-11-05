@@ -290,6 +290,50 @@ describe("Settings page", () => {
     expect(screen.getByText("Storage")).toBeInTheDocument();
   });
 
+  it("shows the provisioning timeout and its hint", async () => {
+    mockGetConfig.mockResolvedValue(
+      createProvisioningConfig({ spec: { provisioningTimeoutSec: 900 } }),
+    );
+    renderSettings();
+
+    await screen.findByText("Provisioning Timeout (seconds)");
+    expect(screen.getByDisplayValue("900")).toBeInTheDocument();
+    expect(screen.getByText(/Image pull time does not count/)).toBeInTheDocument();
+  });
+
+  it("saves the provisioning timeout as a number", async () => {
+    const config = createProvisioningConfig({ spec: { provisioningTimeoutSec: 600 } });
+    mockGetConfig.mockResolvedValue(config);
+    mockUpdateConfig.mockResolvedValue(config);
+    renderSettings();
+
+    const input = await screen.findByLabelText("Provisioning Timeout (seconds)");
+    await userEvent.clear(input);
+    await userEvent.type(input, "900");
+    await userEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(mockUpdateConfig).toHaveBeenCalled();
+    });
+    expect(mockUpdateConfig.mock.calls[0][1].spec.provisioningTimeoutSec).toBe(900);
+  });
+
+  it("clears the provisioning timeout to the default", async () => {
+    const config = createProvisioningConfig({ spec: { provisioningTimeoutSec: 600 } });
+    mockGetConfig.mockResolvedValue(config);
+    mockUpdateConfig.mockResolvedValue(config);
+    renderSettings();
+
+    const input = await screen.findByLabelText("Provisioning Timeout (seconds)");
+    await userEvent.clear(input);
+    await userEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(mockUpdateConfig).toHaveBeenCalled();
+    });
+    expect(mockUpdateConfig.mock.calls[0][1].spec.provisioningTimeoutSec).toBeUndefined();
+  });
+
   it("renders root domain and version fields", async () => {
     mockGetConfig.mockResolvedValue(createProvisioningConfig());
     renderSettings();

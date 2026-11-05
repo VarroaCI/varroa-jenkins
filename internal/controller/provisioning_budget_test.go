@@ -12,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
+
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
 func waitingStatus(name, reason string) corev1.ContainerStatus {
@@ -287,15 +289,21 @@ func TestNextStartWaiter(t *testing.T) {
 }
 
 func TestProvisioningBudgetExceeded(t *testing.T) {
+	def := provisioningLimitsFrom(nil)
+	long := provisioningLimitsFrom(&v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{ProvisioningTimeoutSec: 900}})
 	tests := []struct {
 		name string
 		b    provisioningBudget
 		want bool
 	}{
-		{"six minutes without a pull", provisioningBudget{Elapsed: 6 * time.Minute}, true},
-		{"eight minutes with four minutes of pull", provisioningBudget{Elapsed: 8 * time.Minute, PullWait: 4 * time.Minute}, false},
-		{"twenty-one minutes with a long pull", provisioningBudget{Elapsed: 21 * time.Minute, PullWait: 18 * time.Minute}, true},
-		{"four minutes", provisioningBudget{Elapsed: 4 * time.Minute}, false},
+		{"six minutes without a pull", provisioningBudget{Elapsed: 6 * time.Minute, Limits: def}, true},
+		{"eight minutes with four minutes of pull", provisioningBudget{Elapsed: 8 * time.Minute, PullWait: 4 * time.Minute, Limits: def}, false},
+		{"twenty-one minutes with a long pull", provisioningBudget{Elapsed: 21 * time.Minute, PullWait: 18 * time.Minute, Limits: def}, true},
+		{"four minutes", provisioningBudget{Elapsed: 4 * time.Minute, Limits: def}, false},
+		{"six minutes within a 900-second budget", provisioningBudget{Elapsed: 6 * time.Minute, Limits: long}, false},
+		{"sixteen minutes past a 900-second budget", provisioningBudget{Elapsed: 16 * time.Minute, Limits: long}, true},
+		{"twenty-five minutes with eighteen minutes of pull", provisioningBudget{Elapsed: 25 * time.Minute, PullWait: 18 * time.Minute, Limits: long}, false},
+		{"thirty-one minutes with twenty-five minutes of pull", provisioningBudget{Elapsed: 31 * time.Minute, PullWait: 25 * time.Minute, Limits: long}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -307,6 +315,8 @@ func TestProvisioningBudgetExceeded(t *testing.T) {
 }
 
 func TestProvisioningBudgetFailureMessage(t *testing.T) {
+	def := provisioningLimitsFrom(nil)
+	long := provisioningLimitsFrom(&v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{ProvisioningTimeoutSec: 900}})
 	tests := []struct {
 		name string
 		b    provisioningBudget
@@ -314,29 +324,63 @@ func TestProvisioningBudgetFailureMessage(t *testing.T) {
 	}{
 		{
 			name: "hard cap while a pull runs",
-			b:    provisioningBudget{Elapsed: 21 * time.Minute, PullWait: 18 * time.Minute, Pull: &imagePull{Container: "mite", Image: "mite:2"}},
+			b:    provisioningBudget{Elapsed: 21 * time.Minute, PullWait: 18 * time.Minute, Pull: &imagePull{Container: "mite", Image: "mite:2"}, Limits: def},
 			want: "provisioning exceeded 20m0s; container mite still pulls image mite:2",
 		},
 		{
 			name: "hard cap without a pull",
-			b:    provisioningBudget{Elapsed: 21 * time.Minute},
+			b:    provisioningBudget{Elapsed: 21 * time.Minute, Limits: def},
 			want: "provisioning exceeded 20m0s",
 		},
 		{
 			name: "budget with pull credit",
-			b:    provisioningBudget{Elapsed: 8 * time.Minute, PullWait: 4*time.Minute + 300*time.Millisecond},
+			b:    provisioningBudget{Elapsed: 8 * time.Minute, PullWait: 4*time.Minute + 300*time.Millisecond, Limits: def},
 			want: "provisioning exceeded 5m0s, not counting 4m0s of image pulls",
 		},
 		{
 			name: "plain budget",
-			b:    provisioningBudget{Elapsed: 6 * time.Minute},
+			b:    provisioningBudget{Elapsed: 6 * time.Minute, Limits: def},
 			want: "provisioning exceeded 5m0s",
+		},
+		{
+			name: "configured base budget",
+			b:    provisioningBudget{Elapsed: 11 * time.Minute, Limits: provisioningLimitsFrom(&v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{ProvisioningTimeoutSec: 600}})},
+			want: "provisioning exceeded 10m0s",
+		},
+		{
+			name: "configured hard cap",
+			b:    provisioningBudget{Elapsed: 31 * time.Minute, Limits: long},
+			want: "provisioning exceeded 30m0s",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.b.failureMessage(); got != tc.want {
 				t.Errorf("failureMessage() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestProvisioningLimitsFrom(t *testing.T) {
+	sec := func(n int) *v1alpha1.ProvisioningDefaults {
+		return &v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{ProvisioningTimeoutSec: n}}
+	}
+	tests := []struct {
+		name     string
+		defaults *v1alpha1.ProvisioningDefaults
+		want     provisioningLimits
+	}{
+		{"nil defaults", nil, provisioningLimits{Base: 5 * time.Minute, Hard: 20 * time.Minute}},
+		{"unset", sec(0), provisioningLimits{Base: 5 * time.Minute, Hard: 20 * time.Minute}},
+		{"negative", sec(-5), provisioningLimits{Base: 5 * time.Minute, Hard: 20 * time.Minute}},
+		{"minimum", sec(60), provisioningLimits{Base: time.Minute, Hard: 16 * time.Minute}},
+		{"configured", sec(900), provisioningLimits{Base: 15 * time.Minute, Hard: 30 * time.Minute}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := provisioningLimitsFrom(tc.defaults); got != tc.want {
+				t.Errorf("provisioningLimitsFrom() = %+v, want %+v", got, tc.want)
 			}
 		})
 	}
