@@ -86,6 +86,7 @@ export default function ActivityTimeline({
     hasMore,
     loadMore,
     isLoadingMore,
+    loadMoreNote,
   } = feed;
 
   const [laneChip, setLaneChip] = useState<LaneChip>("All");
@@ -621,6 +622,7 @@ export default function ActivityTimeline({
 					{isLoadingMore ? "Loading history..." : "Load more history"}
 				</button>
 			)}
+			{loadMoreNote && <p className={styles.loadMoreNote} role="status">{loadMoreNote}</p>}
         </div>
       )}
     </div>
