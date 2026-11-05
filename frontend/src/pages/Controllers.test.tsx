@@ -11,12 +11,10 @@ vi.mock("react-router-dom", async () => {
   return { ...actual, useNavigate: () => mockNavigate };
 });
 
-const mockDeleteController = vi.fn();
 const mockPreviewBroodOperation = vi.fn();
 const mockCreateBroodOperation = vi.fn();
 vi.mock("../api/client", () => ({
   listClusters: vi.fn(),
-  deleteController: (...args: unknown[]) => mockDeleteController(...args),
   getProvisioningConfig: vi.fn(() => Promise.resolve({ versions: [] })),
   previewBroodOperation: (...args: unknown[]) => mockPreviewBroodOperation(...args),
   createBroodOperation: (...args: unknown[]) => mockCreateBroodOperation(...args),
@@ -88,13 +86,6 @@ describe("Controllers", () => {
   it('shows "No controllers found" when there are no controllers', () => {
     renderPage();
     expect(screen.getByText("No controllers found.")).toBeInTheDocument();
-  });
-
-  it("shows delete dialog when delete is triggered", () => {
-    // The Controllers page has no UI trigger for delete today — this
-    // documents the pre-existing (dead) state, unchanged by this refactor.
-    renderPage();
-    expect(screen.queryByText("Delete Controller")).not.toBeInTheDocument();
   });
 
   describe("Run operation flow", () => {

@@ -8,7 +8,6 @@ import {
   groupKey,
   groupEvents,
   passesScope,
-  passesSelection,
   passesLane,
   passesSource,
   ACTIVITY_TYPE_MAP,
@@ -327,32 +326,6 @@ describe("passesScope", () => {
   it("returns false when event controller differs", () => {
     const e = makeEvent({ namespace: "ns", controller: "other" });
     expect(passesScope(e, { namespace: "ns", name: "ctrl" })).toBe(false);
-  });
-});
-
-describe("passesSelection", () => {
-  it("returns true when selection is empty", () => {
-    expect(passesSelection(makeEvent({ source: "mite" }), new Set())).toBe(true);
-  });
-
-  it("returns true when event controller is in selection", () => {
-    const e = makeEvent({ namespace: "ns", controller: "ctrlA" });
-    expect(passesSelection(e, new Set(["/ns/ctrlA"]))).toBe(true);
-  });
-
-  it("returns false when event controller not in selection", () => {
-    const e = makeEvent({ namespace: "ns", controller: "ctrlB" });
-    expect(passesSelection(e, new Set(["/ns/ctrlA"]))).toBe(false);
-  });
-
-  it("returns true for global event when __global__ selected", () => {
-    const e = makeEvent({ controller: undefined, namespace: undefined });
-    expect(passesSelection(e, new Set(["__global__"]))).toBe(true);
-  });
-
-  it("returns false for global event when __global__ not selected", () => {
-    const e = makeEvent({ controller: undefined, namespace: undefined });
-    expect(passesSelection(e, new Set(["/ns/ctrlA"]))).toBe(false);
   });
 });
 
