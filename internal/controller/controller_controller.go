@@ -59,10 +59,12 @@ import (
 )
 
 const (
+	// provisioningTimeout is the base provisioning budget when
+	// ProvisioningDefaults sets no provisioningTimeoutSec.
 	provisioningTimeout = 5 * time.Minute
-	// provisioningHardTimeout bounds the image-pull credit, so a pull that
-	// never ends cannot hold provisioning forever.
-	provisioningHardTimeout     = 20 * time.Minute
+	// maxImagePullCredit bounds the image-pull time that does not count
+	// against the budget, so a pull that never ends cannot hold provisioning forever.
+	maxImagePullCredit          = 15 * time.Minute
 	pluginRollTimeout           = 10 * time.Minute
 	finalizerName               = "varroa.dev/finalizer"
 	annotationAllowAdminLockout = "varroa.dev/allow-admin-lockout"
@@ -3920,7 +3922,7 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 		r.persistStatusDiagnostics(ctx, cr)
 		return fmt.Errorf("read controller pod for provisioning budget: %w", err)
 	}
-	budget := r.provisioningBudgetFor(ctx, cr, pod, time.Now())
+	budget := r.provisioningBudgetFor(ctx, cr, pod, provisioningLimitsFrom(defaults), time.Now())
 	if budget.exceeded() {
 		setImagePullingCondition(cr, nil)
 		cr.Status.Phase = v1alpha1.ControllerPhaseFailed
@@ -5285,24 +5287,27 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 	// A stream lost after the last provisioning run is not a connect timeout:
 	// ProvisioningStartedAt predates the loss, so the guard skips it.
 	// The verdict applies the image-pull credit of the pod read above.
-	if started := cr.Status.ProvisioningStartedAt; started != nil &&
-		time.Since(started.Time) > provisioningTimeout && !streamLostSince(cr, started.Time) {
-		// A failed read skips the verdict for this tick, so no pull credit is lost.
-		if podErr != nil && r.Logger != nil {
-			r.Logger.Warn("skip mite connect timeout: pod read failed",
-				"controller", cr.Namespace+"/"+cr.Name, "error", podErr)
-		}
-		if podErr == nil && r.provisioningBudgetFor(ctx, cr, pod, time.Now()).exceeded() {
-			cr.Status.Phase = v1alpha1.ControllerPhaseFailed
-			cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-				Type:    v1alpha1.ConditionFailed,
-				Status:  metav1.ConditionTrue,
-				Reason:  "ProvisioningTimeout",
-				Message: "timed out waiting for mite connection",
-			})
+	// The guard reads ProvisioningDefaults on each tick, so a changed budget applies at once.
+	if started := cr.Status.ProvisioningStartedAt; started != nil && !streamLostSince(cr, started.Time) {
+		limits := r.currentProvisioningLimits(ctx)
+		if time.Since(started.Time) > limits.Base {
+			// A failed read skips the verdict for this tick, so no pull credit is lost.
+			if podErr != nil && r.Logger != nil {
+				r.Logger.Warn("skip mite connect timeout: pod read failed",
+					"controller", cr.Namespace+"/"+cr.Name, "error", podErr)
+			}
+			if podErr == nil && r.provisioningBudgetFor(ctx, cr, pod, limits, time.Now()).exceeded() {
+				cr.Status.Phase = v1alpha1.ControllerPhaseFailed
+				cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+					Type:    v1alpha1.ConditionFailed,
+					Status:  metav1.ConditionTrue,
+					Reason:  "ProvisioningTimeout",
+					Message: "timed out waiting for mite connection",
+				})
 
-			r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedMiteConnectTimeout, "timed out waiting for mite connection")
-			return fmt.Errorf("provisioning timed out waiting for mite connection")
+				r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedMiteConnectTimeout, "timed out waiting for mite connection")
+				return fmt.Errorf("provisioning timed out waiting for mite connection")
+			}
 		}
 	}
 

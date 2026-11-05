@@ -104,7 +104,7 @@ Read `status.phase` and `status.conditions` when operating a controller.
 | `Hibernated` | Inactivity policy parked the controller. |
 | `Failed` | A blocking provisioning or operation error occurred. |
 
-Provisioning has a 5-minute budget. Time that kubelet spends pulling an image does not count against it. The `ImagePulling` condition names the image while a pull runs. Provisioning fails after 20 minutes in all cases. The phase is then `Failed` with reason `ProvisioningTimeout`, and the operator provisions the controller again.
+Provisioning has a budget of 5 minutes, from the start of provisioning until the mite connects. Set `ProvisioningDefaults.spec.provisioningTimeoutSec` or the Settings Provisioning tab to change it. The minimum is 60 seconds. Time that kubelet spends pulling an image does not count against the budget, up to 15 minutes. The `ImagePulling` condition names the image while a pull runs. Provisioning fails 15 minutes after the budget in all cases, 20 minutes by default. The phase is then `Failed` with reason `ProvisioningTimeout`, and the operator provisions the controller again.
 
 A phase says where the controller is in its lifecycle. It does not say whether the controller is stuck there. Varroa reports "needs attention" separately, on the dashboard, the controllers list, and the detail page. It is derived from these status signals, in precedence order.
 

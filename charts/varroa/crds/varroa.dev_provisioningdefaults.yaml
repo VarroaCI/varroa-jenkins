@@ -214,8 +214,12 @@ spec:
                   resolution (maps to JENKINS_UC). When non-empty, plugins-init uses this mirror.
                 type: string
               provisioningTimeoutSec:
-                description: ProvisioningTimeoutSec is the max seconds to wait for
-                  provisioning.
+                description: |-
+                  ProvisioningTimeoutSec is the provisioning budget of a controller, in seconds.
+                  The budget runs until the mite connects. Image-pull time does not count, up to 15 minutes.
+                  Unset means 300.
+                maximum: 86400
+                minimum: 60
                 type: integer
               rootDomain:
                 description: RootDomain is the root domain for auto-derived ingress

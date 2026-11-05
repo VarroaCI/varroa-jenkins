@@ -1755,6 +1755,76 @@ func TestProvisioningTimeoutCreditsFinishedPull(t *testing.T) {
 	}
 }
 
+// TestProvisioningTimeoutHonorsProvisioningDefaults: a 900-second budget keeps
+// a 10-minute provisioning run alive, which the 5-minute default would fail.
+func TestProvisioningTimeoutHonorsProvisioningDefaults(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.provisioningDefaults = &v1alpha1.ProvisioningDefaults{
+		Spec: v1alpha1.ProvisioningDefaultsSpec{ProvisioningTimeoutSec: 900},
+	}
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	cr := provisionPullCtrl(time.Now().Add(-10 * time.Minute))
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseProvisioning {
+		t.Fatalf("phase = %s, want Provisioning within the 900s budget", cr.Status.Phase)
+	}
+}
+
+// TestProvisioningTimeoutFiresPastConfiguredBudget: a 600-second budget fails
+// provisioning at 11 minutes and names the configured limit.
+func TestProvisioningTimeoutFiresPastConfiguredBudget(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.provisioningDefaults = &v1alpha1.ProvisioningDefaults{
+		Spec: v1alpha1.ProvisioningDefaultsSpec{ProvisioningTimeoutSec: 600},
+	}
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	cr := provisionPullCtrl(time.Now().Add(-11 * time.Minute))
+	if err := rec.reconcileController(context.Background(), cr); err == nil || !strings.Contains(err.Error(), "provisioning timeout exceeded") {
+		t.Fatalf("Reconcile error = %v, want provisioning timeout exceeded", err)
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseFailed {
+		t.Fatalf("phase = %s, want Failed", cr.Status.Phase)
+	}
+	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionFailed)
+	if c == nil || c.Reason != "ProvisioningTimeout" || !strings.Contains(c.Message, "10m0s") {
+		t.Fatalf("Failed condition = %+v, want ProvisioningTimeout naming 10m0s", c)
+	}
+}
+
+// TestProvisioningHardCapFollowsConfiguredBudget: a pull that runs since the
+// start of a 900-second budget keeps provisioning alive at 25 minutes. The
+// hard cap is 30 minutes for that budget.
+func TestProvisioningHardCapFollowsConfiguredBudget(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.provisioningDefaults = &v1alpha1.ProvisioningDefaults{
+		Spec: v1alpha1.ProvisioningDefaultsSpec{ProvisioningTimeoutSec: 900},
+	}
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-25 * time.Minute)
+	pod, ev := provisionPullPod(started.Add(10 * time.Second))
+	client.controllerPod = pod
+	client.pullEvents = []corev1.Event{ev}
+	cr := provisionPullCtrl(started)
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseProvisioning {
+		t.Fatalf("phase = %s, want Provisioning while the pull is credited under the 30m hard cap", cr.Status.Phase)
+	}
+}
+
 // TestImagePullingConditionRemovedOutsideProvisioning: a controller that is
 // no longer Provisioning drops a stale ImagePulling condition.
 func TestImagePullingConditionRemovedOutsideProvisioning(t *testing.T) {

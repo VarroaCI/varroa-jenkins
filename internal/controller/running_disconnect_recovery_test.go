@@ -360,3 +360,30 @@ func TestReconcileRunning_ChainedPushFailureKeepsConnected(t *testing.T) {
 		t.Fatalf("persisted phase = %q after a chained failure, want Connected", got)
 	}
 }
+
+// TestHandleRunning_TimeoutHonorsProvisioningDefaults: the Running guard reads
+// the configured budget. A 900-second budget keeps a controller alive at 10
+// minutes and fails it at 16 minutes.
+func TestHandleRunning_TimeoutHonorsProvisioningDefaults(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	client.provisioningDefaults = &v1alpha1.ProvisioningDefaults{
+		Spec: v1alpha1.ProvisioningDefaultsSpec{ProvisioningTimeoutSec: 900},
+	}
+	rec, _ := newTestReconcilerForGate(client)
+
+	young := runningCtrl("young")
+	youngStarted := metav1.NewTime(time.Now().Add(-10 * time.Minute))
+	young.Status.ProvisioningStartedAt = &youngStarted
+	_ = rec.handleRunning(context.Background(), young)
+	if young.Status.Phase != v1alpha1.ControllerPhaseRunning {
+		t.Fatalf("phase at 10m = %s, want Running within the 900s budget", young.Status.Phase)
+	}
+
+	old := runningCtrl("old")
+	oldStarted := metav1.NewTime(time.Now().Add(-16 * time.Minute))
+	old.Status.ProvisioningStartedAt = &oldStarted
+	_ = rec.handleRunning(context.Background(), old)
+	if old.Status.Phase != v1alpha1.ControllerPhaseFailed {
+		t.Fatalf("phase at 16m = %s, want Failed past the 900s budget", old.Status.Phase)
+	}
+}

@@ -4368,6 +4368,9 @@
             "type": "string"
           },
           "provisioningTimeoutSec": {
+            "description": "Provisioning budget in seconds. Image-pull time does not count, up to 15 minutes. Unset means 300.",
+            "maximum": 86400,
+            "minimum": 60,
             "type": "integer"
           },
           "rootDomain": {
@@ -14369,6 +14372,9 @@
             "type": "string"
           },
           "provisioningTimeoutSec": {
+            "description": "Provisioning budget in seconds. Image-pull time does not count, up to 15 minutes. Unset means 300.",
+            "maximum": 86400,
+            "minimum": 60,
             "type": "integer"
           },
           "rootDomain": {
