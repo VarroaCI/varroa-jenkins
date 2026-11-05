@@ -212,6 +212,11 @@ func TestUpdateCenterReconciler(t *testing.T) {
 	t.Run("seed-multi-registry-secret-rejected", testSeedMultiRegistrySecretRejected)
 	t.Run("seed-failed-import-is-retried-next-tick", testSeedFailedImportIsRetriedNextTick)
 	t.Run("seed-refused-pack-reports-reason", testSeedRefusedPackReportsReason)
+	t.Run("seed-refused-digest-is-not-pulled-again", testSeedRefusedDigestIsNotPulledAgain)
+	t.Run("seed-transient-import-failure-is-retried", testSeedTransientImportFailureIsRetried)
+	t.Run("seed-refused-digest-retried-when-digest-changes", testSeedRefusedDigestRetriedWhenDigestChanges)
+	t.Run("seed-refused-digest-retried-after-restart", testSeedRefusedDigestRetriedAfterRestart)
+	t.Run("seed-refusal-dropped-with-ref", testSeedRefusalDroppedWithRef)
 	t.Run("prefetch-disabled-removes-condition", testPrefetchDisabledRemovesCondition)
 	t.Run("prefetch-posts-servable-gaps-only", testPrefetchPostsServableGapsOnly)
 	t.Run("prefetch-caps-batch-at-20", testPrefetchCapsBatchAt20)
@@ -1960,6 +1965,283 @@ func testSeedRefusedPackReportsReason(t *testing.T) {
 	}
 	if !strings.Contains(cond.Message, "has no kind") {
 		t.Errorf("condition message %q does not name the cause %q", cond.Message, "has no kind")
+	}
+	if !strings.Contains(cond.Message, digest) {
+		t.Errorf("condition message %q does not name the digest %q", cond.Message, digest)
+	}
+}
+
+// seedImportTestServer serves an empty inventory and answers each import with
+// code(). It returns the server and a pointer to the count of import posts.
+func seedImportTestServer(t *testing.T, code func() int) (*httptest.Server, *int) {
+	t.Helper()
+	var importCalls int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/inventory":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(ucInventoryResponse{Plugins: []inventoryEntry{}})
+		case "/api/v1/import":
+			importCalls++
+			w.WriteHeader(code())
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	return ts, &importCalls
+}
+
+// reseedUCWithStatus stores uc with the status that the last tick wrote, as the
+// API server would keep it between reconciles.
+func reseedUCWithStatus(t *testing.T, client *testClient, uc *v1alpha1.UpdateCenter) {
+	t.Helper()
+	u := uc.DeepCopy()
+	u.Status = lastUCStatus(t, client)
+	client.updateCenter = u
+	crdstore.MustSeed(client.store, u)
+}
+
+// testSeedRefusedDigestIsNotPulledAgain: a 400 or 413 refuses the pack content.
+// The next tick must check the digest only. It must not pull or post the pack.
+func testSeedRefusedDigestIsNotPulledAgain(t *testing.T) {
+	const ref = "registry.example.org/plugins/a:1.0"
+	const digest = "sha256:0000000000000000000000000000000000000000000000000000000000000007"
+
+	for _, code := range []int{http.StatusBadRequest, http.StatusRequestEntityTooLarge} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			client := newTestClient()
+			importTokenSecret(client)
+			uc := updateCenter(updateCenterSingletonName, withSeedRefs(ref))
+			client.updateCenter = uc
+			crdstore.MustSeed(client.store, client.updateCenter)
+			client.pvc = boundPVC()
+
+			ts, importCalls := seedImportTestServer(t, func() int { return code })
+			fbs := newFakeBlobStore(t, ref, digest)
+			var stores int
+			rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+			rec.newRegistryStore = func(_ string, _ oci.RegistryOptions) (oci.BlobStore, error) {
+				stores++
+				return fbs, nil
+			}
+
+			// --- Tick 1: the update center refuses the pack ---
+			if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+				t.Fatalf("first reconcile: %v", err)
+			}
+			if *importCalls != 1 || stores != 2 {
+				t.Fatalf("tick 1: want 1 import and 2 stores, got %d and %d", *importCalls, stores)
+			}
+			cond := findUCCondition(lastUCStatus(t, client).Conditions, condTypeSeedImported)
+			if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "ImportFailed" {
+				t.Fatalf("expected SeedImported=False/ImportFailed, got %+v", cond)
+			}
+			for _, want := range []string{ref, digest, "retried when the digest changes"} {
+				if !strings.Contains(cond.Message, want) {
+					t.Errorf("condition message %q does not contain %q", cond.Message, want)
+				}
+			}
+			firstMessage := cond.Message
+
+			// --- Tick 2: the refused digest is not pulled or posted again ---
+			reseedUCWithStatus(t, client, uc)
+			if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+				t.Fatalf("second reconcile: %v", err)
+			}
+			if *importCalls != 1 {
+				t.Errorf("a refused digest must not be posted again, got %d imports", *importCalls)
+			}
+			if stores != 3 {
+				t.Errorf("tick 2 must run only the registry HEAD, got %d total stores", stores)
+			}
+			status := lastUCStatus(t, client)
+			if len(status.SeedImportedDigests) != 0 {
+				t.Errorf("a refused digest must not be recorded as imported, got %v", status.SeedImportedDigests)
+			}
+			cond = findUCCondition(status.Conditions, condTypeSeedImported)
+			if cond == nil || cond.Message != firstMessage {
+				t.Errorf("expected the same message on every tick, got %+v", cond)
+			}
+		})
+	}
+}
+
+// testSeedTransientImportFailureIsRetried: a failure that can clear without a new
+// digest keeps the retry on every tick.
+func testSeedTransientImportFailureIsRetried(t *testing.T) {
+	const ref = "registry.example.org/plugins/a:1.0"
+	const digest = "sha256:0000000000000000000000000000000000000000000000000000000000000008"
+
+	for _, code := range []int{http.StatusUnauthorized, http.StatusNotFound, http.StatusInternalServerError, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			client := newTestClient()
+			importTokenSecret(client)
+			uc := updateCenter(updateCenterSingletonName, withSeedRefs(ref))
+			client.updateCenter = uc
+			crdstore.MustSeed(client.store, client.updateCenter)
+			client.pvc = boundPVC()
+
+			ts, importCalls := seedImportTestServer(t, func() int { return code })
+			fbs := newFakeBlobStore(t, ref, digest)
+			var stores int
+			rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+			rec.newRegistryStore = func(_ string, _ oci.RegistryOptions) (oci.BlobStore, error) {
+				stores++
+				return fbs, nil
+			}
+
+			for tick := 1; tick <= 2; tick++ {
+				if tick > 1 {
+					reseedUCWithStatus(t, client, uc)
+				}
+				if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+					t.Fatalf("tick %d reconcile: %v", tick, err)
+				}
+			}
+			if *importCalls != 2 || stores != 4 {
+				t.Errorf("want 2 imports and 4 stores over two ticks, got %d and %d", *importCalls, stores)
+			}
+		})
+	}
+}
+
+// testSeedRefusedDigestRetriedWhenDigestChanges: a refused digest is pulled again
+// as soon as the ref resolves to another digest.
+func testSeedRefusedDigestRetriedWhenDigestChanges(t *testing.T) {
+	const ref = "registry.example.org/plugins/a:1.0"
+	const digestA = "sha256:000000000000000000000000000000000000000000000000000000000000000a"
+	const digestB = "sha256:000000000000000000000000000000000000000000000000000000000000000b"
+
+	client := newTestClient()
+	importTokenSecret(client)
+	uc := updateCenter(updateCenterSingletonName, withSeedRefs(ref))
+	client.updateCenter = uc
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+
+	code := http.StatusBadRequest
+	ts, importCalls := seedImportTestServer(t, func() int { return code })
+	fbs := newFakeBlobStore(t, ref, digestA)
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	rec.newRegistryStore = func(_ string, _ oci.RegistryOptions) (oci.BlobStore, error) { return fbs, nil }
+
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+
+	// The ref now resolves to a new digest, and the update center accepts it.
+	fbs.resolveDigest = digestB
+	code = http.StatusOK
+	reseedUCWithStatus(t, client, uc)
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if *importCalls != 2 {
+		t.Errorf("a new digest must be imported, got %d imports", *importCalls)
+	}
+	status := lastUCStatus(t, client)
+	if len(status.SeedImportedDigests) != 1 || status.SeedImportedDigests[0] != digestB {
+		t.Errorf("expected digest B recorded after the import, got %v", status.SeedImportedDigests)
+	}
+	cond := findUCCondition(status.Conditions, condTypeSeedImported)
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != "AllImported" {
+		t.Fatalf("expected SeedImported=True/AllImported, got %+v", cond)
+	}
+	if len(rec.seedRefused) != 0 {
+		t.Errorf("a successful import must clear the refusal, got %v", rec.seedRefused)
+	}
+}
+
+// testSeedRefusedDigestRetriedAfterRestart: the refusal is process-local, so a new
+// reconciler tries the same refused digest once more.
+func testSeedRefusedDigestRetriedAfterRestart(t *testing.T) {
+	const ref = "registry.example.org/plugins/a:1.0"
+	const digest = "sha256:0000000000000000000000000000000000000000000000000000000000000009"
+
+	client := newTestClient()
+	importTokenSecret(client)
+	uc := updateCenter(updateCenterSingletonName, withSeedRefs(ref))
+	client.updateCenter = uc
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+
+	ts, importCalls := seedImportTestServer(t, func() int { return http.StatusBadRequest })
+	fbs := newFakeBlobStore(t, ref, digest)
+	store := func(_ string, _ oci.RegistryOptions) (oci.BlobStore, error) { return fbs, nil }
+
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	rec.newRegistryStore = store
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+
+	restarted := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	restarted.newRegistryStore = store
+	reseedUCWithStatus(t, client, uc)
+	if _, err := restarted.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("reconcile after restart: %v", err)
+	}
+	if *importCalls != 2 {
+		t.Errorf("a restarted operator must post the refused pack once more, got %d imports", *importCalls)
+	}
+}
+
+// testSeedRefusalDroppedWithRef: removing a ref from spec.seed.refs drops its
+// refusal, so declaring the ref again pulls it.
+func testSeedRefusalDroppedWithRef(t *testing.T) {
+	const ref = "registry.example.org/plugins/a:1.0"
+	const digest = "sha256:000000000000000000000000000000000000000000000000000000000000000c"
+
+	client := newTestClient()
+	importTokenSecret(client)
+	uc := updateCenter(updateCenterSingletonName, withSeedRefs(ref))
+	client.updateCenter = uc
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+
+	ts, importCalls := seedImportTestServer(t, func() int { return http.StatusBadRequest })
+	fbs := newFakeBlobStore(t, ref, digest)
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	rec.newRegistryStore = func(_ string, _ oci.RegistryOptions) (oci.BlobStore, error) { return fbs, nil }
+
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+
+	// --- Tick 2: the ref is removed from spec.seed.refs ---
+	reseedUCWithStatus(t, client, updateCenter(updateCenterSingletonName))
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if len(rec.seedRefused) != 0 {
+		t.Errorf("a ref removed from spec.seed.refs must drop its refusal, got %v", rec.seedRefused)
+	}
+	if cond := findUCCondition(lastUCStatus(t, client).Conditions, condTypeSeedImported); cond == nil || cond.Reason != "NoSeedRefs" {
+		t.Fatalf("expected reason NoSeedRefs, got %+v", cond)
+	}
+
+	// --- Tick 3: the ref is declared again and is pulled again ---
+	reseedUCWithStatus(t, client, uc)
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("third reconcile: %v", err)
+	}
+	if *importCalls != 2 {
+		t.Errorf("a re-declared ref must be imported again, got %d imports", *importCalls)
+	}
+}
+
+// TestRefusesSeedContent pins which import statuses refuse the pack content.
+func TestRefusesSeedContent(t *testing.T) {
+	for _, code := range []int{http.StatusBadRequest, http.StatusRequestEntityTooLarge} {
+		if !refusesSeedContent(code) {
+			t.Errorf("HTTP %d must refuse the pack content", code)
+		}
+	}
+	for _, code := range []int{401, 403, 404, 405, 409, 429, 500, 502, 503} {
+		if refusesSeedContent(code) {
+			t.Errorf("HTTP %d must not refuse the pack content", code)
+		}
 	}
 }
 
