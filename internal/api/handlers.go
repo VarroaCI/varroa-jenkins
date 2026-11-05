@@ -2681,17 +2681,9 @@ func (s *Server) handleActivityStream(w http.ResponseWriter, r *http.Request) {
 	claims := auth.ClaimsFromContext(r.Context())
 	authz := s.deps.Authorizer
 
-	controller := r.URL.Query().Get("controller")
-	var ch <-chan sse.Record
-	if controller != "" {
-		// Per-controller subscription: key format "namespace/controller"
-		// When we only have a bare controller name, subscribe to the
-		// global feed; the authz gate will enrich per-controller filtering.
-		// For now, subscribe globally — the frontend filters.
-		ch = s.deps.Broadcaster.SubscribeAll()
-	} else {
-		ch = s.deps.Broadcaster.SubscribeAll()
-	}
+	// The stream subscribes to every event. Matches applies the parsed
+	// filter, controller included, to each event below.
+	ch := s.deps.Broadcaster.SubscribeAll()
 	defer s.deps.Broadcaster.Unsubscribe("*", ch)
 
 	// Send the headers now so the client sees the stream open before the
