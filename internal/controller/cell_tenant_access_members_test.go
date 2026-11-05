@@ -57,3 +57,23 @@ func TestTenantIsDrainingFromCellReadsTheScalarForAnEmptyList(t *testing.T) {
 		t.Error("an empty member list does not read the scalar cell")
 	}
 }
+
+// TestTenantIsDrainingFromCellReadsAMemberDrain asserts a member the pass
+// releases drains its own cell alone, with no voluntary move in progress.
+func TestTenantIsDrainingFromCellReadsAMemberDrain(t *testing.T) {
+	slot0, slot1 := int32(0), int32(1)
+	tenant := drainingTenant([]v1alpha1.TenantMemberStatus{
+		{Cell: "cell-a", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive, Slot: &slot0},
+		{Cell: "cell-b", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleActive, Slot: &slot1, Stale: true, Draining: true},
+		{Cell: "cell-c", CellNamespace: "cells-ns", Role: v1alpha1.TenantMemberRoleStandby, Stale: true},
+	})
+	tenant.Status.Conditions[0].Reason = v1alpha1.TenantReasonMembersStale
+
+	want := map[string]bool{"cell-a": false, "cell-b": true, "cell-c": false, "cell-z": false}
+	for name, draining := range want {
+		cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "cells-ns"}}
+		if got := tenantIsDrainingFromCell(tenant, cr); got != draining {
+			t.Errorf("%s draining = %v, want %v", name, got, draining)
+		}
+	}
+}

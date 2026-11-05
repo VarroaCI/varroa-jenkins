@@ -591,6 +591,12 @@ spec:
                           description: CellNamespace is the namespace of that cell
                             Controller.
                           type: string
+                        draining:
+                          description: |-
+                            Draining is true while the member's cell drops the tenant's folder
+                            before the placement pass releases that cell. The member keeps its
+                            role and its slot until the cell drains.
+                          type: boolean
                         role:
                           description: Role is TenantMemberRoleActive or TenantMemberRoleStandby.
                           type: string

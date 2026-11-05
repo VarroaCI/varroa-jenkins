@@ -44,26 +44,24 @@ func findTenantCondition(conds []v1alpha1.TenantCondition, condType string) *v1a
 	return nil
 }
 
-// tenantIsDrainingFromCell reports whether tenant is draining away from cr:
-// its Placed condition is False with reason TenantMoving, and its
-// placement still names this cell (design D4, tenant-isolation spec). A
-// draining tenant's folder is omitted from the merged manifest, which is
-// what makes the voluntary move's idle test converge.
+// tenantIsDrainingFromCell reports whether tenant is draining away from cr
+// (design D4, tenant-isolation spec). A voluntary move drains every member
+// cell: its Placed condition is False with reason TenantMoving, and its
+// placement still names cr. A member the pass releases drains its own cell
+// alone, through the member's draining flag. A draining tenant's folder is
+// omitted from the merged manifest, which is what makes the voluntary
+// move's idle test and a member's release converge.
 func tenantIsDrainingFromCell(tenant *v1alpha1.Tenant, cr *v1alpha1.Controller) bool {
-	cond := findTenantCondition(tenant.Status.Conditions, v1alpha1.TenantConditionPlaced)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TenantReasonTenantMoving {
-		return false
-	}
-	// A draining tenant loses its folder on every member's cell, so the
-	// voluntary move's idle test converges on all of them.
 	p := tenant.Status.Placement
 	if p == nil {
 		return false
 	}
+	cond := findTenantCondition(tenant.Status.Conditions, v1alpha1.TenantConditionPlaced)
+	moving := cond != nil && cond.Status == metav1.ConditionFalse && cond.Reason == v1alpha1.TenantReasonTenantMoving
 	for _, m := range p.Members {
 		if m.Cell == cr.Name && m.CellNamespace == cr.Namespace {
-			return true
+			return moving || m.Draining
 		}
 	}
-	return p.Cell == cr.Name && p.CellNamespace == cr.Namespace
+	return moving && p.Cell == cr.Name && p.CellNamespace == cr.Namespace
 }

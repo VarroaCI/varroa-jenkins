@@ -334,15 +334,54 @@ func TestPlaceReplacesStaleMembersWithFreshCells(t *testing.T) {
 		return true, nil
 	}
 
+	// Tick 1: b and c are stale and still hold the folder. Both drain, and
+	// no replacement binds.
 	out, err := Place(context.Background(), in, tenant, status)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
+	}
+	if status.Placement.Generation != 3 {
+		t.Errorf("tick 1 generation = %d, want 3", status.Placement.Generation)
+	}
+	if !storedMemberOf(status, "cell-b").Draining || !storedMemberOf(status, "cell-c").Draining {
+		t.Errorf("stale members b and c should drain, got %+v", status.Placement.Members)
+	}
+	for _, name := range []string{"cell-b", "cell-c", "cell-e", "cell-f"} {
+		if patchFor(out, name) != nil || claimedCells(out)[name] {
+			t.Errorf("tick 1 must not patch or claim %s: %+v", name, out.CellPatches)
+		}
+	}
+	if n := strings.Count(placedMessage(status), "(draining)"); n != 2 {
+		t.Errorf("tick 1 message should mark two draining members, got %d: %q", n, placedMessage(status))
+	}
+
+	// Tick 2: cell-b still owes an item deletion, so it keeps draining.
+	in.LastSync = out.SyncCacheUpdate
+	editCell(&in, "cell-b", func(c *CellCandidate) {
+		c.AppliedTenants = nil
+		c.PendingDeletionPaths = []string{"payments/api"}
+	})
+	out, err = Place(context.Background(), in, tenant, status)
+	if err != nil {
+		t.Fatalf("Place tick 2: %v", err)
+	}
+	if !storedMemberOf(status, "cell-b").Draining || storedMemberOf(status, "cell-e").Cell != "" {
+		t.Errorf("tick 2 should hold the drain of cell-b, got %+v", status.Placement.Members)
+	}
+
+	// Tick 3: cell-b is clear and cell-c drops the folder. Both release.
+	in.LastSync = out.SyncCacheUpdate
+	editCell(&in, "cell-b", func(c *CellCandidate) { c.PendingDeletionPaths = nil })
+	editCell(&in, "cell-c", func(c *CellCandidate) { simulateMemberDrain(status, c) })
+	out, err = Place(context.Background(), in, tenant, status)
+	if err != nil {
+		t.Fatalf("Place tick 3: %v", err)
 	}
 	if status.Placement.Generation != 4 {
 		t.Errorf("generation = %d, want 4", status.Placement.Generation)
 	}
 	if !dropsTenant(patchFor(out, "cell-b")) || !dropsTenant(patchFor(out, "cell-c")) {
-		t.Errorf("want stale members b and c patched without the tenant, got %+v", out.CellPatches)
+		t.Errorf("want drained members b and c patched without the tenant, got %+v", out.CellPatches)
 	}
 	slot1 := findMember(memberBindingsOf(status), "cell-e")
 	if slot1 == nil || slot1.Slot == nil || *slot1.Slot != 1 {
@@ -377,6 +416,7 @@ func TestPlaceReplacesAMemberOnAPoolChange(t *testing.T) {
 	d.AppliedTenants = []string{"payments"}
 	b := poolCell("cell-b", "small", "payments")
 	b.AppliedTenants = []string{"payments"}
+	b.Instance = "uid-cell-b"
 	in.Cells = []CellCandidate{d, b, poolCell("cell-e", "big")}
 	status := placedStatus(3)
 	status.Placement.Cell = "cell-d"
@@ -385,8 +425,21 @@ func TestPlaceReplacesAMemberOnAPoolChange(t *testing.T) {
 		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
 	}
 
-	if _, err := Place(context.Background(), in, tenant, status); err != nil {
+	// Tick 1: cell-b is on the old pool and still holds the folder, so it drains.
+	out, err := Place(context.Background(), in, tenant, status)
+	if err != nil {
 		t.Fatalf("Place: %v", err)
+	}
+	if len(status.Placement.Members) != 2 || status.Placement.Members[1].Cell != "cell-b" ||
+		!status.Placement.Members[1].Draining {
+		t.Fatalf("slot 1 should keep cell-b while it drains, got %+v", status.Placement.Members)
+	}
+
+	// Tick 2: cell-b has dropped the folder, so slot 1 moves to cell-e.
+	in.LastSync = out.SyncCacheUpdate
+	editCell(&in, "cell-b", func(c *CellCandidate) { c.AppliedTenants = nil })
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
+		t.Fatalf("Place tick 2: %v", err)
 	}
 	if len(status.Placement.Members) != 2 || status.Placement.Members[1].Cell != "cell-e" {
 		t.Fatalf("slot 1 should move to cell-e, got %+v", status.Placement.Members)
@@ -446,7 +499,7 @@ func TestDesiredMembersReleasesAStaleStandbyFirst(t *testing.T) {
 	tenant := slotTenant(1, 1)
 	slot0 := appliedCell("cell-a", "payments")
 	in.Cells = []CellCandidate{
-		slot0, oldProfileCell("cell-b", "payments"), appliedCell("cell-c", "payments"),
+		slot0, drainedOldCell("cell-b"), appliedCell("cell-c", "payments"),
 	}
 	status := placedStatus(3)
 	status.Placement.Members = []v1alpha1.TenantMemberStatus{

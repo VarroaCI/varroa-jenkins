@@ -467,6 +467,22 @@ func markStaleMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.Tenan
 	}
 }
 
+// markDrainingMembers copies each decided member's Draining flag onto the
+// stored member of the same cell. The record store never reads the flag,
+// so the write needs no announcement. A stored member the pass releases
+// this tick keeps its flag until the announced list replaces it.
+func markDrainingMembers(p *v1alpha1.TenantPlacementStatus, decided []MemberBinding) {
+	draining := map[string]bool{}
+	for _, m := range decided {
+		draining[memberKey(m.Namespace, m.Cell)] = m.Draining
+	}
+	for i := range p.Members {
+		if d, ok := draining[memberKey(p.Members[i].CellNamespace, p.Members[i].Cell)]; ok {
+			p.Members[i].Draining = d
+		}
+	}
+}
+
 // staleMembersMessage names each stale member in the stored order, so a
 // repeat tick writes the same message. It also names the pool cap while
 // the resolved pool reports CellCapReached, because no member can move
@@ -475,7 +491,11 @@ func staleMembersMessage(in Inputs, tenant *v1alpha1.Tenant, members []v1alpha1.
 	var names []string
 	for _, m := range members {
 		if m.Stale {
-			names = append(names, fmt.Sprintf("%s %s/%s", memberRoleLabel(m), m.CellNamespace, m.Cell))
+			name := fmt.Sprintf("%s %s/%s", memberRoleLabel(m), m.CellNamespace, m.Cell)
+			if m.Draining {
+				name += " (draining)"
+			}
+			names = append(names, name)
 		}
 	}
 	poolName := ResolvedPoolName(tenant.Spec.Pipelines)
@@ -1099,6 +1119,7 @@ func maybeReannounce(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, st
 	rehydratedInstance, pendingJobs := currentRehydrationState(in, cell)
 
 	members, _ := desiredMembers(in, tenant, status, &cell, nowT)
+	markDrainingMembers(status.Placement, members)
 	announced := announceMembers(members)
 	// A member joining, a member leaving, a member instance change, a
 	// member seed change, and a member applied change are each a trigger.
@@ -1439,7 +1460,9 @@ func appendMemberCellPatches(in Inputs, tenant *v1alpha1.Tenant, members []Membe
 }
 
 // appendReleasedMemberPatches drops the tenant from every cell it held a
-// member on before this tick and holds no member on now. A scale-down of
+// member on before this tick and holds no member on now. A member reaches
+// this path only after its cell drains, or when its cell is gone or
+// evacuating. A scale-down of
 // the slots, a scale-down of the standbys, and a member replacement all
 // reach this path, so no former member keeps the tenant's folder, its
 // desired state, or a unit of that cell's capacity.

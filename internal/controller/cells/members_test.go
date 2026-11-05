@@ -237,7 +237,7 @@ func TestDesiredMembersScaleDownReleasesTheHighestSlots(t *testing.T) {
 	in := testInputs()
 	tenant := slotTenant(2, 0)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", tenant.Name), appliedCell("cell-b", tenant.Name), appliedCell("cell-c", tenant.Name),
+		appliedCell("cell-a", tenant.Name), appliedCell("cell-b", tenant.Name), drainedHolder("cell-c", tenant.Name),
 	}
 	status := placedStatus(3)
 	status.Placement.Members = []v1alpha1.TenantMemberStatus{

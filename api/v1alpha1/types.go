@@ -1941,6 +1941,10 @@ type TenantMemberStatus struct {
 	// belongs to another pool. The member keeps its cell until the
 	// tenant's pool has a free cell for it.
 	Stale bool `json:"stale,omitempty"`
+	// Draining is true while the member's cell drops the tenant's folder
+	// before the placement pass releases that cell. The member keeps its
+	// role and its slot until the cell drains.
+	Draining bool `json:"draining,omitempty"`
 }
 
 // TenantPipelinesStatus carries a pipelines tenant's door credentials and

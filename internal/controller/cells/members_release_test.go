@@ -85,7 +85,7 @@ func TestPlaceReleasesAScaledDownSlot(t *testing.T) {
 	in := testInputs()
 	tenant := slotTenant(1, 0)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", tenant.Name), appliedCell("cell-b", tenant.Name),
+		appliedCell("cell-a", tenant.Name), drainedHolder("cell-b", tenant.Name),
 	}
 	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
 		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
@@ -114,7 +114,7 @@ func TestPlaceReleasesAScaledDownStandby(t *testing.T) {
 	in := testInputs()
 	tenant := slotTenant(1, 0)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", tenant.Name), appliedCell("cell-c", tenant.Name),
+		appliedCell("cell-a", tenant.Name), drainedHolder("cell-c", tenant.Name),
 	}
 	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
 		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
@@ -229,7 +229,7 @@ func TestPlaceReleasesAMemberWithACellScopedPurge(t *testing.T) {
 	in := testInputs()
 	tenant := slotTenant(1, 0)
 	in.Cells = []CellCandidate{
-		appliedCell("cell-a", tenant.Name), appliedCell("cell-b", tenant.Name),
+		appliedCell("cell-a", tenant.Name), drainedHolder("cell-b", tenant.Name),
 	}
 	var seen []PurgeRequest
 	in.RequestPurge = func(_ context.Context, req PurgeRequest) (bool, error) {
