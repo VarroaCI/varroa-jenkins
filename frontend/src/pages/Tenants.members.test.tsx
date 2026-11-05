@@ -37,6 +37,7 @@ const multiSlotTenant = {
       { cell: "cell-a", cellNamespace: "cells-ns", role: "active", slot: 0, applied: true },
       { cell: "cell-b", cellNamespace: "cells-ns", role: "active", slot: 1, applied: true },
       { cell: "cell-c", cellNamespace: "cells-ns", role: "standby", applied: true, stale: true },
+      { cell: "cell-d", cellNamespace: "cells-ns", role: "active", slot: 2, applied: true, stale: true, draining: true },
     ],
   },
 };
@@ -64,6 +65,7 @@ describe("Tenants member list", () => {
     expect(await screen.findByText("cell-a (slot 0)")).toBeInTheDocument();
     expect(screen.getByText("cell-b (slot 1)")).toBeInTheDocument();
     expect(screen.getByText("cell-c (standby, waiting to move)")).toBeInTheDocument();
+    expect(screen.getByText("cell-d (slot 2, draining)")).toBeInTheDocument();
   });
 
   // A tenant with no member list falls back to the scalar placement, so it

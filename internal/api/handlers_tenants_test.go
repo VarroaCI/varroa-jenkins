@@ -1179,3 +1179,28 @@ func TestTenantPlacementEntryCarriesTheStaleFlag(t *testing.T) {
 		t.Errorf("stale flags = %t/%t, want false/true", entry.Members[0].Stale, entry.Members[1].Stale)
 	}
 }
+
+// TestTenantPlacementEntryCarriesTheDrainingFlag asserts each member entry
+// maps the draining flag from the stored status, and the wire shape names it.
+func TestTenantPlacementEntryCarriesTheDrainingFlag(t *testing.T) {
+	slot := int32(1)
+	entry := tenantPlacementEntryFromStatus(&v1alpha1.TenantPlacementStatus{
+		Cell: "cell-a", CellNamespace: "cells",
+		Members: []v1alpha1.TenantMemberStatus{
+			{Cell: "cell-a", CellNamespace: "cells", Role: v1alpha1.TenantMemberRoleActive, Slot: &slot, Applied: true, Stale: true, Draining: true},
+		},
+	})
+	if entry == nil || len(entry.Members) != 1 {
+		t.Fatalf("entry = %+v, want one member", entry)
+	}
+	if !entry.Members[0].Draining {
+		t.Error("draining = false, want true")
+	}
+	raw, err := json.Marshal(entry.Members[0])
+	if err != nil {
+		t.Fatalf("marshal member: %v", err)
+	}
+	if !strings.Contains(string(raw), `"draining":true`) {
+		t.Errorf("member JSON = %s, want draining:true", raw)
+	}
+}

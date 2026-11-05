@@ -17011,6 +17011,10 @@
           "cluster": {
             "type": "string"
           },
+          "draining": {
+            "description": "True while the member's cell drops the tenant folder before the placement pass releases that cell.",
+            "type": "boolean"
+          },
           "failedLast24h": {
             "format": "int64",
             "type": "integer"
@@ -17045,6 +17049,7 @@
           "cluster",
           "role",
           "stale",
+          "draining",
           "runningNow",
           "runsLast24h",
           "failedLast24h",
@@ -17276,6 +17281,10 @@
           "cellNamespace": {
             "description": "Namespace of that cell Controller.",
             "type": "string"
+          },
+          "draining": {
+            "description": "True while the member's cell drops the tenant folder before the placement pass releases that cell.",
+            "type": "boolean"
           },
           "role": {
             "description": "An active member holds one slot. A standby holds the folder, holds no slot, and runs no build.",

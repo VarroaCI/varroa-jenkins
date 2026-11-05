@@ -5400,8 +5400,11 @@ type ComponentsSchemasTenantCellState string
 
 // ComponentsSchemasTenantCellMember One member of the tenant, with that member's own four load counts. The counts apply the same grant narrowing the top-level counts apply. No entry names another tenant.
 type ComponentsSchemasTenantCellMember struct {
-	Cell          string `json:"cell"`
-	Cluster       string `json:"cluster"`
+	Cell    string `json:"cell"`
+	Cluster string `json:"cluster"`
+
+	// Draining True while the member's cell drops the tenant folder before the placement pass releases that cell.
+	Draining      bool   `json:"draining"`
 	FailedLast24h int64  `json:"failedLast24h"`
 	Jobs          int64  `json:"jobs"`
 	Namespace     string `json:"namespace"`
@@ -5505,6 +5508,9 @@ type ComponentsSchemasTenantMember struct {
 
 	// CellNamespace Namespace of that cell Controller.
 	CellNamespace *string `json:"cellNamespace,omitempty"`
+
+	// Draining True while the member's cell drops the tenant folder before the placement pass releases that cell.
+	Draining *bool `json:"draining,omitempty"`
 
 	// Role An active member holds one slot. A standby holds the folder, holds no slot, and runs no build.
 	Role *ComponentsSchemasTenantMemberRole `json:"role,omitempty"`

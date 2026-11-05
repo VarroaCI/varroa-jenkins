@@ -457,3 +457,35 @@ func wantTenantCellCount(t *testing.T, name string, got *int64, want int64) {
 		t.Errorf("%s = %d, want %d", name, *got, want)
 	}
 }
+
+// TestGetTenantCellCarriesTheDrainingMember asserts a member that its cell
+// drops reads draining true on the tenant cell body, and the other member
+// reads draining false.
+func TestGetTenantCellCarriesTheDrainingMember(t *testing.T) {
+	client, reader := tenantCellFixture(t, []string{tenantCellTenant})
+	obj := tenantCellObject("core", v1alpha1.TenantReasonTenantPlaced)
+	_ = unstructured.SetNestedSlice(obj.Object, []any{
+		map[string]any{"cell": "cell-a", "cellNamespace": "cells", "role": "active", "slot": int64(0), "applied": true},
+		map[string]any{"cell": "cell-b", "cellNamespace": "cells", "role": "active", "slot": int64(1), "applied": true, "stale": true, "draining": true},
+	}, "status", "placement", "members")
+	seedTenant(t, client.crdStore, obj)
+	srv := tenantCellServer(client, tenantCellAuthorizer([]string{tenantCellTenant}, nil), reader)
+
+	rec := doTenantCellRequest(t, srv, tenantCellTenant)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	body := decodeTenantCell(t, rec)
+	if len(body.Members) != 2 {
+		t.Fatalf("members = %d, want 2 (body %s)", len(body.Members), rec.Body.String())
+	}
+	if body.Members[0].Draining {
+		t.Error("member 0 draining = true, want false")
+	}
+	if !body.Members[1].Draining || !body.Members[1].Stale {
+		t.Errorf("member 1 draining/stale = %t/%t, want true/true", body.Members[1].Draining, body.Members[1].Stale)
+	}
+	if !strings.Contains(rec.Body.String(), `"draining":false`) {
+		t.Errorf("body lacks an explicit draining:false: %s", rec.Body.String())
+	}
+}

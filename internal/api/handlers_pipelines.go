@@ -1484,7 +1484,10 @@ type tenantCellMemberJSON struct {
 	Role      string `json:"role"`
 	// Stale is true when the member's cell serves another profile or
 	// belongs to another pool.
-	Stale         bool  `json:"stale"`
+	Stale bool `json:"stale"`
+	// Draining is true while the member's cell drops the tenant folder
+	// before the placement pass releases that cell.
+	Draining      bool  `json:"draining"`
 	RunningNow    int64 `json:"runningNow"`
 	RunsLast24h   int64 `json:"runsLast24h"`
 	FailedLast24h int64 `json:"failedLast24h"`
@@ -1655,7 +1658,7 @@ func (s *Server) tenantCellMembers(ctx context.Context, claims *auth.Claims, ref
 	for _, m := range members {
 		entry := tenantCellMemberJSON{
 			Cell: m.Cell, Namespace: m.CellNamespace, Cluster: ref.Cluster,
-			Role: renderTenantMemberRole(m), Stale: m.Stale,
+			Role: renderTenantMemberRole(m), Stale: m.Stale, Draining: m.Draining,
 		}
 		memberRef := ref
 		memberRef.Namespace = m.CellNamespace
