@@ -133,6 +133,15 @@ jobs:
         run: |
           shellcheck hack/check-generated.sh hack/check-generated_test.sh
           make check-generated-test
+      - name: Check varroactl platforms
+        # Only a Go change can break the varroactl build, so the step needs the go output.
+        # A separate build cache keeps the cross-compile output out of the saved setup-go cache.
+        if: ${{ !cancelled() && needs.changes.outputs.go == 'true' }}
+        env:
+          GOCACHE: ${{ runner.temp }}/varroactl-platforms-gocache
+        run: |
+          shellcheck hack/check-varroactl-platforms.sh
+          make check-varroactl-platforms
       - name: Check Proto
         if: ${{ !cancelled() }}
         run: make check-proto

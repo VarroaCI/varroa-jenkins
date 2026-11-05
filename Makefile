@@ -1,4 +1,4 @@
-.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-generated-test check-plugin-advisories-test check-comments check-outbound check-terminology outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
+.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-generated-test check-plugin-advisories-test check-comments check-outbound check-terminology check-varroactl-platforms outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
 
 GIT_SHA=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -80,6 +80,11 @@ check-outbound:
 # Fails on a tracked text hit of the old product word outside the allowlist.
 check-terminology:
 	hack/check-terminology.sh
+
+# Builds varroactl for each release platform and writes no binary.
+# The varroactl release job reads the same list with --list.
+check-varroactl-platforms:
+	bash hack/check-varroactl-platforms.sh
 
 # Regenerates docs/security/outbound-connections.md from the inventory.
 outbound-doc:
