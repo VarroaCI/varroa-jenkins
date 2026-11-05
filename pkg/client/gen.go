@@ -3597,6 +3597,9 @@ type ComponentsSchemasObjectMeta struct {
 	Labels      *map[string]string `json:"labels,omitempty"`
 	Name        *string            `json:"name,omitempty"`
 	Namespace   *string            `json:"namespace,omitempty"`
+
+	// ResourceVersion The version of the stored object, as the server returned it. Each write operation states how it uses this value.
+	ResourceVersion *string `json:"resourceVersion,omitempty"`
 }
 
 // ComponentsSchemasPendingDeletion Pending item deletion.

@@ -135,6 +135,7 @@ export default function SettingsProvisioningTab() {
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 409) {
         setConflict(true);
+        setMissing(false);
         return;
       }
       setSaveError(e instanceof Error ? e.message : String(e));

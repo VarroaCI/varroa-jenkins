@@ -674,6 +674,84 @@ func TestMCPUpdateProvisioningDefaults_NotFoundOnTargetStartsEmpty(t *testing.T)
 	if body.Name != "varroa-defaults" {
 		t.Errorf("name = %q, want varroa-defaults", body.Name)
 	}
+	if body.ResourceVersion != "" {
+		t.Errorf("resourceVersion = %q, want empty: a not-found base only creates", body.ResourceVersion)
+	}
+}
+
+// A not-found read gives a base with no resourceVersion, so the write only
+// creates. When another writer creates the object first, the write answers
+// conflict, and the tool reads the target again and merges onto that object.
+func TestMCPUpdateProvisioningDefaults_CreateConflictReadsAndMergesAgain(t *testing.T) {
+	deps := adminDeps()
+	brood := &pdRoutedBrood{
+		stored:        map[string]json.RawMessage{},
+		conflicts:     1,
+		afterConflict: pdSpecRawAt(t, "varroa-defaults", "1", "raced.example.com"),
+	}
+	deps.ConfigBrood = brood
+
+	tr := updatePDCall(t, deps, map[string]interface{}{
+		"name": "varroa-defaults", "cluster": "member-b", "storageClass": "fast",
+	})
+	if tr.IsError {
+		t.Fatalf("tool errored: %v", tr.Content)
+	}
+	if len(brood.reads) != 2 {
+		t.Fatalf("base reads = %v, want two reads of member-b", brood.reads)
+	}
+	if len(brood.updates) != 2 {
+		t.Fatalf("got %d updates, want 2", len(brood.updates))
+	}
+	if got := brood.updates[0].body.ResourceVersion; got != "" {
+		t.Errorf("first write resourceVersion = %q, want empty (create-only)", got)
+	}
+	second := brood.updates[1].body
+	if second.ResourceVersion != "1" {
+		t.Errorf("second write resourceVersion = %q, want 1", second.ResourceVersion)
+	}
+	if second.Spec.RootDomain != "raced.example.com" {
+		t.Errorf("second write rootDomain = %q, want the other writer's value", second.Spec.RootDomain)
+	}
+	if second.Spec.StorageClass != "fast" {
+		t.Errorf("second write storageClass = %q, want fast", second.Spec.StorageClass)
+	}
+}
+
+// The local-store path has the same race. The first read misses although the
+// object exists, so the create conflicts and the second round merges onto it.
+func TestMCPUpdateProvisioningDefaults_StoreFallbackCreateRaceReadsAndMergesAgain(t *testing.T) {
+	deps := adminDeps()
+	deps.ConfigBrood = nil
+	fake := deps.Store.(*crdstore.Fake)
+	if err := fake.Seed(&v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "raced.example.com"},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	gvr, err := crdstore.GVRFor[v1alpha1.ProvisioningDefaults]()
+	if err != nil {
+		t.Fatalf("GVRFor: %v", err)
+	}
+	fake.FailNext("get", gvr, apierrors.NewNotFound(gvr.GroupResource(), "varroa-defaults"))
+
+	tr := updatePDCall(t, deps, map[string]interface{}{
+		"name": "varroa-defaults", "storageClass": "fast",
+	})
+	if tr.IsError {
+		t.Fatalf("tool errored after a create race: %v", tr.Content)
+	}
+	got, err := crdstore.Get[v1alpha1.ProvisioningDefaults](context.Background(), fake, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Spec.RootDomain != "raced.example.com" {
+		t.Errorf("rootDomain = %q, want the other writer's value kept", got.Spec.RootDomain)
+	}
+	if got.Spec.StorageClass != "fast" {
+		t.Errorf("storageClass = %q, want fast", got.Spec.StorageClass)
+	}
 }
 
 // A transient read error must fail the call. Starting from empty would write

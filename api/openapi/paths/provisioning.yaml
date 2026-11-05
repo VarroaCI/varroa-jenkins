@@ -23,9 +23,10 @@
     tags: [provisioning]
     summary: Updates provisioning defaults for a cluster.
     description: >-
-      The body can carry metadata.resourceVersion. A stale version, or an object
-      deleted after the read, answers 409 and writes nothing. A body without one
-      creates or replaces the object.
+      Send the metadata.resourceVersion of your read. The write then changes only
+      that version. A stale version, or an object deleted after the read, answers
+      409 and writes nothing. A body without metadata.resourceVersion only creates
+      the object. When the object exists, that body answers 409 and writes nothing.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/name'

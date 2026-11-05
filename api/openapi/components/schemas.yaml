@@ -1000,6 +1000,11 @@ ObjectMeta:
       type: string
     namespace:
       type: string
+    resourceVersion:
+      type: string
+      description: >-
+        The version of the stored object, as the server returned it. Each write
+        operation states how it uses this value.
     labels:
       type: object
       additionalProperties:

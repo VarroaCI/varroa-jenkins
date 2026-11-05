@@ -178,7 +178,7 @@ A session call adds a `Varroa-Session` trailer to the commit. A failed call star
 
 ## Account for redaction
 
-MCP and REST results omit credentials and noisy Kubernetes metadata. Removed
+MCP results omit credentials and noisy Kubernetes metadata. Removed
 fields include:
 
 - controller wake tokens

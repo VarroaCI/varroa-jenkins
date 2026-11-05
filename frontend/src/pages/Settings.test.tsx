@@ -381,6 +381,19 @@ describe("Settings provisioning tab without varroa-defaults", () => {
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
   });
 
+  it("shows the conflict note without the missing note when another writer creates the defaults first", async () => {
+    mockGetConfig.mockRejectedValue(new ApiError(404, "We could not find that page."));
+    mockUpdateConfig.mockRejectedValue(new ApiError(409, "was created after it was read"));
+    renderSettings();
+
+    await userEvent.type(await screen.findByLabelText("Storage Class"), "fast");
+    await userEvent.click(screen.getByText("Save"));
+
+    expect(await screen.findByText(/Another user or tool changed these defaults/)).toBeInTheDocument();
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+    expect(mockUpdateConfig.mock.calls[0][1].metadata.resourceVersion).toBeUndefined();
+  });
+
   it("reloads the defaults when Reload is clicked after a conflict", async () => {
     mockGetConfig
       .mockResolvedValueOnce(

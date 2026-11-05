@@ -2559,6 +2559,10 @@ components:
           type: string
         namespace:
           type: string
+        resourceVersion:
+          description: The version of the stored object, as the server returned it.
+            Each write operation states how it uses this value.
+          type: string
       type: object
     PendingDeletion:
       additionalProperties: false
@@ -9527,6 +9531,10 @@ components:
         name:
           type: string
         namespace:
+          type: string
+        resourceVersion:
+          description: The version of the stored object, as the server returned it.
+            Each write operation states how it uses this value.
           type: string
       type: object
     components_schemas_PendingDeletion:
@@ -17336,9 +17344,11 @@ paths:
       tags:
       - provisioning
     put:
-      description: The body can carry metadata.resourceVersion. A stale version, or
-        an object deleted after the read, answers 409 and writes nothing. A body without
-        one creates or replaces the object.
+      description: Send the metadata.resourceVersion of your read. The write then
+        changes only that version. A stale version, or an object deleted after the
+        read, answers 409 and writes nothing. A body without metadata.resourceVersion
+        only creates the object. When the object exists, that body answers 409 and
+        writes nothing.
       operationId: updateProvisioningDefaults
       parameters:
       - $ref: '#/components/parameters/components_parameters_cluster'
