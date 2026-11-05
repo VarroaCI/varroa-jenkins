@@ -38,10 +38,16 @@ export interface AssistantState {
   setHint(h: RouteHint): void;
   /** toggleDrawer opens or closes the drawer. A close puts focus on returnTo when the caller names one. */
   toggleDrawer(returnTo?: HTMLElement): void;
-  openSession(id: string): void;
+  /** openSession opens the drawer on a session. A page button passes itself as opener, so a close can return focus to it. */
+  openSession(id: string, opener?: HTMLElement): void;
   openWithMessage(text: string, ctx: AssistantSessionContext): void;
-  explainRun(runId: string, ctx: AssistantSessionContext): void;
-  startSession(body: { context: AssistantSessionContext; message?: string; prompt?: string }): Promise<StartResult>;
+  /** explainRun starts an explain session. A page button passes the opener that a close returns focus to. */
+  explainRun(runId: string, ctx: AssistantSessionContext, opener?: HTMLElement): void;
+  /** startSession creates a session and opens the drawer on it. A created session names the opener. */
+  startSession(
+    body: { context: AssistantSessionContext; message?: string; prompt?: string },
+    opener?: HTMLElement,
+  ): Promise<StartResult>;
   /** resolved refreshes the approval and session reads after a decision. It does not change epoch. */
   resolved(sessionId: string): void;
   onSessionDone(sessionId: string, state: AssistantSessionState): void;
@@ -51,6 +57,8 @@ export interface AssistantState {
   doorRef: { current: HTMLElement | null };
   /** returnToRef holds the focus target that the last close named. The drawer reads it when it unmounts. */
   returnToRef: { current: HTMLElement | null };
+  /** openerRef holds the page button that the last open named. The drawer reads it and clears it when it mounts. */
+  openerRef: { current: HTMLElement | null };
 }
 
 const OFF: AssistantState = {
@@ -78,6 +86,7 @@ const OFF: AssistantState = {
   registerDoor: () => {},
   doorRef: { current: null },
   returnToRef: { current: null },
+  openerRef: { current: null },
 };
 
 const AssistantCtx = createContext<AssistantState>(OFF);
@@ -151,6 +160,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [hint, setHintState] = useState<RouteHint>({});
   const doorRef = useRef<HTMLElement | null>(null);
   const returnToRef = useRef<HTMLElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
 
   const setHint = useCallback((h: RouteHint) => setHintState(h), []);
   const registerDoor = useCallback((el: HTMLElement | null) => {
@@ -203,7 +213,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }, [subject, pending, onSessionDone]);
 
   const openSession = useCallback(
-    (id: string) => {
+    (id: string, opener?: HTMLElement) => {
+      if (opener) openerRef.current = opener;
       setActiveSessionId(id);
       if (subject) writeLast(subject, id);
       setDrawerOpen(true);
@@ -229,11 +240,16 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const newConversation = useCallback(() => setActiveSessionId(null), []);
 
   const startSession = useCallback(
-    async (body: { context: AssistantSessionContext; message?: string; prompt?: string }): Promise<StartResult> => {
+    async (
+      body: { context: AssistantSessionContext; message?: string; prompt?: string },
+      opener?: HTMLElement,
+    ): Promise<StartResult> => {
       try {
         const s = await createAssistantSession(body);
         setActiveSessionId(s.id);
         if (subject) writeLast(subject, s.id);
+        // A failed create opens no drawer, so only a created session names the opener.
+        if (opener) openerRef.current = opener;
         setDrawerOpen(true);
         setEpoch((e) => e + 1);
         return { ok: true, sessionId: s.id };
@@ -259,8 +275,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   );
 
   const explainRun = useCallback(
-    (runId: string, ctx: AssistantSessionContext) => {
-      void startSession({ context: ctx, prompt: "explain-failure" }).then((r) => {
+    (runId: string, ctx: AssistantSessionContext, opener?: HTMLElement) => {
+      void startSession({ context: ctx, prompt: "explain-failure" }, opener).then((r) => {
         if (r.ok) pending.add({ sessionId: r.sessionId, runId });
       });
     },
@@ -303,6 +319,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       registerDoor,
       doorRef,
       returnToRef,
+      openerRef,
     }),
     [
       me.isFetched, available, switchOn, canUse, paused, settings.data, drawerOpen, activeSessionId, epoch, hint,

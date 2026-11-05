@@ -161,7 +161,7 @@ export default function ProposePipelineCard({ tenant }: { tenant: string }) {
   const loading = !startedOver && (sessions.isPending || (!!current && detail.isPending));
   const view: ProposeView = startedOver ? { kind: "form" } : proposeView(detail.data);
   const openButton = current ? (
-    <Button size="sm" variant="ghost" onClick={() => assistant.openSession(current)}>Open in the assistant</Button>
+    <Button size="sm" variant="ghost" onClick={(e) => assistant.openSession(current, e.currentTarget)}>Open in the assistant</Button>
   ) : null;
 
   return (

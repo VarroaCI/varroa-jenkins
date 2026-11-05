@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../../test/render-utils";
+import { ApiError } from "../../hooks/useApi";
 import { installMockEventSource, MockEventSource } from "../../test/mockEventSource";
 import { AssistantProvider, useAssistant } from "./AssistantProvider";
 import AssistantDrawer from "./AssistantDrawer";
@@ -363,6 +364,63 @@ describe("AssistantDrawer", () => {
     expect(Array.from(container.querySelectorAll("p")).some((p) => p.textContent === "retry me")).toBe(false);
     expect(screen.getByRole("status").textContent).toBe("");
   });
+
+  /** openCompleted opens s1 as a completed session and returns the message box. */
+  async function openCompleted() {
+    vi.mocked(client.getAssistantSession).mockResolvedValue({ session: { ...session, state: "completed" }, approvals: [] });
+    renderDrawer();
+    fireEvent.click(screen.getByText("open"));
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+    act(() => {
+      es.emitNamedEvent("done", JSON.stringify({ state: "completed", created_at: "2026-11-05T10:00:00Z" }), "1");
+    });
+    return (await screen.findByLabelText("Message")) as HTMLTextAreaElement;
+  }
+
+  it.each([
+    ["Send has focus", true],
+    ["a click on Send does not focus it", false],
+  ])("moves focus to the message box when a send starts and %s", async (_label, focusSend) => {
+    const box = await openCompleted();
+    fireEvent.change(box, { target: { value: "and the fix?" } });
+    const send = screen.getByRole("button", { name: "Send" }) as HTMLButtonElement;
+    await waitFor(() => expect(send.disabled).toBe(false));
+    if (focusSend) act(() => send.focus());
+    else act(() => (document.activeElement as HTMLElement | null)?.blur());
+    fireEvent.click(send);
+    await waitFor(() => expect(client.postAssistantMessage).toHaveBeenCalledWith("s1", { message: "and the fix?" }));
+    expect(send.disabled).toBe(true);
+    expect(document.activeElement).toBe(box);
+  });
+
+  it("offers a new conversation when a follow-up answers a plain 409", async () => {
+    vi.mocked(client.postAssistantMessage).mockRejectedValueOnce(
+      new ApiError(409, "conflict", { error: "the session token budget is spent", code: "assistant_busy" }),
+    );
+    vi.mocked(client.createAssistantSession).mockResolvedValue({ ...session, id: "s2" });
+    const box = await openCompleted();
+    fireEvent.change(box, { target: { value: "one more" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(false));
+    const reads = vi.mocked(client.getAssistantSession).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This conversation cannot continue. Start a new conversation.");
+    await waitFor(() => expect(vi.mocked(client.getAssistantSession).mock.calls.length).toBeGreaterThan(reads));
+    expect(box.value).toBe("one more");
+    expect(screen.queryByRole("button", { name: "New conversation for this page" })).toBeNull();
+
+    const startOver = screen.getByRole("button", { name: "Start a new conversation" });
+    act(() => startOver.focus());
+    fireEvent.click(startOver);
+    expect(screen.queryByRole("button", { name: "Start a new conversation" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("No session")).toBeTruthy();
+    expect(box.value).toBe("one more");
+    expect(document.activeElement).toBe(box);
+
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(client.createAssistantSession).toHaveBeenLastCalledWith({ context: { route: "dashboard" }, message: "one more" }));
+  });
 });
 
 const originalMatchMedia = window.matchMedia;
@@ -408,7 +466,15 @@ function FocusProbe() {
     <>
       <button ref={a.registerDoor} type="button" onClick={(e) => a.toggleDrawer(e.currentTarget)}>door</button>
       <Routes>
-        <Route path="/" element={<button type="button" onClick={() => a.openSession("s1")}>explain</button>} />
+        <Route
+          path="/"
+          element={
+            <>
+              <button type="button" onClick={(e) => a.openSession("s1", e.currentTarget)}>explain</button>
+              <button type="button" onClick={(e) => a.explainRun("r1", { route: "dashboard" }, e.currentTarget)}>explain run</button>
+            </>
+          }
+        />
         <Route path="*" element={<p>other page</p>} />
       </Routes>
       <button type="button" onClick={() => navigate("/other")}>go</button>
@@ -594,5 +660,48 @@ describe("AssistantDrawer focus return", () => {
     expect(screen.queryByRole("button", { name: "New conversation for this page" })).toBeNull();
     expect(screen.getByText("No session")).toBeTruthy();
     expect(document.activeElement).toBe(screen.getByLabelText("Message"));
+  });
+
+  it.each([
+    [1280, "complementary"],
+    [800, "complementary"],
+    [500, "dialog"],
+  ])("returns focus to a page button that a click did not focus at %i px", async (width, role) => {
+    stubViewport(width);
+    renderFocusProbe();
+    const opener = screen.getByRole("button", { name: "explain" });
+    // jsdom, like Safari, does not focus a button on click.
+    fireEvent.click(opener);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" })));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByText("drawer closed")).toBeTruthy();
+    expect(screen.queryByRole(role, { name: "Assistant" })).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("returns focus to the page button after an explain run that a click did not focus", async () => {
+    vi.mocked(client.createAssistantSession).mockResolvedValue({ ...session, id: "s1" });
+    stubViewport(1280);
+    renderFocusProbe();
+    const opener = screen.getByRole("button", { name: "explain run" });
+    fireEvent.click(opener);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" })));
+    fireEvent.keyDown(screen.getByRole("complementary", { name: "Assistant" }), { key: "Escape" });
+    expect(screen.getByText("drawer closed")).toBeTruthy();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("keeps the opener when a page button opens a session while the drawer is open", async () => {
+    stubViewport(1280);
+    renderFocusProbe();
+    const door = await openFrom("door");
+    fireEvent.click(screen.getByRole("button", { name: "explain" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByText("drawer closed")).toBeTruthy();
+    expect(document.activeElement).toBe(door);
+    // The next open does not reuse the page button that named itself while the drawer was open.
+    await openFrom("door");
+    fireEvent.keyDown(screen.getByRole("complementary", { name: "Assistant" }), { key: "Escape" });
+    expect(document.activeElement).toBe(door);
   });
 });

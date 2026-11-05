@@ -10,7 +10,8 @@ import { createTestQueryClient } from "../test/render-utils";
 import { installMockEventSource } from "../test/mockEventSource";
 import Layout from "./Layout";
 import * as client from "../api/client";
-import { createMyAssistant } from "../test/assistantFactories";
+import { createAssistantSession, createMyAssistant } from "../test/assistantFactories";
+import { useAssistant } from "./assistant/AssistantProvider";
 
 vi.mock("../hooks/useApi", async (orig) => {
   const actual = await orig<typeof import("../hooks/useApi")>();
@@ -23,8 +24,15 @@ vi.mock("../api/client", async (orig) => {
     getMyAssistant: vi.fn(),
     getAssistantSettings: vi.fn(async () => ({ paused: false, pausedBy: null, pausedAt: null })),
     listAssistantSessions: vi.fn(async () => ({ items: [], nextCursor: null })),
+    getAssistantSession: vi.fn(async () => ({ session: createAssistantSession({ id: "s1" }), approvals: [] })),
   };
 });
+
+/** PageOpener is a page button that opens the drawer on a session and names itself as the opener. */
+function PageOpener() {
+  const a = useAssistant();
+  return <button type="button" onClick={(e) => a.openSession("s1", e.currentTarget)}>Explain from the page</button>;
+}
 
 installMockEventSource();
 
@@ -38,7 +46,7 @@ function renderShell() {
               <ComposerProvider>
                 <Routes>
                   <Route element={<Layout />}>
-                    <Route path="/activity" element={<div>Activity page</div>} />
+                    <Route path="/activity" element={<><div>Activity page</div><PageOpener /></>} />
                   </Route>
                 </Routes>
               </ComposerProvider>
@@ -120,5 +128,20 @@ describe("Layout assistant doors", () => {
     } finally {
       page.remove();
     }
+  });
+
+  it("returns focus to a page button that a click did not focus", async () => {
+    vi.mocked(client.getMyAssistant).mockResolvedValue(createMyAssistant());
+    renderShell();
+    await screen.findByRole("button", { name: "Assistant" });
+    const page = screen.getByRole("button", { name: "Explain from the page" });
+    // jsdom, like Safari, does not focus a button on click.
+    fireEvent.click(page);
+    const region = await screen.findByRole("complementary", { name: "Assistant" });
+    const close = within(region).getByRole("button", { name: "Close" });
+    await waitFor(() => expect(document.activeElement).toBe(close));
+    fireEvent.click(close);
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Assistant" })).toBeNull());
+    expect(document.activeElement).toBe(page);
   });
 });

@@ -206,6 +206,12 @@
   margin: 0;
 }
 
+/* The button keeps its own width in the drawer column. */
+.startOver {
+  flex: none;
+  align-self: flex-start;
+}
+
 .withheld {
   color: var(--text-2);
   font-style: italic;
