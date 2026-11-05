@@ -221,8 +221,9 @@ export interface ControllerDetail {
   // only on the PATCH response, and only when at least one removal was blocked —
   // an empty or absent array leaves the ordinary success path unchanged.
   unappliedRemovals?: UnappliedRemoval[];
-  // imagePull names the provisioning image pull that runs now. Absent when none runs.
-  imagePull?: { message: string };
+  // provisioningStep names the credited provisioning step that runs now: an image
+  // pull or the plugin download. Absent when no such step runs.
+  provisioningStep?: { step: "imagePull" | "pluginDownload"; message: string };
   // Controller conditions from the CRD status (e.g. HibernationCronTriggersSkipped).
   conditions?: Array<{ type: string; status: string; reason?: string; message?: string; lastTransitionTime?: string }>;
   /** Mirrors v1alpha1.IsCell. Always present. The Cell tab reads this field. */

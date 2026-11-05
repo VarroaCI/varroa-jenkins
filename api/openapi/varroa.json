@@ -2141,9 +2141,6 @@
             "description": "When the controller was last hibernated (status.hibernatedAt, RFC 3339).",
             "type": "string"
           },
-          "imagePull": {
-            "$ref": "#/components/schemas/components_schemas_ImagePull"
-          },
           "jenkinsHealth": {
             "type": "string"
           },
@@ -2215,6 +2212,9 @@
           "powerState": {
             "description": "The controller's spec.powerState intent (Running or Stopped).",
             "type": "string"
+          },
+          "provisioningStep": {
+            "$ref": "#/components/schemas/components_schemas_ProvisioningStep"
           },
           "rbacHash": {
             "type": "string"
@@ -4368,7 +4368,7 @@
             "type": "string"
           },
           "provisioningTimeoutSec": {
-            "description": "Provisioning budget in seconds. Image-pull time does not count, up to 15 minutes. Unset means 300.",
+            "description": "Provisioning budget in seconds. Image pulls and the plugins-init download do not count, up to 15 minutes. Unset means 300.",
             "maximum": 86400,
             "minimum": 60,
             "type": "integer"
@@ -10141,9 +10141,6 @@
             "description": "When the controller was last hibernated (status.hibernatedAt, RFC 3339).",
             "type": "string"
           },
-          "imagePull": {
-            "$ref": "#/components/schemas/components_schemas_ImagePull"
-          },
           "jenkinsHealth": {
             "type": "string"
           },
@@ -10215,6 +10212,9 @@
           "powerState": {
             "description": "The controller's spec.powerState intent (Running or Stopped).",
             "type": "string"
+          },
+          "provisioningStep": {
+            "$ref": "#/components/schemas/components_schemas_ProvisioningStep"
           },
           "rbacHash": {
             "type": "string"
@@ -11718,19 +11718,6 @@
           "cookieDomain",
           "defaultRead",
           "localAccounts"
-        ],
-        "type": "object"
-      },
-      "components_schemas_ImagePull": {
-        "additionalProperties": false,
-        "description": "Read-only projection of the provisioning image pull that runs now. Absent when no pull runs.",
-        "properties": {
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "message"
         ],
         "type": "object"
       },
@@ -14398,7 +14385,7 @@
             "type": "string"
           },
           "provisioningTimeoutSec": {
-            "description": "Provisioning budget in seconds. Image-pull time does not count, up to 15 minutes. Unset means 300.",
+            "description": "Provisioning budget in seconds. Image pulls and the plugins-init download do not count, up to 15 minutes. Unset means 300.",
             "maximum": 86400,
             "minimum": 60,
             "type": "integer"
@@ -14436,6 +14423,27 @@
             "type": "array"
           }
         },
+        "type": "object"
+      },
+      "components_schemas_ProvisioningStep": {
+        "additionalProperties": false,
+        "description": "Read-only projection of the provisioning step that runs now and does not count against the provisioning budget. Absent when no such step runs.",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "step": {
+            "enum": [
+              "imagePull",
+              "pluginDownload"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "step",
+          "message"
+        ],
         "type": "object"
       },
       "components_schemas_QualityCounter": {

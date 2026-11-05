@@ -200,7 +200,7 @@ spec:
               provisioningTimeoutSec:
                 description: |-
                   ProvisioningTimeoutSec is the provisioning budget of a controller, in seconds.
-                  The budget runs until the mite connects. Image-pull time does not count, up to 15 minutes.
+                  The budget runs until the mite connects. Image pulls and the plugins-init download do not count, up to 15 minutes.
                   Unset means 300.
                 maximum: 86400
                 minimum: 60

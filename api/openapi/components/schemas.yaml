@@ -1687,13 +1687,16 @@ PluginConflict:
       type: string
   additionalProperties: false
 
-ImagePull:
+ProvisioningStep:
   type: object
-  description: Read-only projection of the provisioning image pull that runs now. Absent when no pull runs.
+  description: Read-only projection of the provisioning step that runs now and does not count against the provisioning budget. Absent when no such step runs.
   properties:
+    step:
+      type: string
+      enum: [imagePull, pluginDownload]
     message:
       type: string
-  required: [message]
+  required: [step, message]
   additionalProperties: false
 
 MiteImageStatus:
@@ -1898,8 +1901,8 @@ ControllerDetail:
       $ref: '#/VersionStatus'
     miteImageStatus:
       $ref: '#/MiteImageStatus'
-    imagePull:
-      $ref: '#/ImagePull'
+    provisioningStep:
+      $ref: '#/ProvisioningStep'
     reconcileBlocked:
       $ref: '#/ReconcileBlocked'
     attention:
@@ -2620,7 +2623,7 @@ ProvisioningDefaultsSpec:
       type: integer
       minimum: 60
       maximum: 86400
-      description: Provisioning budget in seconds. Image-pull time does not count, up to 15 minutes. Unset means 300.
+      description: Provisioning budget in seconds. Image pulls and the plugins-init download do not count, up to 15 minutes. Unset means 300.
     commandDeadlineSec:
       type: integer
     liveFingerprintIntervalSec:

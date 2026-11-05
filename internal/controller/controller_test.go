@@ -1676,12 +1676,12 @@ func TestProvisioningTimeoutPausesWhileImagePulls(t *testing.T) {
 	if cr.Status.Phase != v1alpha1.ControllerPhaseProvisioning {
 		t.Fatalf("phase = %s, want Provisioning", cr.Status.Phase)
 	}
-	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionImagePulling)
-	if c == nil || c.Status != metav1.ConditionTrue {
-		t.Fatalf("ImagePulling = %+v, want True", c)
+	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionProvisioningStep)
+	if c == nil || c.Status != metav1.ConditionTrue || c.Reason != v1alpha1.ReasonImagePullInProgress {
+		t.Fatalf("ProvisioningStep = %+v, want True with ImagePullInProgress", c)
 	}
 	if !strings.Contains(c.Message, "jenkins/jenkins:2.528") || !strings.Contains(c.Message, "plugins-init") {
-		t.Errorf("ImagePulling message = %q, want image and container", c.Message)
+		t.Errorf("ProvisioningStep message = %q, want image and container", c.Message)
 	}
 }
 
@@ -1731,8 +1731,8 @@ func TestProvisioningTimeoutCountsWaitWithoutPullEvent(t *testing.T) {
 	if cr.Status.Phase != v1alpha1.ControllerPhaseFailed {
 		t.Fatalf("phase = %s, want Failed", cr.Status.Phase)
 	}
-	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionImagePulling); c != nil {
-		t.Errorf("ImagePulling = %+v, want absent", c)
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionProvisioningStep); c != nil {
+		t.Errorf("ProvisioningStep = %+v, want absent", c)
 	}
 }
 
@@ -1758,8 +1758,8 @@ func TestProvisioningTimeoutCountsWaitAfterPulled(t *testing.T) {
 	if f == nil || f.Reason != "ProvisioningTimeout" || !strings.Contains(f.Message, "not counting 30s of image pulls") {
 		t.Fatalf("Failed = %+v, want ProvisioningTimeout not counting 30s of image pulls", f)
 	}
-	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionImagePulling); c != nil {
-		t.Errorf("ImagePulling = %+v, want absent once the pull ended", c)
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionProvisioningStep); c != nil {
+		t.Errorf("ProvisioningStep = %+v, want absent once the pull ended", c)
 	}
 }
 
@@ -1774,8 +1774,11 @@ func TestProvisioningTimeoutCreditsFinishedPull(t *testing.T) {
 	started := time.Now().Add(-7 * time.Minute)
 	pod, ev := provisionPullPod(started.Add(10 * time.Second))
 	pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
-		Name:  "plugins-init",
-		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(started.Add(4 * time.Minute))}},
+		Name: "plugins-init",
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			ExitCode:  0,
+			StartedAt: metav1.NewTime(started.Add(4 * time.Minute)),
+		}},
 	}}
 	client.controllerPod = pod
 	client.pullEvents = []corev1.Event{ev}
@@ -1787,8 +1790,8 @@ func TestProvisioningTimeoutCreditsFinishedPull(t *testing.T) {
 	if cr.Status.Phase == v1alpha1.ControllerPhaseFailed {
 		t.Fatal("controller should not be Failed: the finished pull is credited")
 	}
-	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionImagePulling); c != nil {
-		t.Errorf("ImagePulling = %+v, want absent once no pull runs", c)
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionProvisioningStep); c != nil {
+		t.Errorf("ProvisioningStep = %+v, want absent once no pull runs", c)
 	}
 }
 
@@ -1862,9 +1865,9 @@ func TestProvisioningHardCapFollowsConfiguredBudget(t *testing.T) {
 	}
 }
 
-// TestImagePullingConditionRemovedOutsideProvisioning: a controller that is
-// no longer Provisioning drops a stale ImagePulling condition.
-func TestImagePullingConditionRemovedOutsideProvisioning(t *testing.T) {
+// TestProvisioningStepConditionRemovedOutsideProvisioning: a controller that is
+// no longer Provisioning drops a stale ProvisioningStep condition.
+func TestProvisioningStepConditionRemovedOutsideProvisioning(t *testing.T) {
 	client := newTestClientWithBundle()
 	rec := newTestReconciler(client)
 
@@ -1872,15 +1875,200 @@ func TestImagePullingConditionRemovedOutsideProvisioning(t *testing.T) {
 	cr := provisionPullCtrl(started)
 	cr.Status.Phase = v1alpha1.ControllerPhaseRunning
 	cr.Status.Conditions = []v1alpha1.ControllerCondition{{
-		Type:    v1alpha1.ConditionImagePulling,
+		Type:    v1alpha1.ConditionProvisioningStep,
 		Status:  metav1.ConditionTrue,
 		Reason:  v1alpha1.ReasonImagePullInProgress,
 		Message: "pulling image x for container y",
 	}}
 
 	_ = rec.reconcileController(context.Background(), cr)
-	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionImagePulling); c != nil {
-		t.Errorf("ImagePulling = %+v, want removed outside Provisioning", c)
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionProvisioningStep); c != nil {
+		t.Errorf("ProvisioningStep = %+v, want removed outside Provisioning", c)
+	}
+}
+
+// provisionDownloadPod returns a pod whose plugins-init container runs since
+// runStart, with the given restart count. It carries no pull event.
+func provisionDownloadPod(runStart time.Time, restarts int32) *corev1.Pod {
+	pod, _ := provisionPullPod(runStart)
+	pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+		Name:         "plugins-init",
+		RestartCount: restarts,
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{
+			StartedAt: metav1.NewTime(runStart),
+		}},
+	}}
+	return pod
+}
+
+// TestProvisioningTimeoutPausesWhilePluginsDownload: a first plugins-init run
+// that downloads for longer than the base budget does not fail provisioning.
+func TestProvisioningTimeoutPausesWhilePluginsDownload(t *testing.T) {
+	client := newTestClientWithBundle()
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-8 * time.Minute)
+	client.controllerPod = provisionDownloadPod(started.Add(30*time.Second), 0)
+	cr := provisionPullCtrl(started)
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseProvisioning {
+		t.Fatalf("phase = %s, want Provisioning while plugins-init downloads", cr.Status.Phase)
+	}
+	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionProvisioningStep)
+	if c == nil || c.Status != metav1.ConditionTrue || c.Reason != v1alpha1.ReasonPluginDownloadInProgress {
+		t.Fatalf("ProvisioningStep = %+v, want True with PluginDownloadInProgress", c)
+	}
+	if !strings.Contains(c.Message, "plugins-init") {
+		t.Errorf("ProvisioningStep message = %q, want the container name", c.Message)
+	}
+}
+
+// TestProvisioningTimeoutFiresPastHardCapWhilePluginsDownload: a download that
+// runs past the hard cap fails provisioning and names the download.
+func TestProvisioningTimeoutFiresPastHardCapWhilePluginsDownload(t *testing.T) {
+	client := newTestClientWithBundle()
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-21 * time.Minute)
+	client.controllerPod = provisionDownloadPod(started.Add(30*time.Second), 0)
+	cr := provisionPullCtrl(started)
+
+	if err := rec.reconcileController(context.Background(), cr); err == nil {
+		t.Error("expected error for provisioning timeout")
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseFailed {
+		t.Fatalf("phase = %s, want Failed", cr.Status.Phase)
+	}
+	f := findCondition(cr.Status.Conditions, v1alpha1.ConditionFailed)
+	if f == nil || f.Reason != "ProvisioningTimeout" {
+		t.Fatalf("Failed = %+v, want ProvisioningTimeout", f)
+	}
+	if !strings.Contains(f.Message, "20m0s") || !strings.Contains(f.Message, "plugins-init still downloads plugins") {
+		t.Errorf("Failed message = %q, want hard cap and download", f.Message)
+	}
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionProvisioningStep); c != nil {
+		t.Errorf("ProvisioningStep = %+v, want absent once provisioning failed", c)
+	}
+}
+
+// TestProvisioningTimeoutCountsRestartedPluginsInit: a plugins-init run after a
+// restart earns no download credit, so the base budget fails provisioning.
+func TestProvisioningTimeoutCountsRestartedPluginsInit(t *testing.T) {
+	client := newTestClientWithBundle()
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-6 * time.Minute)
+	client.controllerPod = provisionDownloadPod(started.Add(5*time.Minute), 1)
+	cr := provisionPullCtrl(started)
+
+	_ = rec.reconcileController(context.Background(), cr)
+	if cr.Status.Phase != v1alpha1.ControllerPhaseFailed {
+		t.Fatalf("phase = %s, want Failed", cr.Status.Phase)
+	}
+	f := findCondition(cr.Status.Conditions, v1alpha1.ConditionFailed)
+	if f == nil || f.Message != "provisioning exceeded 5m0s" {
+		t.Fatalf("Failed = %+v, want message exactly %q", f, "provisioning exceeded 5m0s")
+	}
+}
+
+// TestProvisioningTimeoutCreditsFinishedPluginDownload: a first plugins-init run
+// that exited zero counts as download time, so the budget is not spent.
+func TestProvisioningTimeoutCreditsFinishedPluginDownload(t *testing.T) {
+	client := newTestClientWithBundle()
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-7 * time.Minute)
+	pod, _ := provisionPullPod(started)
+	pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+		Name: "plugins-init",
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			ExitCode:   0,
+			StartedAt:  metav1.NewTime(started.Add(30 * time.Second)),
+			FinishedAt: metav1.NewTime(started.Add(5*time.Minute + 30*time.Second)),
+		}},
+	}}
+	client.controllerPod = pod
+	cr := provisionPullCtrl(started)
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if cr.Status.Phase == v1alpha1.ControllerPhaseFailed {
+		t.Fatal("controller should not be Failed: the finished download is credited")
+	}
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionProvisioningStep); c != nil {
+		t.Errorf("ProvisioningStep = %+v, want absent once no step runs", c)
+	}
+}
+
+// TestProvisioningTimeoutAddsPullAndDownloadCredit: a pull and the first
+// plugins-init run both count, one after the other, and the budget holds.
+func TestProvisioningTimeoutAddsPullAndDownloadCredit(t *testing.T) {
+	client := newTestClientWithBundle()
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-12 * time.Minute)
+	pod := provisionDownloadPod(started.Add(6*time.Minute), 0)
+	client.controllerPod = pod
+	client.pullEvents = []corev1.Event{{
+		Reason:         "Pulling",
+		InvolvedObject: corev1.ObjectReference{UID: testUID, FieldPath: "spec.initContainers{plugins-init}"},
+		LastTimestamp:  metav1.NewTime(started.Add(5 * time.Second)),
+	}}
+	cr := provisionPullCtrl(started)
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseProvisioning {
+		t.Fatalf("phase = %s, want Provisioning while the pull and the download are credited", cr.Status.Phase)
+	}
+}
+
+// TestProvisioningTimeoutRecordsPluginInitFailureOnVerdict: a plugins-init that
+// exits non-zero past the base budget shows PluginRollFailed on the tick that
+// fails provisioning.
+func TestProvisioningTimeoutRecordsPluginInitFailureOnVerdict(t *testing.T) {
+	client := newTestClientWithBundle()
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-6 * time.Minute)
+	pod, _ := provisionPullPod(started)
+	pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+		Name: "plugins-init",
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			ExitCode:   1,
+			Reason:     "Error",
+			Message:    "plugin foo failed to install",
+			StartedAt:  metav1.NewTime(started.Add(10 * time.Second)),
+			FinishedAt: metav1.NewTime(started.Add(time.Minute)),
+		}},
+	}}
+	client.controllerPod = pod
+	cr := provisionPullCtrl(started)
+
+	_ = rec.reconcileController(context.Background(), cr)
+	if cr.Status.Phase != v1alpha1.ControllerPhaseFailed {
+		t.Fatalf("phase = %s, want Failed", cr.Status.Phase)
+	}
+	roll := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginRollFailed)
+	if roll == nil || roll.Status != metav1.ConditionTrue || roll.Reason != v1alpha1.ReasonPluginRollFailed {
+		t.Fatalf("PluginRollFailed = %+v, want True on the failing tick", roll)
 	}
 }
 

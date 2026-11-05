@@ -14,29 +14,29 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
-// The provisioning budget counts time spent on image pulls for the
-// current pod as zero, up to maxImagePullCredit. A pull needs no timeout
-// of its own. The hard cap bounds that credit, so a pull that never ends
-// still fails provisioning.
+// The provisioning budget counts two steps of the current pod as zero, up to
+// maxProvisioningCredit together: image pulls, and the first plugins-init run,
+// which downloads the managed plugins. The hard cap bounds the credit, so a
+// step that never ends still fails provisioning.
 
 // imagePull names a container whose image kubelet pulls now.
 type imagePull struct{ Container, Image string }
 
 // provisioningLimits holds the two time limits of one provisioning run.
 type provisioningLimits struct {
-	Base time.Duration // budget for the time outside image pulls
-	Hard time.Duration // limit for the whole run, image pulls included
+	Base time.Duration // budget for the time outside credited steps
+	Hard time.Duration // limit for the whole run, credited steps included
 }
 
 // provisioningLimitsFrom is the one reader of provisioningTimeoutSec. A nil
 // defaults or a value of zero or less gives provisioningTimeout. The hard
-// limit is the base plus maxImagePullCredit, so it is always above the base.
+// limit is the base plus maxProvisioningCredit, so it is always above the base.
 func provisioningLimitsFrom(defaults *v1alpha1.ProvisioningDefaults) provisioningLimits {
 	base := provisioningTimeout
 	if defaults != nil && defaults.Spec.ProvisioningTimeoutSec > 0 {
 		base = time.Duration(defaults.Spec.ProvisioningTimeoutSec) * time.Second
 	}
-	return provisioningLimits{Base: base, Hard: base + maxImagePullCredit}
+	return provisioningLimits{Base: base, Hard: base + maxProvisioningCredit}
 }
 
 // currentProvisioningLimits reads ProvisioningDefaults now. A failed read
@@ -51,15 +51,17 @@ func (r *Reconciler) currentProvisioningLimits(ctx context.Context) provisioning
 
 // provisioningBudget is the provisioning timeout verdict of one tick.
 type provisioningBudget struct {
-	Elapsed  time.Duration // since status.provisioningStartedAt
-	PullWait time.Duration // part of Elapsed spent on image pulls of the current pod
-	Pull     *imagePull    // the pull that runs now, or nil
-	Limits   provisioningLimits
+	Elapsed      time.Duration // since status.provisioningStartedAt
+	PullWait     time.Duration // part of Elapsed spent on image pulls of the current pod
+	DownloadWait time.Duration // part of Elapsed spent in the first plugins-init run of the current pod
+	Pull         *imagePull    // the pull that runs now, or nil
+	Downloading  bool          // the first plugins-init run downloads plugins now
+	Limits       provisioningLimits
 }
 
 // exceeded reports whether provisioning has run out of time.
 func (b provisioningBudget) exceeded() bool {
-	return b.Elapsed > b.Limits.Hard || b.Elapsed-b.PullWait > b.Limits.Base
+	return b.Elapsed > b.Limits.Hard || b.Elapsed-b.PullWait-b.DownloadWait > b.Limits.Base
 }
 
 // failureMessage describes the verdict for status.conditions.
@@ -69,11 +71,22 @@ func (b provisioningBudget) failureMessage() string {
 			return fmt.Sprintf("provisioning exceeded %v; container %s still pulls image %s",
 				b.Limits.Hard, b.Pull.Container, b.Pull.Image)
 		}
+		if b.Downloading {
+			return fmt.Sprintf("provisioning exceeded %v; container %s still downloads plugins",
+				b.Limits.Hard, pluginsInitName)
+		}
 		return fmt.Sprintf("provisioning exceeded %v", b.Limits.Hard)
 	}
+	var credited []string
 	if b.PullWait > 0 {
-		return fmt.Sprintf("provisioning exceeded %v, not counting %v of image pulls",
-			b.Limits.Base, b.PullWait.Round(time.Second))
+		credited = append(credited, fmt.Sprintf("%v of image pulls", b.PullWait.Round(time.Second)))
+	}
+	if b.DownloadWait > 0 {
+		credited = append(credited, fmt.Sprintf("%v of plugin downloads", b.DownloadWait.Round(time.Second)))
+	}
+	if len(credited) > 0 {
+		return fmt.Sprintf("provisioning exceeded %v, not counting %s",
+			b.Limits.Base, strings.Join(credited, " and "))
 	}
 	return fmt.Sprintf("provisioning exceeded %v", b.Limits.Base)
 }
@@ -87,9 +100,10 @@ type podPullEventLister interface {
 
 var _ podPullEventLister = (*ClientsetClient)(nil)
 
-// provisioningBudgetFor computes the budget of one tick. It reads events only
-// when the answer can change the verdict: a container waits to be created, or
-// the base budget has passed.
+// provisioningBudgetFor computes the budget of one tick. It reads the plugin
+// download from pod status on every call. It reads events only when the answer
+// can change the verdict: a container waits to be created, or the base budget
+// has passed.
 func (r *Reconciler) provisioningBudgetFor(ctx context.Context, cr *v1alpha1.Controller, pod *corev1.Pod, limits provisioningLimits, now time.Time) provisioningBudget {
 	if cr.Status.ProvisioningStartedAt == nil {
 		return provisioningBudget{Limits: limits}
@@ -99,6 +113,7 @@ func (r *Reconciler) provisioningBudgetFor(ctx context.Context, cr *v1alpha1.Con
 	if pod == nil {
 		return b
 	}
+	b.DownloadWait, b.Downloading = pluginDownloadWait(pod, since, now)
 	if b.Elapsed <= limits.Base && nextStartWaiter(pod) == "" {
 		return b
 	}
@@ -157,6 +172,36 @@ func nextStartWaiter(pod *corev1.Pod) string {
 		}
 	}
 	return ""
+}
+
+// pluginsInitName is the init container that downloads the managed plugins.
+const pluginsInitName = "plugins-init"
+
+// pluginDownloadWait returns the part of [since, now] that the first run of
+// plugins-init spent, and whether that run continues now. Pod status shows the
+// run, so no event read is needed. A run after a restart or a run that exited
+// non-zero earns no credit: pluginsInitScript retries five times inside one run,
+// so a restart means the download failed. A zero start time earns no credit.
+func pluginDownloadWait(pod *corev1.Pod, since, now time.Time) (time.Duration, bool) {
+	for _, s := range pod.Status.InitContainerStatuses {
+		if s.Name != pluginsInitName {
+			continue
+		}
+		if s.RestartCount > 0 {
+			return 0, false
+		}
+		if r := s.State.Running; r != nil {
+			if r.StartedAt.IsZero() {
+				return 0, true
+			}
+			return windowOverlap(r.StartedAt.Time, now, since, now), true
+		}
+		if t := s.State.Terminated; t != nil && t.ExitCode == 0 {
+			return windowOverlap(t.StartedAt.Time, t.FinishedAt.Time, since, now), false
+		}
+		return 0, false
+	}
+	return 0, false
 }
 
 // Kubelet event reasons that open and close an image pull.
@@ -330,17 +375,27 @@ func windowOverlap(start, end, lo, hi time.Time) time.Duration {
 	return end.Sub(start)
 }
 
-// setImagePullingCondition records the pull that runs now, or removes the
-// condition when none runs.
-func setImagePullingCondition(cr *v1alpha1.Controller, pull *imagePull) {
-	if pull == nil {
-		cr.Status.Conditions = removeConditionByType(cr.Status.Conditions, v1alpha1.ConditionImagePulling)
-		return
+// setProvisioningStepCondition records the credited step that runs now. The
+// two steps never run at once, and a pull wins a tie. The message carries no
+// elapsed time, so the status does not change on every tick. The condition is
+// removed when no credited step runs.
+func setProvisioningStepCondition(cr *v1alpha1.Controller, b provisioningBudget) {
+	switch {
+	case b.Pull != nil:
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+			Type:    v1alpha1.ConditionProvisioningStep,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReasonImagePullInProgress,
+			Message: fmt.Sprintf("pulling image %s for container %s", b.Pull.Image, b.Pull.Container),
+		})
+	case b.Downloading:
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+			Type:    v1alpha1.ConditionProvisioningStep,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReasonPluginDownloadInProgress,
+			Message: fmt.Sprintf("container %s downloads plugins", pluginsInitName),
+		})
+	default:
+		cr.Status.Conditions = removeConditionByType(cr.Status.Conditions, v1alpha1.ConditionProvisioningStep)
 	}
-	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-		Type:    v1alpha1.ConditionImagePulling,
-		Status:  metav1.ConditionTrue,
-		Reason:  v1alpha1.ReasonImagePullInProgress,
-		Message: fmt.Sprintf("pulling image %s for container %s", pull.Image, pull.Container),
-	})
 }

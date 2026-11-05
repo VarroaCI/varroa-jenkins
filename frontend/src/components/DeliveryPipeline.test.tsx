@@ -482,13 +482,37 @@ describe("DeliveryPipeline", () => {
     const model = buildDeliveryNodes(baseCtrl({
       phase: "Provisioning",
       miteConnected: false,
-      imagePull: { message: "pulling image jenkins/jenkins:2.528 for container plugins-init" },
+      provisioningStep: { step: "imagePull", message: "pulling image jenkins/jenkins:2.528 for container plugins-init" },
     }), NOW);
     expect(model.kind).toBe("pipeline");
     if (model.kind !== "pipeline") return;
     const jenkins = model.nodes[2];
     expect(jenkins.line).toBe("pulling image…");
     expect(jenkins.sub?.map((s) => s.t).join("")).toContain("jenkins/jenkins:2.528");
+  });
+
+  it("provisioning with a plugin download names the step", () => {
+    const model = buildDeliveryNodes(baseCtrl({
+      phase: "Provisioning",
+      miteConnected: false,
+      provisioningStep: { step: "pluginDownload", message: "container plugins-init downloads plugins" },
+    }), NOW);
+    expect(model.kind).toBe("pipeline");
+    if (model.kind !== "pipeline") return;
+    const jenkins = model.nodes[2];
+    expect(jenkins.line).toBe("downloading plugins…");
+    expect(jenkins.sub?.map((s) => s.t).join("")).toContain("plugins-init");
+  });
+
+  it("a provisioning step outside Provisioning is ignored", () => {
+    const model = buildDeliveryNodes(baseCtrl({
+      phase: "Running",
+      miteConnected: false,
+      provisioningStep: { step: "pluginDownload", message: "container plugins-init downloads plugins" },
+    }), NOW);
+    expect(model.kind).toBe("pipeline");
+    if (model.kind !== "pipeline") return;
+    expect(model.nodes[2].line).toBe("starting pod…");
   });
 
   it("provisioning without an image pull says starting pod", () => {

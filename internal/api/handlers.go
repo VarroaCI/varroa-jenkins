@@ -448,9 +448,9 @@ type controllerDetailResponse struct {
 	// MiteImageStatus projects the actually-running mite image and whether it
 	// is stale vs. the operator-desired image; nil when never observed.
 	MiteImageStatus *MiteImageStatusJSON `json:"miteImageStatus,omitempty"`
-	// ImagePull projects the ImagePulling condition: the image a provisioning
-	// container pulls now. Nil when no pull runs.
-	ImagePull *ImagePullJSON `json:"imagePull,omitempty"`
+	// ProvisioningStep projects the ProvisioningStep condition: the credited
+	// provisioning step that runs now. Nil when no such step runs.
+	ProvisioningStep *ProvisioningStepJSON `json:"provisioningStep,omitempty"`
 	// ReconcileBlocked projects whether the controller's reconcile loop is
 	// currently blocked by an unresolved error (C3). Always present (never nil),
 	// so it is a required field with no omitempty — matches the OpenAPI contract.
@@ -621,19 +621,30 @@ type MiteImageStatusJSON struct {
 	Stale *bool   `json:"stale,omitempty"`
 }
 
-// ImagePullJSON is a read-only projection of the ImagePulling condition. The
-// message names the container and image of the pull that runs now.
-type ImagePullJSON struct {
+// ProvisioningStepJSON is a read-only projection of the ProvisioningStep
+// condition. Step names the credited step: imagePull or pluginDownload.
+type ProvisioningStepJSON struct {
+	Step    string `json:"step"`
 	Message string `json:"message"`
 }
 
-// buildImagePull projects the ImagePulling condition. Returns nil unless the
-// condition is True.
-func buildImagePull(conds []v1alpha1.ControllerCondition) *ImagePullJSON {
+// buildProvisioningStep projects the ProvisioningStep condition. Returns nil
+// unless the condition is True and its reason names a known step.
+func buildProvisioningStep(conds []v1alpha1.ControllerCondition) *ProvisioningStepJSON {
 	for i := range conds {
-		if conds[i].Type == v1alpha1.ConditionImagePulling && conds[i].Status == metav1.ConditionTrue {
-			return &ImagePullJSON{Message: conds[i].Message}
+		if conds[i].Type != v1alpha1.ConditionProvisioningStep || conds[i].Status != metav1.ConditionTrue {
+			continue
 		}
+		var step string
+		switch conds[i].Reason {
+		case v1alpha1.ReasonImagePullInProgress:
+			step = "imagePull"
+		case v1alpha1.ReasonPluginDownloadInProgress:
+			step = "pluginDownload"
+		default:
+			return nil
+		}
+		return &ProvisioningStepJSON{Step: step, Message: conds[i].Message}
 	}
 	return nil
 }
