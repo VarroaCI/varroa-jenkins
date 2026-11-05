@@ -28,7 +28,7 @@ func (s *Server) HandleDeployableNamespaces(w http.ResponseWriter, r *http.Reque
 
 	local := s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster()
 	if local {
-		// Core-local input assembly: reusing the exact resolution from HandleProvisioningConfig.
+		// Core-local input assembly: reusing the exact resolution from handleProvisioningConfigForCluster.
 		defaults, err := crdstore.Get[v1alpha1.ProvisioningDefaults](r.Context(), s.deps.Store, "varroa-defaults", "")
 		if err != nil {
 			if !k8serrors.IsNotFound(err) {
@@ -44,11 +44,15 @@ func (s *Server) HandleDeployableNamespaces(w http.ResponseWriter, r *http.Reque
 			curatedDefault = "varroa"
 		}
 
+		// Each namespace appears once. The default namespace comes first.
+		seen := map[string]bool{curatedDefault: true}
 		curated = []string{curatedDefault}
 		for _, ns := range defaults.Spec.Namespaces {
-			if ns != curatedDefault {
-				curated = append(curated, ns)
+			if seen[ns] {
+				continue
 			}
+			seen[ns] = true
+			curated = append(curated, ns)
 		}
 
 		// Parse the raw ManagedNamespaces string (space/comma-separated) into []string.

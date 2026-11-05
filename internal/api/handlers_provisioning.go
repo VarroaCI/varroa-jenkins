@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -27,7 +26,7 @@ type VersionCatalogEntry struct {
 	Channel     string `json:"channel"`
 	Recommended bool   `json:"recommended,omitempty"`
 	EOL         string `json:"eol,omitempty"`
-	// NEW (owned by change D; change C consumes read-only):
+	// Name, PluginSetReady, and PluginCount come from the JenkinsVersionProfile object.
 	Name           string `json:"name"`                     // profile object name (stable handle)
 	PluginSetReady *bool  `json:"pluginSetReady,omitempty"` // nil = metadata-only profile (no pluginSetRef)
 	PluginCount    int    `json:"pluginCount,omitempty"`    // status.pluginCount
@@ -70,13 +69,9 @@ type provisioningConfigResponse struct {
 	InjectedVariables []string              `json:"injectedVariables"`
 }
 
-// HandleProvisioningConfig serves GET /provisioning/config with the aggregate
-// provisioning read surface (root domain, namespaces, versions, size presets,
-// and injected variable names). Any authenticated caller may read this.
-func (s *Server) HandleProvisioningConfig(w http.ResponseWriter, r *http.Request) {
-	s.handleProvisioningConfigForCluster(w, r, s.localCluster())
-}
-
+// handleProvisioningConfigForCluster serves GET /clusters/{cluster}/provisioning/config
+// with the aggregate provisioning read surface (root domain, namespaces, versions,
+// size presets, and injected variable names). Any authenticated caller may read this.
 func (s *Server) handleProvisioningConfigForCluster(w http.ResponseWriter, r *http.Request, cluster string) {
 	if r.Method != http.MethodGet {
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -136,11 +131,15 @@ func (s *Server) handleProvisioningConfigForCluster(w http.ResponseWriter, r *ht
 		defaultNS = "varroa"
 	}
 
+	// Each namespace appears once. The default namespace comes first.
+	seen := map[string]bool{defaultNS: true}
 	namespaces := []string{defaultNS}
 	for _, ns := range defaults.Spec.Namespaces {
-		if ns != defaultNS {
-			namespaces = append(namespaces, ns)
+		if seen[ns] {
+			continue
 		}
+		seen[ns] = true
+		namespaces = append(namespaces, ns)
 	}
 
 	versions := buildVersionCatalogFromProfiles(profiles)
@@ -161,17 +160,6 @@ func (s *Server) handleProvisioningConfigForCluster(w http.ResponseWriter, r *ht
 	}
 
 	s.writeJSON(w, http.StatusOK, resp)
-}
-
-// buildVersionCatalog builds the version catalog from JenkinsVersionProfile CRDs.
-// On error it logs and returns an empty slice (never nil).
-func (s *Server) buildVersionCatalog(ctx context.Context) []VersionCatalogEntry {
-	profiles, err := crdstore.List[v1alpha1.JenkinsVersionProfile](ctx, s.deps.Store, "", "")
-	if err != nil {
-		s.deps.Logger.Error("failed to list JenkinsVersionProfile CRDs", "error", err)
-		return []VersionCatalogEntry{}
-	}
-	return buildVersionCatalogFromProfiles(profiles)
 }
 
 func buildVersionCatalogFromProfiles(profiles []*v1alpha1.JenkinsVersionProfile) []VersionCatalogEntry {
