@@ -660,7 +660,9 @@ type CellStatus struct {
 	// the current pod. A held tenant or a tenant with a refused item keeps
 	// its previous membership. A draining tenant never enters this list. A
 	// pod change removes each held and each refused tenant. A tenant absent
-	// here has no folder building on this cell. It is a subset of Tenants.
+	// here has no folder building on this cell. After a release it keeps the
+	// departed tenant until the next items walk, and the warm pool reads that
+	// entry to keep the cell.
 	// +kubebuilder:validation:MaxItems=64
 	// +optional
 	AppliedTenants []string `json:"appliedTenants,omitempty"`

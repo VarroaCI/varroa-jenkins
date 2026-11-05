@@ -620,7 +620,9 @@ func (r *WarmPoolReconciler) ensureFinalizer(ctx context.Context, pool *v1alpha1
 // drainDeletedPool runs the one drain pass of design D15: delete every free
 // cell, then remove the finalizer. It deletes no cell that holds a tenant
 // and it removes no label from any cell. A placed cell therefore keeps its
-// labels and lives on as a cell with no effective owner.
+// labels and lives on as a cell with no effective owner. A free cell that
+// still runs a build of a tenant that left it holds the finalizer until that
+// build ends.
 func (r *WarmPoolReconciler) drainDeletedPool(ctx context.Context, pool *v1alpha1.CellPool) {
 	log := r.logger()
 	owned, err := r.ownedCells(ctx, pool)
@@ -754,11 +756,15 @@ func cellMiteResources(spec *v1alpha1.ControllerSpec) *corev1.ResourceRequiremen
 // restampFreeCells sets spec.version, spec.resources, spec.podOverrides, and
 // spec.miteSpec.resources on each free cell, from the profile and from the template. It never edits
 // a cell that holds a tenant, so a template edit rolls free cells at once and
-// reaches a placed cell only after that cell drains.
+// reaches a placed cell only after that cell drains. It also skips a free cell
+// that cellHoldsDepartedBuild holds, because the roll would end that build.
 func (r *WarmPoolReconciler) restampFreeCells(ctx context.Context, pool *v1alpha1.CellPool, profile *v1alpha1.JenkinsVersionProfile, free []*v1alpha1.Controller) {
 	log := r.logger()
 	version := resolvedProfileVersion(profile)
 	for _, cell := range free {
+		if cellHoldsDepartedBuild(cell) {
+			continue
+		}
 		next := cell.DeepCopy()
 		next.Spec.Version = version
 		applyCellTemplate(&next.Spec, pool.Spec.CellTemplate)
@@ -786,8 +792,9 @@ func equalCellShape(a, b *v1alpha1.ControllerSpec) bool {
 // keeps the lowest-numbered members and a later fill reuses the freed high
 // ordinals. It never deletes a cell that holds a tenant, and it re-checks
 // every cell against live state before the delete (deleteFreeCell). It
-// answers how many cells it actually deleted; a skipped cell leaves the pool
-// above its target, and the next tick decides again.
+// skips a cell that cellHoldsDepartedBuild holds and drains another free cell
+// in its place. It answers how many cells it actually deleted; a skipped cell
+// leaves the pool above its target, and the next tick decides again.
 func (r *WarmPoolReconciler) drainSurplus(ctx context.Context, pool *v1alpha1.CellPool, free []*v1alpha1.Controller, count int) int {
 	fenced, err := r.fencedCells(ctx)
 	if err != nil {
@@ -798,7 +805,14 @@ func (r *WarmPoolReconciler) drainSurplus(ctx context.Context, pool *v1alpha1.Ce
 	}
 
 	prefix := fmt.Sprintf("cell-%s-", pool.Name)
-	ordered := append([]*v1alpha1.Controller(nil), free...)
+	ordered := make([]*v1alpha1.Controller, 0, len(free))
+	for _, cell := range free {
+		if cellHoldsDepartedBuild(cell) {
+			r.logger().Info("cell pool: kept a free cell, a build of a tenant that left it still runs", "pool", pool.Name, "cell", cell.Name)
+			continue
+		}
+		ordered = append(ordered, cell)
+	}
 	sort.Slice(ordered, func(i, j int) bool {
 		oi, oki := cellOrdinal(ordered[i].Name, prefix)
 		oj, okj := cellOrdinal(ordered[j].Name, prefix)
@@ -953,6 +967,8 @@ func takeMemberFits(fits []cellFit, held map[string]bool, want int) int {
 // and its claim can pass CellClaimTTL before the patch lands. A write that
 // arrives between the read and the delete makes the apiserver answer
 // Conflict, and the next tick decides again from current state.
+// The fresh read also refuses a cell that cellHoldsDepartedBuild holds. A pool
+// delete then keeps its finalizer until that build ends.
 func (r *WarmPoolReconciler) deleteFreeCell(ctx context.Context, pool *v1alpha1.CellPool, cell *v1alpha1.Controller, fenced map[string]bool) bool {
 	log := r.logger()
 	live, err := crdstore.Get[v1alpha1.Controller](ctx, r.Store, cell.Name, cell.Namespace)
@@ -964,6 +980,10 @@ func (r *WarmPoolReconciler) deleteFreeCell(ctx context.Context, pool *v1alpha1.
 	}
 	if cellTenantCount(live) > 0 {
 		log.Info("cell pool: skipped a drain, the cell gained a tenant", "pool", pool.Name, "cell", cell.Name)
+		return false
+	}
+	if cellHoldsDepartedBuild(live) {
+		log.Info("cell pool: skipped a drain, a build of a tenant that left the cell still runs", "pool", pool.Name, "cell", cell.Name)
 		return false
 	}
 	if HasLiveCellClaim(live, r.now()) {
@@ -1090,7 +1110,10 @@ func (r *WarmPoolReconciler) poolReadyTransitionTime(pool *v1alpha1.CellPool, ne
 	return metav1.NewTime(r.now())
 }
 
-// freeCells returns the owned cells that hold no tenant.
+// freeCells returns the owned cells that hold no tenant. The list includes a
+// cell that cellHoldsDepartedBuild holds. The placement pass can bind a tenant
+// to such a cell, so it counts toward the warm target. Only the drain and the
+// re-stamp skip it.
 func freeCells(owned []*v1alpha1.Controller) []*v1alpha1.Controller {
 	free := make([]*v1alpha1.Controller, 0, len(owned))
 	for _, cell := range owned {
@@ -1107,6 +1130,27 @@ func cellTenantCount(cell *v1alpha1.Controller) int {
 		return 0
 	}
 	return len(cell.Status.Cell.Tenants)
+}
+
+// cellHoldsDepartedBuild reports whether a cell with no tenant can still run
+// a build of a tenant that left it. The caller passes a cell whose
+// status.cell.tenants is empty.
+//
+// Two fields cover the whole window. status.pendingItemDeletions names a
+// folder until its build ends. status.cell.appliedTenants still names a
+// released tenant until the first items walk after the release. Both fields
+// are written only from a live pod (status.cell.instance), so a cell with no
+// live pod holds nothing: its builds died with the pod, and no walk runs to
+// clear a stale entry. An evacuating cell holds nothing either: the roll rule
+// deleted its pod, so its builds are already lost.
+//
+// No writer may trim appliedTenants to the tenant list at a release. The
+// leftover entry is the first window of this hold.
+func cellHoldsDepartedBuild(cell *v1alpha1.Controller) bool {
+	if cell.Status.Cell == nil || cell.Status.Cell.Instance == "" || cell.Status.Cell.Evacuate {
+		return false
+	}
+	return len(cell.Status.PendingItemDeletions) > 0 || len(cell.Status.Cell.AppliedTenants) > 0
 }
 
 // cellMaxTenants reports a cell's own spec.cell.maxTenants.

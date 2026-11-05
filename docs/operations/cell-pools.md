@@ -147,7 +147,20 @@ A watch wakes the operator, so a scale edit takes effect within seconds rather t
 
 Lowering `warm` drains free cells only. The pool never deletes a cell that holds a tenant, nor one
 a tenant is being placed on. Such a cell leaves the pool one above its target until the next pass.
-Deleting a pool drains its free cells. A placed cell keeps every label and lives on as an ordinary
+
+A free cell can still run a build of a tenant that left it, after a slot scale-down for example. The
+pool keeps that cell until the build ends, and drains another free cell first. It still counts toward
+`warm` and `maxCells`. Two fields show the hold, and only a live pod (`status.cell.instance`) counts:
+
+- `status.cell.appliedTenants` names the tenant until the next items walk.
+- `status.pendingItemDeletions` names the folder while its build runs.
+
+The pool does not keep a cell with `status.cell.evacuate` set, because its builds are already lost.
+To end a build that does not stop, approve the deferred deletion. See
+[Control removal](../config/items.md#control-removal).
+
+Deleting a pool drains its free cells. It keeps its finalizer while a free cell waits for a build.
+A placed cell keeps every label and lives on as an ordinary
 cell, resolving its capacity from its own `spec.cell.maxTenants` or from `cells.maxTenantsPerCell`.
 
 ### Scale up a pool
@@ -166,14 +179,16 @@ one to three minutes. Set `warm` to 1 or more to remove that wait.
 
 The pool re-stamps `spec.version`, `spec.resources`, `spec.podOverrides`, and
 `spec.miteSpec.resources` on each free cell every tick. It keeps the other `spec.miteSpec` fields,
-and never edits a cell that holds a tenant. A `cellTemplate` edit therefore rolls the free cells
+and never edits a cell that holds a tenant. It also skips a free cell that waits for a build, as
+[Scale a pool](#scale-a-pool) describes. A `cellTemplate` edit therefore rolls the free cells
 at once, and reaches a placed cell only after it drains. To grow a placed tenant, move
 it to a pool with a larger template.
 
 ## Watch a voluntary move
 
 A voluntary move ends when the old cell drops the tenant. Read these fields on the old cell's
-`Controller` status with `kubectl`. Both lists are subsets of `status.cell.tenants`.
+`Controller` status with `kubectl`. `drainingTenants` names current tenants. `appliedTenants`
+can keep a released tenant until the next items walk.
 
 - `status.cell.drainingTenants` lists the tenants that the last delivered desired state leaves out.
   No component uses it to decide a drain. No dashboard panel shows it.

@@ -1842,3 +1842,274 @@ func TestEnsurePoolSecrets_MintLosesCreateRaceRepairsNextPass(t *testing.T) {
 		t.Fatalf("tick 2 PoolReady = %+v, want Ready", cond)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Departed-build hold (issue 2069)
+// ---------------------------------------------------------------------------
+
+// departedBuildCell returns a free cell of the test profile whose folder for
+// each path in pending waits in the deferred deletion list, and whose
+// status.cell.appliedTenants names the applied tenants.
+func departedBuildCell(name string, applied, pending []string) *v1alpha1.Controller {
+	c := poolCellNamed(name, testProfileName, nil)
+	c.Status.Cell = &v1alpha1.CellStatus{AppliedTenants: applied, Instance: "pod-" + name}
+	for _, p := range pending {
+		c.Status.PendingItemDeletions = append(c.Status.PendingItemDeletions,
+			v1alpha1.PendingDeletion{Path: p, Reason: "build in progress"})
+	}
+	return c
+}
+
+// TestCellPool_DrainKeepsACellWithADeferredDeletion covers a free cell whose
+// build still runs: the scale-down keeps it, and deletes it once it is clean.
+func TestCellPool_DrainKeepsACellWithADeferredDeletion(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), newPool(0),
+		departedBuildCell("cell-lts-2-555-0", nil, []string{"team-a"}))
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !cellExists(t, store, "cell-lts-2-555-0") {
+		t.Fatal("the drain deleted a cell whose build still runs")
+	}
+
+	crdstore.MustSeed(store, departedBuildCell("cell-lts-2-555-0", nil, nil))
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if cellExists(t, store, "cell-lts-2-555-0") {
+		t.Fatal("a clean free cell must be drained once its build ends")
+	}
+}
+
+// TestCellPool_DrainKeepsACellThatStillAppliesADepartedTenant covers the
+// window before the first items walk clears the deferred deletion list.
+func TestCellPool_DrainKeepsACellThatStillAppliesADepartedTenant(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), newPool(0),
+		departedBuildCell("cell-lts-2-555-0", []string{"team-a"}, nil))
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !cellExists(t, store, "cell-lts-2-555-0") {
+		t.Fatal("the drain deleted a cell that still applies a departed tenant")
+	}
+}
+
+// TestCellPool_DrainTakesAnotherFreeCellFirst covers a scale-down that finds
+// one held cell and one clean cell: the clean cell goes, the held one stays.
+func TestCellPool_DrainTakesAnotherFreeCellFirst(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), newPool(1),
+		departedBuildCell("cell-lts-2-555-0", nil, nil),
+		departedBuildCell("cell-lts-2-555-1", nil, []string{"team-a"}))
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	got := cellNames(listCells(t, store))
+	if len(got) != 1 || got[0] != "cell-lts-2-555-1" {
+		t.Fatalf("cells = %v, want [cell-lts-2-555-1]", got)
+	}
+}
+
+// TestCellPool_HeldCellCountsTowardTheWarmTarget covers the placement race:
+// a held cell is a warm cell, so the pool creates no cell beside it.
+func TestCellPool_HeldCellCountsTowardTheWarmTarget(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), newPool(1),
+		departedBuildCell("cell-lts-2-555-0", nil, []string{"team-a"}))
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if got := cellNames(listCells(t, store)); len(got) != 1 {
+		t.Fatalf("cells = %v, want only the held cell", got)
+	}
+}
+
+// TestCellPool_CapCountsACellWithADeferredDeletion covers maxCells: the held
+// cell counts toward the cap, so the fill stops at two cells.
+func TestCellPool_CapCountsACellWithADeferredDeletion(t *testing.T) {
+	store := crdstore.NewFake()
+	pool := newPool(3)
+	pool.Spec.MaxCells = 2
+	crdstore.MustSeed(store, newProfile(), pool,
+		departedBuildCell("cell-lts-2-555-0", nil, nil),
+		departedBuildCell("cell-lts-2-555-1", nil, []string{"team-a"}))
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if got := listCells(t, store); len(got) != 2 {
+		t.Fatalf("cells = %v, want two", cellNames(got))
+	}
+	cond := poolReady(t, getPool(t, store, testProfileName))
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.CellPoolReasonCellCapReached {
+		t.Fatalf("PoolReady = %+v, want False/CellCapReached", cond)
+	}
+}
+
+// TestCellPool_RestampSkipsACellWithADeferredDeletion covers a template edit:
+// the roll would end the held build, so only the clean cell takes the template.
+func TestCellPool_RestampSkipsACellWithADeferredDeletion(t *testing.T) {
+	store := crdstore.NewFake()
+	pool := newPool(2)
+	pool.Spec.CellTemplate = &v1alpha1.CellTemplate{
+		PodOverrides: &v1alpha1.PodOverrides{NodeSelector: map[string]string{"pool": "cells"}},
+	}
+	crdstore.MustSeed(store, newProfile(), pool,
+		departedBuildCell("cell-lts-2-555-0", nil, nil),
+		departedBuildCell("cell-lts-2-555-1", nil, []string{"team-a"}))
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	clean := getCell(t, store, "cell-lts-2-555-0")
+	if clean.Spec.PodOverrides == nil || clean.Spec.PodOverrides.NodeSelector["pool"] != "cells" {
+		t.Errorf("the clean free cell must carry the template, got %+v", clean.Spec.PodOverrides)
+	}
+	held := getCell(t, store, "cell-lts-2-555-1")
+	if held.Spec.PodOverrides != nil {
+		t.Errorf("the held cell must stay unchanged, got %+v", held.Spec.PodOverrides)
+	}
+
+	crdstore.MustSeed(store, departedBuildCell("cell-lts-2-555-1", nil, nil))
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if got := getCell(t, store, "cell-lts-2-555-1"); got.Spec.PodOverrides == nil {
+		t.Error("the cell must take the template once its build ends")
+	}
+}
+
+// TestCellPool_DrainSkipsACellThatDeferredADeletionAfterTheSnapshot covers a
+// cell that gained a deferred deletion after the pass listed it as free.
+func TestCellPool_DrainSkipsACellThatDeferredADeletionAfterTheSnapshot(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), newPool(0),
+		departedBuildCell("cell-lts-2-555-1", nil, []string{"team-a"}))
+	stale := versionedCell("cell-lts-2-555-1", "uid-1", "1", nil)
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	pool := getPool(t, store, testProfileName)
+	if got := r.drainSurplus(context.Background(), pool, []*v1alpha1.Controller{stale}, 1); got != 0 {
+		t.Fatalf("drainSurplus deleted %d cells, want 0", got)
+	}
+	if !cellExists(t, store, "cell-lts-2-555-1") {
+		t.Fatal("the drain deleted a cell whose build still runs")
+	}
+}
+
+// TestCellPool_DeletedPoolHoldsTheFinalizerWhileACellRunsADepartedBuild
+// covers a pool delete: the held cell keeps the finalizer until its build ends.
+func TestCellPool_DeletedPoolHoldsTheFinalizerWhileACellRunsADepartedBuild(t *testing.T) {
+	store := crdstore.NewFake()
+	deleting := newPool(0)
+	now := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	deleting.DeletionTimestamp = &now
+	deleting.Finalizers = []string{v1alpha1.CellPoolFinalizerDrain}
+	crdstore.MustSeed(store, newProfile(), deleting,
+		departedBuildCell("cell-lts-2-555-0", nil, nil),
+		departedBuildCell("cell-lts-2-555-1", nil, []string{"team-a"}))
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if cellExists(t, store, "cell-lts-2-555-0") {
+		t.Error("the clean free cell must be drained")
+	}
+	if !cellExists(t, store, "cell-lts-2-555-1") {
+		t.Fatal("the drain deleted a cell whose build still runs")
+	}
+	if !hasDrainFinalizer(getPool(t, store, testProfileName)) {
+		t.Fatal("the finalizer must hold while a held cell survives")
+	}
+
+	crdstore.MustSeed(store, departedBuildCell("cell-lts-2-555-1", nil, nil))
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if cellExists(t, store, "cell-lts-2-555-1") {
+		t.Error("the cell must be drained once its build ends")
+	}
+	if hasDrainFinalizer(getPool(t, store, testProfileName)) {
+		t.Fatal("the finalizer must be removed once the drain completes")
+	}
+}
+
+// hasDrainFinalizer reports whether the pool still holds the drain finalizer.
+func hasDrainFinalizer(pool *v1alpha1.CellPool) bool {
+	for _, f := range pool.Finalizers {
+		if f == v1alpha1.CellPoolFinalizerDrain {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCellPool_DrainTakesAnEvacuatingCell covers a cell the roll gate gave up
+// on: its builds are already lost, so the pool drains it.
+func TestCellPool_DrainTakesAnEvacuatingCell(t *testing.T) {
+	store := crdstore.NewFake()
+	cell := departedBuildCell("cell-lts-2-555-0", []string{"team-a"}, []string{"team-a"})
+	cell.Status.Cell.Evacuate = true
+	crdstore.MustSeed(store, newProfile(), newPool(0), cell)
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if cellExists(t, store, "cell-lts-2-555-0") {
+		t.Fatal("an evacuating cell must be drained")
+	}
+}
+
+// TestCellHoldsDepartedBuild covers the hold predicate's table.
+func TestCellHoldsDepartedBuild(t *testing.T) {
+	evacuate := func(c *v1alpha1.Controller) *v1alpha1.Controller {
+		if c.Status.Cell == nil {
+			c.Status.Cell = &v1alpha1.CellStatus{}
+		}
+		c.Status.Cell.Evacuate = true
+		return c
+	}
+	tests := []struct {
+		name string
+		cell *v1alpha1.Controller
+		want bool
+	}{
+		{"nil status", poolCellNamed("c", testProfileName, nil), false},
+		{"pending only", departedBuildCell("c", nil, []string{"team-a"}), true},
+		{"applied only", departedBuildCell("c", []string{"team-a"}, nil), true},
+		{"applied without a live pod", func() *v1alpha1.Controller {
+			c := departedBuildCell("c", []string{"team-a"}, nil)
+			c.Status.Cell.Instance = ""
+			return c
+		}(), false},
+		{"pending without a live pod", func() *v1alpha1.Controller {
+			c := departedBuildCell("c", nil, []string{"team-a"})
+			c.Status.Cell.Instance = ""
+			return c
+		}(), false},
+		{"empty cell status", &v1alpha1.Controller{Status: v1alpha1.ControllerStatus{Cell: &v1alpha1.CellStatus{}}}, false},
+		{"evacuate plus applied", evacuate(departedBuildCell("c", []string{"team-a"}, nil)), false},
+		{"evacuate plus pending", evacuate(departedBuildCell("c", nil, []string{"team-a"})), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cellHoldsDepartedBuild(tt.cell); got != tt.want {
+				t.Fatalf("cellHoldsDepartedBuild = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
