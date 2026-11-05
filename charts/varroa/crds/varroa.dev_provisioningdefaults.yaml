@@ -110,22 +110,6 @@ spec:
                 description: DefaultNamespace is the namespace the creation wizard
                   preselects. Empty means "varroa".
                 type: string
-              defaultPlugins:
-                items:
-                  description: PluginEntry defines a single plugin with artifact ID
-                    and version.
-                  properties:
-                    artifactId:
-                      description: ArtifactId is the Jenkins plugin artifact ID.
-                      type: string
-                    version:
-                      description: Version is the pinned plugin version.
-                      type: string
-                  required:
-                  - artifactId
-                  - version
-                  type: object
-                type: array
               defaultReconciliationPolicy:
                 description: |-
                   DefaultReconciliationPolicy is the default reconciliation policy for
@@ -249,8 +233,6 @@ spec:
                 type: array
               storageClass:
                 type: string
-              storageSizeGB:
-                type: integer
               upgradePolicy:
                 description: |-
                   UpgradePolicy governs whether a profile-driven version roll (a

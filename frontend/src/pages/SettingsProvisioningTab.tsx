@@ -9,7 +9,6 @@ import { Button } from "../components/Button";
 import styles from "./settings.module.css";
 
 const EMPTY_ANNOTATION = { key: "", value: "" };
-const EMPTY_PLUGIN = { name: "", version: "" };
 
 export default function SettingsProvisioningTab() {
   const [config, setConfig] = useState<ProvisioningDefaults | null>(null);
@@ -21,9 +20,6 @@ export default function SettingsProvisioningTab() {
   const [annotations, setAnnotations] = useState<
     { key: string; value: string }[]
   >([{ ...EMPTY_ANNOTATION }]);
-  const [plugins, setPlugins] = useState<{ name: string; version: string }[]>([
-    { ...EMPTY_PLUGIN },
-  ]);
 
   useEffect(() => {
     setConfig(null);
@@ -36,14 +32,6 @@ export default function SettingsProvisioningTab() {
             ([key, value]) => ({ key, value }),
           );
           setAnnotations(rows.length > 0 ? rows : [{ ...EMPTY_ANNOTATION }]);
-        }
-        if (cfg.spec.defaultPlugins && cfg.spec.defaultPlugins.length > 0) {
-          setPlugins(
-            cfg.spec.defaultPlugins.map((p) => ({
-              name: p.artifactId,
-              version: p.version,
-            })),
-          );
         }
       })
       .catch((e) => setError(e.message));
@@ -71,21 +59,11 @@ export default function SettingsProvisioningTab() {
       for (const a of annotations) {
         if (a.key.trim()) annMap[a.key.trim()] = a.value;
       }
-      const plugEntries = plugins
-        .filter((p) => p.name.trim())
-        .map((p) => ({
-          artifactId: p.name.trim(),
-          version: p.version || "latest",
-        }));
       const updated = {
         ...config,
         spec: {
           ...config.spec,
           ingressAnnotations: Object.keys(annMap).length > 0 ? annMap : undefined,
-          defaultPlugins: plugEntries.length > 0 ? plugEntries : undefined,
-          storageSizeGB: config.spec.storageSizeGB
-            ? Number(config.spec.storageSizeGB)
-            : undefined,
           provisioningTimeoutSec: config.spec.provisioningTimeoutSec
             ? Number(config.spec.provisioningTimeoutSec)
             : undefined,
@@ -123,15 +101,9 @@ export default function SettingsProvisioningTab() {
         <input className={styles.formInput} value={spec.defaultVersion || ""} onChange={setField("defaultVersion")} placeholder="latest" />
       </div>
 
-      <div className={`${styles.formGroup} ${styles.row12}`}>
-        <div className={styles.grow}>
-          <label className={styles.formLabel}>Storage Class</label>
-          <input className={styles.formInput} value={spec.storageClass || ""} onChange={setField("storageClass")} placeholder="standard" />
-        </div>
-        <div className={styles.grow}>
-          <label className={styles.formLabel}>Storage Size (GB)</label>
-          <input className={styles.formInput} type="number" value={spec.storageSizeGB ?? ""} onChange={setField("storageSizeGB")} placeholder="20" />
-        </div>
+      <div className={styles.formGroup}>
+        <label className={styles.formLabel} htmlFor="storageClass">Storage Class</label>
+        <input id="storageClass" className={styles.formInput} value={spec.storageClass || ""} onChange={setField("storageClass")} placeholder="standard" />
       </div>
 
       <div className={styles.formGroup}>
@@ -155,16 +127,6 @@ export default function SettingsProvisioningTab() {
           <input className={styles.formInput} value={spec.defaultStorage || ""} onChange={setField("defaultStorage")} placeholder="20Gi" />
         </div>
       </div>
-
-      <h3 className={styles.sectionTitle}>Default Plugins</h3>
-      {plugins.map((p, i) => (
-        <div key={i} className={`${styles.formGroup} ${styles.pluginRow}`}>
-          <input className={`${styles.formInput} ${styles.pluginName}`} placeholder="artifactId" value={p.name} onChange={(e) => { const next = [...plugins]; next[i] = { ...next[i], name: e.target.value }; setPlugins(next); }} />
-          <input className={`${styles.formInput} ${styles.pluginVersion}`} placeholder="version" value={p.version} onChange={(e) => { const next = [...plugins]; next[i] = { ...next[i], version: e.target.value }; setPlugins(next); }} />
-          <Button type="button" variant="ghost" size="sm" onClick={() => setPlugins((prev) => [...prev.slice(0, i), ...prev.slice(i + 1)])} className={styles.dangerBtn}>×</Button>
-        </div>
-      ))}
-      <Button type="button" variant="ghost" onClick={() => setPlugins((prev) => [...prev, { ...EMPTY_PLUGIN }])} className={`${styles.backLink} ${styles.addAction}`}>+ Add Plugin</Button>
 
       <h3 className={styles.sectionTitle}>Ingress Annotations</h3>
       <small className={styles.formHint}>Use <code>{"{{.Name}}"}</code> and <code>{"{{.Namespace}}"}</code> for template variables.</small>

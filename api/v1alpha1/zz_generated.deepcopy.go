@@ -1732,9 +1732,9 @@ func (in *ProvisioningDefaultsSpec) DeepCopyInto(out *ProvisioningDefaultsSpec) 
 			(*out)[k] = v
 		}
 	}
-	if in.DefaultPlugins != nil {
-		in, out := &in.DefaultPlugins, &out.DefaultPlugins
-		*out = make([]PluginEntry, len(*in))
+	if in.ImagePullSecrets != nil {
+		in, out := &in.ImagePullSecrets, &out.ImagePullSecrets
+		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
 	if in.DefaultReconciliationPolicy != nil {

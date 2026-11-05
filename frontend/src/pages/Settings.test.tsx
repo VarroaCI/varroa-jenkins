@@ -81,9 +81,7 @@ describe("Settings page", () => {
         defaultMemory: "4Gi",
         defaultStorage: "20Gi",
         storageClass: "fast",
-        storageSizeGB: 100,
         provisioningTimeoutSec: 600,
-        defaultPlugins: [{ artifactId: "git", version: "5.0.0" }],
       },
     });
     mockGetConfig.mockResolvedValue(config);
@@ -138,43 +136,35 @@ describe("Settings page", () => {
     expect(screen.queryByRole("tab", { name: "Versions" })).not.toBeInTheDocument();
   });
 
-  it("removes a plugin row when its '×' is clicked", async () => {
-    mockGetConfig.mockResolvedValue(
-      createProvisioningConfig({ spec: { defaultPlugins: [{ artifactId: "git", version: "5.0.0" }] } }),
-    );
-    renderSettings();
-
-    await screen.findByDisplayValue("git");
-    await userEvent.click(screen.getAllByText("×")[0]);
-    expect(screen.queryByDisplayValue("git")).not.toBeInTheDocument();
-  });
-
-  it("renders default plugins section", async () => {
+  it("shows no default plugins or storage size field", async () => {
     mockGetConfig.mockResolvedValue(createProvisioningConfig());
     renderSettings();
-    await screen.findByText("Default Plugins");
+    await screen.findByText("Default Resources");
+    expect(screen.getByLabelText("Storage Class")).toBeInTheDocument();
+    expect(screen.queryByText("Default Plugins")).not.toBeInTheDocument();
+    expect(screen.queryByText("+ Add Plugin")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("artifactId")).not.toBeInTheDocument();
+    expect(screen.queryByText("Storage Size (GB)")).not.toBeInTheDocument();
+  });
+
+  it("saves the spec without defaultPlugins or storageSizeGB", async () => {
+    const config = createProvisioningConfig({ spec: { storageClass: "fast", defaultStorage: "20Gi" } });
+    mockGetConfig.mockResolvedValue(config);
+    mockUpdateConfig.mockResolvedValue(config);
+    renderSettings();
+    await userEvent.click(await screen.findByText("Save"));
+    await waitFor(() => expect(mockUpdateConfig).toHaveBeenCalled());
+    const savedSpec = mockUpdateConfig.mock.calls[0][1].spec;
+    expect(savedSpec.storageClass).toBe("fast");
+    expect(savedSpec.defaultStorage).toBe("20Gi");
+    // JSON drops undefined values, so this matches what the server receives.
+    expect(JSON.stringify(savedSpec)).not.toMatch(/defaultPlugins|storageSizeGB/);
   });
 
   it("renders ingress annotations section", async () => {
     mockGetConfig.mockResolvedValue(createProvisioningConfig());
     renderSettings();
     await screen.findByText("Ingress Annotations");
-  });
-
-  it("adds a new plugin row when '+ Add Plugin' is clicked", async () => {
-    const config = createProvisioningConfig({
-      spec: { defaultPlugins: [] },
-    });
-    mockGetConfig.mockResolvedValue(config);
-    renderSettings();
-
-    await screen.findByText("Default Plugins");
-    const addBtn = screen.getByText("+ Add Plugin");
-    await userEvent.click(addBtn);
-
-    // Should now have at least one plugin name input
-    const pluginInputs = screen.getAllByPlaceholderText("artifactId");
-    expect(pluginInputs.length).toBeGreaterThanOrEqual(1);
   });
 
   it("adds a new annotation row when '+ Add Annotation' is clicked", async () => {
@@ -199,42 +189,6 @@ describe("Settings page", () => {
     const xs = screen.getAllByText("×");
     await userEvent.click(xs[xs.length - 1]);
     expect(screen.getAllByPlaceholderText("annotation key").length).toBe(before - 1);
-  });
-
-  it("fills plugin fields and saves", async () => {
-    const config = createProvisioningConfig({
-      spec: { defaultPlugins: [] },
-    });
-    mockGetConfig.mockResolvedValue(config);
-    mockUpdateConfig.mockResolvedValue(config);
-    renderSettings();
-
-    await screen.findByText("Default Plugins");
-
-    // Add a plugin
-    await userEvent.click(screen.getByText("+ Add Plugin"));
-
-    const artifactInput = screen.getAllByPlaceholderText("artifactId")[0];
-    await userEvent.type(artifactInput, "my-plugin");
-
-    const versionInput = screen.getAllByPlaceholderText("version")[0];
-    await userEvent.type(versionInput, "1.0");
-
-    // Submit form
-    const saveBtn = screen.getByText("Save");
-    await userEvent.click(saveBtn);
-
-    await waitFor(() => {
-      expect(mockUpdateConfig).toHaveBeenCalled();
-    });
-
-    // updateProvisioningDefaults(cluster, updated): the payload is the 2nd arg.
-    const updatedArg = mockUpdateConfig.mock.calls[0][1];
-    expect(updatedArg.spec.defaultPlugins).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ artifactId: "my-plugin", version: "1.0" }),
-      ]),
-    );
   });
 
   it("shows 'Saved.' confirmation after successful save", async () => {

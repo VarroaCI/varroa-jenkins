@@ -4384,9 +4384,6 @@
           },
           "storageClass": {
             "type": "string"
-          },
-          "storageSizeGB": {
-            "type": "integer"
           }
         },
         "type": "object"
@@ -14388,9 +14385,6 @@
           },
           "storageClass": {
             "type": "string"
-          },
-          "storageSizeGB": {
-            "type": "integer"
           }
         },
         "type": "object"

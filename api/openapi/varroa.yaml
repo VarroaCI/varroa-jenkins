@@ -3245,8 +3245,6 @@ components:
           type: array
         storageClass:
           type: string
-        storageSizeGB:
-          type: integer
       type: object
     RecentBuild:
       additionalProperties: false
@@ -10828,8 +10826,6 @@ components:
           type: array
         storageClass:
           type: string
-        storageSizeGB:
-          type: integer
       type: object
     components_schemas_ProvisioningDefaultsStatus:
       description: Observed state of ProvisioningDefaults.

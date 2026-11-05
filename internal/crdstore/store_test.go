@@ -955,3 +955,26 @@ func TestApply_ReturnsNotFoundAfterTwoRounds(t *testing.T) {
 		t.Fatalf("err = %v, want NotFound", err)
 	}
 }
+
+func TestFromUnstructured_IgnoresUndeclaredSpecFields(t *testing.T) {
+	// A stored object keeps a field that the CRD no longer declares until the next write. The typed read must still decode it.
+	u := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "ProvisioningDefaults",
+		"metadata":   map[string]any{"name": "varroa-defaults"},
+		"spec": map[string]any{
+			"rootDomain":    "example.com",
+			"storageSizeGB": int64(100),
+			"defaultPlugins": []any{
+				map[string]any{"artifactId": "git", "version": "5.0.0"},
+			},
+		},
+	}}
+	got, err := fromUnstructured[v1alpha1.ProvisioningDefaults](u)
+	if err != nil {
+		t.Fatalf("fromUnstructured: %v", err)
+	}
+	if got.Spec.RootDomain != "example.com" {
+		t.Fatalf("RootDomain = %q, want example.com", got.Spec.RootDomain)
+	}
+}
