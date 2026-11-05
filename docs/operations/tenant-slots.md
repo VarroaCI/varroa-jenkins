@@ -88,8 +88,8 @@ A change to `spec.pipelines.profile` or `spec.pipelines.cellPool` moves every me
 of the new pool.
 
 1. Slot 0 moves through the voluntary move in [Placement lifecycle](cells.md#placement-lifecycle).
-   While it waits, every member drops the tenant folder. A running build continues, and no new
-   build starts on any member.
+   While it waits, each member on the old profile or pool drops the tenant folder. A running
+   build continues, and no new build starts on those members.
 2. The move also waits until each member cell on the old profile or pool is idle.
 3. Each other slot and each standby then takes a ready cell of the new pool. When the pool has
    no such cell yet, the member stays on its old cell and continues to build. It moves on a

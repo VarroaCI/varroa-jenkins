@@ -33,10 +33,10 @@ func capPoolInputs(bound ...CellCandidate) Inputs {
 }
 
 // simulateDrainFilter applies the controller's drain filter to a cell: a
-// cell drops the tenant's folder while the tenant is TenantMoving, and it
-// applies the folder again otherwise.
+// cell drops the tenant's folder while TenantDrainsFromCell names it, and
+// it applies the folder again otherwise.
 func simulateDrainFilter(status *v1alpha1.TenantStatus, cell *CellCandidate) {
-	if c := condition(status); c != nil && c.Reason == v1alpha1.TenantReasonTenantMoving {
+	if TenantDrainsFromCell(status, cell.Namespace, cell.Name) {
 		cell.AppliedTenants = removeString(cell.AppliedTenants, "payments")
 		return
 	}
@@ -279,5 +279,165 @@ func TestStaleMembersMessageNamesThePoolCap(t *testing.T) {
 	open := Inputs{Pools: []CellPoolSummary{{Name: "big"}}}
 	if got := staleMembersMessage(open, tenant, members); strings.Contains(got, "maxCells") {
 		t.Errorf("message %q names a cap the pool does not report", got)
+	}
+}
+
+// applyDrainRule acts as each cell's apply does. A cell that lists the
+// tenant drops its folder while TenantDrainsFromCell names that cell, and
+// applies the folder again otherwise.
+func applyDrainRule(status *v1alpha1.TenantStatus, in *Inputs) {
+	for i := range in.Cells {
+		c := &in.Cells[i]
+		if !containsString(c.Tenants, "payments") {
+			continue
+		}
+		if TenantDrainsFromCell(status, c.Namespace, c.Name) {
+			c.AppliedTenants = removeString(c.AppliedTenants, "payments")
+			continue
+		}
+		c.AppliedTenants = appendUnique(c.AppliedTenants, "payments")
+	}
+}
+
+// relabeledSlotZeroInputs builds a tenant whose slot 0 cell cell-a moved to
+// the pool "small". The tenant asks for pool "big", which holds its
+// maxCells cells, and each cell of it holds one tenant.
+func relabeledSlotZeroInputs(cells ...CellCandidate) Inputs {
+	in := testInputs()
+	in.Pools = []CellPoolSummary{
+		{Name: "small", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 10},
+		{Name: "big", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 1, CapReached: true},
+	}
+	in.Cells = cells
+	return in
+}
+
+// pooledAppliedCell is appliedCell with the varroa.dev/cell-pool label.
+func pooledAppliedCell(name, pool string, tenants ...string) CellCandidate {
+	c := appliedCell(name, tenants...)
+	c.Pool = pool
+	return c
+}
+
+func TestPlace_VoluntaryMove_PromotesAFullStandbyWithoutALoop(t *testing.T) {
+	slotZero := pooledAppliedCell("cell-a", "small", "payments")
+	slotZero.PendingDeletionPaths = []string{"payments/api"}
+	in := relabeledSlotZeroInputs(slotZero,
+		pooledAppliedCell("cell-b", "big", "payments"), pooledAppliedCell("cell-c", "big", "payments"))
+	var seen []AnnounceRequest
+	in.Announce = recordingAnnounce(true, &seen)
+	tenant := slotTenant(2, 1)
+	tenant.Spec.Pipelines.CellPool = "big"
+	status := threeMemberStatus("cell-a")
+	status.Conditions = []v1alpha1.TenantCondition{{
+		Type: v1alpha1.TenantConditionPlaced, Status: metav1.ConditionTrue,
+		Reason:             v1alpha1.TenantReasonMembersApplied,
+		LastTransitionTime: metav1.NewTime(fixedNow.Add(-time.Hour)),
+	}}
+
+	// A build on cell-a holds the drain for three ticks.
+	for tick := 0; tick < 3; tick++ {
+		in.Now = fixedClock(fixedNow.Add(time.Duration(tick) * time.Minute))
+		out, err := Place(context.Background(), in, tenant, status)
+		if err != nil {
+			t.Fatalf("tick %d: Place returned error: %v", tick, err)
+		}
+		cond := condition(status)
+		if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TenantReasonTenantMoving {
+			t.Fatalf("tick %d: want False/TenantMoving, got %+v", tick, cond)
+		}
+		if !cond.LastTransitionTime.Time.Equal(fixedNow) {
+			t.Errorf("tick %d: LastTransitionTime = %v, want %v", tick, cond.LastTransitionTime.Time, fixedNow)
+		}
+		if status.Placement.Cell != "cell-a" || status.Placement.Generation != 3 {
+			t.Fatalf("tick %d: placement moved during the drain: %+v", tick, status.Placement)
+		}
+		if len(out.CellPatches) != 0 {
+			t.Errorf("tick %d: a drain tick must patch no cell: %+v", tick, out.CellPatches)
+		}
+		applyDrainRule(status, &in)
+		if containsString(in.Cells[0].AppliedTenants, "payments") {
+			t.Errorf("tick %d: slot 0's old cell kept the folder", tick)
+		}
+		for _, kept := range in.Cells[1:] {
+			if !containsString(kept.AppliedTenants, "payments") {
+				t.Errorf("tick %d: %s dropped the folder of a current member", tick, kept.Name)
+			}
+		}
+	}
+
+	// The build ends, so cell-a has drained.
+	in.Cells[0].PendingDeletionPaths = nil
+	in.Now = fixedClock(fixedNow.Add(3 * time.Minute))
+	out, err := Place(context.Background(), in, tenant, status)
+	if err != nil {
+		t.Fatalf("final tick: Place returned error: %v", err)
+	}
+	if status.Placement.Cell != "cell-c" || status.Placement.Generation != 4 {
+		t.Fatalf("want slot 0 on the standby cell-c at gen 4, got %+v", status.Placement)
+	}
+	if m := storedMemberOf(status, "cell-c"); m.Slot == nil || *m.Slot != 0 {
+		t.Errorf("cell-c should hold slot 0, got %+v", m)
+	}
+	if m := storedMemberOf(status, "cell-b"); m.Slot == nil || *m.Slot != 1 {
+		t.Errorf("cell-b should keep slot 1, got %+v", m)
+	}
+	if !dropsTenant(patchFor(out, "cell-a")) {
+		t.Errorf("the old slot 0 cell should drop the tenant, got %+v", out.CellPatches)
+	}
+	if p := patchFor(out, "cell-c"); p != nil && len(p.Tenants) != 1 {
+		t.Errorf("the promotion must add no tenant to the full cell-c: %+v", p)
+	}
+	if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TenantReasonStandbyPending {
+		t.Errorf("want StandbyPending while the full pool has no standby cell, got %+v", cond)
+	}
+	if len(seen) == 0 || seen[len(seen)-1].Cell != "cell-c" || seen[len(seen)-1].Generation != 4 {
+		t.Errorf("want a last announce for cell-c at gen 4, got %+v", seen)
+	}
+}
+
+func TestPlace_VoluntaryMove_KeepsACurrentMemberBuilding(t *testing.T) {
+	in := testInputs()
+	in.Pools = []CellPoolSummary{
+		{Name: "small", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 10},
+		{Name: "big", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 10},
+	}
+	in.Cells = []CellCandidate{
+		pooledAppliedCell("cell-a", "small", "payments"),
+		pooledAppliedCell("cell-b", "big", "payments"),
+		poolCell("cell-d", "big"),
+	}
+	in.Cells[0].PendingDeletionPaths = []string{"payments/api"}
+	tenant := slotTenant(2, 0)
+	tenant.Spec.Pipelines.CellPool = "big"
+	status := placedWithMembers([]v1alpha1.TenantMemberStatus{
+		memberStatus("cell-a", v1alpha1.TenantMemberRoleActive, intPtr(0)),
+		memberStatus("cell-b", v1alpha1.TenantMemberRoleActive, intPtr(1)),
+	})
+
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
+		t.Fatalf("tick 1: Place returned error: %v", err)
+	}
+	if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TenantReasonTenantMoving {
+		t.Fatalf("tick 1: want TenantMoving, got %+v", cond)
+	}
+	applyDrainRule(status, &in)
+	if !containsString(in.Cells[1].AppliedTenants, "payments") {
+		t.Errorf("slot 1's current cell-b dropped the folder during the move")
+	}
+
+	in.Cells[0].PendingDeletionPaths = nil
+	out, err := Place(context.Background(), in, tenant, status)
+	if err != nil {
+		t.Fatalf("tick 2: Place returned error: %v", err)
+	}
+	if status.Placement.Cell != "cell-d" || status.Placement.Generation != 4 {
+		t.Fatalf("want slot 0 on cell-d at gen 4, got %+v", status.Placement)
+	}
+	if m := storedMemberOf(status, "cell-b"); m.Slot == nil || *m.Slot != 1 {
+		t.Errorf("cell-b should keep slot 1 after the move, got %+v", m)
+	}
+	if patchFor(out, "cell-b") != nil {
+		t.Errorf("the move must not patch slot 1's cell, got %+v", patchFor(out, "cell-b"))
 	}
 }
