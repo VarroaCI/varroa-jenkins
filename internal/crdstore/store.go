@@ -431,9 +431,11 @@ func Apply[T any](ctx context.Context, b Backend, obj *T) error {
 }
 
 // ApplyAt writes obj with the caller's read as a precondition. An obj without a
-// resourceVersion is an Apply. An obj with one updates only that version of the
-// live object: a stale version answers Conflict, and an object that a delete
-// removed after the read answers Conflict too. ApplyAt never retries a Conflict
+// resourceVersion means the caller read no object: ApplyAt creates it, and an
+// existing object answers Conflict. An obj with a resourceVersion updates only
+// that version of the live object: a stale version answers Conflict, and an
+// object that a delete removed after the read answers Conflict too. ApplyAt
+// never retries a Conflict, never replaces an object the caller did not read,
 // and never creates an object for a caller that read one.
 func ApplyAt[T any](ctx context.Context, b Backend, obj *T) error {
 	info, err := gvrInfo[T]()
@@ -444,12 +446,21 @@ func ApplyAt[T any](ctx context.Context, b Backend, obj *T) error {
 	if err != nil {
 		return err
 	}
+	ns := namespaceFromObj(u, info)
+	gr := schema.GroupResource{Group: info.gvr.Group, Resource: info.gvr.Resource}
 	if u.GetResourceVersion() == "" {
-		return Apply(ctx, b, obj)
+		created, err := b.CreateObject(ctx, info.gvr, ns, u)
+		if apierrors.IsAlreadyExists(err) {
+			err = apierrors.NewConflict(gr, u.GetName(), errors.New("the object was created after it was read"))
+		}
+		if err != nil {
+			return fmt.Errorf("create %s: %w", info.gvr.Resource, err)
+		}
+		mergeCreateResult(obj, created)
+		return nil
 	}
-	updated, err := b.UpdateObject(ctx, info.gvr, namespaceFromObj(u, info), u)
+	updated, err := b.UpdateObject(ctx, info.gvr, ns, u)
 	if apierrors.IsNotFound(err) {
-		gr := schema.GroupResource{Group: info.gvr.Group, Resource: info.gvr.Resource}
 		err = apierrors.NewConflict(gr, u.GetName(), errors.New("the object was deleted after it was read"))
 	}
 	if err != nil {

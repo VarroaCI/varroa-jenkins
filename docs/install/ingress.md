@@ -57,7 +57,9 @@ kubectl apply -f defaults.yaml
 
 When the object does not exist, the Settings ▸ Provisioning tab shows an empty form, and Save creates the object.
 
-Save stops with a conflict note when another writer changed the object after the tab read it. Select **Reload**, then make the change again. Reload discards your unsaved edits.
+Save stops with a conflict note when another writer created or changed the object after the tab read it. Select **Reload**, then make the change again. Reload discards your unsaved edits.
+
+An API client writes the object with `PUT /api/v1/clusters/{cluster}/provisioningdefaults/varroa-defaults`. Send the `metadata.resourceVersion` of your read. A stale version answers `409`. A body without `metadata.resourceVersion` only creates the object, and answers `409` when the object exists. On a `409`, read the object again and repeat the change.
 
 A subdomain controller without an explicit host then uses `<name>.example.com`.
 

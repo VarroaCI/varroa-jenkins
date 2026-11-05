@@ -1527,22 +1527,36 @@ func TestHandleProvisioningDefaultsUpdateDeletedAfterReadConflicts(t *testing.T)
 	}
 }
 
-// TestHandleProvisioningDefaultsUpdateWithoutVersionUpserts pins that a body
-// without a resourceVersion creates the object and then replaces it.
-func TestHandleProvisioningDefaultsUpdateWithoutVersionUpserts(t *testing.T) {
+// TestHandleProvisioningDefaultsUpdateWithoutVersionCreatedAfterReadConflicts pins
+// that a body without a resourceVersion writes only a create. A create by another
+// writer after the caller's not-found read answers conflict and keeps that object.
+func TestHandleProvisioningDefaultsUpdateWithoutVersionCreatedAfterReadConflicts(t *testing.T) {
+	ctx := context.Background()
 	store := crdstore.NewFake()
 	c := &ConfigCRUD{Store: store, Logger: testLogger()}
-	if resp := applyPD(t, c, v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{RootDomain: "a.example.com"}}); resp.Code != "" {
-		t.Fatalf("create without a version: code %q: %s", resp.Code, resp.Error)
+
+	if _, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, store, "varroa-defaults", ""); !apierrors.IsNotFound(err) {
+		t.Fatalf("caller read = %v, want NotFound", err)
 	}
-	if resp := applyPD(t, c, v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{RootDomain: "b.example.com"}}); resp.Code != "" {
-		t.Fatalf("replace without a version: code %q: %s", resp.Code, resp.Error)
+	if err := crdstore.Create(ctx, store, &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "other.example.com"},
+	}); err != nil {
+		t.Fatalf("concurrent create: %v", err)
 	}
-	got, err := crdstore.Get[v1alpha1.ProvisioningDefaults](context.Background(), store, "varroa-defaults", "")
+
+	resp := applyPD(t, c, v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{RootDomain: "mine.example.com"}})
+	if resp.Code != bus.CodeConflict {
+		t.Fatalf("write without a version over a raced create: code %q, want %q (error %q)", resp.Code, bus.CodeConflict, resp.Error)
+	}
+	if !strings.Contains(resp.Error, "created after it was read") {
+		t.Errorf("error %q, want the create-after-read message", resp.Error)
+	}
+	got, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, store, "varroa-defaults", "")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.Spec.RootDomain != "b.example.com" {
-		t.Fatalf("rootDomain %q, want b.example.com", got.Spec.RootDomain)
+	if got.Spec.RootDomain != "other.example.com" {
+		t.Fatalf("rootDomain %q, want the other writer's other.example.com", got.Spec.RootDomain)
 	}
 }

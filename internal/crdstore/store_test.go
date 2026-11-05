@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1066,7 +1067,7 @@ func TestApplyAt_DeletedAfterReadIsConflictAndCreatesNothing(t *testing.T) {
 	}
 }
 
-func TestApplyAt_WithoutResourceVersionUpserts(t *testing.T) {
+func TestApplyAt_WithoutResourceVersionCreates(t *testing.T) {
 	ctx := context.Background()
 	f := NewFake()
 
@@ -1077,15 +1078,42 @@ func TestApplyAt_WithoutResourceVersionUpserts(t *testing.T) {
 	if err := ApplyAt(ctx, f, obj); err != nil {
 		t.Fatalf("ApplyAt when absent: %v", err)
 	}
-	obj.Spec.RootDomain = "second.example"
-	if err := ApplyAt(ctx, f, obj); err != nil {
-		t.Fatalf("ApplyAt without a version when present: %v", err)
+	if obj.ResourceVersion == "" {
+		t.Errorf("created object resourceVersion was not written back")
 	}
 	got, err := Get[v1alpha1.ProvisioningDefaults](ctx, f, "varroa-defaults", "")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.Spec.RootDomain != "second.example" {
-		t.Errorf("rootDomain = %q, want %q", got.Spec.RootDomain, "second.example")
+	if got.Spec.RootDomain != "first.example" {
+		t.Errorf("rootDomain = %q, want %q", got.Spec.RootDomain, "first.example")
+	}
+}
+
+func TestApplyAt_WithoutResourceVersionConflictsWhenTheObjectExists(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "stored.example"},
+	})
+
+	obj := &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "mine.example"},
+	}
+	err := ApplyAt(ctx, f, obj)
+	if !apierrors.IsConflict(err) {
+		t.Fatalf("ApplyAt without a version when present = %v, want Conflict", err)
+	}
+	if !strings.Contains(err.Error(), "created after it was read") {
+		t.Errorf("error = %q, want the create-after-read message", err)
+	}
+	got, err := Get[v1alpha1.ProvisioningDefaults](ctx, f, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Spec.RootDomain != "stored.example" {
+		t.Errorf("rootDomain = %q, want the stored %q", got.Spec.RootDomain, "stored.example")
 	}
 }

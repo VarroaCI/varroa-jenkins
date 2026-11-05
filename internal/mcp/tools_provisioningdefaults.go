@@ -60,7 +60,7 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 	})
 
 	updatePD := mcp.NewTool("update_provisioning_defaults",
-		mcp.WithDescription("Update provisioning defaults configuration. The tool sets only the fields you name. When another writer changes the object during the call, the tool reads it again and merges again, up to three times."),
+		mcp.WithDescription("Update provisioning defaults configuration. The tool sets only the fields you name. When another writer creates or changes the object during the call, the tool reads it again and merges again, up to three times."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Provisioning defaults name")),
 		mcp.WithString("rootDomain", mcp.Description("Root domain for auto-derived ingress hosts")),
 		mcp.WithString("storageClass", mcp.Description("Default storage class")),
@@ -324,6 +324,8 @@ func writeProvisioningDefaults(ctx context.Context, deps *api.Dependencies, clus
 // The base comes from the target cluster, so a merge never copies another
 // cluster's spec. A not-found answer yields an empty object. Any other read
 // error fails the call, so a transient error cannot wipe the target's spec.
+// The empty object carries no resourceVersion, so its write only creates the
+// object. A create by another writer answers conflict, and the caller reads again.
 func readProvisioningDefaultsBase(ctx context.Context, deps *api.Dependencies, cluster, name string) (*v1alpha1.ProvisioningDefaults, error) {
 	empty := &v1alpha1.ProvisioningDefaults{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	if deps.ConfigBrood == nil {
