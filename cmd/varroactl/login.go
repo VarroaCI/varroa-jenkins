@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -268,9 +269,6 @@ func loginBrowser(cmd *cobra.Command, serverFlag string) error {
 	// Print the URL before the open: a launcher can exit 0 and open nothing.
 	errOut := cmd.ErrOrStderr()
 	_, _ = fmt.Fprintf(errOut, "Opening the login page in a browser. If no browser window opens, go to this URL:\n  %s\n", loginURL)
-	if err := openBrowser(loginURL); err != nil {
-		_, _ = fmt.Fprintf(errOut, "Cannot open a browser: %v\nGo to the URL above in a browser on this computer, or use: varroactl login --api-key\n", err)
-	}
 
 	// 4. Loopback server
 	type result struct {
@@ -328,18 +326,56 @@ func loginBrowser(cmd *cobra.Command, serverFlag string) error {
 		_ = srv.Shutdown(ctx)
 	}()
 
-	select {
-	case r := <-ch:
-		if r.denied {
-			return fmt.Errorf("login denied in browser")
+	// The timeout clock starts before the open, so a blocking launcher cannot stall the flow.
+	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+	defer cancel()
+
+	// cli/browser blocks while a foreground launcher keeps the browser attached.
+	// The open runs in its own goroutine; the flow waits only on the callback or the timeout.
+	// The goroutine reports an open error on a channel. The flow prints it on this
+	// goroutine, so the message is ordered against the outcome and never lost.
+	open := openBrowser
+	openFailed := make(chan error, 1)
+	go func() {
+		if err := open(loginURL); err != nil {
+			openFailed <- err
 		}
-		return validateAndStore(cmd, server, r.token, ctxFlag)
-	case <-time.After(timeout):
-		return fmt.Errorf("timed out waiting for browser login; URL:\n  %s\nOn headless machines use: varroactl login --api-key", loginURL)
-	case <-sigCh:
-		return fmt.Errorf("interrupted")
-	case <-cmd.Context().Done():
-		return fmt.Errorf("login cancelled: %w", cmd.Context().Err())
+	}()
+	printOpenFailure := func(err error) {
+		_, _ = fmt.Fprintf(errOut, "Cannot open a browser: %v\nGo to the URL above in a browser on this computer, or use: varroactl login --api-key\n", err)
+	}
+	// drain prints an open error that arrived before the flow ends.
+	drain := func() {
+		select {
+		case err := <-openFailed:
+			printOpenFailure(err)
+		default:
+		}
+	}
+	var openErrs <-chan error = openFailed
+
+	for {
+		select {
+		case err := <-openErrs:
+			printOpenFailure(err)
+			openErrs = nil
+			continue
+		case r := <-ch:
+			drain()
+			if r.denied {
+				return fmt.Errorf("login denied in browser")
+			}
+			return validateAndStore(cmd, server, r.token, ctxFlag)
+		case <-ctx.Done():
+			drain()
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("timed out waiting for browser login; URL:\n  %s\nOn headless machines use: varroactl login --api-key", loginURL)
+			}
+			return fmt.Errorf("login cancelled: %w", ctx.Err())
+		case <-sigCh:
+			drain()
+			return fmt.Errorf("interrupted")
+		}
 	}
 }
 
