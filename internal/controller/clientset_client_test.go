@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -2996,5 +2997,79 @@ func TestControllerStatusPatchAlwaysCarriesEndpoint(t *testing.T) {
 	set := controllerStatusPatch(&v1alpha1.ControllerStatus{Endpoint: "https://x.example.com"})
 	if v := set["endpoint"]; v != "https://x.example.com" {
 		t.Fatalf("endpoint = %v, want https://x.example.com", v)
+	}
+}
+
+// fillStatusFields sets every top-level ControllerStatus field to a non-zero
+// value, so controllerStatusPatch emits every key it can emit.
+func fillStatusFields(t *testing.T) *v1alpha1.ControllerStatus {
+	t.Helper()
+	status := &v1alpha1.ControllerStatus{}
+	v := reflect.ValueOf(status).Elem()
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Field(i)
+		switch f.Kind() {
+		case reflect.String:
+			f.SetString("x")
+		case reflect.Bool:
+			f.SetBool(true)
+		case reflect.Pointer:
+			f.Set(reflect.New(f.Type().Elem()))
+		case reflect.Slice:
+			f.Set(reflect.MakeSlice(f.Type(), 1, 1))
+		default:
+			t.Fatalf("field %s has kind %s, extend fillStatusFields", v.Type().Field(i).Name, f.Kind())
+		}
+	}
+	return status
+}
+
+// TestControllerStatusPatchCoversEveryStatusField fails when a ControllerStatus
+// JSON key is neither carried by controllerStatusPatch nor listed in
+// statusPatchOmittedKeys, and when an allowlist entry is stale.
+func TestControllerStatusPatchCoversEveryStatusField(t *testing.T) {
+	typ := reflect.TypeOf(v1alpha1.ControllerStatus{})
+	keys := map[string]bool{}
+	for i := 0; i < typ.NumField(); i++ {
+		name := strings.Split(typ.Field(i).Tag.Get("json"), ",")[0]
+		if name == "" || name == "-" {
+			continue
+		}
+		keys[name] = true
+	}
+	patch := controllerStatusPatch(fillStatusFields(t))
+	for key := range keys {
+		_, inPatch := patch[key]
+		reason, omitted := statusPatchOmittedKeys[key]
+		switch {
+		case inPatch && omitted:
+			t.Errorf("status key %q is carried by the patch and listed as omitted (%s); remove the allowlist entry", key, reason)
+		case !inPatch && !omitted:
+			t.Errorf("status key %q is neither in controllerStatusPatch nor in statusPatchOmittedKeys", key)
+		}
+	}
+	for key := range statusPatchOmittedKeys {
+		if !keys[key] {
+			t.Errorf("statusPatchOmittedKeys lists %q, which is not a ControllerStatus field", key)
+		}
+	}
+}
+
+// TestProvisioningStartedAtSurvivesTheStatusPatch proves the provisioning
+// stamp round-trips through the wire form of the status patch, so the next
+// tick reads the same budget start.
+func TestProvisioningStartedAtSurvivesTheStatusPatch(t *testing.T) {
+	stamp := metav1.NewTime(time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC))
+	in := &v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseProvisioning, ProvisioningStartedAt: &stamp}
+	body, err := json.Marshal(controllerStatusPatch(in))
+	if err != nil {
+		t.Fatalf("marshal status patch: %v", err)
+	}
+	var out v1alpha1.ControllerStatus
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("unmarshal status patch: %v", err)
+	}
+	if out.ProvisioningStartedAt == nil || !out.ProvisioningStartedAt.Equal(&stamp) {
+		t.Fatalf("ProvisioningStartedAt = %v after the patch, want %v", out.ProvisioningStartedAt, stamp)
 	}
 }
