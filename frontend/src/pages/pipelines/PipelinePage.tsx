@@ -365,10 +365,7 @@ export default function PipelinePage() {
       if (ev.data?.job_path !== job) continue;
       if (ev.type === "wait") {
         // A wait frame refetches the job read, which carries the Waiting card.
-        // The runs table refetches too, because the coalescing stream can
-        // replace a held run frame with this one.
         refetchJob = true;
-        refetchRuns = true;
       } else if (ev.type === "run") {
         refetchRuns = true;
         // A terminal run moves the health values and the Last 30 days card.

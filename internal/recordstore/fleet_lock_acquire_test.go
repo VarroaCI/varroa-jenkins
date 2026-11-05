@@ -388,7 +388,7 @@ func TestFleetLockAcquire_PublishesWaitingThenHeld(t *testing.T) {
 	}
 
 	notifier.now = func() time.Time { return notifyClockStart.Add(2 * notifier.interval) }
-	notifier.flush(runID)
+	flushRun(notifier, runID)
 	if got := sent.count(); got != 2 {
 		t.Fatalf("published %d notifications after the interval, want 2", got)
 	}
@@ -430,7 +430,7 @@ func TestFleetLockAcquire_RepeatPollPublishesNothing(t *testing.T) {
 	if resp := acquireForCaller(t, deps, runID); resp.State != FleetLockStateWaiting {
 		t.Fatalf("repeat poll state: got %q, want %q", resp.State, FleetLockStateWaiting)
 	}
-	notifier.flush(runID)
+	flushRun(notifier, runID)
 	if got := sent.count(); got != 1 {
 		t.Fatalf("published %d notifications after a repeat poll, want 1", got)
 	}
@@ -467,7 +467,7 @@ func TestFleetLockAcquire_PromotionIntoAHeldRowPublishesNothing(t *testing.T) {
 	if resp := acquireForCaller(t, deps, runID); resp.State != FleetLockStateWaiting {
 		t.Fatalf("second poll state: got %q, want %q", resp.State, FleetLockStateWaiting)
 	}
-	notifier.flush(runID)
+	flushRun(notifier, runID)
 	if got := sent.count(); got != 1 {
 		t.Fatalf("published %d notifications after an unpromoted poll, want 1", got)
 	}
@@ -572,7 +572,7 @@ func TestFleetLockAcquire_StoresCallerJobPathOnTheRowAndItsNotifications(t *test
 	}
 
 	notifier.now = func() time.Time { return notifyClockStart.Add(2 * notifier.interval) }
-	notifier.flush(runID)
+	flushRun(notifier, runID)
 	if got := sent.count(); got != 2 {
 		t.Fatalf("published %d notifications after the interval, want 2", got)
 	}

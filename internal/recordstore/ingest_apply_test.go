@@ -357,7 +357,7 @@ func countNotifications(t *testing.T, notifier *RunNotifier, sent *captureSend, 
 	// The run's terminal notification ends its own interval, so the lock
 	// notifications that follow it are the ones a flush reaches.
 	notifier.now = func() time.Time { return notifyClockStart.Add(2 * notifier.interval) }
-	notifier.flush(runID)
+	flushRun(notifier, runID)
 	for i := 0; i < sent.count(); i++ {
 		switch sent.payload(i).Kind {
 		case "run":
