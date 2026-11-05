@@ -18,6 +18,12 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
+// tenantMetadataEntry is the Tenant metadata that the tenants API carries.
+// A PUT sends ResourceVersion back as the precondition of its write.
+type tenantMetadataEntry struct {
+	ResourceVersion string `json:"resourceVersion,omitempty"`
+}
+
 // tenantEntry is the JSON shape for GET /tenants entries. Pipelines carries
 // spec.pipelines; Placement carries status.placement; Rehydration carries
 // status.rehydration. Neither status.pipelines.webhookToken nor
@@ -28,6 +34,7 @@ import (
 // handler serves.
 type tenantEntry struct {
 	Name                string                          `json:"name"`
+	Metadata            tenantMetadataEntry             `json:"metadata"`
 	DisplayName         string                          `json:"displayName,omitempty"`
 	Members             []string                        `json:"members,omitempty"`
 	Subjects            []v1alpha1.SubjectRef           `json:"subjects,omitempty"`
@@ -374,6 +381,7 @@ func tenantRehydrationEntryFromStatus(r *v1alpha1.TenantRehydrationStatus) *tena
 func tenantFromCRD(t *v1alpha1.Tenant) tenantEntry {
 	return tenantEntry{
 		Name:                t.Name,
+		Metadata:            tenantMetadataEntry{ResourceVersion: t.ResourceVersion},
 		DisplayName:         t.Spec.DisplayName,
 		Members:             t.Spec.Members,
 		Subjects:            t.Spec.Subjects,
@@ -428,8 +436,11 @@ func (s *Server) handleListTenants(w http.ResponseWriter, r *http.Request) {
 }
 
 // createTenantRequest is the JSON body for POST /tenants and PUT /tenants/{name}.
+// POST ignores Metadata. PUT reads Metadata.ResourceVersion as the precondition
+// of its write.
 type createTenantRequest struct {
 	Name                string                `json:"name"`
+	Metadata            *tenantMetadataEntry  `json:"metadata,omitempty"`
 	DisplayName         string                `json:"displayName,omitempty"`
 	Members             []string              `json:"members,omitempty"`
 	Subjects            []v1alpha1.SubjectRef `json:"subjects,omitempty"`
@@ -437,6 +448,19 @@ type createTenantRequest struct {
 	RoleRef             string                `json:"roleRef,omitempty"`
 	ProvisionNamespaces bool                  `json:"provisionNamespaces,omitempty"`
 	Pipelines           *tenantPipelinesEntry `json:"pipelines,omitempty"`
+}
+
+// tenantSpecFromRequest maps every spec field of the request onto a TenantSpec.
+func tenantSpecFromRequest(req createTenantRequest) v1alpha1.TenantSpec {
+	return v1alpha1.TenantSpec{
+		DisplayName:         req.DisplayName,
+		Members:             req.Members,
+		Subjects:            req.Subjects,
+		Namespaces:          req.Namespaces,
+		RoleRef:             req.RoleRef,
+		ProvisionNamespaces: req.ProvisionNamespaces,
+		Pipelines:           tenantPipelinesSpecFromEntry(req.Pipelines),
+	}
 }
 
 func (s *Server) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
@@ -483,15 +507,7 @@ func (s *Server) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: req.Name,
 		},
-		Spec: v1alpha1.TenantSpec{
-			DisplayName:         req.DisplayName,
-			Members:             req.Members,
-			Subjects:            req.Subjects,
-			Namespaces:          req.Namespaces,
-			RoleRef:             req.RoleRef,
-			ProvisionNamespaces: req.ProvisionNamespaces,
-			Pipelines:           tenantPipelinesSpecFromEntry(req.Pipelines),
-		},
+		Spec: tenantSpecFromRequest(req),
 	}
 
 	ctx := r.Context()
@@ -514,7 +530,8 @@ func (s *Server) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 // HandleTenantDispatch dispatches /tenants/{name} requests:
 //
 //	GET    /tenants/{name} — get tenant detail (admin, or CanReadPipeline on the tenant)
-//	PUT    /tenants/{name} — update tenant (admin, or the tenant's pipelines:admin capability)
+//	PUT    /tenants/{name} — update tenant (admin, or the tenant's pipelines:admin capability);
+//	                         metadata.resourceVersion fences the write
 //	DELETE /tenants/{name} — delete tenant (admin)
 func (s *Server) HandleTenantDispatch(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/tenants/")
@@ -619,38 +636,62 @@ func (s *Server) handleUpdateTenant(w http.ResponseWriter, r *http.Request, name
 		return
 	}
 
-	tenant := &v1alpha1.Tenant{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Spec: v1alpha1.TenantSpec{
-			DisplayName:         req.DisplayName,
-			Members:             req.Members,
-			Subjects:            req.Subjects,
-			Namespaces:          req.Namespaces,
-			RoleRef:             req.RoleRef,
-			ProvisionNamespaces: req.ProvisionNamespaces,
-			Pipelines:           tenantPipelinesSpecFromEntry(req.Pipelines),
-		},
+	ctx := r.Context()
+	isAdmin := s.deps.Authorizer.IsAdmin(claims)
+	version := ""
+	if req.Metadata != nil {
+		version = req.Metadata.ResourceVersion
+	}
+	// A body without a version only creates.
+	createOnly := version == ""
+	spec := tenantSpecFromRequest(req)
+
+	stored, err := crdstore.Get[v1alpha1.Tenant](ctx, s.deps.Store, name, "")
+	switch {
+	case apierrors.IsNotFound(err):
+		stored = nil
+	case err != nil:
+		s.writeJSONError(w, http.StatusInternalServerError, "failed to read tenant")
+		return
 	}
 
-	ctx := r.Context()
-	if !s.deps.Authorizer.IsAdmin(claims) {
-		// A tenant pipelines admin may change only spec.pipelines.exports.
-		// Every other field of the Tenant stays as stored, or the write is
-		// refused, so the tenant right never reaches members, roleRef,
-		// namespaces, or placement.
-		stored, err := crdstore.Get[v1alpha1.Tenant](ctx, s.deps.Store, name, "")
-		if err != nil || stored == nil {
-			s.writeJSONError(w, http.StatusNotFound, "tenant not found")
-			return
+	var tenant *v1alpha1.Tenant
+	switch {
+	case stored == nil && !isAdmin:
+		// Only an administrator creates a Tenant.
+		s.writeJSONError(w, http.StatusNotFound, "tenant not found")
+		return
+	case stored == nil && createOnly:
+		tenant = &v1alpha1.Tenant{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:       spec,
 		}
-		if !tenantSpecEqualExceptTenantOwned(stored.Spec, tenant.Spec) {
+	case stored == nil || stored.ResourceVersion != version:
+		// The version check runs before the tenant-owned field check, so a
+		// stale body answers 409 and never 403.
+		s.writeJSONError(w, http.StatusConflict, applyAtConflictMessage("tenant", name, createOnly))
+		return
+	default:
+		if !isAdmin && !tenantSpecEqualExceptTenantOwned(stored.Spec, spec) {
+			// A tenant pipelines admin may change only spec.pipelines.exports,
+			// concurrency limits, badge, and triggers. Every other field stays
+			// as stored, or the write is refused, so the tenant right never
+			// reaches members, roleRef, namespaces, or placement.
 			s.writeJSONError(w, http.StatusForbidden, "a tenant pipelines admin may change only exports, concurrency limits, badge, and triggers")
 			return
 		}
+		// The copy keeps the stored labels, annotations, owner references,
+		// and finalizers. The body carries every spec field, so it replaces
+		// the stored spec whole. ApplyAt writes only the checked version.
+		tenant = stored.DeepCopy()
+		tenant.Spec = spec
 	}
-	if err := crdstore.Apply[v1alpha1.Tenant](ctx, s.deps.Store, tenant); err != nil {
+
+	if err := crdstore.ApplyAt[v1alpha1.Tenant](ctx, s.deps.Store, tenant); err != nil {
+		if apierrors.IsConflict(err) {
+			s.writeJSONError(w, http.StatusConflict, applyAtConflictMessage("tenant", name, createOnly))
+			return
+		}
 		if k8sErrorToHTTP(err) == http.StatusBadRequest {
 			s.writeJSONError(w, http.StatusBadRequest, err.Error())
 			return

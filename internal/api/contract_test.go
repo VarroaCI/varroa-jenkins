@@ -423,6 +423,11 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 	})
 	// A placed pipelines Tenant, so the landing-page list answers one row
 	// for the response schema to check.
+	// A plain Tenant at a known version, so the PUT contract cases can fence on it.
+	crdstore.MustSeed(client.crdStore, &v1alpha1.Tenant{
+		ObjectMeta: metav1.ObjectMeta{Name: "contract-put-tenant", ResourceVersion: contractTenantVersion},
+		Spec:       v1alpha1.TenantSpec{Members: []string{"user"}, Namespaces: []string{"ns"}},
+	})
 	crdstore.MustSeed(client.crdStore, &v1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{Name: "contract-tenant"},
 		Spec:       v1alpha1.TenantSpec{Namespaces: []string{"test-ns"}, Pipelines: &v1alpha1.TenantPipelinesSpec{Profile: "lts", AgentNamespace: "test-ns"}},
@@ -1108,3 +1113,6 @@ func (f *fakeBrood) DiscoverNamespaces(ctx context.Context, cluster string) (*bu
 	}
 	return &bus.NamespacesListResponse{}, nil
 }
+
+// contractTenantVersion is the stored resourceVersion of contract-put-tenant.
+const contractTenantVersion = "300"

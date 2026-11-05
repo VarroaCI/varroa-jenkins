@@ -76,7 +76,16 @@
   put:
     operationId: updateTenant
     tags: [tenants]
-    summary: Updates a tenant (admin).
+    summary: Updates a tenant (admin, or the tenant's pipelines admin for its exports and limits).
+    description: >-
+      Send the metadata.resourceVersion of your read. The write then changes only that
+      version. A stale version, or a tenant deleted after the read, answers 409 and
+      writes nothing. A body without metadata.resourceVersion only creates the tenant.
+      When the tenant exists, that body answers 409 and writes nothing. Only an
+      administrator creates a tenant. A tenant pipelines administrator gets 404 for a
+      missing tenant. The server checks the version before it checks the fields that a
+      tenant pipelines administrator can change. The write keeps the labels,
+      annotations, owner references, and finalizers of the stored tenant.
     parameters:
       - $ref: '../components/parameters.yaml#/name'
     requestBody:
@@ -105,6 +114,8 @@
         $ref: '../components/responses.yaml#/Forbidden'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
   delete:
     operationId: deleteTenant
     tags: [tenants]

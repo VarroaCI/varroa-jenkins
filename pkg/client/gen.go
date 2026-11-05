@@ -5453,8 +5453,11 @@ type ComponentsSchemasTenantEntry struct {
 	DisplayName *string                             `json:"displayName,omitempty"`
 
 	// GroupRef Reference to the managed VarroaRoleBinding group.
-	GroupRef           *string                                  `json:"groupRef,omitempty"`
-	Members            *[]string                                `json:"members,omitempty"`
+	GroupRef *string   `json:"groupRef,omitempty"`
+	Members  *[]string `json:"members,omitempty"`
+
+	// Metadata The Tenant metadata that the tenants API carries.
+	Metadata           ComponentsSchemasTenantMetadata          `json:"metadata"`
 	Name               string                                   `json:"name"`
 	NamespaceStates    *[]ComponentsSchemasTenantNamespaceState `json:"namespaceStates,omitempty"`
 	Namespaces         []string                                 `json:"namespaces"`
@@ -5520,6 +5523,12 @@ type ComponentsSchemasTenantMember struct {
 
 // ComponentsSchemasTenantMemberRole An active member holds one slot. A standby holds the folder, holds no slot, and runs no build.
 type ComponentsSchemasTenantMemberRole string
+
+// ComponentsSchemasTenantMetadata The Tenant metadata that the tenants API carries.
+type ComponentsSchemasTenantMetadata struct {
+	// ResourceVersion The version of the stored tenant, as the server returned it. PUT /tenants/{name} uses it as the precondition of the write. POST /tenants ignores it.
+	ResourceVersion *string `json:"resourceVersion,omitempty"`
+}
 
 // ComponentsSchemasTenantNamespaceState State of a single namespace for a Tenant.
 type ComponentsSchemasTenantNamespaceState struct {
@@ -5662,6 +5671,9 @@ type ComponentsSchemasTenantRequest struct {
 
 	// Members Direct member usernames.
 	Members *[]string `json:"members,omitempty"`
+
+	// Metadata The Tenant metadata that the tenants API carries.
+	Metadata *ComponentsSchemasTenantMetadata `json:"metadata,omitempty"`
 
 	// Name Tenant name (ignored in body for updates).
 	Name string `json:"name"`
@@ -26304,6 +26316,7 @@ type UpdateTenantResponse struct {
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
 	JSON404 *ComponentsResponsesNotFound
+	JSON409 *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -38138,6 +38151,13 @@ func ParseUpdateTenantResponse(rsp *http.Response) (*UpdateTenantResponse, error
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 

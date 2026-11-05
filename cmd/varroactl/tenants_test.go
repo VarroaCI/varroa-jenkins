@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -146,5 +147,53 @@ func TestTenant_GetList(t *testing.T) {
 	root.SetArgs([]string{"get", "tenants"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestTenant_EditSendsReadVersion asserts that edit tenant keeps the
+// resourceVersion of its read out of the buffer and sends it on the PUT.
+func TestTenant_EditSendsReadVersion(t *testing.T) {
+	testSetup(t)
+	callCount := 0
+	var putBody map[string]any
+	srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			json.NewEncoder(w).Encode(map[string]any{
+				"name":       "team-alpha",
+				"roleRef":    "admin",
+				"members":    []any{"alice"},
+				"namespaces": []any{"ns1"},
+				"metadata":   map[string]any{"resourceVersion": "7"},
+			})
+			return
+		}
+		json.NewDecoder(r.Body).Decode(&putBody)
+		w.WriteHeader(http.StatusOK)
+	})
+	defer srv.Close()
+
+	origEditor := runEditorC3
+	runEditorC3 = func(path string) error {
+		buf, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(buf), "resourceVersion") || strings.Contains(string(buf), "metadata:") {
+			t.Errorf("edit buffer shows the version or metadata: %s", buf)
+		}
+		content := "name: team-alpha\nroleRef: viewer\nmembers:\n  - alice\nnamespaces:\n  - ns1\n"
+		return os.WriteFile(path, []byte(content), 0644)
+	}
+	defer func() { runEditorC3 = origEditor }()
+
+	root := newRootCmd()
+	root.SetArgs([]string{"edit", "tenant", "team-alpha"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	meta, ok := putBody["metadata"].(map[string]any)
+	if !ok || meta["resourceVersion"] != "7" {
+		t.Fatalf("PUT metadata = %v, want resourceVersion 7", putBody["metadata"])
 	}
 }

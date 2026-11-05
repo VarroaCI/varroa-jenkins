@@ -210,8 +210,8 @@ func TestRequestHandlersPassRequestContext(t *testing.T) {
 		},
 		{
 			name: "tenant update", method: http.MethodPut, path: "/tenants/t1",
-			seed: []any{&v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "t1"}, Spec: v1alpha1.TenantSpec{Members: []string{"alice"}, Namespaces: []string{"ns1"}}}},
-			body: `{"members":["alice"],"namespaces":["ns1"]}`,
+			seed: []any{&v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "t1", ResourceVersion: "7"}, Spec: v1alpha1.TenantSpec{Members: []string{"alice"}, Namespaces: []string{"ns1"}}}},
+			body: `{"metadata":{"resourceVersion":"7"},"members":["alice"],"namespaces":["ns1"]}`,
 			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleTenantDispatch(w, r) },
 		},
 		{

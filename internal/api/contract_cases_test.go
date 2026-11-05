@@ -57,7 +57,7 @@ func init() {
 		contractCase{Name: "zz-deleteGroup", Method: "DELETE", Path: "/api/v1/groups/any-group", Claims: adminClaims, WantStatus: http.StatusNoContent},
 	)
 
-	// ── tenants (5 cases) ──────────────────────────────────────────────────
+	// ── tenants (8 cases) ──────────────────────────────────────────────────
 	registerContractCases(
 		contractCase{Name: "listTenants", Method: "GET", Path: "/api/v1/tenants", Claims: adminClaims, WantStatus: http.StatusOK},
 		contractCase{Name: "listTenants-403-nonadmin", Method: "GET", Path: "/api/v1/tenants", Claims: operatorClaims, WantStatus: http.StatusForbidden},
@@ -65,6 +65,9 @@ func init() {
 		contractCase{Name: "zz-deleteTenant", Method: "DELETE", Path: "/api/v1/tenants/any-tenant", Claims: adminClaims, WantStatus: http.StatusNoContent},
 		contractCase{Name: "getTenant-404", Method: "GET", Path: "/api/v1/tenants/nonexistent", Claims: adminClaims, WantStatus: http.StatusNotFound},
 		contractCase{Name: "updateTenant", Method: "PUT", Path: "/api/v1/tenants/new-tenant", Claims: adminClaims, Body: map[string]interface{}{"name": "new-tenant", "members": []string{"user"}, "namespaces": []string{"ns"}}, WantStatus: http.StatusOK},
+		contractCase{Name: "updateTenant-existing", Method: "PUT", Path: "/api/v1/tenants/contract-put-tenant", Claims: adminClaims, Body: map[string]interface{}{"name": "contract-put-tenant", "metadata": map[string]string{"resourceVersion": contractTenantVersion}, "members": []string{"user"}, "namespaces": []string{"ns"}}, WantStatus: http.StatusOK},
+		contractCase{Name: "updateTenant-409-stale", Method: "PUT", Path: "/api/v1/tenants/contract-put-tenant", Claims: adminClaims, Body: map[string]interface{}{"name": "contract-put-tenant", "metadata": map[string]string{"resourceVersion": "1"}, "members": []string{"user"}, "namespaces": []string{"ns"}}, WantStatus: http.StatusConflict},
+		contractCase{Name: "updateTenant-409-exists", Method: "PUT", Path: "/api/v1/tenants/contract-put-tenant", Claims: adminClaims, Body: map[string]interface{}{"name": "contract-put-tenant", "members": []string{"user"}, "namespaces": []string{"ns"}}, WantStatus: http.StatusConflict},
 	)
 
 	// ── runners (5 cases) ────────────────────────────────────────────────

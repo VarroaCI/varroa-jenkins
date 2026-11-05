@@ -474,3 +474,20 @@ func TestEditProvisioningDefaults_ConflictExitsNonZero(t *testing.T) {
 		t.Errorf("expected conflict message on stderr, got: %s", stderrBuf.String())
 	}
 }
+
+// TestStripEditNoise_DropsEmptyMetadata asserts that stripEditNoise removes a
+// metadata map that it leaves empty, and keeps a metadata map that has a name.
+func TestStripEditNoise_DropsEmptyMetadata(t *testing.T) {
+	onlyVersion := map[string]any{"metadata": map[string]any{"resourceVersion": "7"}}
+	stripEditNoise(onlyVersion)
+	if _, ok := onlyVersion["metadata"]; ok {
+		t.Fatalf("metadata = %v, want the empty map dropped", onlyVersion["metadata"])
+	}
+
+	withName := map[string]any{"metadata": map[string]any{"name": "x", "resourceVersion": "7"}}
+	stripEditNoise(withName)
+	meta, ok := withName["metadata"].(map[string]any)
+	if !ok || meta["name"] != "x" {
+		t.Fatalf("metadata = %v, want metadata.name kept", withName["metadata"])
+	}
+}

@@ -150,6 +150,12 @@ func runEditTenant(cmd *cobra.Command, args []string) error {
 					}
 				}
 			}
+			// editLoop keeps the version out of the buffer and sends it on the PUT.
+			if meta, ok := doc["metadata"].(map[string]any); ok {
+				if rv, ok := meta["resourceVersion"].(string); ok && rv != "" {
+					projected["metadata"] = map[string]any{"resourceVersion": rv}
+				}
+			}
 			if _, ok := projected["name"]; !ok {
 				projected["name"] = name
 			}

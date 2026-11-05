@@ -167,6 +167,10 @@ func stripEditNoise(doc map[string]any) {
 		for _, k := range []string{"managedFields", "resourceVersion", "uid", "generation", "creationTimestamp"} {
 			delete(meta, k)
 		}
+		// A metadata map that held only the version would show as an empty map.
+		if len(meta) == 0 {
+			delete(doc, "metadata")
+		}
 	}
 }
 

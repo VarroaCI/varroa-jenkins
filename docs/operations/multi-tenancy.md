@@ -37,6 +37,14 @@ Only configured deployable namespaces accept controller creation. Configure them
 
 Tenants own their namespace membership and bindings. Do not manually edit generated access objects. If a user gets `403`, verify their identity, Tenant membership, namespace scope, and role binding. If creation is rejected, verify that the namespace is deployable.
 
+## Change a tenant through the API
+
+Change a tenant with `PUT /api/v1/tenants/{name}`. Read the tenant first. Send the `metadata.resourceVersion` of that read in the body. The write then changes only that version of the `Tenant`. It keeps the labels, annotations, owner references, and finalizers of the stored `Tenant`.
+
+A stale version answers `409` and writes nothing. A body without `metadata.resourceVersion` only creates a tenant, and only an administrator can create one. When the tenant exists, that body answers `409`. On a `409`, read the tenant again and repeat the change.
+
+The dashboard tenant form and `varroactl edit tenant` send the version of their read. When another writer changed the tenant, the save stops with a conflict note. Reload the page or run the edit again.
+
 ## Onboard a pipelines tenant
 
 A `Tenant` can also become a pipelines tenant: it shares a cell controller with other tenants instead
