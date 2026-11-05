@@ -4367,6 +4367,8 @@ components:
           items:
             type: string
           type: array
+        metadata:
+          $ref: '#/components/schemas/components_schemas_TenantMetadata'
         name:
           type: string
         namespaceStates:
@@ -4397,6 +4399,7 @@ components:
       required:
       - name
       - namespaces
+      - metadata
       type: object
     TenantNamespaceState:
       additionalProperties: false
@@ -4421,6 +4424,8 @@ components:
           items:
             type: string
           type: array
+        metadata:
+          $ref: '#/components/schemas/components_schemas_TenantMetadata'
         name:
           description: Tenant name (ignored in body for updates).
           type: string
@@ -12968,6 +12973,8 @@ components:
           items:
             type: string
           type: array
+        metadata:
+          $ref: '#/components/schemas/components_schemas_TenantMetadata'
         name:
           type: string
         namespaceStates:
@@ -12998,6 +13005,7 @@ components:
       required:
       - name
       - namespaces
+      - metadata
       type: object
     components_schemas_TenantExport:
       additionalProperties: false
@@ -13076,6 +13084,16 @@ components:
             to another pool. The member keeps that cell until the tenant's pool has
             a free cell.
           type: boolean
+      type: object
+    components_schemas_TenantMetadata:
+      additionalProperties: false
+      description: The Tenant metadata that the tenants API carries.
+      properties:
+        resourceVersion:
+          description: The version of the stored tenant, as the server returned it.
+            PUT /tenants/{name} uses it as the precondition of the write. POST /tenants
+            ignores it.
+          type: string
       type: object
     components_schemas_TenantNamespaceState:
       additionalProperties: false
@@ -13299,6 +13317,8 @@ components:
           items:
             type: string
           type: array
+        metadata:
+          $ref: '#/components/schemas/components_schemas_TenantMetadata'
         name:
           description: Tenant name (ignored in body for updates).
           type: string
@@ -20351,6 +20371,15 @@ paths:
       tags:
       - tenants
     put:
+      description: Send the metadata.resourceVersion of your read. The write then
+        changes only that version. A stale version, or a tenant deleted after the
+        read, answers 409 and writes nothing. A body without metadata.resourceVersion
+        only creates the tenant. When the tenant exists, that body answers 409 and
+        writes nothing. Only an administrator creates a tenant. A tenant pipelines
+        administrator gets 404 for a missing tenant. The server checks the version
+        before it checks the fields that a tenant pipelines administrator can change.
+        The write keeps the labels, annotations, owner references, and finalizers
+        of the stored tenant.
       operationId: updateTenant
       parameters:
       - $ref: '#/components/parameters/components_parameters_name'
@@ -20381,7 +20410,10 @@ paths:
           $ref: '#/components/responses/components_responses_Forbidden'
         "404":
           $ref: '#/components/responses/components_responses_NotFound'
-      summary: Updates a tenant (admin).
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
+      summary: Updates a tenant (admin, or the tenant's pipelines admin for its exports
+        and limits).
       tags:
       - tenants
   /api/v1/updatecenter:

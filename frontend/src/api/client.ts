@@ -915,8 +915,13 @@ export interface TenantCondition {
   lastTransitionTime?: string;
 }
 
+export interface TenantMetadata {
+  resourceVersion?: string;
+}
+
 export interface TenantEntry {
   name: string;
+  metadata: TenantMetadata;
   displayName?: string;
   members?: string[];
   subjects?: SubjectRef[];
@@ -935,6 +940,7 @@ export interface TenantEntry {
 
 export interface CreateTenantBody {
   name: string;
+  metadata?: TenantMetadata;
   displayName?: string;
   members?: string[];
   subjects?: SubjectRef[];

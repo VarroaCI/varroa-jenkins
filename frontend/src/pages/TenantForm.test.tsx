@@ -70,6 +70,54 @@ describe("TenantForm", () => {
     expect(await screen.findByText("A tenant with this name already exists.")).toBeInTheDocument();
   });
 
+  it("sends the resourceVersion of the read on an update", async () => {
+    const user = userEvent.setup();
+    mockParams = { name: "payments" };
+    mockGetTenant.mockResolvedValue({
+      name: "payments",
+      metadata: { resourceVersion: "7" },
+      members: ["alice"],
+      namespaces: ["ns1"],
+      roleRef: "developer",
+    });
+
+    render(<TenantForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Update")).toBeInTheDocument();
+    });
+    await user.click(screen.getByText("Update"));
+
+    await waitFor(() => {
+      expect(mockUpdateTenant).toHaveBeenCalled();
+    });
+    const body = mockUpdateTenant.mock.calls[0][1];
+    expect(body.metadata).toEqual({ resourceVersion: "7" });
+  });
+
+  it("shows the conflict note when another writer changed the tenant", async () => {
+    const user = userEvent.setup();
+    mockParams = { name: "payments" };
+    mockGetTenant.mockResolvedValue({
+      name: "payments",
+      metadata: { resourceVersion: "7" },
+      members: ["alice"],
+      namespaces: ["ns1"],
+      roleRef: "developer",
+    });
+    mockUpdateTenant.mockRejectedValueOnce(new ApiError(409, "x", { error: "changed" }));
+
+    render(<TenantForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Update")).toBeInTheDocument();
+    });
+    await user.click(screen.getByText("Update"));
+
+    expect(await screen.findByText(/Another user or tool changed this tenant/)).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
   it("emits pipelines with the selected bundle's namespace explicitly", async () => {
     const user = userEvent.setup();
     render(<TenantForm />);
@@ -102,6 +150,7 @@ describe("TenantForm", () => {
       expect(mockCreateTenant).toHaveBeenCalled();
     });
     const body = mockCreateTenant.mock.calls[0][0];
+    expect(body.metadata).toBeUndefined();
     expect(body.pipelines).toEqual({
       profile: "lts-2.479",
       cellPool: "solo",

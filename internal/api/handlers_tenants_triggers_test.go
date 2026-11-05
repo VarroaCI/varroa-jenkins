@@ -34,7 +34,7 @@ func TestUpdateTenant_TenantAdminRefusalNamesTenantOwnedFields(t *testing.T) {
 		"namespaces": ["ns1", "ns2"],
 		"pipelines": {"profile": "lts", "agentNamespace": "ns1"}
 	}`
-	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(body)))
+	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(tenantBodyAt(t, body, storedPaymentsVersion(t, store)))))
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleTenantDispatch(w, req)

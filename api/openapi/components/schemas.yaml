@@ -271,6 +271,18 @@ CreateGroupRequest:
         type: string
   additionalProperties: false
 
+TenantMetadata:
+  type: object
+  description: The Tenant metadata that the tenants API carries.
+  properties:
+    resourceVersion:
+      type: string
+      description: >-
+        The version of the stored tenant, as the server returned it. PUT
+        /tenants/{name} uses it as the precondition of the write. POST
+        /tenants ignores it.
+  additionalProperties: false
+
 TenantRequest:
   type: object
   description: Request body for creating or updating a tenant.
@@ -279,6 +291,8 @@ TenantRequest:
     name:
       type: string
       description: Tenant name (ignored in body for updates).
+    metadata:
+      $ref: '#/TenantMetadata'
     displayName:
       type: string
     members:
@@ -712,10 +726,12 @@ TenantMember:
 TenantEntry:
   type: object
   description: Full tenant object returned from get/list operations.
-  required: [name, namespaces]
+  required: [name, namespaces, metadata]
   properties:
     name:
       type: string
+    metadata:
+      $ref: '#/TenantMetadata'
     displayName:
       type: string
     members:

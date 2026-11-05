@@ -10,6 +10,9 @@ import { Card } from "../components/Card";
 import { useClusters } from "../hooks/useClusters";
 import styles from "./TenantForm.module.css";
 
+const TENANT_CONFLICT_NOTE =
+  "Another user or tool changed this tenant after you opened it. Reload the page, then make the change again.";
+
 interface SubjectRef {
   kind: "Group" | "User";
   name: string;
@@ -393,6 +396,10 @@ export default function TenantForm() {
     try {
       const body = {
         name: form.name,
+        // The version of the read fences the save.
+        ...(isEdit && tenant?.metadata?.resourceVersion
+          ? { metadata: { resourceVersion: tenant.metadata.resourceVersion } }
+          : {}),
         displayName: form.displayName || undefined,
         members: form.members.filter((m) => m.trim()),
         subjects: form.subjects.filter((s) => s.name.trim()),
@@ -453,8 +460,8 @@ export default function TenantForm() {
       }
       navigate("/access/tenants");
     } catch (err: unknown) {
-      if (!isEdit && err instanceof ApiError && err.status === 409) {
-        setErrors(["A tenant with this name already exists."]);
+      if (err instanceof ApiError && err.status === 409) {
+        setErrors([isEdit ? TENANT_CONFLICT_NOTE : "A tenant with this name already exists."]);
       } else {
         setErrors([err instanceof Error ? err.message : "Save failed"]);
       }

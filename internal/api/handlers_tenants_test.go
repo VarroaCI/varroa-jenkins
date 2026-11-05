@@ -254,7 +254,7 @@ func TestTenantHandlers_PipelinesFieldsStoredOnPUT(t *testing.T) {
 			"composedBundleRef": {"name": "payments-bundle", "namespace": "ns1"}
 		}
 	}`
-	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(body)))
+	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(tenantBodyAt(t, body, storedPaymentsVersion(t, store)))))
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleTenantDispatch(w, req)
@@ -355,7 +355,7 @@ func TestTenantHandlers_PipelinesLedgerSettingsRoundTrip(t *testing.T) {
 			"cronGrace": "10m0s"
 		}
 	}`
-	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(body)))
+	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(tenantBodyAt(t, body, storedPaymentsVersion(t, store)))))
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleTenantDispatch(w, req)
@@ -529,7 +529,7 @@ func TestTenantHandlers_ExportsRoundTrip(t *testing.T) {
 			]
 		}
 	}`
-	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(body)))
+	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(tenantBodyAt(t, body, storedPaymentsVersion(t, store)))))
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleTenantDispatch(w, req)
@@ -699,7 +699,7 @@ func TestTenantHandlers_UpdateExports_TenantAdminAllowed(t *testing.T) {
 			"exports": [{"job": "release/*", "callers": ["search"]}]
 		}
 	}`
-	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(body)))
+	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(tenantBodyAt(t, body, storedPaymentsVersion(t, store)))))
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleTenantDispatch(w, req)
@@ -742,7 +742,7 @@ func TestTenantHandlers_UpdateExports_TenantAdminCannotChangeOtherFields(t *test
 			"exports": [{"job": "release/*", "callers": ["search"]}]
 		}
 	}`
-	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(body)))
+	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(tenantBodyAt(t, body, storedPaymentsVersion(t, store)))))
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleTenantDispatch(w, req)
@@ -948,7 +948,7 @@ func TestUpdateTenant_TenantAdminMayChangeConcurrencyLimits(t *testing.T) {
 			"concurrencyLimits": [{"name": "deploys", "jobs": ["deploy/*"], "max": 1}]
 		}
 	}`
-	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(body)))
+	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(tenantBodyAt(t, body, storedPaymentsVersion(t, store)))))
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleTenantDispatch(w, req)
@@ -990,7 +990,7 @@ func TestUpdateTenant_TenantAdminMayToggleBadge(t *testing.T) {
 			"badge": {"enabled": true}
 		}
 	}`
-	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(body)))
+	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(tenantBodyAt(t, body, storedPaymentsVersion(t, store)))))
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleTenantDispatch(w, req)
@@ -1048,7 +1048,7 @@ func TestTenantHandlers_PipelinesSlotCountsRoundTrip(t *testing.T) {
 
 	put := func(body string) {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(body)))
+		req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(tenantBodyAt(t, body, storedPaymentsVersion(t, store)))))
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 		srv.HandleTenantDispatch(w, req)
@@ -1116,7 +1116,7 @@ func TestTenantHandlers_UpdateExports_TenantAdminKeepsSlotCounts(t *testing.T) {
 			"exports": [{"job": "release/*", "callers": ["search"]}]
 		}
 	}`
-	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(body)))
+	req := httptest.NewRequest(http.MethodPut, "/tenants/payments", bytes.NewReader([]byte(tenantBodyAt(t, body, storedPaymentsVersion(t, store)))))
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.HandleTenantDispatch(w, req)
