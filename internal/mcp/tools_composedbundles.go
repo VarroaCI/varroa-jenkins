@@ -6,6 +6,7 @@ import (
 
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -158,7 +159,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 	})
 
 	updateCB := mcp.NewTool("update_composed_bundle",
-		mcp.WithDescription("Update an existing composed bundle"),
+		mcp.WithDescription("Update an existing composed bundle. When another writer changes the object during the call, the tool reads it again and merges again, up to three times."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Bundle namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Bundle name")),
 		mcp.WithString("displayName", mcp.Description("Human-readable display name")),
@@ -180,49 +181,53 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if !deps.Authorizer.CanWriteComposedBundlesInNamespace(claims, "update", ns) {
 			return mcp.NewToolResultError("access denied: missing composedbundles:update permission in namespace " + ns), nil
 		}
-		existing, err := crdstore.Get[v1alpha1.ComposedBundle](ctx, deps.Store, name, ns)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("composed bundle not found: %v", err)), nil
-		}
-		// Key presence, not non-empty value, decides whether a field is touched.
-		// Testing the value conflates "leave this alone" with "clear this", so a
-		// non-empty field could never be cleared through MCP while REST PUT
-		// clears it by submitting a replacement resource. This matches how
-		// `variables` already behaves: omitted preserves, {} clears.
-		for _, f := range []struct {
-			arg   string
-			field *string
-		}{
-			{"description", &existing.Spec.Description},
-			{"displayName", &existing.Spec.DisplayName},
-			{"jcascMergeStrategy", &existing.Spec.JcascMergeStrategy},
-		} {
-			if _, ok := args[f.arg]; ok {
-				*f.field = strArg(args, f.arg)
+		existing, res := updateLocal[v1alpha1.ComposedBundle](ctx, deps.Store, name, ns, func(obj *v1alpha1.ComposedBundle) error {
+			// Key presence, not non-empty value, decides whether a field is touched.
+			// Testing the value conflates "leave this alone" with "clear this", so a
+			// non-empty field could never be cleared through MCP while REST PUT
+			// clears it by submitting a replacement resource. This matches how
+			// `variables` already behaves: omitted preserves, {} clears.
+			for _, f := range []struct {
+				arg   string
+				field *string
+			}{
+				{"description", &obj.Spec.Description},
+				{"displayName", &obj.Spec.DisplayName},
+				{"jcascMergeStrategy", &obj.Spec.JcascMergeStrategy},
+			} {
+				if _, ok := args[f.arg]; ok {
+					*f.field = strArg(args, f.arg)
+				}
 			}
-		}
-		if vars := args["variables"]; vars != nil {
-			if err := marshalUnmarshal(vars, &existing.Spec.Variables); err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("invalid variables: %v", err)), nil
+			if vars := args["variables"]; vars != nil {
+				if err := marshalUnmarshal(vars, &obj.Spec.Variables); err != nil {
+					return fmt.Errorf("invalid variables: %v", err)
+				}
 			}
-		}
-		// inputs replaces wholesale, like create_composed_bundle and REST PUT: the
-		// list is the merge order, so a partial edit has no well-defined meaning.
-		// A JSON null is "omitted", matching how variables is treated above. An
-		// empty list is rejected rather than applied — a bundle with no inputs
-		// composes to nothing and wedges every controller using it.
-		if raw, ok := args["inputs"]; ok && raw != nil {
-			var inputs []v1alpha1.ComposedInput
-			if err := marshalUnmarshal(raw, &inputs); err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("invalid inputs: %v", err)), nil
+			// inputs replaces wholesale, like create_composed_bundle and REST PUT: the
+			// list is the merge order, so a partial edit has no well-defined meaning.
+			// A JSON null is "omitted", matching how variables is treated above. An
+			// empty list is rejected rather than applied — a bundle with no inputs
+			// composes to nothing and wedges every controller using it.
+			if raw, ok := args["inputs"]; ok && raw != nil {
+				var inputs []v1alpha1.ComposedInput
+				if err := marshalUnmarshal(raw, &inputs); err != nil {
+					return fmt.Errorf("invalid inputs: %v", err)
+				}
+				if len(inputs) == 0 {
+					return errors.New("invalid inputs: a composed bundle needs at least one input")
+				}
+				obj.Spec.Inputs = inputs
 			}
-			if len(inputs) == 0 {
-				return mcp.NewToolResultError("invalid inputs: a composed bundle needs at least one input"), nil
-			}
-			existing.Spec.Inputs = inputs
-		}
-		if err := crdstore.Apply[v1alpha1.ComposedBundle](ctx, deps.Store, existing); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to update composed bundle: %v", err)), nil
+			return nil
+		}, updateTexts{
+			tool:     "update_composed_bundle",
+			object:   "composed bundle " + ns + "/" + name,
+			notFound: "composed bundle not found",
+			failed:   "failed to update composed bundle",
+		})
+		if res != nil {
+			return res, nil
 		}
 		emitActivity(ctx, deps, claims, activity.Event{
 			Type:      "composedbundle.updated",

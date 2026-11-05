@@ -98,8 +98,8 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 			if !isConflictErr(err) {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to update provisioning defaults: %v", err)), nil
 			}
-			if attempt == pdWriteAttempts {
-				return mcp.NewToolResultError(fmt.Sprintf("provisioning defaults %s on cluster %s changed during each of %d attempts: call update_provisioning_defaults again", name, cluster, pdWriteAttempts)), nil
+			if attempt == updateWriteAttempts {
+				return mcp.NewToolResultError(fmt.Sprintf("provisioning defaults %s on cluster %s changed during each of %d attempts: call update_provisioning_defaults again", name, cluster, updateWriteAttempts)), nil
 			}
 		}
 		// routed records whether the write actually reached the named cluster.
@@ -281,10 +281,6 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 	})
 }
 
-// pdWriteAttempts bounds the read-merge-write rounds of update_provisioning_defaults.
-// Each round reads the target again, so a conflict merges onto the newer object.
-const pdWriteAttempts = 3
-
 // mergeProvisioningDefaultsArgs sets each spec field that the caller named.
 // A field the caller leaves out keeps the stored value.
 func mergeProvisioningDefaultsArgs(spec *v1alpha1.ProvisioningDefaultsSpec, args map[string]any) {
@@ -322,16 +318,6 @@ func writeProvisioningDefaults(ctx context.Context, deps *api.Dependencies, clus
 		return nil, err
 	}
 	return json.Marshal(pd)
-}
-
-// isConflictErr reports a conflict answer from the local store or from a
-// member cluster over the bus.
-func isConflictErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	var be *api.BroodError
-	return apierrors.IsConflict(err) || (errors.As(err, &be) && be.Code == bus.CodeConflict)
 }
 
 // readProvisioningDefaultsBase returns the stored spec that a patch merges onto.

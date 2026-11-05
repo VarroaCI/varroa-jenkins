@@ -14,7 +14,7 @@ the authoritative reference for available names and arguments.
 
 Varroa create and update tools are declarative. The create tools for controllers, groups, roles,
 role bindings, Jenkins roles, Jenkins role bindings, catalog sources, composed bundles, and users refuse a name that
-already exists. An identical create for an existing controller returns that controller. Use the update tool to change an existing object. Updates for most
+already exists. An identical create for an existing controller returns that controller. Use the update tool to change an existing object. When another writer changes the object during the call, an update tool reads the object again and merges again, up to three times. This applies to the update tools for composed bundles, catalog sources, roles, role bindings, Jenkins roles, Jenkins role bindings, and provisioning defaults. Updates for most
 resources replace omitted fields. Two tools are sparse instead.
 `update_controller` is a sparse patch with separate ownership rules. Read
 [Writing through MCP](writing.md) before using it. `update_cell_pool` writes
@@ -195,6 +195,7 @@ Do not build workflows that expect these fields from MCP.
 | Authentication failure | Follow [the connection procedure](connecting.md) |
 | Authorization failure | Check Varroa and Jenkins roles |
 | Field conflict | Follow [field ownership](writing.md#manage-field-ownership) |
+| Object changed during each attempt | Call the same update tool again |
 | Oversized list | Use filters or `get_*` |
 | Jenkins tool failure | Re-discover the controller tools |
 

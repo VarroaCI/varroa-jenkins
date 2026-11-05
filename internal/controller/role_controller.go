@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -160,9 +161,21 @@ func (r *RoleReconciler) migrateCustomRoles(ctx context.Context) error {
 		if err := crdstore.Apply[v1alpha1.JenkinsRole](ctx, r.store, jr); err != nil {
 			return fmt.Errorf("migrate custom role %s: %w", role.Name, err)
 		}
-		role.Spec.JenkinsRoleRef = jrName
-		if err := crdstore.Apply[v1alpha1.VarroaRole](ctx, r.store, role); err != nil {
+		// The read is fresh, so an edit made since the list survives the write.
+		// A permission edit made since the list leaves the reference unset; the
+		// next pass builds the JenkinsRole from the newer permissions.
+		changed, err := crdstore.Mutate[v1alpha1.VarroaRole](ctx, r.store, role.Name, "", func(live *v1alpha1.VarroaRole) (bool, error) {
+			if live.Spec.JenkinsRoleRef != "" || !slices.Equal(live.Spec.JenkinsPermissions, jr.Spec.Permissions) {
+				return false, nil
+			}
+			live.Spec.JenkinsRoleRef = jrName
+			return true, nil
+		})
+		if err != nil {
 			return fmt.Errorf("set jenkinsRoleRef on custom role %s: %w", role.Name, err)
+		}
+		if !changed {
+			continue
 		}
 		r.Logger.Info("migrated custom VarroaRole to JenkinsRole", "varroaRole", role.Name, "jenkinsRole", jrName)
 	}

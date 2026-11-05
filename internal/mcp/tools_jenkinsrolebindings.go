@@ -96,7 +96,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 	})
 
 	updateJRB := mcp.NewTool("update_jenkins_role_binding",
-		mcp.WithDescription("Update an existing Jenkins role binding"),
+		mcp.WithDescription("Update an existing Jenkins role binding. When another writer changes the object during the call, the tool reads it again and merges again, up to three times."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Binding name")),
 		mcp.WithString("roleRef", mcp.Description("JenkinsRole name to bind")),
 		mcp.WithArray("subjects", mcp.Description("Subject references")),
@@ -114,18 +114,22 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if !deps.Authorizer.CanUpdateJenkinsRoleBinding(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsrolebindings:update permission"), nil
 		}
-		existing, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, name, "")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Jenkins role binding not found: %v", err)), nil
-		}
-		if v := strArg(args, "roleRef"); v != "" {
-			existing.Spec.RoleRef = v
-		}
-		if subs := buildSubjectRefs(args["subjects"]); subs != nil {
-			existing.Spec.Subjects = subs
-		}
-		if err := crdstore.Apply[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, existing); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to update Jenkins role binding: %v", err)), nil
+		existing, res := updateLocal[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, name, "", func(obj *v1alpha1.JenkinsRoleBinding) error {
+			if v := strArg(args, "roleRef"); v != "" {
+				obj.Spec.RoleRef = v
+			}
+			if subs := buildSubjectRefs(args["subjects"]); subs != nil {
+				obj.Spec.Subjects = subs
+			}
+			return nil
+		}, updateTexts{
+			tool:     "update_jenkins_role_binding",
+			object:   "Jenkins role binding " + name,
+			notFound: "Jenkins role binding not found",
+			failed:   "failed to update Jenkins role binding",
+		})
+		if res != nil {
+			return res, nil
 		}
 		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRoleBinding, api.AccessUpdated, name))
 		return resultJSON(existing)

@@ -763,8 +763,8 @@ func TestMCPUpdateProvisioningDefaults_ConflictOnEveryAttemptAsksForARetry(t *te
 	if !tr.IsError {
 		t.Fatalf("want a tool error after every attempt conflicts, got %v", tr.Content)
 	}
-	if len(brood.updates) != pdWriteAttempts {
-		t.Errorf("got %d updates, want %d", len(brood.updates), pdWriteAttempts)
+	if len(brood.updates) != updateWriteAttempts {
+		t.Errorf("got %d updates, want %d", len(brood.updates), updateWriteAttempts)
 	}
 	if len(tr.Content) == 0 || !strings.Contains(tr.Content[0].Text, "call update_provisioning_defaults again") {
 		t.Errorf("error text = %v, want it to ask for a new call", tr.Content)

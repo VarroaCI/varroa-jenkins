@@ -107,7 +107,7 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 	})
 
 	updateRB := mcp.NewTool("update_varroa_role_binding",
-		mcp.WithDescription("Update an existing Varroa RBAC role binding"),
+		mcp.WithDescription("Update an existing Varroa RBAC role binding. When another writer changes the object during the call, the tool reads it again and merges again, up to three times."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Binding name")),
 		mcp.WithString("roleRef", mcp.Description("VarroaRole name to bind")),
 		mcp.WithArray("subjects", mcp.Description("Subject references")),
@@ -126,25 +126,29 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 		if !deps.Authorizer.CanUpdateRoleBinding(claims) {
 			return mcp.NewToolResultError("access denied: missing rolebindings:update permission"), nil
 		}
-		existing, err := crdstore.Get[v1alpha1.VarroaRoleBinding](ctx, deps.Store, name, "")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("role binding not found: %v", err)), nil
-		}
-		if v := strArg(args, "roleRef"); v != "" {
-			existing.Spec.RoleRef = v
-		}
-		if subs := buildSubjectRefs(args["subjects"]); subs != nil {
-			existing.Spec.Subjects = subs
-		}
-		scope, err := buildBindingScope(args["scope"])
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		if scope != nil {
-			existing.Spec.Scope = scope
-		}
-		if err := crdstore.Apply[v1alpha1.VarroaRoleBinding](ctx, deps.Store, existing); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to update role binding: %v", err)), nil
+		existing, res := updateLocal[v1alpha1.VarroaRoleBinding](ctx, deps.Store, name, "", func(obj *v1alpha1.VarroaRoleBinding) error {
+			if v := strArg(args, "roleRef"); v != "" {
+				obj.Spec.RoleRef = v
+			}
+			if subs := buildSubjectRefs(args["subjects"]); subs != nil {
+				obj.Spec.Subjects = subs
+			}
+			scope, err := buildBindingScope(args["scope"])
+			if err != nil {
+				return err
+			}
+			if scope != nil {
+				obj.Spec.Scope = scope
+			}
+			return nil
+		}, updateTexts{
+			tool:     "update_varroa_role_binding",
+			object:   "role binding " + name,
+			notFound: "role binding not found",
+			failed:   "failed to update role binding",
+		})
+		if res != nil {
+			return res, nil
 		}
 		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessVarroaRoleBinding, api.AccessUpdated, name))
 		return resultJSON(existing)
