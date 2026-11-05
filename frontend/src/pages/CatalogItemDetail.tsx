@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { parse as parseYAML, stringify as stringifyYAML } from "yaml";
 import type { RJSFSchema, UiSchema } from "@rjsf/utils";
@@ -377,6 +377,15 @@ function PipelineTemplateCard({ content }: { content?: string }) {
   const doc = useMemo(() => parseTemplateDocument(content), [content]);
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [copied, setCopied] = useState(false);
+  const revertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clears a pending revert on unmount only. It never runs on a copy, so it cannot cancel a live label.
+  useEffect(
+    () => () => {
+      if (revertTimer.current !== null) clearTimeout(revertTimer.current);
+    },
+    []
+  );
 
   if (!doc) {
     return (
@@ -395,7 +404,12 @@ function PipelineTemplateCard({ content }: { content?: string }) {
     try {
       await navigator.clipboard.writeText(markerYaml);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      // Each copy restarts the revert timer, so a second copy keeps the label for a full 1500 ms.
+      if (revertTimer.current !== null) clearTimeout(revertTimer.current);
+      revertTimer.current = setTimeout(() => {
+        revertTimer.current = null;
+        setCopied(false);
+      }, 1500);
     } catch {
       // The browser can deny clipboard access; the YAML stays on screen for
       // a manual copy.

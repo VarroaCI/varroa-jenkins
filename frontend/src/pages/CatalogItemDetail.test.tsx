@@ -361,6 +361,41 @@ describe("CatalogItemDetail — pipeline-template item", () => {
     }
   });
 
+  it("keeps the Copied label for a full window after a second copy", async () => {
+    mockGetCatalogItem.mockResolvedValue(detailResponse(pipelineTemplateItem()));
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText(/template: go-service/)).toBeInTheDocument());
+    // Install the fake clock after waitFor, because waitFor waits on a real setTimeout.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+      });
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copied" }));
+      });
+      expect(writeText).toHaveBeenCalledTimes(2);
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      // The first click's timer would have fired at 1500 ms. The second copy keeps the label.
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows an error banner when the template content does not parse", async () => {
     mockGetCatalogItem.mockResolvedValue(detailResponse(
       catalogItem("broken-template", {
