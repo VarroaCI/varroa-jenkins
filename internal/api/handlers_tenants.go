@@ -151,6 +151,7 @@ type tenantMemberEntry struct {
 	Role          string `json:"role,omitempty"`
 	Slot          *int32 `json:"slot,omitempty"`
 	Applied       bool   `json:"applied,omitempty"`
+	Stale         bool   `json:"stale,omitempty"`
 }
 
 // tenantRehydrationEntry is the JSON shape of status.rehydration,
@@ -344,7 +345,7 @@ func tenantPlacementEntryFromStatus(p *v1alpha1.TenantPlacementStatus) *tenantPl
 	for _, m := range p.Members {
 		out.Members = append(out.Members, tenantMemberEntry{
 			Cell: m.Cell, CellNamespace: m.CellNamespace, Role: m.Role,
-			Slot: m.Slot, Applied: m.Applied,
+			Slot: m.Slot, Applied: m.Applied, Stale: m.Stale,
 		})
 	}
 	return out

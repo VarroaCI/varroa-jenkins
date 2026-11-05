@@ -29,12 +29,15 @@ heap.
 The placement pass never creates a cell. A pool that cannot meet the demand reports `SlotPending`;
 raise its `maxCells`. A tenant that holds every slot but not its standby reports `StandbyPending`,
 and one whose members all report applied reports `MembersApplied`.
+A tenant with a member on a cell of another profile or pool reports `MembersStale`.
 
 Read the members:
 
 ```bash
 kubectl get tenant payments -o jsonpath='{.status.placement.members}'
 ```
+
+A member on a cell of another profile or pool carries `stale: true`.
 
 ## Every job has one home slot
 
@@ -96,6 +99,8 @@ never a cancel.
 
 The pool creates the cells that the move needs. A pool at its `maxCells` leaves the remaining
 members on their old cells, and they keep building there. Raise `maxCells` to complete the move.
+
+A waiting member carries `stale: true`. `Placed` stays `True` with reason `MembersStale`.
 
 ## Build state across slots
 

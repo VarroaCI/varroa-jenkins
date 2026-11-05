@@ -12,6 +12,39 @@ import (
 
 func intPtr(n int32) *int32 { return &n }
 
+// TestMemberReasonRanksAStaleMember asserts the four-step rank of the
+// member reasons: SlotPending, StandbyPending, MembersStale, MembersApplied.
+func TestMemberReasonRanksAStaleMember(t *testing.T) {
+	slot := func(n int32) *int32 { return &n }
+	active := func(cell string, stale bool) MemberBinding {
+		return MemberBinding{Cell: cell, Role: v1alpha1.TenantMemberRoleActive, Slot: slot(0), Applied: true, Stale: stale}
+	}
+	standby := func(cell string, stale bool) MemberBinding {
+		return MemberBinding{Cell: cell, Role: v1alpha1.TenantMemberRoleStandby, Applied: true, Stale: stale}
+	}
+	cases := []struct {
+		name    string
+		members []MemberBinding
+		slots   int32
+		standby int32
+		want    string
+	}{
+		{"slot short outranks a stale standby", []MemberBinding{standby("s", true)}, 2, 1, v1alpha1.TenantReasonSlotPending},
+		{"standby short outranks a stale slot", []MemberBinding{active("a", true), active("b", false)}, 2, 1, v1alpha1.TenantReasonStandbyPending},
+		{"full set with a stale member", []MemberBinding{active("a", false), active("b", true), standby("c", false)}, 2, 1, v1alpha1.TenantReasonMembersStale},
+		{"full set with no stale member", []MemberBinding{active("a", false), active("b", false), standby("c", false)}, 2, 1, v1alpha1.TenantReasonMembersApplied},
+		{"one member adds no reason", []MemberBinding{active("a", true)}, 1, 0, ""},
+	}
+	for _, tc := range cases {
+		if got := memberReason(tc.members, tc.slots, tc.standby); got != tc.want {
+			t.Errorf("%s: memberReason = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	if !memberReasonRefines(v1alpha1.TenantReasonMembersStale) {
+		t.Errorf("memberReasonRefines(MembersStale) = false, want true")
+	}
+}
+
 // slotTenant builds a pipelines tenant asking for members active slots and
 // standby warm members.
 func slotTenant(members, standby int32) *v1alpha1.Tenant {

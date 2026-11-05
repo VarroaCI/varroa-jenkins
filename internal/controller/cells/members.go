@@ -349,13 +349,15 @@ func selectCandidateExcluding(in Inputs, tenant *v1alpha1.Tenant, held map[strin
 	return selectCandidate(narrowed, tenant)
 }
 
-// memberReason answers the Placed reason the member set implies.
-// SlotPending outranks StandbyPending. An empty answer means the member
-// set adds no reason, and the caller's own reason stands.
+// memberReason answers the Placed reason the member set implies. The
+// rank is SlotPending, then StandbyPending, then MembersStale, then
+// MembersApplied. An empty answer means the member set adds no reason,
+// and the caller's own reason stands.
 func memberReason(members []MemberBinding, wantedSlots, wantedStandby int32) string {
 	activeCount := int32(0)
 	standbyCount := int32(0)
 	applied := true
+	stale := false
 	for _, m := range members {
 		if m.Role == v1alpha1.TenantMemberRoleStandby {
 			standbyCount++
@@ -365,12 +367,17 @@ func memberReason(members []MemberBinding, wantedSlots, wantedStandby int32) str
 		if !m.Applied {
 			applied = false
 		}
+		if m.Stale {
+			stale = true
+		}
 	}
 	switch {
 	case activeCount < wantedSlots:
 		return v1alpha1.TenantReasonSlotPending
 	case standbyCount < wantedStandby:
 		return v1alpha1.TenantReasonStandbyPending
+	case stale && wantedSlots+wantedStandby > 1:
+		return v1alpha1.TenantReasonMembersStale
 	case applied && wantedSlots+wantedStandby > 1:
 		// A tenant that asks for one member keeps today's TenantPlaced
 		// reason, so every earlier rule is unchanged for it.
@@ -389,6 +396,7 @@ func memberStatuses(members []MemberBinding) []v1alpha1.TenantMemberStatus {
 	for _, m := range members {
 		entry := v1alpha1.TenantMemberStatus{
 			Cell: m.Cell, CellNamespace: m.Namespace, Role: m.Role, Applied: m.Applied,
+			Stale: m.Stale,
 		}
 		if m.Slot != nil {
 			s := *m.Slot

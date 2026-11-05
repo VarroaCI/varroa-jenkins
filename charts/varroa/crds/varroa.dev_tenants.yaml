@@ -598,6 +598,12 @@ spec:
                           description: Slot is set only on an active member.
                           format: int32
                           type: integer
+                        stale:
+                          description: |-
+                            Stale is true when the member's cell serves another profile or
+                            belongs to another pool. The member keeps its cell until the
+                            tenant's pool has a free cell for it.
+                          type: boolean
                       type: object
                     type: array
                 type: object

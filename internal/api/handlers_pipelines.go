@@ -1478,14 +1478,17 @@ type tenantCellWarningJSON struct {
 // Each entry carries that member's own four load counts, narrowed by the
 // caller's own grant exactly as the top-level counts are.
 type tenantCellMemberJSON struct {
-	Cell          string `json:"cell"`
-	Namespace     string `json:"namespace"`
-	Cluster       string `json:"cluster"`
-	Role          string `json:"role"`
-	RunningNow    int64  `json:"runningNow"`
-	RunsLast24h   int64  `json:"runsLast24h"`
-	FailedLast24h int64  `json:"failedLast24h"`
-	Jobs          int64  `json:"jobs"`
+	Cell      string `json:"cell"`
+	Namespace string `json:"namespace"`
+	Cluster   string `json:"cluster"`
+	Role      string `json:"role"`
+	// Stale is true when the member's cell serves another profile or
+	// belongs to another pool.
+	Stale         bool  `json:"stale"`
+	RunningNow    int64 `json:"runningNow"`
+	RunsLast24h   int64 `json:"runsLast24h"`
+	FailedLast24h int64 `json:"failedLast24h"`
+	Jobs          int64 `json:"jobs"`
 }
 
 // tenantWarning returns the Tenant's TenantWarnings condition as a warning,
@@ -1652,7 +1655,7 @@ func (s *Server) tenantCellMembers(ctx context.Context, claims *auth.Claims, ref
 	for _, m := range members {
 		entry := tenantCellMemberJSON{
 			Cell: m.Cell, Namespace: m.CellNamespace, Cluster: ref.Cluster,
-			Role: renderTenantMemberRole(m),
+			Role: renderTenantMemberRole(m), Stale: m.Stale,
 		}
 		memberRef := ref
 		memberRef.Namespace = m.CellNamespace

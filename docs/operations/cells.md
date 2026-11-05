@@ -267,6 +267,8 @@ Every `Placed` reason on a `Tenant`:
 |---|---|---|---|
 | `TenantPlaced` | True | The tenant is bound to a cell and ready. | None. |
 | `TenantMoved` | True | An involuntary move landed on a new cell. | None. The old cell's schedule purge retries in the background. |
+| `MembersApplied` | True | Every slot and standby holds a cell, and every member's cell reports the tenant applied. | None. |
+| `MembersStale` | True | Every slot and standby holds a cell, and one member is stale. The tenant still builds. | Wait for a free cell in the pool, or raise the pool's `maxCells`. See [a profile or pool change](tenant-slots.md#a-profile-or-pool-change-moves-every-member). |
 | `RecordStoreUnsupported` | False | `recordStore.enabled` is false. | Enable the record store. |
 | `BlobTierUnsupported` | False | `recordStore.blobs.mode` is not `s3`. | Set the blob tier to `s3`. |
 | `ProfileNotFound` | False | `spec.pipelines.profile` names no `JenkinsVersionProfile`. | Create the profile, or fix the name. |
@@ -274,6 +276,8 @@ Every `Placed` reason on a `Tenant`:
 | `AgentNamespaceUnmanaged` | False | `agentNamespace` is missing from `spec.namespaces`, or Varroa does not manage it. | Add it to `spec.namespaces` as a managed namespace. |
 | `AwaitingCell` | False | No cell of the tenant's pool is enabled, ready, not evacuating, and under its resolved capacity. | Wait for the pool to create a cell, or raise its `warm` or `maxTenantsPerCell`. |
 | `CellCapReached` | False | The tenant's pool sits at its `maxCells` and no cell is free. | Raise `maxCells`, or move the tenant to another pool. |
+| `SlotPending` | False | At least one active slot holds no cell. | Raise the pool's `maxCells`. |
+| `StandbyPending` | False | Every active slot holds a cell, and at least one standby does not. | Raise the pool's `maxCells`. |
 | `TenantMoving` | False | A voluntary move is waiting for the old cell to finish draining the tenant's folder. | Wait. Check `status.pendingItemDeletions` for a stuck delete on the old cell. |
 | `CellNotReady` | False | The tenant stays on its cell, which reports `CellReady=False` without an `evacuate` signal. | Diagnose the cell's own `CellReady` reason below. |
 | `AgentServiceFailed` | False | An agent Service write or delete failed. The placement is kept. | See [Agent Services](agents.md). |

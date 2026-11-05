@@ -12797,11 +12797,17 @@ components:
         runsLast24h:
           format: int64
           type: integer
+        stale:
+          description: True when the member's cell serves another profile or belongs
+            to another pool. The member keeps that cell until the tenant's pool has
+            a free cell.
+          type: boolean
       required:
       - cell
       - namespace
       - cluster
       - role
+      - stale
       - runningNow
       - runsLast24h
       - failedLast24h
@@ -12992,6 +12998,11 @@ components:
           description: The slot index. Set only on an active member.
           format: int32
           type: integer
+        stale:
+          description: True when the member's cell serves another profile or belongs
+            to another pool. The member keeps that cell until the tenant's pool has
+            a free cell.
+          type: boolean
       type: object
     components_schemas_TenantNamespaceState:
       additionalProperties: false

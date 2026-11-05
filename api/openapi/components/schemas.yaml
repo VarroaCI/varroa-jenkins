@@ -696,6 +696,12 @@ TenantMember:
     applied:
       type: boolean
       description: True when the member's cell reports this tenant applied.
+    stale:
+      type: boolean
+      description: >-
+        True when the member's cell serves another profile or belongs to
+        another pool. The member keeps that cell until the tenant's pool has
+        a free cell.
   additionalProperties: false
 
 TenantEntry:
@@ -7281,7 +7287,7 @@ TenantCellMember:
     One member of the tenant, with that member's own four load counts. The
     counts apply the same grant narrowing the top-level counts apply. No
     entry names another tenant.
-  required: [cell, namespace, cluster, role, runningNow, runsLast24h, failedLast24h, jobs]
+  required: [cell, namespace, cluster, role, stale, runningNow, runsLast24h, failedLast24h, jobs]
   properties:
     cell:
       type: string
@@ -7293,6 +7299,12 @@ TenantCellMember:
       type: string
       description: >-
         "slot <n>" for an active member and "standby" for a standby.
+    stale:
+      type: boolean
+      description: >-
+        True when the member's cell serves another profile or belongs to
+        another pool. The member keeps that cell until the tenant's pool has
+        a free cell.
     runningNow:
       type: integer
       format: int64

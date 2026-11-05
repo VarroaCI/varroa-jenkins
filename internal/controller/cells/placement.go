@@ -318,6 +318,7 @@ func Place(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1al
 		now = time.Now
 	}
 	nowT := now()
+	entryPlaced := placedConditionCopy(status)
 	hasFinalizer := containsString(tenant.Finalizers, v1alpha1.TenantFinalizerTenantPlacement)
 	beingDeleted := tenant.DeletionTimestamp != nil && !tenant.DeletionTimestamp.IsZero()
 
@@ -348,6 +349,9 @@ func Place(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1al
 	}
 
 	if reason, message, refused := refuse(in, tenant); refused {
+		// A refused tenant keeps its members, so its stale flags must
+		// track this tick's cells too.
+		markStaleMembers(in, tenant, status)
 		setPlaced(status, metav1.ConditionFalse, reason, message, nowT)
 		return out, nil
 	}
@@ -391,7 +395,9 @@ func Place(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1al
 		performVoluntaryMove(ctx, in, tenant, status, cell, nowT, &out)
 	}
 
+	markStaleMembers(in, tenant, status)
 	applyMemberReason(tenant, status, nowT)
+	keepPlacedTransition(status, entryPlaced)
 
 	if status.Placement != nil && !hasFinalizer {
 		out.FinalizerAdd = true
@@ -402,8 +408,8 @@ func Place(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1al
 // applyMemberReason overrides the Placed reason with the one the member
 // set implies, when the member set has one to state and the placed reason
 // may be refined (memberReasonRefines). SlotPending outranks
-// StandbyPending, and both report Placed=False. MembersApplied reports
-// Placed=True.
+// StandbyPending, and both report Placed=False. MembersStale and
+// MembersApplied report Placed=True.
 //
 // A tenant that asks for one member and no standby never reaches this
 // path, so every earlier reason is unchanged for it.
@@ -426,8 +432,80 @@ func applyMemberReason(tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, n
 	case v1alpha1.TenantReasonStandbyPending:
 		setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonStandbyPending,
 			"every active slot holds a cell and at least one standby does not", nowT)
+	case v1alpha1.TenantReasonMembersStale:
+		setPlaced(status, metav1.ConditionTrue, v1alpha1.TenantReasonMembersStale,
+			staleMembersMessage(tenant, status.Placement.Members), nowT)
 	case v1alpha1.TenantReasonMembersApplied:
 		setPlaced(status, metav1.ConditionTrue, v1alpha1.TenantReasonMembersApplied, "", nowT)
+	}
+}
+
+// markStaleMembers sets each stored member's Stale flag from this tick's
+// cell list through the keep rule. The record store never reads the
+// flag, so the write needs no announcement. A stale change that keeps
+// the member set triggers no announcement, so the flag is refreshed here
+// every tick. A member whose cell left the cell list is not stale.
+func markStaleMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus) {
+	if status.Placement == nil || tenant.Spec.Pipelines == nil {
+		return
+	}
+	for i := range status.Placement.Members {
+		m := &status.Placement.Members[i]
+		cell, found := lookupCell(in.Cells, m.Cell, m.CellNamespace)
+		m.Stale = found && !cellKeepsTenant(in, tenant, cell)
+	}
+}
+
+// staleMembersMessage names each stale member in the stored order, so a
+// repeat tick writes the same message.
+func staleMembersMessage(tenant *v1alpha1.Tenant, members []v1alpha1.TenantMemberStatus) string {
+	var names []string
+	for _, m := range members {
+		if m.Stale {
+			names = append(names, fmt.Sprintf("%s %s/%s", memberRoleLabel(m), m.CellNamespace, m.Cell))
+		}
+	}
+	return fmt.Sprintf("these members wait for a free cell in pool %q with profile %q: %s",
+		ResolvedPoolName(tenant.Spec.Pipelines), tenant.Spec.Pipelines.Profile, strings.Join(names, ", "))
+}
+
+// memberRoleLabel answers "slot <n>" for an active member and "standby"
+// for a standby.
+func memberRoleLabel(m v1alpha1.TenantMemberStatus) string {
+	if m.Role == v1alpha1.TenantMemberRoleStandby || m.Slot == nil {
+		return "standby"
+	}
+	return fmt.Sprintf("slot %d", *m.Slot)
+}
+
+// placedConditionCopy answers a copy of the Placed condition, or nil.
+func placedConditionCopy(status *v1alpha1.TenantStatus) *v1alpha1.TenantCondition {
+	for _, c := range status.Conditions {
+		if c.Type == v1alpha1.TenantConditionPlaced {
+			copied := c
+			return &copied
+		}
+	}
+	return nil
+}
+
+// keepPlacedTransition keeps the entry transition time when the tick
+// ends on the Placed condition it started with. The keep path writes
+// TenantPlaced before the member reason refines it, so without this
+// step a member reason takes a new transition time every tick.
+func keepPlacedTransition(status *v1alpha1.TenantStatus, entry *v1alpha1.TenantCondition) {
+	if entry == nil {
+		return
+	}
+	for i := range status.Conditions {
+		c := &status.Conditions[i]
+		if c.Type != v1alpha1.TenantConditionPlaced {
+			continue
+		}
+		if c.Status == entry.Status && c.Reason == entry.Reason && c.Message == entry.Message {
+			c.LastTransitionTime = entry.LastTransitionTime
+		}
+		return
 	}
 }
 
@@ -440,7 +518,7 @@ func memberReasonRefines(reason string) bool {
 	switch reason {
 	case v1alpha1.TenantReasonTenantPlaced, v1alpha1.TenantReasonTenantMoved,
 		v1alpha1.TenantReasonSlotPending, v1alpha1.TenantReasonStandbyPending,
-		v1alpha1.TenantReasonMembersApplied:
+		v1alpha1.TenantReasonMembersStale, v1alpha1.TenantReasonMembersApplied:
 		return true
 	default:
 		return false
@@ -454,6 +532,7 @@ func memberReasonFromStatus(members []v1alpha1.TenantMemberStatus, wantedSlots, 
 	for _, m := range members {
 		bound = append(bound, MemberBinding{
 			Cell: m.Cell, Namespace: m.CellNamespace, Role: m.Role, Slot: m.Slot, Applied: m.Applied,
+			Stale: m.Stale,
 		})
 	}
 	return memberReason(bound, wantedSlots, wantedStandby)

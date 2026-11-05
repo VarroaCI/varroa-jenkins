@@ -61,13 +61,17 @@ function Frame({ children }: { children: ReactNode }) {
 
 /** MemberCard renders one member of the tenant: the cell it sits on, the
  * role it holds there, and that member's own load. A standby holds the
- * tenant folder and runs no build, so its running count is zero. */
+ * tenant folder and runs no build, so its running count is zero. A stale
+ * member carries a "Waiting to move" badge beside its role. */
 function MemberCard({ member }: { member: TenantCellMember }) {
   return (
     <li className={styles.member}>
       <div className={styles.memberHead}>
         <span className={styles.memberCell}>{member.cell}</span>
-        <span className={styles.memberRole}>{member.role}</span>
+        <span className={styles.memberTags}>
+          {member.stale && <span className={styles.badgeWarn}>Waiting to move</span>}
+          <span className={styles.memberRole}>{member.role}</span>
+        </span>
       </div>
       <div className={styles.load}>
         <Pair label="Running" value={member.runningNow} />
