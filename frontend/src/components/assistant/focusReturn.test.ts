@@ -72,4 +72,36 @@ describe("returnFocus", () => {
     returnFocus(el("drawer"), el("close"), el("door"));
     expect(document.activeElement).toBe(el("door"));
   });
+
+  it("moves focus to returnTo when focus is on no element", () => {
+    el<HTMLButtonElement>("close").focus();
+    el<HTMLButtonElement>("close").blur();
+    returnFocus(el("drawer"), el("opener"), el("door"), el("door"));
+    expect(document.activeElement).toBe(el("door"));
+  });
+
+  it("moves focus to returnTo when focus is inside the drawer", () => {
+    el<HTMLButtonElement>("close").focus();
+    returnFocus(el("drawer"), el("opener"), el("door"), el("door"));
+    expect(document.activeElement).toBe(el("door"));
+  });
+
+  it("moves focus to returnTo when focus is outside the drawer", () => {
+    el<HTMLAnchorElement>("page").focus();
+    returnFocus(el("drawer"), el("opener"), el("door"), el("door"));
+    expect(document.activeElement).toBe(el("door"));
+  });
+
+  it("falls back to the opener when returnTo does not take focus", () => {
+    el<HTMLButtonElement>("door").disabled = true;
+    el<HTMLButtonElement>("close").focus();
+    returnFocus(el("drawer"), el("opener"), el("door"), el("door"));
+    expect(document.activeElement).toBe(el("opener"));
+  });
+
+  it("skips a returnTo inside the drawer", () => {
+    el<HTMLButtonElement>("close").focus();
+    returnFocus(el("drawer"), el("opener"), el("door"), el("close"));
+    expect(document.activeElement).toBe(el("opener"));
+  });
 });

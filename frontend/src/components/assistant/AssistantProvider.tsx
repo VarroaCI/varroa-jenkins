@@ -36,7 +36,8 @@ export interface AssistantState {
   epoch: number;
   hint: RouteHint;
   setHint(h: RouteHint): void;
-  toggleDrawer(): void;
+  /** toggleDrawer opens or closes the drawer. A close puts focus on returnTo when the caller names one. */
+  toggleDrawer(returnTo?: HTMLElement): void;
   openSession(id: string): void;
   openWithMessage(text: string, ctx: AssistantSessionContext): void;
   explainRun(runId: string, ctx: AssistantSessionContext): void;
@@ -48,6 +49,8 @@ export interface AssistantState {
   newConversation(): void;
   registerDoor(el: HTMLElement | null): void;
   doorRef: { current: HTMLElement | null };
+  /** returnToRef holds the focus target that the last close named. The drawer reads it when it unmounts. */
+  returnToRef: { current: HTMLElement | null };
 }
 
 const OFF: AssistantState = {
@@ -74,6 +77,7 @@ const OFF: AssistantState = {
   newConversation: () => {},
   registerDoor: () => {},
   doorRef: { current: null },
+  returnToRef: { current: null },
 };
 
 const AssistantCtx = createContext<AssistantState>(OFF);
@@ -146,6 +150,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [epoch, setEpoch] = useState(0);
   const [hint, setHintState] = useState<RouteHint>({});
   const doorRef = useRef<HTMLElement | null>(null);
+  const returnToRef = useRef<HTMLElement | null>(null);
 
   const setHint = useCallback((h: RouteHint) => setHintState(h), []);
   const registerDoor = useCallback((el: HTMLElement | null) => {
@@ -207,7 +212,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     [subject],
   );
 
-  const toggleDrawer = useCallback(() => {
+  const toggleDrawer = useCallback((returnTo?: HTMLElement) => {
+    returnToRef.current = returnTo ?? null;
     setDrawerOpen((open) => {
       if (open) return false;
       const last = subject ? readLast(subject) : null;
@@ -216,7 +222,10 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     });
   }, [subject, activeSessionId]);
 
-  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  const closeDrawer = useCallback(() => {
+    returnToRef.current = null;
+    setDrawerOpen(false);
+  }, []);
   const newConversation = useCallback(() => setActiveSessionId(null), []);
 
   const startSession = useCallback(
@@ -293,6 +302,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       newConversation,
       registerDoor,
       doorRef,
+      returnToRef,
     }),
     [
       me.isFetched, available, switchOn, canUse, paused, settings.data, drawerOpen, activeSessionId, epoch, hint,

@@ -52,7 +52,7 @@ export function Topbar({ query = "", onQueryChange = () => {}, onSearchOpen = ()
             title="Open the assistant (a)"
             aria-keyshortcuts="a"
             aria-expanded={assistant.drawerOpen}
-            onClick={assistant.toggleDrawer}
+            onClick={(e) => assistant.toggleDrawer(e.currentTarget)}
           >
             <Sparkles size={16} aria-hidden />
           </button>
