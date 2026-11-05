@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { RevisionLink } from "./RevisionLink";
 
 const SHA = "abcdef1234567890";
@@ -46,5 +46,38 @@ describe("RevisionLink", () => {
     fireEvent.click(screen.getByRole("button", { name: `Copy commit ${SHA}` }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(SHA));
     expect(await screen.findByText("Copied")).toBeInTheDocument();
+  });
+
+  it("keeps the Copied label for a full window after a second copy", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(<RevisionLink revision={SHA} length={7} />);
+    const copyButton = () => screen.getByRole("button", { name: `Copy commit ${SHA}` });
+    // Install the fake clock after render, so the first copy runs on the real queue.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await act(async () => {
+        fireEvent.click(copyButton());
+      });
+      expect(screen.getByText("Copied")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      await act(async () => {
+        fireEvent.click(copyButton());
+      });
+      expect(writeText).toHaveBeenCalledTimes(2);
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      // The first click's timer would have fired at 2000 ms. The second copy keeps the label.
+      expect(screen.getByText("Copied")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.queryByText("Copied")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
