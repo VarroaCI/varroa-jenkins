@@ -2013,6 +2013,7 @@ LogEntry:
     timestamp:
       type: string
       format: date-time
+      description: The time that the container runtime wrote the line.
     level:
       type: string
       enum: [ERROR, WARN, DEBUG, INFO]

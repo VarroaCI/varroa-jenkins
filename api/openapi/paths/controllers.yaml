@@ -598,6 +598,10 @@
     description: >
       When `follow=true` the response switches to `text/event-stream`;
       the SSE mode is not available through the generated Go client.
+      Each unnamed `data:` frame carries one LogEntry. The stream starts with
+      the last 50 lines of each container. When a pod log read ends, the
+      server reads again after the newest line it sent and sends no line
+      twice.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/ns'

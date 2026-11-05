@@ -508,7 +508,7 @@ func (f *fakeResourceClient) ListOperatorPodIPs(_ context.Context, _ string) ([]
 func (f *fakeResourceClient) ScaleStatefulSetToZero(_ context.Context, _, _ string, _ func(context.Context) error) error {
 	return nil
 }
-func (f *fakeResourceClient) StreamPodLogs(_ context.Context, _, _, _ string, _ int64, _ bool) (io.ReadCloser, error) {
+func (f *fakeResourceClient) StreamPodLogs(_ context.Context, _, _ string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
 	return nil, nil
 }
 func (f *fakeResourceClient) DeleteControllerPod(_ context.Context, _, _ string) error { return nil }

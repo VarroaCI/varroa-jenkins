@@ -115,7 +115,7 @@ func (s *stubClient) PatchControllerCellStatus(ctx context.Context, name, namesp
 	return nil
 }
 func (s *stubClient) ClearUserPassword(ctx context.Context, name, namespace string) error { return nil }
-func (s *stubClient) StreamPodLogs(ctx context.Context, namespace, podName, container string, tailLines int64, follow bool) (io.ReadCloser, error) {
+func (s *stubClient) StreamPodLogs(ctx context.Context, namespace, podName string, opts corev1.PodLogOptions) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
 }
 func (s *stubClient) DeleteControllerPod(ctx context.Context, namespace, name string) error {

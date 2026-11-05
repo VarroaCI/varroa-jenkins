@@ -1333,6 +1333,13 @@ function logEntryOf(frame: unknown): LogEntry | null {
   return entry && typeof entry.message === "string" ? entry : null;
 }
 
+// The BFF stamps each line with the time the container runtime wrote it, so a
+// line keeps its source, timestamp, and message on every read. A frame with no
+// timestamp has no key and always shows.
+function logLineKey(e: LogEntry): string | null {
+  return e.timestamp ? `${e.source ?? ""}\u0000${e.timestamp}\u0000${e.message}` : null;
+}
+
 interface StreamEntry {
   key: string;
   ts: number;
@@ -1352,15 +1359,6 @@ function ControllerStream({
 }) {
   const [chip, setChip] = useState<string>("All");
   const [lines, setLines] = useState<LogEntry[]>([]);
-  // Dedupe replay bursts: the logs endpoint re-tails the last N lines on every
-  // reconnect, so a burst of identical (source, message) lines arriving right
-  // after an (re)connect is treated as a replay, not new log output.
-  const recentRef = useRef<Array<{ source: string; message: string; at: number }>>([]);
-  // Wall-clock time of the most recent readyState -> "open" transition. The
-  // replay dedupe above only applies within a short settle window after that
-  // transition; steady-state repeated lines are genuine output and must not be
-  // dropped just because they repeat a very recent message.
-  const connectedAtRef = useRef(0);
 
   // Log frames wait in this queue until the drain effect below appends them.
   // useEventStream calls onEvent once for each frame, also for each frame of
@@ -1382,47 +1380,36 @@ function ControllerStream({
     { onEvent: onLogEvent },
   );
 
-  // This effect must stay above the drain effect. When the open and the
-  // first burst land in one render, the drain then reads the new connect time.
-  useEffect(() => {
-    if (readyState === "open") connectedAtRef.current = Date.now();
-  }, [readyState]);
-
-  // Append every queued log frame in one lines update.
+  // Append every queued log frame in one lines update. A frame whose source,
+  // timestamp, and message match a held line is a replay and is dropped.
   useEffect(() => {
     const frames = logQueueRef.current;
     if (frames.length === 0) return;
     logQueueRef.current = [];
-    const now = Date.now();
-    // Only the post-(re)connect settle window may contain replayed tail
-    // lines; outside it, every line is new output even if it repeats one
-    // seen very recently.
-    const inSettleWindow = now - connectedAtRef.current < 5000;
-    const kept: LogEntry[] = [];
+    const incoming: LogEntry[] = [];
     for (const frame of frames) {
       const entry = logEntryOf(frame);
-      if (!entry) continue;
-      const source = entry.source ?? "";
-      // A re-tailed line from the logs endpoint reports a timestamp from
-      // BEFORE the (re)connect, while genuinely new output reports one at or
-      // after it. Gate the replay dedupe on that too: a line that repeats a
-      // recent (source, message) but is stamped at/after the connection is
-      // new output (e.g. a heartbeat right after reconnect), not a replay.
-      // If timestamp is missing/unparseable, treat it as new output rather
-      // than risk dropping a real log line.
-      const entryTs = entry.timestamp ? Date.parse(entry.timestamp) : NaN;
-      const isPreConnectTail = !Number.isNaN(entryTs) && entryTs < connectedAtRef.current;
-      const replay = inSettleWindow && isPreConnectTail && recentRef.current.some(
-        (r) => r.source === source && r.message === entry.message,
-      );
-      if (replay) continue;
-      recentRef.current.push({ source, message: entry.message, at: now });
-      if (recentRef.current.length > 200) recentRef.current = recentRef.current.slice(-150);
-      kept.push(entry);
+      if (entry) incoming.push(entry);
     }
-    if (kept.length === 0) return;
+    if (incoming.length === 0) return;
     setLines((prev) => {
-      const next = [...prev, ...kept];
+      const held = new Set<string>();
+      for (const l of prev) {
+        const k = logLineKey(l);
+        if (k !== null) held.add(k);
+      }
+      const next = [...prev];
+      let added = false;
+      for (const entry of incoming) {
+        const k = logLineKey(entry);
+        if (k !== null) {
+          if (held.has(k)) continue;
+          held.add(k);
+        }
+        next.push(entry);
+        added = true;
+      }
+      if (!added) return prev;
       return next.length > 500 ? next.slice(-500) : next;
     });
   }, [logTick]);

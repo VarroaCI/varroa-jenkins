@@ -3428,10 +3428,12 @@ type ComponentsSchemasLiveDrift struct {
 
 // ComponentsSchemasLogEntry A single structured log line from a controller.
 type ComponentsSchemasLogEntry struct {
-	Level     ComponentsSchemasLogEntryLevel `json:"level"`
-	Message   string                         `json:"message"`
-	Source    string                         `json:"source"`
-	Timestamp time.Time                      `json:"timestamp"`
+	Level   ComponentsSchemasLogEntryLevel `json:"level"`
+	Message string                         `json:"message"`
+	Source  string                         `json:"source"`
+
+	// Timestamp The time that the container runtime wrote the line.
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // ComponentsSchemasLogEntryLevel defines model for ComponentsSchemasLogEntry.Level.

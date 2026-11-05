@@ -1179,9 +1179,9 @@ type ResourceClient interface {
 
 	ClearUserPassword(ctx context.Context, name, namespace string) error
 
-	// StreamPodLogs streams stdout+stderr from a container in the given pod.
-	// The caller must close the returned ReadCloser when done.
-	StreamPodLogs(ctx context.Context, namespace, podName, container string, tailLines int64, follow bool) (io.ReadCloser, error)
+	// StreamPodLogs streams stdout and stderr of one container in the named pod.
+	// opts.Container names the container. The caller must close the ReadCloser.
+	StreamPodLogs(ctx context.Context, namespace, podName string, opts corev1.PodLogOptions) (io.ReadCloser, error)
 
 	// DeleteControllerPod deletes the Jenkins pod for a controller (hard restart).
 	// The StatefulSet recreates it. Idempotent: a missing pod is not an error.

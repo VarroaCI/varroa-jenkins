@@ -876,7 +876,7 @@ func (t *testClient) ScaleStatefulSetToZero(ctx context.Context, name, _ string,
 	t.scaleCalls[name] = 0
 	return nil
 }
-func (t *testClient) StreamPodLogs(_ context.Context, _, _, _ string, _ int64, _ bool) (io.ReadCloser, error) {
+func (t *testClient) StreamPodLogs(_ context.Context, _, _ string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
 	return nil, nil
 }
 

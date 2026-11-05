@@ -66,6 +66,10 @@ type Server struct {
 	// rerunSpawn runs the work of one accepted re-run event. Nil means a
 	// goroutine. A test substitutes a function that runs the work inline.
 	rerunSpawn func(func())
+
+	// podLogRetry is the wait before the controller log stream reads a container log again.
+	// Zero means podLogRetryDefault. A test sets a short wait.
+	podLogRetry time.Duration
 }
 
 // NewServer creates a new API server with the given dependencies.
@@ -1460,8 +1464,9 @@ func (s *Server) controllerPodName(ctx context.Context, namespace, name string) 
 
 // streamPodLogsSSE streams logs from both containers (jenkins + mite) of the
 // controller's pod directly from the Kubernetes API, writing each line as an
-// SSE data event. It reconnects on error after a 10-second delay. Exits when
-// the request context is cancelled (client disconnect).
+// SSE data event. Each container read resumes after the newest line it sent,
+// so a line is never sent twice. Exits when the request context is cancelled
+// (client disconnect).
 func (s *Server) streamPodLogsSSE(w http.ResponseWriter, r *http.Request, flusher http.Flusher, namespace, name string) {
 	ctx := r.Context()
 	podName, err := s.controllerPodName(ctx, namespace, name)
@@ -1479,55 +1484,7 @@ func (s *Server) streamPodLogsSSE(w http.ResponseWriter, r *http.Request, flushe
 		wg.Add(1)
 		go func(ctr string) {
 			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
-				rc, err := s.deps.Client.StreamPodLogs(ctx, namespace, podName, ctr, 50, true)
-				if err != nil {
-					if ctx.Err() != nil {
-						return
-					}
-					s.deps.Logger.Warn("log stream failed, retrying in 10s",
-						"namespace", namespace, "pod", podName, "container", ctr, "error", err)
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(10 * time.Second):
-					}
-					continue
-				}
-
-				scanner := bufio.NewScanner(rc)
-				scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-				for scanner.Scan() {
-					line := scanner.Text()
-					select {
-					case lineCh <- logbuffer.LogEntry{
-						Timestamp: time.Now(),
-						Level:     logbuffer.DetectLogLevel(line),
-						Source:    ctr,
-						Message:   line,
-					}:
-					case <-ctx.Done():
-						_ = rc.Close()
-						return
-					}
-				}
-				_ = rc.Close()
-
-				if ctx.Err() != nil {
-					return
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(10 * time.Second):
-				}
-			}
+			s.followContainerLogs(ctx, namespace, podName, ctr, lineCh)
 		}(container)
 	}
 
@@ -1561,8 +1518,8 @@ func (s *Server) streamPodLogsSSE(w http.ResponseWriter, r *http.Request, flushe
 }
 
 // fetchPodLogsOneShot performs a one-shot fetch of recent log lines from both
-// containers (jenkins + mite) of the controller's pod. Fetches sequentially so
-// the merged slice is ordered predictably (jenkins lines, then mite lines).
+// containers (jenkins + mite) of the controller's pod. The merged slice is
+// sorted by timestamp; lines with equal timestamps keep the jenkins-then-mite order.
 func (s *Server) fetchPodLogsOneShot(ctx context.Context, namespace, name string) []logbuffer.LogEntry {
 	podName, err := s.controllerPodName(ctx, namespace, name)
 	if err != nil {
@@ -1576,7 +1533,12 @@ func (s *Server) fetchPodLogsOneShot(ctx context.Context, namespace, name string
 
 	var entries []logbuffer.LogEntry
 	for _, container := range containers {
-		rc, err := s.deps.Client.StreamPodLogs(ctx, namespace, podName, container, 500, false)
+		tail := podLogOneShotTail
+		rc, err := s.deps.Client.StreamPodLogs(ctx, namespace, podName, corev1.PodLogOptions{
+			Container:  container,
+			TailLines:  &tail,
+			Timestamps: true,
+		})
 		if err != nil {
 			s.deps.Logger.Warn("one-shot log fetch failed",
 				"namespace", namespace, "pod", podName, "container", container, "error", err)
@@ -1586,13 +1548,8 @@ func (s *Server) fetchPodLogsOneShot(ctx context.Context, namespace, name string
 		scanner := bufio.NewScanner(rc)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
-			line := scanner.Text()
-			entries = append(entries, logbuffer.LogEntry{
-				Timestamp: time.Now(),
-				Level:     logbuffer.DetectLogLevel(line),
-				Source:    container,
-				Message:   line,
-			})
+			entry, _ := podLogEntry(container, scanner.Text())
+			entries = append(entries, entry)
 		}
 		_ = rc.Close()
 	}
@@ -1600,6 +1557,9 @@ func (s *Server) fetchPodLogsOneShot(ctx context.Context, namespace, name string
 	if entries == nil {
 		return []logbuffer.LogEntry{}
 	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].Timestamp.Before(entries[j].Timestamp)
+	})
 	return entries
 }
 

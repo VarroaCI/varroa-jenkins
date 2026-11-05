@@ -202,12 +202,50 @@ func TestLogsFollow_DedupeAfterReconnect(t *testing.T) {
 
 	root.SetArgs([]string{"logs", "team-a/ctrl-1", "--server", srv.URL, "-f"})
 	root.SetContext(ctx)
-	if err := root.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	var execErr error
+	out := captureStdout(t, func() { execErr = root.Execute() })
+	if execErr != nil {
+		t.Fatalf("unexpected error: %v", execErr)
 	}
 
 	if requestCount.Load() < 2 {
 		t.Errorf("expected at least 2 requests (reconnect), got %d", requestCount.Load())
+	}
+	if n := strings.Count(out, " second\n"); n != 1 {
+		t.Errorf("second printed %d times, want 1; output:\n%s", n, out)
+	}
+	if !strings.Contains(out, " third\n") {
+		t.Errorf("third not printed; output:\n%s", out)
+	}
+}
+
+// printLogEntry drops a frame that repeats the source, timestamp, and message
+// of a printed line. The two containers interleave, so a frame with an older
+// timestamp than the last printed line still prints when it is new.
+func TestPrintLogEntry_DropsReplayedLines(t *testing.T) {
+	frames := []string{
+		`{"timestamp":"2024-01-15T10:00:05Z","level":"INFO","source":"jenkins","message":"j-new"}`,
+		`{"timestamp":"2024-01-15T10:00:01Z","level":"INFO","source":"mite","message":"m-old"}`,
+		`{"timestamp":"2024-01-15T10:00:05Z","level":"INFO","source":"jenkins","message":"j-new"}`,
+		`{"timestamp":"2024-01-15T10:00:01Z","level":"INFO","source":"mite","message":"m-old"}`,
+		`{"timestamp":"2024-01-15T10:00:01Z","level":"INFO","source":"mite","message":"m-old-2"}`,
+	}
+	var seen logLineSeen
+	out := captureStdout(t, func() {
+		for _, f := range frames {
+			if err := printLogEntry(stream.Event{Data: []byte(f)}, &seen); err != nil {
+				t.Fatalf("printLogEntry: %v", err)
+			}
+		}
+	})
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("printed %d lines, want 3; output:\n%s", len(lines), out)
+	}
+	for i, want := range []string{"j-new", "m-old", "m-old-2"} {
+		if !strings.HasSuffix(lines[i], " "+want) {
+			t.Errorf("line %d = %q, want suffix %q", i, lines[i], want)
+		}
 	}
 }
 

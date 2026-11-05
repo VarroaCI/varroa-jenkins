@@ -778,15 +778,13 @@ describe("ControllerDetail — Diagnostics stream (8.2)", () => {
     }
   });
 
-  it("does not dedupe a genuinely repeated log line outside the reconnect settle window", () => {
-    const nowSpy = vi.spyOn(Date, "now");
+  it("keeps a repeated message that carries a new timestamp", () => {
     const logEventA = { type: "log", data: { timestamp: "2024-01-01T00:00:00Z", source: "jenkins", message: "jenkins heartbeat" } };
     const logEventB = { type: "log", data: { timestamp: "2024-01-01T00:00:06Z", source: "jenkins", message: "jenkins heartbeat" } };
     const activityState = { lastEvent: null, readyState: "open", error: null };
     const logState = { lastEvent: null, readyState: "open", error: null };
     let logOnEvent: ((ev: SSEEvent<unknown>) => void) | undefined;
     try {
-      nowSpy.mockReturnValue(1_700_000_000_000); // arbitrary base "now"
       vi.mocked(useEventStream).mockImplementation((_baseUrl, scope, _names, options) => {
         if (scope === "activity") return activityState;
         logOnEvent = options?.onEvent as typeof logOnEvent;
@@ -796,29 +794,19 @@ describe("ControllerDetail — Diagnostics stream (8.2)", () => {
       fireEvent.click(screen.getByText(/Diagnostics/));
       act(() => logOnEvent?.(logEventA));
       expect(screen.getByText(/jenkins heartbeat/)).toBeInTheDocument();
-      // Step beyond the 5s post-(re)connect settle window, then deliver the
-      // same line again — steady-state repetition is real output, not replay.
-      nowSpy.mockReturnValue(1_700_000_000_000 + 6_000); // simulate 6s later, outside the settle window
+      // The second line has its own kubelet time, so it is new output.
       act(() => logOnEvent?.(logEventB));
       expect(screen.getAllByText(/jenkins heartbeat/)).toHaveLength(2);
     } finally {
-      nowSpy.mockRestore();
       vi.mocked(useEventStream).mockReturnValue({ lastEvent: null, readyState: "closed", error: null });
     }
   });
-  it("still dedupes an identical line replayed inside the reconnect settle window", () => {
-    const nowSpy = vi.spyOn(Date, "now");
-    // Both frames carry a timestamp BEFORE the (re)connect moment
-    // (connectedAtRef = Date.now() = 1_700_000_000_000), the signature of a
-    // re-tailed tail line: pre-connect timestamps inside the settle window
-    // with a matching (source, message) are treated as replay and dropped.
-    const logEventA = { type: "log", data: { timestamp: "2023-01-01T00:00:00Z", source: "mite", message: "mite status snapshot" } };
-    const logEventB = { type: "log", data: { timestamp: "2023-01-01T00:00:01Z", source: "mite", message: "mite status snapshot" } };
+  it("drops a frame that repeats the source, timestamp, and message of a held line", () => {
+    const logEvent = { type: "log", data: { timestamp: "2023-01-01T00:00:00Z", source: "mite", message: "mite status snapshot" } };
     const activityState = { lastEvent: null, readyState: "open", error: null };
     const logState = { lastEvent: null, readyState: "open", error: null };
     let logOnEvent: ((ev: SSEEvent<unknown>) => void) | undefined;
     try {
-      nowSpy.mockReturnValue(1_700_000_000_000); // arbitrary base "now"
       vi.mocked(useEventStream).mockImplementation((_baseUrl, scope, _names, options) => {
         if (scope === "activity") return activityState;
         logOnEvent = options?.onEvent as typeof logOnEvent;
@@ -826,31 +814,20 @@ describe("ControllerDetail — Diagnostics stream (8.2)", () => {
       });
       renderWithProviders(<ControllerDetail />);
       fireEvent.click(screen.getByText(/Diagnostics/));
-      act(() => logOnEvent?.(logEventA));
+      act(() => logOnEvent?.(logEvent));
       expect(screen.getByText(/mite status snapshot/)).toBeInTheDocument();
-      // Same pre-connect line arrives again while still inside the 5s settle
-      // window -> treated as a reconnect tail replay and dropped.
-      nowSpy.mockReturnValue(1_700_000_000_000 + 1_000); // still inside the 5s settle window
-      act(() => logOnEvent?.(logEventB));
+      act(() => logOnEvent?.(logEvent));
       expect(screen.getAllByText(/mite status snapshot/)).toHaveLength(1);
     } finally {
-      nowSpy.mockRestore();
       vi.mocked(useEventStream).mockReturnValue({ lastEvent: null, readyState: "closed", error: null });
     }
   });
-  it("does not dedupe a repeated line inside the settle window when its timestamp is at/after connection (new output, not replay)", () => {
-    // Regression guard: within the settle window, a matching recent
-    // source+message alone must not classify a line as replay. If the line's
-    // OWN timestamp is at/after the connection, it is new output and is kept.
-    const nowSpy = vi.spyOn(Date, "now");
-    // Timestamps (2024) are AFTER the connection time (1_700_000_000_000).
-    const logEventA = { type: "log", data: { timestamp: "2024-01-01T00:00:00Z", source: "jenkins", message: "jenkins heartbeat" } };
-    const logEventB = { type: "log", data: { timestamp: "2024-01-01T00:00:00Z", source: "jenkins", message: "jenkins heartbeat" } };
+  it("drops a replayed line that arrives long after the stream opened", () => {
+    const logEvent = { type: "log", data: { timestamp: "2024-01-01T00:00:00Z", source: "jenkins", message: "jenkins replayed line" } };
     const activityState = { lastEvent: null, readyState: "open", error: null };
     const logState = { lastEvent: null, readyState: "open", error: null };
     let logOnEvent: ((ev: SSEEvent<unknown>) => void) | undefined;
     try {
-      nowSpy.mockReturnValue(1_700_000_000_000); // arbitrary base "now"
       vi.mocked(useEventStream).mockImplementation((_baseUrl, scope, _names, options) => {
         if (scope === "activity") return activityState;
         logOnEvent = options?.onEvent as typeof logOnEvent;
@@ -858,33 +835,27 @@ describe("ControllerDetail — Diagnostics stream (8.2)", () => {
       });
       renderWithProviders(<ControllerDetail />);
       fireEvent.click(screen.getByText(/Diagnostics/));
-      act(() => logOnEvent?.(logEventA));
-      expect(screen.getByText(/jenkins heartbeat/)).toBeInTheDocument();
-      // Still inside the 5s settle window, same source+message again, but its
-      // timestamp is at/after the connection -> genuinely new output, kept.
-      nowSpy.mockReturnValue(1_700_000_000_000 + 1_000); // still inside the 5s settle window
-      act(() => logOnEvent?.(logEventB));
-      expect(screen.getAllByText(/jenkins heartbeat/)).toHaveLength(2);
+      act(() => logOnEvent?.(logEvent));
+      expect(screen.getByText(/jenkins replayed line/)).toBeInTheDocument();
+      // The stream stays open. A replay of the same line is the same line,
+      // so it is not shown twice.
+      act(() => logOnEvent?.(logEvent));
+      expect(screen.getAllByText(/jenkins replayed line/)).toHaveLength(1);
     } finally {
-      nowSpy.mockRestore();
       vi.mocked(useEventStream).mockReturnValue({ lastEvent: null, readyState: "closed", error: null });
     }
   });
-  it("identical timestamp+message log lines render as distinct rows with no key collision", () => {
-    const nowSpy = vi.spyOn(Date, "now");
-    // Two log frames with the SAME timestamp and SAME message, delivered
-    // outside the 5s reconnect settle window so neither is treated as replay.
-    // Their entries keys must stay unique (index included) — a key of just
-    // `l-${timestamp}-${message}` would collide here and trip React's
-    // "two children with the same key" warning.
+  it("identical timestamp+message log lines from different sources render as distinct rows with no key collision", () => {
+    // Two log frames with the SAME timestamp and message but different
+    // sources are distinct lines. Their entry keys must stay unique: a key
+    // without the source would collide and trip React's "same key" warning.
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const logEventA = { type: "log", data: { timestamp: "2024-01-01T00:00:00Z", source: "jenkins", message: "identical burst line" } };
-    const logEventB = { type: "log", data: { timestamp: "2024-01-01T00:00:00Z", source: "jenkins", message: "identical burst line" } };
+    const logEventB = { type: "log", data: { timestamp: "2024-01-01T00:00:00Z", source: "mite", message: "identical burst line" } };
     const activityState = { lastEvent: null, readyState: "open", error: null };
     const logState = { lastEvent: null, readyState: "open", error: null };
     let logOnEvent: ((ev: SSEEvent<unknown>) => void) | undefined;
     try {
-      nowSpy.mockReturnValue(1_700_000_000_000); // arbitrary base "now"
       vi.mocked(useEventStream).mockImplementation((_baseUrl, scope, _names, options) => {
         if (scope === "activity") return activityState;
         logOnEvent = options?.onEvent as typeof logOnEvent;
@@ -894,10 +865,6 @@ describe("ControllerDetail — Diagnostics stream (8.2)", () => {
       fireEvent.click(screen.getByText(/Diagnostics/));
       act(() => logOnEvent?.(logEventA));
       expect(screen.getByText(/identical burst line/)).toBeInTheDocument();
-      // Step beyond the 5s settle window and deliver the same line again —
-      // same timestamp and message as the first, so only an indexed key keeps
-      // the two entries distinct.
-      nowSpy.mockReturnValue(1_700_000_000_000 + 6_000);
       act(() => logOnEvent?.(logEventB));
       expect(screen.getAllByText(/identical burst line/)).toHaveLength(2);
       const keyWarnings = errorSpy.mock.calls.filter(
@@ -905,7 +872,6 @@ describe("ControllerDetail — Diagnostics stream (8.2)", () => {
       );
       expect(keyWarnings).toHaveLength(0);
     } finally {
-      nowSpy.mockRestore();
       errorSpy.mockRestore();
       vi.mocked(useEventStream).mockReturnValue({ lastEvent: null, readyState: "closed", error: null });
     }
