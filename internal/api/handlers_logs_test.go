@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -146,8 +147,9 @@ func TestFetchPodLogsOneShot_ResolveError_ReturnsEmptySlice(t *testing.T) {
 
 // scriptStep is the outcome of one StreamPodLogs call: a body or an open error.
 type scriptStep struct {
-	body string
-	err  error
+	body    string
+	err     error
+	readErr error // ends the body with this read error instead of io.EOF
 }
 
 // scriptedLogClient answers StreamPodLogs from a script. Calls past the script
@@ -179,7 +181,11 @@ func (c *scriptedLogClient) StreamPodLogs(ctx context.Context, _, _ string, opts
 	if step.err != nil {
 		return nil, step.err
 	}
-	return io.NopCloser(strings.NewReader(step.body)), nil
+	var r io.Reader = strings.NewReader(step.body)
+	if step.readErr != nil {
+		r = io.MultiReader(r, iotest.ErrReader(step.readErr))
+	}
+	return io.NopCloser(r), nil
 }
 
 func (c *scriptedLogClient) readOpts() []corev1.PodLogOptions {
@@ -339,5 +345,188 @@ func TestSplitKubeletTimestamp(t *testing.T) {
 				t.Errorf("ts = %v, want %v", gotTS, tt.wantTS)
 			}
 		})
+	}
+}
+
+// longLogLine is a kubelet-stamped line of 2 MiB.
+func longLogLine(ts string) string {
+	return ts + " " + strings.Repeat("x", 2<<20)
+}
+
+func cutLogMessage(size string) string {
+	return strings.Repeat("x", podLogLineCap-21) + " … [truncated, " + size + " line]"
+}
+
+func TestPodLogLines(t *testing.T) {
+	x := func(n int) string { return strings.Repeat("x", n) }
+	cut := func(size string) string { return x(podLogLineCap) + " … [truncated, " + size + " line]" }
+	tests := []struct {
+		name    string
+		in      string
+		readErr error
+		want    []string
+		wantErr error
+	}{
+		{name: "empty lines", in: "a\n\nb\n", want: []string{"a", "", "b"}},
+		{name: "carriage return", in: "a\r\nb\n", want: []string{"a", "b"}},
+		{name: "carriage return at the cap", in: strings.Repeat("x", podLogLineCap) + "\r\n",
+			want: []string{strings.Repeat("x", podLogLineCap)}},
+		{name: "line at the cap", in: x(podLogLineCap) + "\n", want: []string{x(podLogLineCap)}},
+		{name: "line one byte over the cap", in: x(podLogLineCap+1) + "\n",
+			want: []string{cut("128 KiB")}},
+		{name: "long line between short lines", in: "a\n" + x(2<<20) + "\nnext\n",
+			want: []string{"a", cut("2.0 MiB"), "next"}},
+		{name: "cut splits a multi-byte rune", in: strings.Repeat("€", 43691) + "\n",
+			want: []string{strings.Repeat("€", 43690) + " … [truncated, 128 KiB line]"}},
+		{name: "cut keeps valid bytes of an invalid line", in: "\xff\xfe" + strings.Repeat("x", podLogLineCap) + "\n",
+			want: []string{"\xff\xfe" + strings.Repeat("x", podLogLineCap-2) + " … [truncated, 128 KiB line]"}},
+		{name: "clean end sends the last line", in: "a\nlast", want: []string{"a", "last"}},
+		{name: "read error drops the partial line", in: "a\npar", readErr: io.ErrUnexpectedEOF,
+			want: []string{"a"}, wantErr: io.ErrUnexpectedEOF},
+		{name: "read error drops a long partial line", in: "a\n" + x(2<<20), readErr: io.ErrUnexpectedEOF,
+			want: []string{"a"}, wantErr: io.ErrUnexpectedEOF},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var r io.Reader = strings.NewReader(tt.in)
+			if tt.readErr != nil {
+				r = io.MultiReader(r, iotest.ErrReader(tt.readErr))
+			}
+			var got []string
+			err := podLogLines(r, func(line string) bool {
+				got = append(got, line)
+				return true
+			})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d lines, want %d", len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("line %d: len %d, want len %d (last 40 bytes %q)", i, len(got[i]), len(tt.want[i]), got[i][max(0, len(got[i])-40):])
+				}
+			}
+		})
+	}
+
+	t.Run("emit stops the read", func(t *testing.T) {
+		n := 0
+		err := podLogLines(strings.NewReader("a\nb\n"), func(string) bool {
+			n++
+			return false
+		})
+		if err != nil || n != 1 {
+			t.Errorf("err = %v, emit calls = %d; want nil and 1", err, n)
+		}
+	})
+}
+
+// A line of 2 MiB is cut at the cap. The next line still reaches the stream.
+func TestFollowContainerLogs_LongLineIsCutAndStreamMoves(t *testing.T) {
+	long := longLogLine("2026-11-04T10:00:01Z")
+	client := &scriptedLogClient{steps: []scriptStep{
+		{body: "2026-11-04T10:00:00Z before\n" + long + "\n"},
+		{body: long + "\n2026-11-04T10:00:02Z after\n"},
+	}}
+
+	got := runFollow(t, client, 3)
+
+	if got[0].Message != "before" {
+		t.Errorf("first Message = %q, want before", got[0].Message)
+	}
+	if got[1].Message != cutLogMessage("2.0 MiB") {
+		t.Errorf("cut Message len = %d, want the capped line with its size note", len(got[1].Message))
+	}
+	if got[2].Message != "after" {
+		t.Errorf("third Message = %q, want after", got[2].Message)
+	}
+	calls := client.readOpts()
+	if len(calls) < 2 {
+		t.Fatalf("got %d reads, want at least 2", len(calls))
+	}
+	if calls[1].SinceTime == nil || !calls[1].SinceTime.Time.Equal(mustKubeletTime(t, "2026-11-04T10:00:01Z")) {
+		t.Errorf("resumed read SinceTime = %v, want 10:00:01", calls[1].SinceTime)
+	}
+}
+
+// A read that fails in the middle of a line sends nothing of that line. The
+// resumed read sends it whole.
+func TestFollowContainerLogs_CutReadDropsPartialLine(t *testing.T) {
+	client := &scriptedLogClient{steps: []scriptStep{
+		{body: "2026-11-04T10:00:00Z one\n2026-11-04T10:00:01Z par", readErr: io.ErrUnexpectedEOF},
+		{body: "2026-11-04T10:00:00Z one\n2026-11-04T10:00:01Z part two whole\n"},
+	}}
+
+	got := runFollow(t, client, 2)
+
+	if got[0].Message != "one" || got[1].Message != "part two whole" {
+		t.Errorf("messages = %q, %q; want one, part two whole", got[0].Message, got[1].Message)
+	}
+	calls := client.readOpts()
+	if len(calls) < 2 {
+		t.Fatalf("got %d reads, want at least 2", len(calls))
+	}
+	if calls[1].SinceTime == nil || !calls[1].SinceTime.Time.Equal(mustKubeletTime(t, "2026-11-04T10:00:00Z")) {
+		t.Errorf("resumed read SinceTime = %v, want 10:00:00", calls[1].SinceTime)
+	}
+}
+
+// A last line without a newline is sent when the read ends cleanly, and the
+// resumed read does not send it twice.
+func TestFollowContainerLogs_CleanEndSendsLastLine(t *testing.T) {
+	client := &scriptedLogClient{steps: []scriptStep{
+		{body: "2026-11-04T10:00:00Z one\n2026-11-04T10:00:01Z last"},
+		{body: "2026-11-04T10:00:01Z last\n2026-11-04T10:00:02Z later\n"},
+	}}
+
+	got := runFollow(t, client, 3)
+
+	msgs := []string{got[0].Message, got[1].Message, got[2].Message}
+	if strings.Join(msgs, " ") != "one last later" {
+		t.Fatalf("messages = %v, want one last later", msgs)
+	}
+	calls := client.readOpts()
+	if len(calls) < 2 {
+		t.Fatalf("got %d reads, want at least 2", len(calls))
+	}
+	if calls[1].SinceTime == nil || !calls[1].SinceTime.Time.Equal(mustKubeletTime(t, "2026-11-04T10:00:01Z")) {
+		t.Errorf("resumed read SinceTime = %v, want 10:00:01", calls[1].SinceTime)
+	}
+}
+
+// The one-shot read cuts a long line and keeps the lines after it.
+func TestFetchPodLogsOneShot_CutsLongLine(t *testing.T) {
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "smoke", Namespace: "varroa", UID: "54c62aff-0000-0000-0000-000000000000"},
+	}
+	st := crdstore.NewFake()
+	crdstore.MustSeed(st, cr)
+	client := &scriptedLogClient{steps: []scriptStep{
+		{body: "2026-11-04T10:00:00Z before\n" + longLogLine("2026-11-04T10:00:01Z") + "\n2026-11-04T10:00:02Z after\n"},
+		{body: ""},
+	}}
+	s := NewServer(&Dependencies{
+		Client: client,
+		Store:  st,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+
+	entries := s.fetchPodLogsOneShot(context.Background(), "varroa", "smoke")
+
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(entries))
+	}
+	if entries[0].Message != "before" || entries[2].Message != "after" {
+		t.Errorf("messages = %q, %q; want before, after", entries[0].Message, entries[2].Message)
+	}
+	if entries[1].Message != cutLogMessage("2.0 MiB") {
+		t.Errorf("cut Message len = %d, want the capped line with its size note", len(entries[1].Message))
+	}
+	for _, e := range entries {
+		if e.Source != "jenkins" {
+			t.Errorf("Source = %q, want jenkins", e.Source)
+		}
 	}
 }

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1545,13 +1544,16 @@ func (s *Server) fetchPodLogsOneShot(ctx context.Context, namespace, name string
 			continue
 		}
 
-		scanner := bufio.NewScanner(rc)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			entry, _ := podLogEntry(container, scanner.Text())
+		readErr := podLogLines(rc, func(line string) bool {
+			entry, _ := podLogEntry(container, line)
 			entries = append(entries, entry)
-		}
+			return true
+		})
 		_ = rc.Close()
+		if readErr != nil {
+			s.deps.Logger.Warn("one-shot log read failed",
+				"namespace", namespace, "pod", podName, "container", container, "error", readErr)
+		}
 	}
 
 	if entries == nil {

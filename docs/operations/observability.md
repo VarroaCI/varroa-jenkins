@@ -45,7 +45,7 @@ status, and the error text. A person's successful cancel, input answer, or repla
 
 ## Follow controller logs
 
-The controller **Diagnostics** tab and `varroactl logs <namespace>/<name> --follow` stream the `jenkins` and `mite` container logs. Each stream starts with the last 50 lines of each container. Each line carries the time that the container runtime wrote it. `kubectl logs --timestamps` shows the same time. When a pod log read stops, the BFF reads the log again after 10 seconds. The new read starts after the last line that the stream sent, so each line shows one time. A browser or CLI reconnect opens a new stream, which starts with the last 50 lines again. The dashboard and the CLI do not show a line again when it has the same container, time, and text.
+The controller **Diagnostics** tab and `varroactl logs <namespace>/<name> --follow` stream the `jenkins` and `mite` container logs. Each stream starts with the last 50 lines of each container. Each line carries the time that the container runtime wrote it. `kubectl logs --timestamps` shows the same time. When a pod log read stops, the BFF reads the log again after 10 seconds. The new read starts after the last line that the stream sent, so each line shows one time. The BFF cuts each log line that is longer than 128 KiB. The line shows its first 128 KiB and a note with its full size. A browser or CLI reconnect opens a new stream, which starts with the last 50 lines again. The dashboard and the CLI do not show a line again when it has the same container, time, and text.
 
 ## Read brood health
 
