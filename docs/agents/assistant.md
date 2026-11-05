@@ -92,6 +92,8 @@ conversation to change it.
 
 When a conversation cannot take another message, the drawer shows **Start a new conversation**. Select it, then select **Send**. Your message goes to a new conversation for this page.
 
+When the assistant is off for your account, the drawer shows a link to your assistant settings. When too many sessions run, the drawer shows a busy message and opens the session list.
+
 Select **Sessions** to see your recent conversations. Each row shows your first message, the context, the state, and the age. On a phone, the drawer opens full screen.
 
 Select **Close** to close the drawer. Press Escape while focus is inside the drawer to close it too. Focus then returns to the control that opened the drawer. When that control is gone, focus moves to the top-bar button. When you close the drawer with the top-bar button, focus stays on that button.

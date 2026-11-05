@@ -3,7 +3,7 @@
 // next message. It resumes after the last seq it applied.
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { History, MessageSquarePlus, X } from "lucide-react";
 import { ApiError } from "../../hooks/useApi";
 import {
@@ -51,6 +51,8 @@ export default function AssistantDrawer() {
   const [model, setModel] = useState<TranscriptModel>(emptyModel());
   const [composer, setComposer] = useState("");
   const [refusal, setRefusal] = useState("");
+  // refusalCode is the code of a refused create. It picks the way forward under the text.
+  const [refusalCode, setRefusalCode] = useState("");
   const [showList, setShowList] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingMessage | null>(null);
@@ -99,6 +101,7 @@ export default function AssistantDrawer() {
   useEffect(() => {
     setModel(emptyModel());
     setRefusal("");
+    setRefusalCode("");
   }, [sid, a.epoch]);
 
   const state = model.state ?? session?.state ?? null;
@@ -118,20 +121,27 @@ export default function AssistantDrawer() {
     // Focus moves to the composer first.
     composerRef.current?.focus();
     setRefusal("");
+    setRefusalCode("");
     setBusy(true);
     setPending({ text, afterSeq: model.lastSeq, sending: true });
     setComposer("");
     const sent = () => setPending((p) => (p ? { ...p, sending: false } : p));
-    const fail = (message: string) => {
+    const fail = (message: string, code = "") => {
       setPending(null);
       setComposer((c) => (c === "" ? raw : c));
       setRefusal(message);
+      setRefusalCode(code);
     };
     try {
       if (!sid) {
         const r = await a.startSession({ context: ctx, message: text });
-        if (r.ok) sent();
-        else fail(r.text);
+        if (r.ok) {
+          sent();
+          return;
+        }
+        fail(r.text, r.code);
+        // A busy refusal opens the session list, so the user can open a running session or end one.
+        if (r.code === "assistant_busy") setShowList(true);
       } else {
         await postAssistantMessage(sid, { message: text });
         sent();
@@ -160,6 +170,7 @@ export default function AssistantDrawer() {
   const startNewConversation = () => {
     setPending(null);
     setRefusal("");
+    setRefusalCode("");
     a.newConversation();
   };
   const spent = !!sid && refusal === SPENT_TEXT;
@@ -338,6 +349,11 @@ export default function AssistantDrawer() {
       />
 
       {refusal && <p role="alert" className={styles.error}>{refusal}</p>}
+      {refusal && refusalCode === "assistant_off" && (
+        <Link ref={keepFocusInComposer} to="/profile?tab=assistant" className={styles.settingsLink}>
+          Open assistant settings
+        </Link>
+      )}
       {spent && (
         <Button ref={keepFocusInComposer} size="sm" className={styles.startOver} onClick={startNewConversation}>
           <MessageSquarePlus size={14} aria-hidden="true" />
