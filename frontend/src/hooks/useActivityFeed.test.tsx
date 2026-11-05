@@ -335,6 +335,20 @@ describe("useActivityFeed load more", () => {
   });
 });
 
+describe("useActivityFeed cluster and controller filters", () => {
+  it("sends the cluster and controller filters to history and the live stream", async () => {
+    renderHook(() => useActivityFeed(undefined, { cluster: "cluster-b", controller: "ns/ctrl" }), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(mockBffFetch).toHaveBeenCalled();
+    });
+    expect(mockBffFetch.mock.calls[0][0]).toBe("/activity?cluster=cluster-b&controller=ns%2Fctrl");
+    expect(String(mockStreamUrl)).toBe("/api/v1/activity/stream?cluster=cluster-b&controller=ns%2Fctrl");
+  });
+});
+
 describe("useActivityFeed range bounds", () => {
   it("a preset range sends start and no end to history and the live stream", async () => {
     renderHook(() => useActivityFeed(undefined, { range: "1h" }), {
