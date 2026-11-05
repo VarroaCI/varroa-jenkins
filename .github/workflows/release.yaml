@@ -258,19 +258,27 @@ jobs:
           # CGO_ENABLED=0 keeps varroactl a static, dependency-free download —
           # the backend image build needs cgo for the race detector, a released
           # CLI must not need a matching libc.
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+          # Windows gets a .exe inside a .zip. Every other target gets a
+          # .tar.gz with a bare binary.
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
             os="${target%/*}"; arch="${target#*/}"
+            bin=varroactl
+            if [ "$os" = windows ]; then bin=varroactl.exe; fi
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
               -trimpath \
               -ldflags "-s -w -X main.version=${VERSION}" \
-              -o dist/varroactl ./cmd/varroactl
-            tar -C dist -czf "dist/varroactl_${VERSION}_${os}_${arch}.tar.gz" varroactl
-            rm dist/varroactl
+              -o "dist/$bin" ./cmd/varroactl
+            if [ "$os" = windows ]; then
+              (cd dist && zip -q -j "varroactl_${VERSION}_${os}_${arch}.zip" "$bin")
+            else
+              tar -C dist -czf "dist/varroactl_${VERSION}_${os}_${arch}.tar.gz" "$bin"
+            fi
+            rm "dist/$bin"
           done
 
           # Checksums are generated from inside dist/ so the file lists bare
           # names, which is what `sha256sum -c` expects after download.
-          (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
+          (cd dist && sha256sum ./*.tar.gz ./*.zip > SHA256SUMS)
           ls -l dist
 
       - name: Create the GitHub Release
@@ -300,6 +308,7 @@ jobs:
             os="${target%/*}"; arch="${target#*/}"
             assets+=("dist/varroactl_${VERSION}_${os}_${arch}.tar.gz")
           done
+          assets+=("dist/varroactl_${VERSION}_windows_amd64.zip")
           assets+=(dist/SHA256SUMS)
 
           # Shared by both branches below: appended under release-please's
@@ -330,6 +339,8 @@ jobs:
           tar -xzf varroactl_${VERSION}_<os>_<arch>.tar.gz
           install -m 0755 varroactl /usr/local/bin/varroactl
           \`\`\`
+
+          On Windows, unzip \`varroactl_${VERSION}_windows_amd64.zip\` and put \`varroactl.exe\` on your \`PATH\`.
 
           See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md) for the full list of changes.
           EOF
