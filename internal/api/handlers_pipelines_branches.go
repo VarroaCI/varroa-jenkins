@@ -83,7 +83,7 @@ func (s *Server) ListJobBranches(ctx context.Context, claims *auth.Claims, tenan
 	if serr != nil {
 		return JobBranchList{}, serr
 	}
-	ref, ok := s.tenantForJob(claims, refs, jobPath)
+	ref, jobPath, ok := s.tenantForJob(claims, refs, tenant, jobPath)
 	if !ok {
 		return JobBranchList{}, &ServiceError{Status: http.StatusNotFound, Message: "job not found"}
 	}

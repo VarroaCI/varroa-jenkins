@@ -267,7 +267,7 @@ func (s *Server) handleGetJobBadge(w http.ResponseWriter, r *http.Request) {
 		s.writeServiceError(w, serr)
 		return
 	}
-	ref, ok := s.tenantForJob(claims, refs, jobPath)
+	ref, jobPath, ok := s.tenantForJob(claims, refs, r.PathValue("tenant"), jobPath)
 	if !ok {
 		s.writeJSONError(w, http.StatusNotFound, "job not found")
 		return

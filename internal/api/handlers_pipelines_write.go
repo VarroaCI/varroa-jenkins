@@ -73,7 +73,7 @@ func decodeJSONBody(body io.Reader, v any) error {
 // naming every candidate, and no surviving tenant answers 404 naming
 // the expected shape. The first candidate is never taken silently.
 func selectWriteTenant(refs []TenantRef, tenant, jobPath, cluster string) (TenantRef, string, *ServiceError) {
-	survivors, paths := matchingWriteTenants(refs, tenant, jobPath)
+	survivors, path := matchingWriteTenants(refs, tenant, jobPath)
 	if len(survivors) == 0 {
 		return TenantRef{}, "", &ServiceError{
 			Status:  http.StatusNotFound,
@@ -81,20 +81,19 @@ func selectWriteTenant(refs []TenantRef, tenant, jobPath, cluster string) (Tenan
 		}
 	}
 	if len(survivors) == 1 {
-		return survivors[0], paths[0], nil
+		return survivors[0], path, nil
 	}
 	if cluster != "" {
 		var selectedRef TenantRef
-		var selectedPath string
 		matches := 0
-		for i, ref := range survivors {
+		for _, ref := range survivors {
 			if ref.Cluster == cluster {
-				selectedRef, selectedPath = ref, paths[i]
+				selectedRef = ref
 				matches++
 			}
 		}
 		if matches == 1 {
-			return selectedRef, selectedPath, nil
+			return selectedRef, path, nil
 		}
 	}
 	names := make([]string, len(survivors))
@@ -107,32 +106,19 @@ func selectWriteTenant(refs []TenantRef, tenant, jobPath, cluster string) (Tenan
 	}
 }
 
-// matchingWriteTenants returns every ref of refs that hosts jobPath,
-// paired with the folder-qualified job path to use for that ref. It
-// tries the long form first: jobPath already inside a ref's folder. A
-// direct match wins outright, since an explicit folder-qualified path
-// names its tenant without guessing. Only when no ref matches directly
-// does it try the short form: jobPath alone, prefixed with the one
-// ref whose folder equals tenant. tenant already names the tenant, so a
-// folder that disagrees with it is never a short-form candidate.
-func matchingWriteTenants(refs []TenantRef, tenant, jobPath string) ([]TenantRef, []string) {
-	var direct []TenantRef
-	var directPaths []string
+// matchingWriteTenants returns every ref of refs that hosts jobPath, and
+// the folder-qualified job path that qualifyJobPath answers. A ref hosts
+// the path when the path lies inside its folder. A folder that disagrees
+// with tenant never takes the short form, as qualifyJobPath enforces.
+func matchingWriteTenants(refs []TenantRef, tenant, jobPath string) ([]TenantRef, string) {
+	path := qualifyJobPath(refs, tenant, jobPath)
+	var hosts []TenantRef
 	for _, ref := range refs {
-		if withinFolder(ref.Folder, jobPath) {
-			direct = append(direct, ref)
-			directPaths = append(directPaths, jobPath)
+		if withinFolder(ref.Folder, path) {
+			hosts = append(hosts, ref)
 		}
 	}
-	if len(direct) > 0 {
-		return direct, directPaths
-	}
-	for _, ref := range refs {
-		if ref.Folder != "" && ref.Folder == tenant {
-			return []TenantRef{ref}, []string{ref.Folder + "/" + jobPath}
-		}
-	}
-	return nil, nil
+	return hosts, path
 }
 
 // --- Task 4.2: the client-token validator (design D3a) ---

@@ -20,12 +20,7 @@ func (s *Server) ListTenantFleetRuns(ctx context.Context, claims *auth.Claims, t
 	if serr != nil {
 		return FleetRunPage{}, serr, nil
 	}
-	var admitted []TenantRef
-	for _, ref := range refs {
-		if s.canReadPipeline(claims, ref, jobPath) {
-			admitted = append(admitted, ref)
-		}
-	}
+	admitted, jobPath := s.readableJobTenants(claims, refs, tenant, jobPath)
 	if len(admitted) == 0 {
 		return FleetRunPage{}, &ServiceError{Status: http.StatusNotFound, Message: "job not found"}, nil
 	}

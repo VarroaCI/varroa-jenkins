@@ -168,7 +168,7 @@ func (s *Server) handleGetTenantAgent(w http.ResponseWriter, r *http.Request) {
 		s.writeServiceError(w, serr)
 		return
 	}
-	ref, ok := s.tenantForJob(claims, refs, "")
+	ref, _, ok := s.tenantForJob(claims, refs, tenant, "")
 	if !ok {
 		s.writeJSONError(w, http.StatusNotFound, "not found")
 		return
@@ -259,7 +259,7 @@ func (s *Server) tenantAgentReadable(w http.ResponseWriter, r *http.Request, cla
 		s.writeServiceError(w, serr)
 		return false
 	}
-	if _, ok := s.tenantForJob(claims, refs, ""); !ok {
+	if _, _, ok := s.tenantForJob(claims, refs, tenant, ""); !ok {
 		s.writeJSONError(w, http.StatusNotFound, "not found")
 		return false
 	}

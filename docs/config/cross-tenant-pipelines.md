@@ -93,6 +93,26 @@ varroa.lock(name: 'deploy-prod', tenant: 'platform') {
 }
 ```
 
+A declarative pipeline calls the `varroaLock` step. It takes the same `name`, `tenant`, and `timeout` arguments. In `options`, it holds the lock for the whole pipeline:
+
+```groovy
+pipeline {
+    agent any
+    options {
+        varroaLock(name: 'deploy-prod', timeout: 300)
+    }
+    stages {
+        stage('Deploy') {
+            steps {
+                sh 'deploy.sh'
+            }
+        }
+    }
+}
+```
+
+A cell has no `lock` step. The `label`, `quantity`, and `inverse` arguments have no fleet lock equivalent.
+
 See [The fleet lock](#the-fleet-lock) for the full contract.
 
 ## The run handle

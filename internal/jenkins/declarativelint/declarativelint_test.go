@@ -2,11 +2,13 @@ package declarativelint
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -121,5 +123,35 @@ func TestValidate_TransportErrorKeepsCause(t *testing.T) {
 	}
 	if err.Error() != "the cell linter is unreachable" {
 		t.Errorf("message = %q", err.Error())
+	}
+}
+
+// TestParseReply_ScriptedJenkinsfile asserts the no-pipeline-step finding
+// becomes one ScriptedMessage finding, and the file text stays out of it.
+func TestParseReply_ScriptedJenkinsfile(t *testing.T) {
+	message := "Jenkinsfile content '" + "node {\n  load 'ci/pipeline.groovy'\n}\n" + "' did not contain the 'pipeline' step"
+	raw, err := json.Marshal(map[string]any{
+		"status": "ok",
+		"data": map[string]any{
+			"result": "failure",
+			"errors": []map[string]any{{"error": message}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal reply: %v", err)
+	}
+	findings, err := ParseReply(raw)
+	if err != nil {
+		t.Fatalf("ParseReply: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("findings = %+v, want one", findings)
+	}
+	f := findings[0]
+	if f.Source != "jenkins" || f.Message != ScriptedMessage || f.Line != 0 || f.Column != 0 {
+		t.Errorf("finding = %+v, want the scripted message with no location", f)
+	}
+	if strings.Contains(f.Message, "node {") {
+		t.Errorf("message repeats the file text: %q", f.Message)
 	}
 }

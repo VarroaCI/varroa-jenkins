@@ -62,12 +62,15 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 	registerLintJenkinsfileTool(mcpServer, deps)
 }
 
+// jobArgDescription describes a pipeline tool argument that names one job.
+const jobArgDescription = "Job path: the full path <tenant>/<job>, such as payments/api, or the path below the tenant folder, such as api. For a tenant with a folder, both forms name the same job. A tenant with no folder takes the job path as written"
+
 // registerLintJenkinsfileTool registers lint_jenkinsfile: it lints a
 // Jenkinsfile on the tenant's cell. It calls the same service the lint HTTP
 // route calls and writes no state.
 func registerLintJenkinsfileTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	lintTool := mcp.NewTool("lint_jenkinsfile",
-		mcp.WithDescription("Lint a declarative Jenkinsfile on the tenant's cell. Returns valid and a list of errors with line and column. Writes nothing."),
+		mcp.WithDescription("Lint a declarative Jenkinsfile on the tenant's cell. The linter checks declarative pipelines only, so a scripted Jenkinsfile, such as a loader that calls load, answers one error that says so. Returns valid and a list of errors with line and column. Writes nothing."),
 		mcp.WithString("tenant", mcp.Required(), mcp.Description("The tenant name")),
 		mcp.WithString("jenkinsfile", mcp.Required(), mcp.Description("The Jenkinsfile text, at most 256 KiB")),
 	)
@@ -204,7 +207,7 @@ func registerScanMultibranchTool(mcpServer *server.MCPServer, deps *api.Dependen
 			"repositories, as the calling user. A job that is neither answers an error. The scan runs on the job's home "+
 			"member and reports no outcome here. Use list_job_branches to follow its result in lastScan."),
 		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant name")),
-		mcp.WithString("job", mcp.Required(), mcp.Description("A multibranch job or an organization folder path, as the job page names it")),
+		mcp.WithString("job", mcp.Required(), mcp.Description("A multibranch job or an organization folder. "+jobArgDescription)),
 		mcp.WithString("cluster", mcp.Description("Cluster to select, when tenant and job resolve to more than one tenant")),
 	)
 	addTool(mcpServer, kindAction, scanTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -255,7 +258,7 @@ func registerRunPipelineTool(mcpServer *server.MCPServer, deps *api.Dependencies
 			"A refused trigger ends the run with status COMPLETED, result TRIGGER_FAILED, and a triggerReasonCode in get_run. "+
 			"A trigger for a job the cell does not hold yet waits up to 90 seconds."),
 		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant, or the controller name for a single-controller tenant")),
-		mcp.WithString("job", mcp.Required(), mcp.Description("Full job path, e.g. checkout-api/main")),
+		mcp.WithString("job", mcp.Required(), mcp.Description(jobArgDescription)),
 		mcp.WithObject("parameters", mcp.Description("Build parameters, as name to string value")),
 		mcp.WithString("cluster", mcp.Description("Cluster to select, when tenant and job resolve to more than one tenant")),
 	)
@@ -373,7 +376,7 @@ func registerListRunsTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 			"which needs job; cause applies to that mode, and trigger and since do not. "+
 			"Each run is a fleet row. Capped at limit (default 50, max 200)."),
 		mcp.WithString("tenant", mcp.Description("Tenant, or the controller name for a single-controller tenant. Omit it to list every readable tenant")),
-		mcp.WithString("job", mcp.Description("Full job path, e.g. checkout-api/main. Required with tenant")),
+		mcp.WithString("job", mcp.Description("Job path. Required with tenant, where the path below the tenant folder also names the job. Without tenant, the full path <tenant>/<job>, matched exactly")),
 		mcp.WithString("branch", mcp.Description("Filter by branch")),
 		mcp.WithString("result", mcp.Description("Filter by result: SUCCESS, FAILURE, UNSTABLE, or ABORTED")),
 		mcp.WithString("actor", mcp.Description("Filter by the user who started the run")),
@@ -512,7 +515,7 @@ func registerListJobBranchesTool(mcpServer *server.MCPServer, deps *api.Dependen
 	listJobBranchesTool := mcp.NewTool("list_job_branches",
 		mcp.WithDescription("List the branches, change requests, and tags a multibranch job has discovered, with each head's latest run. The inventory is exported by the cell that holds the job's home slot, so it can be up to ten minutes stale; a hibernated cell keeps its last inventory. A job with no export yet answers empty lists with no observedAt. Heads you may not read are omitted."),
 		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant name")),
-		mcp.WithString("job", mcp.Required(), mcp.Description("Multibranch job path, as the job page names it")),
+		mcp.WithString("job", mcp.Required(), mcp.Description("A multibranch job. "+jobArgDescription)),
 		withListOutput(jobBranchesOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listJobBranchesTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -541,7 +544,7 @@ func registerGetJobHealthTool(mcpServer *server.MCPServer, deps *api.Dependencie
 	getJobHealthTool := mcp.NewTool("get_job_health",
 		mcp.WithDescription("Get one job's health and its run trend. Health counts the job's last ten finished build runs: SUCCESS passes; FAILURE, UNSTABLE, and ABORTED fail; INTERRUPTED and NOT_BUILT do not count. The trend lists those runs newest first, with duration and suite counters when the run recorded them. qualityTrend lists one coverage or warnings series per report over the same runs, when a run recorded one."),
 		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant name")),
-		mcp.WithString("job", mcp.Required(), mcp.Description("Job path, as the job page names it")),
+		mcp.WithString("job", mcp.Required(), mcp.Description(jobArgDescription)),
 	)
 	addTool(mcpServer, kindRead, getJobHealthTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		claims, toolErr := requirePipelineCaller(ctx, deps)

@@ -235,7 +235,7 @@ func (s *Server) assistantContext(ctx context.Context, claims *auth.Claims, valu
 		var ref TenantRef
 		ok := false
 		if job := str(agent.CtxJob); job != "" {
-			ref, ok = s.tenantForJob(claims, refs, job)
+			ref, _, ok = s.tenantForJob(claims, refs, tenant, job)
 		} else if len(refs) > 0 {
 			ref, ok = refs[0], true
 		}

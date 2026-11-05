@@ -263,3 +263,36 @@ func TestGetPipelineJobKind(t *testing.T) {
 		})
 	}
 }
+
+// TestListJobBranchesAcceptsTheShortFormJobPath reads the branches of a job
+// named below the tenant folder. The short and long forms name one job.
+func TestListJobBranchesAcceptsTheShortFormJobPath(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
+	}
+	seedTenant(t, client.crdStore, placedTenantObject("payments", "core", "test-ns", "ctrl-a"))
+
+	authz := NewAuthorizer(testResolver(pipelinesRoles(), []*v1alpha1.VarroaRoleBinding{
+		branchTestBinding("mb", "mb/*"),
+	}), false)
+	reader := newFakeRecordReader()
+	seedBranchInventory(reader, time.Now().UTC())
+	srv := pipelinesTestServer(client, authz, reader, nil)
+
+	long := doPipelinesRequest(t, srv.handleListJobBranches, "/pipelines/payments/jobs/payments%2Fmb/branches",
+		map[string]string{"tenant": "payments", "job": "payments/mb"})
+	short := doPipelinesRequest(t, srv.handleListJobBranches, "/pipelines/payments/jobs/mb/branches",
+		map[string]string{"tenant": "payments", "job": "mb"})
+	if long.Code != http.StatusOK || short.Code != http.StatusOK {
+		t.Fatalf("status = %d and %d, want 200 and 200; body = %s", long.Code, short.Code, short.Body.String())
+	}
+	longList := decodeBranchList(t, long.Body.Bytes())
+	shortList := decodeBranchList(t, short.Body.Bytes())
+	if shortList.JobPath != "payments/mb" {
+		t.Errorf("short form jobPath = %q, want payments/mb", shortList.JobPath)
+	}
+	if len(shortList.Branches) == 0 || len(shortList.Branches) != len(longList.Branches) {
+		t.Errorf("short form branches = %d, long form = %d; want equal and non-empty", len(shortList.Branches), len(longList.Branches))
+	}
+}
