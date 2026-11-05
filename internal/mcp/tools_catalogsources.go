@@ -169,7 +169,7 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 	})
 
 	updateCS := mcp.NewTool("update_catalog_source",
-		mcp.WithDescription("Update an existing catalog source"),
+		mcp.WithDescription("Update an existing catalog source. When another writer changes the object during the call, the tool reads it again and merges again, up to three times."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Source namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Source name")),
 		mcp.WithString("repoURL", mcp.Description("Git repository URL (exactly one of repoURL or ociRef)")),
@@ -196,59 +196,63 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if err := v1alpha1.CheckCatalogSourceWritable(name); err != nil {
 			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
 		}
-		existing, err := crdstore.Get[v1alpha1.CatalogSource](ctx, deps.Store, name, ns)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("catalog source not found: %v", err)), nil
-		}
-		// Key presence decides whether a field is touched (omit = preserve, "" =
-		// clear). Choosing a source kind clears the other kind's fields so the
-		// CRD's at-most-one rule holds; asking for both in one call is rejected
-		// before anything is mutated, like create.
-		if strArg(args, "repoURL") != "" && strArg(args, "ociRef") != "" {
-			return mcp.NewToolResultError("invalid catalog source: only one of repoURL or ociRef may be set"), nil
-		}
-		for _, f := range []struct {
-			arg   string
-			field *string
-		}{
-			{"revision", &existing.Spec.Revision},
-			{"path", &existing.Spec.Path},
-			{"secretRef", &existing.Spec.SecretRef},
-		} {
-			if _, ok := args[f.arg]; ok {
-				*f.field = strArg(args, f.arg)
+		existing, res := updateLocal[v1alpha1.CatalogSource](ctx, deps.Store, name, ns, func(obj *v1alpha1.CatalogSource) error {
+			// Key presence decides whether a field is touched (omit = preserve, "" =
+			// clear). Choosing a source kind clears the other kind's fields so the
+			// CRD's at-most-one rule holds; asking for both in one call is rejected
+			// before anything is mutated, like create.
+			if strArg(args, "repoURL") != "" && strArg(args, "ociRef") != "" {
+				return errors.New("invalid catalog source: only one of repoURL or ociRef may be set")
 			}
-		}
-		if v, ok := boolArg(args, "trusted"); ok {
-			existing.Spec.Trusted = v
-		}
-		// Source kind is settled after the plain string fields so a git field
-		// passed alongside ociRef cannot survive the clear below.
-		if _, ok := args["ociRef"]; ok {
-			existing.Spec.OCIRef = strArg(args, "ociRef")
-			if existing.Spec.OCIRef != "" {
-				existing.Spec.RepoURL, existing.Spec.Revision = "", ""
+			for _, f := range []struct {
+				arg   string
+				field *string
+			}{
+				{"revision", &obj.Spec.Revision},
+				{"path", &obj.Spec.Path},
+				{"secretRef", &obj.Spec.SecretRef},
+			} {
+				if _, ok := args[f.arg]; ok {
+					*f.field = strArg(args, f.arg)
+				}
 			}
-		}
-		if _, ok := args["repoURL"]; ok {
-			existing.Spec.RepoURL = strArg(args, "repoURL")
-			if existing.Spec.RepoURL != "" {
-				existing.Spec.OCIRef = ""
+			if v, ok := boolArg(args, "trusted"); ok {
+				obj.Spec.Trusted = v
 			}
-		}
-		if v, ok, err := intArg(args, "syncIntervalSeconds"); err != nil {
-			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
-		} else if ok {
-			if err := checkSyncInterval(v); err != nil {
-				return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
+			// Source kind is settled after the plain string fields so a git field
+			// passed alongside ociRef cannot survive the clear below.
+			if _, ok := args["ociRef"]; ok {
+				obj.Spec.OCIRef = strArg(args, "ociRef")
+				if obj.Spec.OCIRef != "" {
+					obj.Spec.RepoURL, obj.Spec.Revision = "", ""
+				}
 			}
-			existing.Spec.SyncIntervalSeconds = v
-		}
-		if err := validateCatalogSourceSpec(name, &existing.Spec); err != nil {
-			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
-		}
-		if err := crdstore.Apply[v1alpha1.CatalogSource](ctx, deps.Store, existing); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to update catalog source: %v", err)), nil
+			if _, ok := args["repoURL"]; ok {
+				obj.Spec.RepoURL = strArg(args, "repoURL")
+				if obj.Spec.RepoURL != "" {
+					obj.Spec.OCIRef = ""
+				}
+			}
+			if v, ok, err := intArg(args, "syncIntervalSeconds"); err != nil {
+				return errors.New("invalid catalog source: " + err.Error())
+			} else if ok {
+				if err := checkSyncInterval(v); err != nil {
+					return errors.New("invalid catalog source: " + err.Error())
+				}
+				obj.Spec.SyncIntervalSeconds = v
+			}
+			if err := validateCatalogSourceSpec(name, &obj.Spec); err != nil {
+				return errors.New("invalid catalog source: " + err.Error())
+			}
+			return nil
+		}, updateTexts{
+			tool:     "update_catalog_source",
+			object:   "catalog source " + ns + "/" + name,
+			notFound: "catalog source not found",
+			failed:   "failed to update catalog source",
+		})
+		if res != nil {
+			return res, nil
 		}
 		emitActivity(ctx, deps, claims, activity.Event{
 			Type:      "catalogsource.updated",

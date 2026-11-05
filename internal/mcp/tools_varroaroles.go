@@ -109,7 +109,7 @@ func registerVarroaRoleTools(mcpServer *server.MCPServer, deps *api.Dependencies
 	})
 
 	updateR := mcp.NewTool("update_varroa_role",
-		mcp.WithDescription("Update an existing Varroa RBAC role"),
+		mcp.WithDescription("Update an existing Varroa RBAC role. When another writer changes the object during the call, the tool reads it again and merges again, up to three times."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Role name")),
 		mcp.WithString("jenkinsRoleRef", mcp.Description("Reference to a JenkinsRole name")),
 		mcp.WithArray("apiRules", mcp.Description("API permission rules")),
@@ -128,30 +128,34 @@ func registerVarroaRoleTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if !deps.Authorizer.CanUpdateRole(claims) {
 			return mcp.NewToolResultError("access denied: missing roles:update permission"), nil
 		}
-		existing, err := crdstore.Get[v1alpha1.VarroaRole](ctx, deps.Store, name, "")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("role not found: %v", err)), nil
-		}
-		if v := strArg(args, "jenkinsRoleRef"); v != "" {
-			existing.Spec.JenkinsRoleRef = v
-		}
-		if v, ok := strSliceArg(args, "jenkinsPermissions"); ok {
-			existing.Spec.JenkinsPermissions = v
-		}
-		if rules, ok := args["apiRules"].([]interface{}); ok {
-			existing.Spec.APIRules = nil
-			for _, r := range rules {
-				if rm, ok := r.(map[string]interface{}); ok {
-					rule := v1alpha1.APIRule{
-						Resources: strSliceAny(rm["resources"]),
-						Verbs:     strSliceAny(rm["verbs"]),
+		existing, res := updateLocal[v1alpha1.VarroaRole](ctx, deps.Store, name, "", func(obj *v1alpha1.VarroaRole) error {
+			if v := strArg(args, "jenkinsRoleRef"); v != "" {
+				obj.Spec.JenkinsRoleRef = v
+			}
+			if v, ok := strSliceArg(args, "jenkinsPermissions"); ok {
+				obj.Spec.JenkinsPermissions = v
+			}
+			if rules, ok := args["apiRules"].([]interface{}); ok {
+				obj.Spec.APIRules = nil
+				for _, r := range rules {
+					if rm, ok := r.(map[string]interface{}); ok {
+						rule := v1alpha1.APIRule{
+							Resources: strSliceAny(rm["resources"]),
+							Verbs:     strSliceAny(rm["verbs"]),
+						}
+						obj.Spec.APIRules = append(obj.Spec.APIRules, rule)
 					}
-					existing.Spec.APIRules = append(existing.Spec.APIRules, rule)
 				}
 			}
-		}
-		if err := crdstore.Apply[v1alpha1.VarroaRole](ctx, deps.Store, existing); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to update role: %v", err)), nil
+			return nil
+		}, updateTexts{
+			tool:     "update_varroa_role",
+			object:   "role " + name,
+			notFound: "role not found",
+			failed:   "failed to update role",
+		})
+		if res != nil {
+			return res, nil
 		}
 		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessVarroaRole, api.AccessUpdated, name))
 		return resultJSON(existing)

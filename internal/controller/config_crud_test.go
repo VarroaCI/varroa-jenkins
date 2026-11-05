@@ -941,9 +941,193 @@ func TestHandleBundlesPauseResume(t *testing.T) {
 		t.Errorf("expected code empty, got %q", pauseResp.Code)
 	}
 
-	b = fc.bundles["ns-a/b1"]
-	if b.Annotations != nil && b.Annotations["varroa.dev/rollout-paused"] == "true" {
+	b, err = crdstore.Get[v1alpha1.ComposedBundle](context.Background(), crStore, "b1", "ns-a")
+	if err != nil {
+		t.Fatalf("get bundle after resume: %v", err)
+	}
+	if _, ok := b.Annotations["varroa.dev/rollout-paused"]; ok {
 		t.Error("rollout-paused annotation should be cleared after resume")
+	}
+}
+
+// raceFirstGet makes a second writer change the object of kind T right after the
+// first read of it, so the handler's write must conflict.
+func raceFirstGet[T any](t *testing.T, store *crdstore.Fake) {
+	t.Helper()
+	gvr, err := crdstore.GVRFor[T]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fired := false
+	store.SetAfterGet(gvr, func(namespace, name string) {
+		if fired {
+			return
+		}
+		fired = true
+		ctx := context.Background()
+		live, err := store.GetObject(ctx, gvr, namespace, name)
+		if err != nil {
+			t.Errorf("second writer get: %v", err)
+			return
+		}
+		ann := live.GetAnnotations()
+		if ann == nil {
+			ann = map[string]string{}
+		}
+		ann["test.varroa.dev/second-writer"] = "kept"
+		live.SetAnnotations(ann)
+		if _, err := store.UpdateObject(ctx, gvr, namespace, live); err != nil {
+			t.Errorf("second writer update: %v", err)
+		}
+	})
+}
+
+// requireSecondWriterKept fails the test when the concurrent write of kind T is lost.
+func requireSecondWriterKept[T any](t *testing.T, store *crdstore.Fake, name, namespace string) {
+	t.Helper()
+	gvr, err := crdstore.GVRFor[T]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := store.GetObject(context.Background(), gvr, namespace, name)
+	if err != nil {
+		t.Fatalf("get %s: %v", name, err)
+	}
+	if live.GetAnnotations()["test.varroa.dev/second-writer"] != "kept" {
+		t.Errorf("second writer annotation lost on %s: %v", name, live.GetAnnotations())
+	}
+}
+
+func TestHandleBundlesPause_ConcurrentWriteSurvives(t *testing.T) {
+	fc := newFakeClient()
+	fc.bundles["ns-a/b1"] = &v1alpha1.ComposedBundle{ObjectMeta: metav1.ObjectMeta{Name: "b1", Namespace: "ns-a"}}
+	cr, crStore := newTestConfigCRUD(fc, "", nil)
+
+	raceFirstGet[v1alpha1.ComposedBundle](t, crStore)
+	resp := cr.HandleBundlesPause(jsonMarshal(t, bus.BundlePauseRequest{Namespace: "ns-a", Name: "b1", Paused: true}))
+	var pauseResp bus.BundlePauseResponse
+	jsonUnmarshal(t, resp, &pauseResp)
+	if pauseResp.Code != "" {
+		t.Fatalf("pause code = %q, want empty", pauseResp.Code)
+	}
+	b, err := crdstore.Get[v1alpha1.ComposedBundle](context.Background(), crStore, "b1", "ns-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Annotations["varroa.dev/rollout-paused"] != "true" {
+		t.Error("expected rollout-paused annotation after pause")
+	}
+	requireSecondWriterKept[v1alpha1.ComposedBundle](t, crStore, "b1", "ns-a")
+
+	raceFirstGet[v1alpha1.ComposedBundle](t, crStore)
+	resp = cr.HandleBundlesPause(jsonMarshal(t, bus.BundlePauseRequest{Namespace: "ns-a", Name: "b1", Paused: false}))
+	jsonUnmarshal(t, resp, &pauseResp)
+	if pauseResp.Code != "" {
+		t.Fatalf("resume code = %q, want empty", pauseResp.Code)
+	}
+	b, err = crdstore.Get[v1alpha1.ComposedBundle](context.Background(), crStore, "b1", "ns-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := b.Annotations["varroa.dev/rollout-paused"]; ok {
+		t.Error("rollout-paused annotation should be cleared after resume")
+	}
+	requireSecondWriterKept[v1alpha1.ComposedBundle](t, crStore, "b1", "ns-a")
+}
+
+func TestHandleBundlesPause_StoreConflictIsRetried(t *testing.T) {
+	fc := newFakeClient()
+	fc.bundles["ns-a/b1"] = &v1alpha1.ComposedBundle{ObjectMeta: metav1.ObjectMeta{Name: "b1", Namespace: "ns-a"}}
+	cr, crStore := newTestConfigCRUD(fc, "", nil)
+	gvr, err := crdstore.GVRFor[v1alpha1.ComposedBundle]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	crStore.FailNext("update", gvr, apierrors.NewConflict(gvr.GroupResource(), "b1", errors.New("stale resourceVersion")))
+
+	resp := cr.HandleBundlesPause(jsonMarshal(t, bus.BundlePauseRequest{Namespace: "ns-a", Name: "b1", Paused: true}))
+	var pauseResp bus.BundlePauseResponse
+	jsonUnmarshal(t, resp, &pauseResp)
+	if pauseResp.Code != "" {
+		t.Fatalf("pause code = %q, want empty", pauseResp.Code)
+	}
+	b, err := crdstore.Get[v1alpha1.ComposedBundle](context.Background(), crStore, "b1", "ns-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Annotations["varroa.dev/rollout-paused"] != "true" {
+		t.Error("expected rollout-paused annotation after a retried pause")
+	}
+}
+
+func TestHandleBundlesResume_UnpausedBundleWritesNothing(t *testing.T) {
+	fc := newFakeClient()
+	fc.bundles["ns-a/b1"] = &v1alpha1.ComposedBundle{ObjectMeta: metav1.ObjectMeta{Name: "b1", Namespace: "ns-a"}}
+	cr, crStore := newTestConfigCRUD(fc, "", nil)
+	before, err := crdstore.Get[v1alpha1.ComposedBundle](context.Background(), crStore, "b1", "ns-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp := cr.HandleBundlesPause(jsonMarshal(t, bus.BundlePauseRequest{Namespace: "ns-a", Name: "b1", Paused: false}))
+	var pauseResp bus.BundlePauseResponse
+	jsonUnmarshal(t, resp, &pauseResp)
+	if pauseResp.Code != "" {
+		t.Fatalf("resume code = %q, want empty", pauseResp.Code)
+	}
+	after, err := crdstore.Get[v1alpha1.ComposedBundle](context.Background(), crStore, "b1", "ns-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.ResourceVersion != before.ResourceVersion {
+		t.Errorf("resourceVersion changed from %s to %s on a no-op resume", before.ResourceVersion, after.ResourceVersion)
+	}
+}
+
+func TestHandleSourceSync_ConcurrentWriteSurvives(t *testing.T) {
+	fc := newFakeClient()
+	fc.sources["ns-a/src1"] = &v1alpha1.CatalogSource{ObjectMeta: metav1.ObjectMeta{Name: "src1", Namespace: "ns-a"}}
+	cr, crStore := newTestConfigCRUD(fc, "", nil)
+
+	raceFirstGet[v1alpha1.CatalogSource](t, crStore)
+	resp := cr.HandleSourceSync(jsonMarshal(t, bus.CatalogSyncRequest{Namespace: "ns-a", Name: "src1"}))
+	var syncResp bus.CatalogSyncResponse
+	jsonUnmarshal(t, resp, &syncResp)
+	if syncResp.Code != "" {
+		t.Fatalf("sync code = %q, want empty", syncResp.Code)
+	}
+	s, err := crdstore.Get[v1alpha1.CatalogSource](context.Background(), crStore, "src1", "ns-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Annotations["varroa.dev/sync-requested-at"] == "" {
+		t.Error("expected sync-requested-at annotation after sync")
+	}
+	requireSecondWriterKept[v1alpha1.CatalogSource](t, crStore, "src1", "ns-a")
+}
+
+func TestHandleSourceSync_StoreConflictIsRetried(t *testing.T) {
+	fc := newFakeClient()
+	fc.sources["ns-a/src1"] = &v1alpha1.CatalogSource{ObjectMeta: metav1.ObjectMeta{Name: "src1", Namespace: "ns-a"}}
+	cr, crStore := newTestConfigCRUD(fc, "", nil)
+	gvr, err := crdstore.GVRFor[v1alpha1.CatalogSource]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	crStore.FailNext("update", gvr, apierrors.NewConflict(gvr.GroupResource(), "src1", errors.New("stale resourceVersion")))
+
+	resp := cr.HandleSourceSync(jsonMarshal(t, bus.CatalogSyncRequest{Namespace: "ns-a", Name: "src1"}))
+	var syncResp bus.CatalogSyncResponse
+	jsonUnmarshal(t, resp, &syncResp)
+	if syncResp.Code != "" {
+		t.Fatalf("sync code = %q, want empty", syncResp.Code)
+	}
+	s, err := crdstore.Get[v1alpha1.CatalogSource](context.Background(), crStore, "src1", "ns-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Annotations["varroa.dev/sync-requested-at"] == "" {
+		t.Error("expected sync-requested-at annotation after a retried sync")
 	}
 }
 

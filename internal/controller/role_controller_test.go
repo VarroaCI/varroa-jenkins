@@ -2,11 +2,84 @@ package controller
 
 import (
 	"context"
+	"log/slog"
 	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
+
+// TestRoleReconciler_MigrationKeepsConcurrentRoleEdit proves the migration sets
+// jenkinsRoleRef on the live role, so an edit made after its list survives.
+func TestRoleReconciler_MigrationKeepsConcurrentRoleEdit(t *testing.T) {
+	st := crdstore.NewFake()
+	crdstore.MustSeed(st, &v1alpha1.VarroaRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "custom"},
+		Spec:       v1alpha1.VarroaRoleSpec{JenkinsPermissions: []string{"hudson.model.Item.Read"}},
+	})
+	raceFirstGet[v1alpha1.VarroaRole](t, st)
+
+	r := NewRoleReconciler(nil, st)
+	r.Logger = slog.Default()
+	if err := r.migrateCustomRoles(context.Background()); err != nil {
+		t.Fatalf("migrateCustomRoles: %v", err)
+	}
+	got, err := crdstore.Get[v1alpha1.VarroaRole](context.Background(), st, "custom", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.JenkinsRoleRef != "varroa-custom-custom" {
+		t.Errorf("jenkinsRoleRef = %q, want varroa-custom-custom", got.Spec.JenkinsRoleRef)
+	}
+	requireSecondWriterKept[v1alpha1.VarroaRole](t, st, "custom", "")
+}
+
+// TestRoleReconciler_MigrationSkipsPermissionEditSinceList proves the migration
+// does not point a role at a JenkinsRole built from permissions that a concurrent
+// edit replaced.
+func TestRoleReconciler_MigrationSkipsPermissionEditSinceList(t *testing.T) {
+	st := crdstore.NewFake()
+	crdstore.MustSeed(st, &v1alpha1.VarroaRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "custom"},
+		Spec:       v1alpha1.VarroaRoleSpec{JenkinsPermissions: []string{"hudson.model.Item.Read"}},
+	})
+	gvr, err := crdstore.GVRFor[v1alpha1.VarroaRole]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fired := false
+	st.SetAfterGet(gvr, func(namespace, name string) {
+		if fired {
+			return
+		}
+		fired = true
+		_, err := crdstore.Mutate[v1alpha1.VarroaRole](context.Background(), st, name, namespace, func(live *v1alpha1.VarroaRole) (bool, error) {
+			live.Spec.JenkinsPermissions = []string{"hudson.model.Item.Build"}
+			return true, nil
+		})
+		if err != nil {
+			t.Errorf("concurrent permission edit: %v", err)
+		}
+	})
+
+	r := NewRoleReconciler(nil, st)
+	r.Logger = slog.Default()
+	if err := r.migrateCustomRoles(context.Background()); err != nil {
+		t.Fatalf("migrateCustomRoles: %v", err)
+	}
+	got, err := crdstore.Get[v1alpha1.VarroaRole](context.Background(), st, "custom", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.JenkinsRoleRef != "" {
+		t.Errorf("jenkinsRoleRef = %q, want unset after a permission edit", got.Spec.JenkinsRoleRef)
+	}
+	if len(got.Spec.JenkinsPermissions) != 1 || got.Spec.JenkinsPermissions[0] != "hudson.model.Item.Build" {
+		t.Errorf("jenkinsPermissions = %v, want the concurrent edit", got.Spec.JenkinsPermissions)
+	}
+}
 
 func TestBuiltinJenkinsRoles_IncludesSystemOperator(t *testing.T) {
 	roles := builtinJenkinsRoles()

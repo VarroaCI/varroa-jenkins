@@ -98,7 +98,7 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 	})
 
 	updateJR := mcp.NewTool("update_jenkins_role",
-		mcp.WithDescription("Update an existing Jenkins role"),
+		mcp.WithDescription("Update an existing Jenkins role. When another writer changes the object during the call, the tool reads it again and merges again, up to three times."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Role name")),
 		mcp.WithString("description", mcp.Description("Human-readable description")),
 		mcp.WithString("roleType", mcp.Description("Role type: Global, Item, Agent")),
@@ -117,21 +117,25 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		if !deps.Authorizer.CanUpdateJenkinsRole(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsroles:update permission"), nil
 		}
-		existing, err := crdstore.Get[v1alpha1.JenkinsRole](ctx, deps.Store, name, "")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Jenkins role not found: %v", err)), nil
-		}
-		if v := strArg(args, "description"); v != "" {
-			existing.Spec.Description = v
-		}
-		if v := strArg(args, "roleType"); v != "" {
-			existing.Spec.RoleType = v
-		}
-		if v, ok := strSliceArg(args, "permissions"); ok {
-			existing.Spec.Permissions = v
-		}
-		if err := crdstore.Apply[v1alpha1.JenkinsRole](ctx, deps.Store, existing); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to update Jenkins role: %v", err)), nil
+		existing, res := updateLocal[v1alpha1.JenkinsRole](ctx, deps.Store, name, "", func(obj *v1alpha1.JenkinsRole) error {
+			if v := strArg(args, "description"); v != "" {
+				obj.Spec.Description = v
+			}
+			if v := strArg(args, "roleType"); v != "" {
+				obj.Spec.RoleType = v
+			}
+			if v, ok := strSliceArg(args, "permissions"); ok {
+				obj.Spec.Permissions = v
+			}
+			return nil
+		}, updateTexts{
+			tool:     "update_jenkins_role",
+			object:   "Jenkins role " + name,
+			notFound: "Jenkins role not found",
+			failed:   "failed to update Jenkins role",
+		})
+		if res != nil {
+			return res, nil
 		}
 		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRole, api.AccessUpdated, name))
 		return resultJSON(existing)

@@ -1108,35 +1108,44 @@ func (c *ConfigCRUD) HandleBundlesPause(data []byte) []byte {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cr, err := crdstore.Get[v1alpha1.ComposedBundle](ctx, c.Store, req.Name, req.Namespace)
+	// A conflict re-reads the bundle, so a concurrent change survives the annotation write.
+	_, err := crdstore.Mutate[v1alpha1.ComposedBundle](ctx, c.Store, req.Name, req.Namespace,
+		func(cr *v1alpha1.ComposedBundle) (bool, error) { return setRolloutPaused(cr, req.Paused), nil })
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return c.configReply(bus.BundlePauseResponse{Error: "bundle not found", Code: bus.CodeNotFound})
 		}
-		c.Logger.Error("get bundle for pause failed", "namespace", req.Namespace, "name", req.Name, "error", err)
-		return c.configReply(bus.BundlePauseResponse{Error: err.Error(), Code: bus.CodeInternal})
-	}
-
-	if req.Paused {
-		if cr.Annotations == nil {
-			cr.Annotations = make(map[string]string)
-		}
-		cr.Annotations["varroa.dev/rollout-paused"] = "true"
-	} else {
-		if cr.Annotations != nil {
-			delete(cr.Annotations, "varroa.dev/rollout-paused")
-			if len(cr.Annotations) == 0 {
-				cr.Annotations = nil
-			}
-		}
-	}
-
-	if err := crdstore.Apply[v1alpha1.ComposedBundle](ctx, c.Store, cr); err != nil {
-		c.Logger.Error("apply bundle for pause/resume failed", "namespace", req.Namespace, "name", req.Name, "error", err)
+		c.Logger.Error("pause or resume bundle failed", "namespace", req.Namespace, "name", req.Name, "error", err)
 		return c.configReply(bus.BundlePauseResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
 
 	return c.configReply(bus.BundlePauseResponse{})
+}
+
+// rolloutPausedAnno holds the annotation that pauses a bundle's rollouts.
+const rolloutPausedAnno = "varroa.dev/rollout-paused"
+
+// setRolloutPaused sets or clears the rollout-pause annotation on cr. It reports
+// whether the object changed, so a no-op resume writes nothing.
+func setRolloutPaused(cr *v1alpha1.ComposedBundle, paused bool) bool {
+	if paused {
+		if cr.Annotations[rolloutPausedAnno] == "true" {
+			return false
+		}
+		if cr.Annotations == nil {
+			cr.Annotations = make(map[string]string)
+		}
+		cr.Annotations[rolloutPausedAnno] = "true"
+		return true
+	}
+	if _, ok := cr.Annotations[rolloutPausedAnno]; !ok {
+		return false
+	}
+	delete(cr.Annotations, rolloutPausedAnno)
+	if len(cr.Annotations) == 0 {
+		cr.Annotations = nil
+	}
+	return true
 }
 
 // HandleSourceSync handles operator.<cluster>.catalog.sourcesync.
@@ -1149,22 +1158,21 @@ func (c *ConfigCRUD) HandleSourceSync(data []byte) []byte {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cr, err := crdstore.Get[v1alpha1.CatalogSource](ctx, c.Store, req.Name, req.Namespace)
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	// A conflict re-reads the source, so a concurrent change survives the annotation write.
+	_, err := crdstore.Mutate[v1alpha1.CatalogSource](ctx, c.Store, req.Name, req.Namespace,
+		func(cr *v1alpha1.CatalogSource) (bool, error) {
+			if cr.Annotations == nil {
+				cr.Annotations = make(map[string]string)
+			}
+			cr.Annotations[syncRequestedAtAnno] = stamp
+			return true, nil
+		})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return c.configReply(bus.CatalogSyncResponse{Error: "catalogsource not found", Code: bus.CodeNotFound})
 		}
-		c.Logger.Error("get catalogsource for sync failed", "namespace", req.Namespace, "name", req.Name, "error", err)
-		return c.configReply(bus.CatalogSyncResponse{Error: err.Error(), Code: bus.CodeInternal})
-	}
-
-	if cr.Annotations == nil {
-		cr.Annotations = make(map[string]string)
-	}
-	cr.Annotations["varroa.dev/sync-requested-at"] = time.Now().UTC().Format(time.RFC3339Nano)
-
-	if err := crdstore.Apply[v1alpha1.CatalogSource](ctx, c.Store, cr); err != nil {
-		c.Logger.Error("apply catalogsource for sync failed", "namespace", req.Namespace, "name", req.Name, "error", err)
+		c.Logger.Error("sync catalogsource failed", "namespace", req.Namespace, "name", req.Name, "error", err)
 		return c.configReply(bus.CatalogSyncResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
 
