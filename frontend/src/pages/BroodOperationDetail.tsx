@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -11,7 +11,7 @@ import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { useAuth } from "../context/AuthContext";
 import { canDoAnywhere } from "../hooks/usePermissions";
-import { useEventStream } from "../hooks/useEventStream";
+import { useEventStream, type SSEEvent } from "../hooks/useEventStream";
 import type { BroodRun, BroodRunCluster, BroodTargetStatus } from "../types";
 import styles from "./BroodOperationDetail.module.css";
 
@@ -65,11 +65,19 @@ export default function BroodOperationDetail() {
   // never assigned here, so it can never clobber this — see the effect below
   // for why we don't otherwise need to inspect `closed` frames at all.
   const [lastStatus, setLastStatus] = useState<BroodRun | undefined>(undefined);
-  const { lastEvent } = useEventStream<BroodRun>(
-    stopStream || initialTerminal ? null : streamUrl,
-    streamScope,
-    ["status", "closed"],
-  );
+  // Stream frames wait in this queue until the drain effect below reads them.
+  // useEventStream calls onEvent once for each frame, also for each frame of a
+  // burst that reaches React as one render. lastEvent keeps only the last
+  // frame of that burst, so the page never reads lastEvent.
+  const frameQueueRef = useRef<SSEEvent<BroodRun>[]>([]);
+  const [frameTick, setFrameTick] = useState(0);
+  const onFrame = useCallback((ev: SSEEvent<BroodRun>) => {
+    frameQueueRef.current.push(ev);
+    setFrameTick((n) => n + 1);
+  }, []);
+  useEventStream<BroodRun>(stopStream || initialTerminal ? null : streamUrl, streamScope, ["status", "closed"], {
+    onEvent: onFrame,
+  });
 
   // On navigation (ns/opName change) reset per-operation stream state so the
   // new operation gets a fresh stream instead of inheriting the previous
@@ -77,25 +85,25 @@ export default function BroodOperationDetail() {
   useEffect(() => {
     setStopStream(false);
     setLastStatus(undefined);
+    // A frame queued before this effect came from the stream of the previous operation.
+    frameQueueRef.current = [];
   }, [ns, opName]);
 
-  // Only `status` frames carry a BroodRun payload. Deliberately NOT reacting
-  // to `closed` frames here: the BFF (internal/api/handlers_broodops.go,
-  // handleBroodStreamWithPoll) always sends a terminal `status` frame
-  // immediately before any genuinely-terminal `closed` frame, so a terminal
-  // `status` is a fully sufficient signal on its own. The only `closed`
-  // frames that arrive WITHOUT a preceding terminal status are the ambiguous
-  // ones (the one-hour `deadline_exceeded` backstop, or a transient
-  // `BroodOps.Get` error) where the operation may still be running — for
-  // those we deliberately do nothing special and let useEventStream's
-  // existing backoff-and-reconnect (mint a fresh ticket on error, already
-  // reviewed clean) pick the stream back up on its own, instead of freezing
-  // the page on a one-shot refetch.
+  // The drain applies the frames of one burst in arrival order. Only a status
+  // frame carries a BroodRun, and the last one wins. A closed frame changes
+  // nothing. The BFF sends the terminal status frame before the terminal closed
+  // frame, so the drain applies that status first. A closed frame with no
+  // terminal status before it is ambiguous, so the hook reconnects.
   useEffect(() => {
-    if (lastEvent?.type === "status") {
-      setLastStatus(lastEvent.data);
+    const frames = frameQueueRef.current;
+    if (frames.length === 0) return;
+    frameQueueRef.current = [];
+    let latest: BroodRun | undefined;
+    for (const ev of frames) {
+      if (ev.type === "status") latest = ev.data;
     }
-  }, [lastEvent]);
+    if (latest) setLastStatus(latest);
+  }, [frameTick]);
 
   // Prefer the latest live status over the page-load snapshot, falling back
   // to `initial` before the stream has delivered anything. This is safe

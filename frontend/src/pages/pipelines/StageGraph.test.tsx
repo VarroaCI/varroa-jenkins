@@ -126,43 +126,65 @@ describe("StageGraph", () => {
 
   it("adds a node from a stage event and replaces its status on a later event", () => {
     const stages: RunStage[] = [stage({ stageId: "1", name: "Build", status: "SUCCESS" })];
-    const { rerender } = render(
-      <StageGraph stages={stages} terminal={false} lastEvent={null} />,
-    );
+    const f1 = { type: "stage", data: { stageId: "2", name: "Test", status: "IN_PROGRESS", startOffset: 0, startLine: 0 } };
+    const f2 = { type: "stage", data: { stageId: "2", name: "Test", status: "SUCCESS", startOffset: 0, startLine: 0 } };
+    const { rerender } = render(<StageGraph stages={stages} terminal={false} frames={[]} version={0} />);
     expect(document.getElementById("node-stage-2")).toBeNull();
 
-    rerender(
-      <StageGraph
-        stages={stages}
-        terminal={false}
-        lastEvent={{ type: "stage", data: { stageId: "2", name: "Test", status: "IN_PROGRESS", startOffset: 0, startLine: 0 } }}
-      />,
-    );
+    rerender(<StageGraph stages={stages} terminal={false} frames={[f1]} version={1} />);
     const added = document.getElementById("node-stage-2");
     expect(added).toBeTruthy();
     expect(added?.getAttribute("aria-label")).toContain("In progress");
 
-    rerender(
-      <StageGraph
-        stages={stages}
-        terminal={false}
-        lastEvent={{ type: "stage", data: { stageId: "2", name: "Test", status: "SUCCESS", startOffset: 0, startLine: 0 } }}
-      />,
-    );
+    rerender(<StageGraph stages={stages} terminal={false} frames={[f1, f2]} version={2} />);
     const updated = document.getElementById("node-stage-2");
     expect(updated?.getAttribute("aria-label")).toContain("Passed");
   });
 
+  it("applies every stage frame of one burst, also when other frames follow", () => {
+    const stages: RunStage[] = [stage({ stageId: "1", name: "Build", status: "SUCCESS" })];
+    const line = { type: "line", data: { n: 1, off: 0, ts: 1700000000000, text: "log" } };
+    const s2 = { type: "stage", data: { stageId: "2", name: "Test", status: "IN_PROGRESS", startOffset: 0, startLine: 0 } };
+    const s3 = { type: "stage", data: { stageId: "3", name: "Deploy", status: "IN_PROGRESS", startOffset: 0, startLine: 0 } };
+    const { rerender } = render(<StageGraph stages={stages} terminal={false} frames={[]} version={0} />);
+
+    rerender(<StageGraph stages={stages} terminal={false} frames={[s2, line, s3, line]} version={4} />);
+    expect(document.getElementById("node-stage-2")).toBeTruthy();
+    expect(document.getElementById("node-stage-3")).toBeTruthy();
+  });
+
+  it("applies only the frames that arrive after it mounts", () => {
+    const stages: RunStage[] = [stage({ stageId: "1", name: "Build", status: "SUCCESS" })];
+    const s2 = { type: "stage", data: { stageId: "2", name: "Test", status: "IN_PROGRESS", startOffset: 0, startLine: 0 } };
+    const s3 = { type: "stage", data: { stageId: "3", name: "Deploy", status: "IN_PROGRESS", startOffset: 0, startLine: 0 } };
+    // The page appends to one array, so the test appends to the same array.
+    const list = [s2];
+    const { rerender } = render(<StageGraph stages={stages} terminal={false} frames={list} version={1} />);
+    expect(document.getElementById("node-stage-2")).toBeNull();
+
+    list.push(s3);
+    rerender(<StageGraph stages={stages} terminal={false} frames={list} version={2} />);
+    expect(document.getElementById("node-stage-2")).toBeNull();
+    expect(document.getElementById("node-stage-3")).toBeTruthy();
+  });
+
+  it("reads every frame of a swapped frame list, so a shorter list does not skip its frames", () => {
+    const stages: RunStage[] = [stage({ stageId: "1", name: "Build", status: "SUCCESS" })];
+    const s2 = { type: "stage", data: { stageId: "2", name: "Test", status: "IN_PROGRESS", startOffset: 0, startLine: 0 } };
+    const s3 = { type: "stage", data: { stageId: "3", name: "Deploy", status: "IN_PROGRESS", startOffset: 0, startLine: 0 } };
+    const s4 = { type: "stage", data: { stageId: "4", name: "Release", status: "IN_PROGRESS", startOffset: 0, startLine: 0 } };
+    const { rerender } = render(<StageGraph stages={stages} terminal={false} frames={[s2, s3]} version={2} />);
+
+    // The page swaps in the next run's list, which is shorter than the old count.
+    rerender(<StageGraph stages={stages} terminal={false} frames={[s4]} version={3} />);
+    expect(document.getElementById("node-stage-4")).toBeTruthy();
+  });
+
   it("stops applying stage events once the run is terminal", () => {
     const stages: RunStage[] = [stage({ stageId: "1", name: "Build", status: "SUCCESS" })];
-    const { rerender } = render(<StageGraph stages={stages} terminal lastEvent={null} />);
-    rerender(
-      <StageGraph
-        stages={stages}
-        terminal
-        lastEvent={{ type: "stage", data: { stageId: "2", name: "Test", status: "IN_PROGRESS", startOffset: 0, startLine: 0 } }}
-      />,
-    );
+    const s2 = { type: "stage", data: { stageId: "2", name: "Test", status: "IN_PROGRESS", startOffset: 0, startLine: 0 } };
+    const { rerender } = render(<StageGraph stages={stages} terminal frames={[]} version={0} />);
+    rerender(<StageGraph stages={stages} terminal frames={[s2]} version={1} />);
     expect(document.getElementById("node-stage-2")).toBeNull();
   });
 

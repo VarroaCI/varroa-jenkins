@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
 import { NotesCard } from "./NotesCard";
 import { TargetApprovalsCard } from "../../components/assistant/TargetApprovalsCard";
@@ -6,7 +6,7 @@ import { useOptionalAuth } from "../../context/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getPipelineJob, listRuns, tenantRunStreamUrl, type ListRunsParams } from "../../api/client";
 import { ApiError, isRecordStoreUnreachable } from "../../hooks/useApi";
-import { useEventStream } from "../../hooks/useEventStream";
+import { useEventStream, type SSEEvent } from "../../hooks/useEventStream";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage, RecordStoreUnreachablePage } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
 import { usePermissions, canAccessTenantPipeline } from "../../hooks/usePermissions";
@@ -304,10 +304,21 @@ export default function PipelinePage() {
   // The tenant's stream carries every job of that tenant, so the page keeps the
   // frames of its own job only. A wait frame reaches the Waiting card, which
   // reads the job detail.
-  const { lastEvent, readyState } = useEventStream<RunNotification>(
+  // Stream frames wait in this queue until the drain effect below reads them.
+  // useEventStream calls onEvent once for each frame, also for each frame of a
+  // burst that reaches React as one render. lastEvent keeps only the last
+  // frame of that burst, so the page never reads lastEvent.
+  const runQueueRef = useRef<SSEEvent<RunNotification>[]>([]);
+  const [runTick, setRunTick] = useState(0);
+  const onRunEvent = useCallback((ev: SSEEvent<RunNotification>) => {
+    runQueueRef.current.push(ev);
+    setRunTick((n) => n + 1);
+  }, []);
+  const { readyState } = useEventStream<RunNotification>(
     tenant ? tenantRunStreamUrl(tenant) : null,
     tenant ? `pipelines:${tenant}` : null,
     ["run", "stage", "wait"],
+    { onEvent: onRunEvent },
   );
   const queryClient = useQueryClient();
 
@@ -341,26 +352,34 @@ export default function PipelinePage() {
     invalidateJob();
   }, [readyState, invalidateRuns, invalidateJob]);
 
+  // The drain reads every queued frame, and it refetches each read at most
+  // once for the burst.
   useEffect(() => {
-    // A wait frame of this job refetches the job read, which carries the
-    // Waiting card. The runs table refetches too, because the coalescing
-    // stream can replace a held run frame with this one.
-    if (lastEvent?.type === "wait") {
-      if (lastEvent.data.job_path !== job) return;
-      invalidateJob();
-      invalidateRuns();
-      return;
+    const frames = runQueueRef.current;
+    if (frames.length === 0) return;
+    runQueueRef.current = [];
+    let refetchRuns = false;
+    let refetchJob = false;
+    for (const ev of frames) {
+      // The page matches the job path the URL holds, and renders no payload field.
+      if (ev.data?.job_path !== job) continue;
+      if (ev.type === "wait") {
+        // A wait frame refetches the job read, which carries the Waiting card.
+        // The runs table refetches too, because the coalescing stream can
+        // replace a held run frame with this one.
+        refetchJob = true;
+        refetchRuns = true;
+      } else if (ev.type === "run") {
+        refetchRuns = true;
+        // A terminal run moves the health values and the Last 30 days card.
+        if (ev.data.status === "COMPLETED") refetchJob = true;
+      }
+      // The page drops a stage frame: the table and the job read carry no
+      // stage value.
     }
-    // The page drops a stage frame: the table and the job read carry no
-    // stage value.
-    if (lastEvent?.type !== "run") return;
-    // The page matches the job path the URL holds, and renders no payload
-    // field.
-    if (lastEvent.data.job_path !== job) return;
-    invalidateRuns();
-    // A terminal run moves the health values and the Last 30 days card.
-    if (lastEvent.data.status === "COMPLETED") invalidateJob();
-  }, [lastEvent, job, invalidateRuns, invalidateJob]);
+    if (refetchRuns) invalidateRuns();
+    if (refetchJob) invalidateJob();
+  }, [runTick, job, invalidateRuns, invalidateJob]);
 
   if (jobQuery.isLoading) {
     return (

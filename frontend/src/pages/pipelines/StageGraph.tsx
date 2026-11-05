@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { RunLogStageEvent, RunStage } from "../../types";
 import styles from "./StageGraph.module.css";
 
@@ -11,8 +11,13 @@ export interface StageGraphEvent {
 export interface StageGraphProps {
   /** The stage list from GetRun, read once on load. */
   stages: RunStage[];
-  /** The build page's shared log-stream frame; StageGraph reads only "stage" frames. */
-  lastEvent?: StageGraphEvent | null;
+  /** Every log frame the page has received, oldest first. StageGraph reads only "stage" frames. */
+  frames?: readonly StageGraphEvent[];
+  /**
+   * Counts the frames the page has appended. StageGraph reads the frames it
+   * has not read yet when this value changes, so no stage frame of a burst is lost.
+   */
+  version?: number;
   /** The run's terminal-ness. Live "stage" frames stop applying once true. */
   terminal: boolean;
   /** Called when a node is selected, by click or by a cold-load #stage-<id> hash. */
@@ -253,6 +258,8 @@ function nodeCenter(n: TopNode, centerY: number): { x: number; y: number } {
   return { x, y };
 }
 
+const NO_FRAMES: readonly StageGraphEvent[] = [];
+
 /** Applies one live "stage" frame onto the merged stage list: add or update by stageId. */
 function mergeStageEvent(prev: RunStage[], ev: RunLogStageEvent): RunStage[] {
   const idx = prev.findIndex((s) => s.stageId === ev.stageId);
@@ -264,10 +271,16 @@ function mergeStageEvent(prev: RunStage[], ev: RunLogStageEvent): RunStage[] {
   return next;
 }
 
-export function StageGraph({ stages, lastEvent, terminal, onSelectStage }: StageGraphProps) {
+export function StageGraph({ stages, frames = NO_FRAMES, version = 0, terminal, onSelectStage }: StageGraphProps) {
   const [merged, setMerged] = useState<RunStage[]>(stages);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [expandedTrunkId, setExpandedTrunkId] = useState<string | null>(null);
+  // The count of frames this graph has read. The stage list is the newest
+  // record at mount, so the count starts at the frames the page already holds.
+  const appliedRef = useRef(frames.length);
+  // The count belongs to one frame list. A swapped list, such as the next
+  // run's list, starts the count over, so no frame of the new list is skipped.
+  const countedRef = useRef(frames);
 
   // The stage list is read from the run record on load; a later prop
   // identity change means a fresh GetRun result and resets the merge.
@@ -275,10 +288,20 @@ export function StageGraph({ stages, lastEvent, terminal, onSelectStage }: Stage
     setMerged(stages);
   }, [stages]);
 
+  // One render can carry a whole burst of frames, so the graph reads every
+  // frame it has not read yet, in order. A shorter list leaves no stale count.
   useEffect(() => {
-    if (!lastEvent || lastEvent.type !== "stage" || terminal) return;
-    setMerged((prev) => mergeStageEvent(prev, lastEvent.data as RunLogStageEvent));
-  }, [lastEvent, terminal]);
+    if (countedRef.current !== frames) {
+      countedRef.current = frames;
+      appliedRef.current = 0;
+    }
+    const pending = frames.slice(appliedRef.current);
+    appliedRef.current = frames.length;
+    if (terminal) return;
+    const events = pending.filter((f) => f.type === "stage").map((f) => f.data as RunLogStageEvent);
+    if (events.length === 0) return;
+    setMerged((prev) => events.reduce(mergeStageEvent, prev));
+  }, [version, frames, terminal]);
 
   // A cold load of a build URL whose fragment names a stage opens with that
   // stage's log group in view.
