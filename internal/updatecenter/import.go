@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/varroaci/varroa-jenkins/internal/oci"
 	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
@@ -29,9 +31,66 @@ var (
 	errImportBadEntry = errors.New("import tarball contains disallowed entry type")
 )
 
+// importServerFault is a fault of the update center's own disk while an import
+// unpacks. handleImport answers 500 for it, so the sender retries the pack.
+type importServerFault struct {
+	op   string
+	name string
+	err  error
+}
+
+func (e *importServerFault) Error() string {
+	cause := e.err
+	var pathErr *fs.PathError
+	if errors.As(cause, &pathErr) {
+		cause = pathErr.Err
+	}
+	return fmt.Sprintf("%s %s: %v", e.op, e.name, cause)
+}
+
+func (e *importServerFault) Unwrap() error { return e.err }
+
+// entryFault classifies a filesystem error for one tar entry. ENOTDIR, EISDIR,
+// and ENAMETOOLONG come only from entry names in a fresh temporary directory,
+// so they refuse the archive. Every other error is a fault of the update center disk.
+func entryFault(op, name string, err error) error {
+	if errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.EISDIR) || errors.Is(err, syscall.ENAMETOOLONG) {
+		return fmt.Errorf("%s %s: %w", op, name, err)
+	}
+	return &importServerFault{op: op, name: name, err: err}
+}
+
+// entryWriter records the first write error, so a failed copy names the side
+// that failed: the request body or the update center disk.
+type entryWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (e *entryWriter) Write(p []byte) (int, error) {
+	n, err := e.w.Write(p)
+	if err == nil && n < len(p) {
+		err = io.ErrShortWrite
+	}
+	if err != nil && e.err == nil {
+		e.err = err
+	}
+	return n, err
+}
+
+// openImportEntry opens one regular tar entry for writing.
+func openImportEntry(path string) (io.WriteCloser, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
 // handleImport handles POST /api/v1/import.
 // Requires Authorization: Bearer <token>. Body is an OCI-layout .tar.gz.
 // The import runs in the request. It answers 200 when every manifest reads and copies.
+// A fault of the update center disk answers 500, so the sender retries.
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -63,6 +122,12 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	if err := s.extractTarGz(r.Body, tmpDir); err != nil {
+		var fault *importServerFault
+		if errors.As(err, &fault) {
+			s.logger.Error("failed to unpack import on the update center disk", "error", err)
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("unpack the import on the update center: %v", err))
+			return
+		}
 		s.logger.Warn("failed to extract import tarball", "error", err)
 		if errors.Is(err, errImportTooLarge) {
 			writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("import too large: %v", err))
@@ -120,6 +185,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 // Rejects entries that would escape destDir (zip-slip guard), enforces per-entry
 // and total byte caps (with remaining-budget-aware per-entry limiting), caps
 // entry count, and rejects non-regular/non-directory typeflags.
+// It returns *importServerFault for a fault of the destination disk.
 func (s *Server) extractTarGz(r io.Reader, destDir string) error {
 	gzReader, err := gzip.NewReader(r)
 	if err != nil {
@@ -161,11 +227,11 @@ func (s *Server) extractTarGz(r io.Reader, destDir string) error {
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(targetPath, 0755); err != nil {
-				return fmt.Errorf("mkdir %s: %w", hdr.Name, err)
+				return entryFault("mkdir", hdr.Name, err)
 			}
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-				return fmt.Errorf("mkdir parent of %s: %w", hdr.Name, err)
+				return entryFault("mkdir parent of", hdr.Name, err)
 			}
 
 			// Bound the per-entry read by the smaller of the per-entry cap
@@ -177,17 +243,26 @@ func (s *Server) extractTarGz(r io.Reader, destDir string) error {
 				perEntryCap = remaining
 			}
 			limited := io.LimitReader(tr, perEntryCap+1)
-			f, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY, 0644)
+			f, err := s.openImportFile(targetPath)
 			if err != nil {
-				return fmt.Errorf("create %s: %w", hdr.Name, err)
+				return entryFault("create", hdr.Name, err)
 			}
-			written, err := io.Copy(f, limited)
-			_ = f.Close()
-			if err != nil {
-				return fmt.Errorf("write %s: %w", hdr.Name, err)
-			}
+			dst := &entryWriter{w: f}
+			written, copyErr := io.Copy(dst, limited)
+			closeErr := f.Close()
+			// The size verdict comes first: an oversize entry is a content
+			// refusal even when the disk also faults while it closes.
 			if written > perEntryCap {
 				return fmt.Errorf("%w: entry %q exceeds import byte limit", errImportTooLarge, hdr.Name)
+			}
+			if dst.err != nil {
+				return entryFault("write", hdr.Name, dst.err)
+			}
+			if copyErr != nil {
+				return fmt.Errorf("read %s: %w", hdr.Name, copyErr)
+			}
+			if closeErr != nil {
+				return entryFault("close", hdr.Name, closeErr)
 			}
 			totalBytes += written
 		}

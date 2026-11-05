@@ -64,7 +64,7 @@ The update center rejects a pack that holds a plugin at `latest` or with no
 version. The error names the plugin. Export the pack again with a concrete
 version.
 
-The update center reads each pack before it stores anything. It also rejects a pack with no kind or an unknown kind. It rejects a manifest that is not a plugin pack. It rejects a pack with a layer that is not a plugin blob, a pack with a missing blob, and a layout with no manifest. A rejected import stores nothing, and `varroactl import` exits with code 1. A copy failure answers `500` and can leave earlier packs of the same import in the store. Import the packs again after the fault clears. A pack with no kind comes from an old export. Export it again with the current `varroactl`.
+The update center reads each pack before it stores anything. It also rejects a pack with no kind or an unknown kind. It rejects a manifest that is not a plugin pack. It rejects a pack with a layer that is not a plugin blob, a pack with a missing blob, and a layout with no manifest. A rejected import stores nothing, and `varroactl import` exits with code 1. A copy failure answers `500` and can leave earlier packs of the same import in the store. A disk fault while the update center unpacks the import also answers `500`, and the import stores nothing. Import the packs again after the fault clears. A pack with no kind comes from an old export. Export it again with the current `varroactl`.
 
 Use `--registry-config` for registry credentials. Restrict `--insecure` to
 trusted development networks.

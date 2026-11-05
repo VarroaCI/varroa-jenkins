@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -46,6 +47,10 @@ type Server struct {
 	maxImportEntryBytes int64
 	maxImportTotalBytes int64
 
+	// openImportFile opens one regular import entry for writing. A test
+	// replaces it to inject a disk fault.
+	openImportFile func(path string) (io.WriteCloser, error)
+
 	// declaredPluginsFile is the operator-written declared-plugins file, re-read
 	// on every upload so a ConfigMap update lands without a restart. Empty means
 	// the service was never told where it is, which is NOT the same as "nothing
@@ -85,6 +90,7 @@ func NewServer(store oci.BlobStore, logger *slog.Logger, opts ...Option) *Server
 		maxImportEntries:    maxImportEntries,
 		maxImportEntryBytes: maxImportEntryBytes,
 		maxImportTotalBytes: maxImportTotalBytes,
+		openImportFile:      openImportEntry,
 		maxUploadBytes:      defaultMaxUploadBytes,
 		uploadLocks:         make(map[string]*sync.Mutex),
 		depsCache:           make(map[string]storedDeps),

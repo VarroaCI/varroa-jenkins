@@ -40,7 +40,7 @@ Enable pull-through only when the update center may reach its configured upstrea
 
 `seed.secretRef` names a `.dockerconfigjson` or `username`/`password` Secret in the operator namespace. It holds pull credentials for every ref in `seed.refs`, so it must contain exactly one registry entry.
 
-The operator posts each seed pack to the import endpoint. A pack that the update center rejects sets `SeedImported=False` with reason `ImportFailed`. The message names the ref and the cause. A `400` or `413` answer refuses the pack content. The operator then stops the pull and the import for that ref. It still checks the ref digest on each reconcile. It imports the ref again when the digest changes. To try the same pack again, restart the operator. Every other failure, for example a network error, a `401`, or a `5xx`, retries on the next reconcile.
+The operator posts each seed pack to the import endpoint. A pack that the update center rejects sets `SeedImported=False` with reason `ImportFailed`. The message names the ref and the cause. A `400` or `413` answer refuses the pack content. The operator then stops the pull and the import for that ref. It still checks the ref digest on each reconcile. It imports the ref again when the digest changes. To try the same pack again, restart the operator. Every other failure, for example a network error, a `401`, or a `5xx`, retries on the next reconcile. A full disk on the update center answers `500`, so the operator retries the pack.
 
 ## Prefetch declared plugins
 
