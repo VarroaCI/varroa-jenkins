@@ -101,7 +101,7 @@ func (s *Server) handleProvisioningConfigForCluster(w http.ResponseWriter, r *ht
 	} else {
 		rawDefaults, err := s.deps.ConfigBrood.GetProvisioningDefaults(ctx, cluster, "varroa-defaults")
 		if err != nil {
-			if !k8serrors.IsNotFound(err) {
+			if !isConfigNotFound(err) {
 				s.deps.Logger.Error("failed to fetch provisioning defaults", "error", err)
 				writeConfigBroodError(w, err, cluster)
 				return

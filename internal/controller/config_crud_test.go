@@ -1217,3 +1217,50 @@ func baselinePluginVersion(t *testing.T, artifactID string) string {
 	t.Fatalf("baseline has no pin for %q", artifactID)
 	return ""
 }
+
+// TestHandleProvisioningDefaultsUpdateCreatesThenUpdates pins the write path
+// the Settings Provisioning tab uses for a cluster without varroa-defaults:
+// the first apply creates the object, and a second apply updates it.
+func TestHandleProvisioningDefaultsUpdateCreatesThenUpdates(t *testing.T) {
+	store := crdstore.NewFake()
+	c := &ConfigCRUD{Store: store, Logger: testLogger()}
+	apply := func(obj v1alpha1.ProvisioningDefaults) bus.ConfigApplyResponse {
+		t.Helper()
+		req := bus.ConfigApplyRequest{Name: "varroa-defaults", Object: mustMarshal(t, obj)}
+		var resp bus.ConfigApplyResponse
+		if err := json.Unmarshal(c.HandleProvisioningDefaultsUpdate(mustMarshal(t, req)), &resp); err != nil {
+			t.Fatalf("unmarshal reply: %v", err)
+		}
+		return resp
+	}
+	stored := func() string {
+		t.Helper()
+		cr, err := crdstore.Get[v1alpha1.ProvisioningDefaults](context.Background(), store, "varroa-defaults", "")
+		if err != nil {
+			t.Fatalf("get stored defaults: %v", err)
+		}
+		return cr.Spec.RootDomain
+	}
+
+	created := apply(v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{RootDomain: "a.example.com"}})
+	if created.Code != "" {
+		t.Fatalf("create: code %q: %s", created.Code, created.Error)
+	}
+	if got := stored(); got != "a.example.com" {
+		t.Fatalf("after create: rootDomain %q, want a.example.com", got)
+	}
+
+	// The second save sends back the object the first save returned.
+	var item v1alpha1.ProvisioningDefaults
+	if err := json.Unmarshal(created.Item, &item); err != nil {
+		t.Fatalf("unmarshal item: %v", err)
+	}
+	item.Spec.RootDomain = "b.example.com"
+	updated := apply(item)
+	if updated.Code != "" {
+		t.Fatalf("update: code %q: %s", updated.Code, updated.Error)
+	}
+	if got := stored(); got != "b.example.com" {
+		t.Fatalf("after update: rootDomain %q, want b.example.com", got)
+	}
+}
