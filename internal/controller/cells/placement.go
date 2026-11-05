@@ -929,8 +929,8 @@ func performVoluntaryMove(ctx context.Context, in Inputs, tenant *v1alpha1.Tenan
 	performMove(ctx, in, tenant, status, oldCell, nowT, out)
 }
 
-// voluntaryDrainDone reports whether slot 0's old cell and each stale
-// member cell have dropped the tenant's folder.
+// voluntaryDrainDone reports whether slot 0's old cell has dropped the
+// tenant's folder and each stale member cell has drained.
 func voluntaryDrainDone(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, oldCell CellCandidate) bool {
 	return cellDrainedTenant(oldCell, tenant.Name) && staleMembersDrained(in, tenant, status.Placement)
 }
@@ -977,20 +977,20 @@ func holdMembers(p *v1alpha1.TenantPlacementStatus) []v1alpha1.TenantMemberStatu
 }
 
 // staleMembersDrained reports whether each member cell that fails the
-// keep rule has dropped the tenant's folder. The move releases such a
-// cell, and a pool drain of a released cell ends a build that still runs
-// there. A cell that is gone or evacuating counts as drained, because
-// its builds are already lost.
+// keep rule has drained. The move releases such a cell, and a pool drain
+// of a released cell ends a build that still runs there. It uses
+// memberCellDrained, so the move and the member release apply one test:
+// a cell that is gone, evacuates, or runs no pod counts as drained.
 func staleMembersDrained(in Inputs, tenant *v1alpha1.Tenant, placement *v1alpha1.TenantPlacementStatus) bool {
 	if placement == nil {
 		return true
 	}
 	for _, m := range placement.Members {
 		cell, found := lookupCell(in.Cells, m.Cell, m.CellNamespace)
-		if !found || cell.Evacuate || cellKeepsTenant(in, tenant, cell) {
+		if found && cellKeepsTenant(in, tenant, cell) {
 			continue
 		}
-		if !cellDrainedTenant(cell, tenant.Name) {
+		if !memberCellDrained(in, tenant, MemberBinding{Cell: m.Cell, Namespace: m.CellNamespace}) {
 			return false
 		}
 	}

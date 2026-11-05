@@ -19,10 +19,12 @@ func oldProfileCell(name string, tenants ...string) CellCandidate {
 }
 
 // drainedOldCell is an old-profile cell that still lists the tenant in its
-// tenant list but has dropped the tenant's folder.
+// tenant list but has dropped the tenant's folder. It runs a pod, so only
+// the folder test decides its drain.
 func drainedOldCell(name string) CellCandidate {
 	c := readyCell(name, "payments")
 	c.ResolvedProfile = "old-profile"
+	c.Instance = "uid-" + name
 	return c
 }
 
@@ -177,6 +179,37 @@ func TestPlaceWaitsForAStaleMemberToDrain(t *testing.T) {
 	}
 	if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TenantReasonTenantMoving {
 		t.Errorf("want TenantMoving, got %+v", cond)
+	}
+}
+
+// TestPlaceDoesNotWaitForAStaleMemberWithNoPod asserts a stale member cell
+// that runs no pod does not hold the move. The cell still names the folder
+// and a pending deletion, so only the no-pod rule counts it drained.
+func TestPlaceDoesNotWaitForAStaleMemberWithNoPod(t *testing.T) {
+	in := testInputs()
+	tenant := slotTenant(2, 1)
+	b := oldProfileCell("cell-b", "payments")
+	b.PendingDeletionPaths = []string{"payments/api"}
+	b.Instance = ""
+	in.Cells = []CellCandidate{
+		drainedOldCell("cell-a"), b, drainedOldCell("cell-c"),
+		readyCell("cell-d"), readyCell("cell-e"), readyCell("cell-f"),
+	}
+	status := threeMemberStatus("cell-a")
+	setMoving(status)
+
+	out, err := Place(context.Background(), in, tenant, status)
+	if err != nil {
+		t.Fatalf("Place: %v", err)
+	}
+	if status.Placement.Cell != "cell-d" || status.Placement.Generation != 4 {
+		t.Fatalf("placement = %s gen %d, want cell-d gen 4", status.Placement.Cell, status.Placement.Generation)
+	}
+	if !dropsTenant(patchFor(out, "cell-b")) {
+		t.Errorf("cell-b: want a patch that drops the tenant, got %+v", patchFor(out, "cell-b"))
+	}
+	if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TenantReasonTenantMoved {
+		t.Errorf("want TenantMoved, got %+v", cond)
 	}
 }
 
