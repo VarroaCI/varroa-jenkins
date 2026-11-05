@@ -71,6 +71,7 @@ vi.mock("../hooks/useEventStream", () => ({
 import ActivityTimeline from "./ActivityTimeline";
 import { useActivityFeed } from "../hooks/useActivityFeed";
 import type { ActivityEvent } from "../types";
+import { ApiError } from "../hooks/useApi";
 
 function createEvent(overrides: Partial<ActivityEvent>): ActivityEvent {
   return {
@@ -115,6 +116,46 @@ beforeEach(() => {
   mockOnEvent = undefined;
   mockSSEReadyState = "closed";
   mockSSEError = null;
+});
+
+describe("ActivityTimeline load more", () => {
+  const firstPage = {
+    items: [createEvent({ timestamp: "2024-01-02T00:00:00Z", message: "newest" })],
+    hasMore: true,
+    nextCursor: "c1",
+    retentionMode: "on",
+    retentionDays: 30,
+  };
+
+  it("an expired cursor shows the retention note and removes Load more", async () => {
+    mockBffFetch.mockImplementation(async (path: string) => {
+      if (path.includes("cursor=")) {
+        throw new ApiError(410, "Varroa could not complete the request.", { error: "activity cursor expired" });
+      }
+      return firstPage;
+    });
+    renderTimeline();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Load more history" }));
+
+    expect(await screen.findByText("Older events are past the retention window.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more history" })).not.toBeInTheDocument();
+  });
+
+  it("a failed page shows the retry note and keeps Load more", async () => {
+    mockBffFetch.mockImplementation(async (path: string) => {
+      if (path.includes("cursor=")) {
+        throw new ApiError(500, "Varroa could not complete the request.", { error: "failed to load activity" });
+      }
+      return firstPage;
+    });
+    renderTimeline();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Load more history" }));
+
+    expect(await screen.findByText("Older events did not load. Select Load more history to try again.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load more history" })).toBeEnabled();
+  });
 });
 
 describe("ActivityTimeline", () => {

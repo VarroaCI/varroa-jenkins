@@ -452,6 +452,8 @@
 
 .loadMore { display: block; margin: 18px auto; padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); cursor: pointer; }
 
+.loadMoreNote { margin: 18px 0; text-align: center; font-size: 13px; color: var(--text-2); }
+
 .errorBanner {
   padding: 14px 18px;
   border-radius: var(--radius-sm);

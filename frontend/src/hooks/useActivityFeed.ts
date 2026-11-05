@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { bffFetch } from "./useApi";
+import { ApiError, bffFetch } from "./useApi";
 import { useEventStream, type SSEEvent } from "./useEventStream";
 import { BFF_BASE } from "../api/client";
 import {
@@ -10,6 +10,10 @@ import {
   MAX_BUFFER,
 } from "../components/activityTimeline.util";
 import type { ActivityEvent, ActivityFilters, ActivityPage } from "../types";
+
+export const LOAD_MORE_EXPIRED = "Older events are past the retention window.";
+export const LOAD_MORE_INVALID = "Older events did not load.";
+export const LOAD_MORE_FAILED = "Older events did not load. Select Load more history to try again.";
 
 export interface UseActivityFeedResult {
   events: ActivityEvent[];
@@ -23,6 +27,7 @@ export interface UseActivityFeedResult {
 	hasMore: boolean;
 	loadMore: () => Promise<void>;
 	isLoadingMore: boolean;
+	loadMoreNote: string | null;
 	retentionMode?: "on" | "off";
 	retentionDays?: number;
 }
@@ -93,6 +98,7 @@ export function useActivityFeed(
 	const [nextCursor, setNextCursor] = useState<string>();
 	const [hasMore, setHasMore] = useState(false);
 	const [isLoadingMore, setLoadingMore] = useState(false);
+	const [loadMoreNote, setLoadMoreNote] = useState<string | null>(null);
   // Pending queue for paused arrivals — use a ref so resume always reads latest
   const [paused, setPaused] = useState(false);
   const pendingQueueRef = useRef<ActivityEvent[]>([]);
@@ -101,8 +107,10 @@ export function useActivityFeed(
   // Track whether we've seeded from backfill so we only do it once
 	const backfillSeededRef = useRef<string | null>(null);
 	const queryIdentity = scopeQuery;
+	const identityRef = useRef(queryIdentity);
 
   useEffect(() => {
+    identityRef.current = queryIdentity;
     setBuffer([]); pendingQueueRef.current = []; setPendingCount(0);
     // A frame queued before this effect came from the stream of the previous
     // query. useEventStream closes that stream in the same commit.
@@ -112,7 +120,7 @@ export function useActivityFeed(
     // fire the old cursor against the new query while the new backfill is
     // still in flight. The seeding effect below re-drives them from the fresh
     // page once it lands.
-    setNextCursor(undefined); setHasMore(false); setLoadingMore(false);
+    setNextCursor(undefined); setHasMore(false); setLoadingMore(false); setLoadMoreNote(null);
   }, [queryIdentity]);
 
   // Seed from backfill — no "seed only if empty" guard; always merge
@@ -162,15 +170,32 @@ export function useActivityFeed(
     setPaused(false);
   }, []);
 
+	// A 410 means every older row is past the retention edge, so paging ends.
+	// A 400 means the cursor is not valid, and a retry answers 400 again, so
+	// paging ends too. An answer for an earlier query must not change the
+	// current query's state.
 	const loadMore = useCallback(async () => {
 		if (!nextCursor || isLoadingMore) return;
-		setLoadingMore(true);
+		const identity = queryIdentity;
+		setLoadingMore(true); setLoadMoreNote(null);
 		try {
 			const p = new URLSearchParams(scopeQuery.slice(1)); p.set("cursor", nextCursor);
 			const page = await bffFetch<ActivityPage>(`/activity?${p}`);
+			if (identityRef.current !== identity) return;
 			setBuffer((b) => mergeEvents(b, page.items, MAX_BUFFER)); setNextCursor(page.nextCursor); setHasMore(page.hasMore);
-		} finally { setLoadingMore(false); }
-	}, [nextCursor, isLoadingMore, scopeQuery]);
+		} catch (e) {
+			if (identityRef.current !== identity) return;
+			if (e instanceof ApiError && e.status === 410) {
+				setNextCursor(undefined); setHasMore(false); setLoadMoreNote(LOAD_MORE_EXPIRED);
+			} else if (e instanceof ApiError && e.status === 400) {
+				setNextCursor(undefined); setHasMore(false); setLoadMoreNote(LOAD_MORE_INVALID);
+			} else {
+				setLoadMoreNote(LOAD_MORE_FAILED);
+			}
+		} finally {
+			if (identityRef.current === identity) setLoadingMore(false);
+		}
+	}, [nextCursor, isLoadingMore, scopeQuery, queryIdentity]);
 
   return {
     events: buffer,
@@ -182,7 +207,7 @@ export function useActivityFeed(
     // The stream closes on purpose at end, so its close is not an error.
     error: fetchError ?? (sseError && liveOpen ? new Error("SSE connection error") : null),
     isLoading,
-		hasMore, loadMore, isLoadingMore,
+		hasMore, loadMore, isLoadingMore, loadMoreNote,
 		retentionMode: backfillData?.retentionMode,
 		retentionDays: backfillData?.retentionDays,
   };

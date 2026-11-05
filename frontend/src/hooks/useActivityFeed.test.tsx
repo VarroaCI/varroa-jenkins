@@ -1,14 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useActivityFeed } from "./useActivityFeed";
+import {
+  useActivityFeed,
+  LOAD_MORE_EXPIRED,
+  LOAD_MORE_INVALID,
+  LOAD_MORE_FAILED,
+} from "./useActivityFeed";
+import { ApiError } from "./useApi";
 import type { ActivityEvent } from "../types";
 import type { ReactNode } from "react";
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
 const mockBffFetch = vi.fn();
-vi.mock("./useApi", () => ({
+vi.mock("./useApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./useApi")>()),
   bffFetch: (...args: unknown[]) => mockBffFetch(...args),
   getToken: () => null,
 }));
@@ -184,6 +191,147 @@ describe("useActivityFeed", () => {
       expect(result.current.events.length).toBe(1);
       expect(result.current.events[0].controller).toBe("ctrl");
     });
+  });
+});
+
+describe("useActivityFeed load more", () => {
+  const firstPage = {
+    items: [createEvent({ timestamp: "2024-01-02T00:00:00Z", message: "newest", namespace: "ns", controller: "ctrl" })],
+    hasMore: true,
+    nextCursor: "c1",
+    retentionMode: "on",
+    retentionDays: 30,
+  };
+
+  it("an expired cursor ends paging and sets the retention note", async () => {
+    mockBffFetch.mockImplementation(async (path: string) => {
+      if (path.includes("cursor=")) {
+        throw new ApiError(410, "Varroa could not complete the request.", { error: "activity cursor expired" });
+      }
+      return firstPage;
+    });
+    const { result } = renderHook(() => useActivityFeed({ namespace: "ns", name: "ctrl" }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.hasMore).toBe(true));
+
+    await act(async () => { await result.current.loadMore(); });
+
+    expect(result.current.hasMore).toBe(false);
+    expect(result.current.loadMoreNote).toBe(LOAD_MORE_EXPIRED);
+    expect(result.current.isLoadingMore).toBe(false);
+    expect(result.current.events).toHaveLength(1);
+
+    const calls = mockBffFetch.mock.calls.length;
+    await act(async () => { await result.current.loadMore(); });
+    expect(mockBffFetch.mock.calls.length).toBe(calls);
+  });
+
+  it("a failed page keeps the cursor, sets the retry note, and a retry clears it", async () => {
+    let cursorReads = 0;
+    mockBffFetch.mockImplementation(async (path: string) => {
+      if (path.includes("cursor=")) {
+        cursorReads += 1;
+        if (cursorReads === 1) {
+          throw new ApiError(500, "Varroa could not complete the request.", { error: "failed to load activity" });
+        }
+        return {
+          items: [createEvent({ timestamp: "2024-01-01T00:00:00Z", message: "older" })],
+          hasMore: false,
+          retentionMode: "on",
+        };
+      }
+      return firstPage;
+    });
+    const { result } = renderHook(() => useActivityFeed({ namespace: "ns", name: "ctrl" }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.hasMore).toBe(true));
+
+    await act(async () => { await result.current.loadMore(); });
+    expect(result.current.hasMore).toBe(true);
+    expect(result.current.loadMoreNote).toBe(LOAD_MORE_FAILED);
+
+    await act(async () => { await result.current.loadMore(); });
+    expect(result.current.loadMoreNote).toBeNull();
+    expect(result.current.hasMore).toBe(false);
+    expect(result.current.events.map((e) => e.message)).toContain("older");
+
+    const cursorPaths = mockBffFetch.mock.calls
+      .map((c) => c[0] as string)
+      .filter((p) => p.includes("cursor="));
+    const cursorPath = "/activity?cluster=&controller=ns%2Fctrl&cursor=c1";
+    expect(cursorPaths).toEqual([cursorPath, cursorPath]);
+  });
+
+  it("an invalid cursor ends paging with the plain note", async () => {
+    mockBffFetch.mockImplementation(async (path: string) => {
+      if (path.includes("cursor=")) {
+        throw new ApiError(400, "Varroa could not complete the request.", { error: "invalid cursor" });
+      }
+      return firstPage;
+    });
+    const { result } = renderHook(() => useActivityFeed({ namespace: "ns", name: "ctrl" }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.hasMore).toBe(true));
+
+    await act(async () => { await result.current.loadMore(); });
+
+    expect(result.current.hasMore).toBe(false);
+    expect(result.current.loadMoreNote).toBe(LOAD_MORE_INVALID);
+  });
+
+  it("a scope change clears the note", async () => {
+    mockBffFetch.mockImplementation(async (path: string) => {
+      if (path.includes("cursor=")) {
+        throw new ApiError(410, "Varroa could not complete the request.", { error: "activity cursor expired" });
+      }
+      return firstPage;
+    });
+    const { result, rerender } = renderHook(
+      ({ name }: { name: string }) => useActivityFeed({ namespace: "ns", name }),
+      { wrapper: createWrapper(), initialProps: { name: "a" } },
+    );
+    await waitFor(() => expect(result.current.hasMore).toBe(true));
+    await act(async () => { await result.current.loadMore(); });
+    expect(result.current.loadMoreNote).toBe(LOAD_MORE_EXPIRED);
+
+    act(() => rerender({ name: "b" }));
+
+    expect(result.current.loadMoreNote).toBeNull();
+  });
+
+  it("drops a load-more answer that lands after the scope changed", async () => {
+    let rejectOld: (e: unknown) => void = () => {};
+    mockBffFetch.mockImplementation((path: string) => {
+      if (path.includes("cursor=old")) {
+        return new Promise((_resolve, reject) => { rejectOld = reject; });
+      }
+      if (path.includes("ctrl-a")) {
+        return Promise.resolve({ items: firstPage.items, hasMore: true, nextCursor: "old" });
+      }
+      return Promise.resolve({ items: firstPage.items, hasMore: true, nextCursor: "new" });
+    });
+    const { result, rerender } = renderHook(
+      ({ name }: { name: string }) => useActivityFeed({ namespace: "ns", name }),
+      { wrapper: createWrapper(), initialProps: { name: "ctrl-a" } },
+    );
+    await waitFor(() => expect(result.current.hasMore).toBe(true));
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => { pending = result.current.loadMore(); });
+    act(() => rerender({ name: "ctrl-b" }));
+    await waitFor(() => expect(result.current.hasMore).toBe(true));
+
+    await act(async () => {
+      rejectOld(new ApiError(410, "x", { error: "activity cursor expired" }));
+      await pending;
+    });
+
+    expect(result.current.hasMore).toBe(true);
+    expect(result.current.loadMoreNote).toBeNull();
+    expect(result.current.isLoadingMore).toBe(false);
   });
 });
 
