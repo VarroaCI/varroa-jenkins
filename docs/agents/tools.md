@@ -47,6 +47,7 @@ and the maximum is 200. It returns an empty list when the record store is not
 wired. It returns a tool error when the record store does not answer. Set
 `excludeRoutineSignIns` to `true` to leave out routine local sign-ins.
 Break-glass and failed sign-ins stay.
+A `controller` value matches that controller on every cluster. Set `cluster` as well to read one controller.
 
 `search` returns a kind-tagged envelope across seven result kinds:
 controller, namespace, group, catalogitem, job, run, and activity. Each kind

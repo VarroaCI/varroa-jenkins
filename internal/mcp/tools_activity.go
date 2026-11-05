@@ -23,9 +23,10 @@ func registerActivitySearchMetaTools(mcpServer *server.MCPServer, deps *api.Depe
 		mcp.WithDescription("List recent Varroa activity events, capped at limit "+
 			"(default 50, max 200). The activity stream is unbounded by design, "+
 			"so only the most recent limit events are returned — narrow with "+
-			"the controller filter instead of raising the cap. Events are already "+
+			"the cluster and controller filters instead of raising the cap. Events are already "+
 			"flat; every field is returned."),
-		mcp.WithString("controller", mcp.Description("Optional controller name filter")),
+		mcp.WithString("controller", mcp.Description("Optional controller filter: a name or namespace/name. It matches on every cluster unless cluster is set.")),
+		mcp.WithString("cluster", mcp.Description("Optional cluster filter. Default: every cluster.")),
 		mcp.WithNumber("limit", mcp.Description("Maximum number of events to return (default 50, max 200)")),
 		mcp.WithBoolean("excludeRoutineSignIns", mcp.Description("Set true to leave out routine local sign-ins: auth.local.login events below warning severity. Break-glass and failed sign-ins stay.")),
 		withListOutput(activityListOutputSchema),
@@ -33,6 +34,7 @@ func registerActivitySearchMetaTools(mcpServer *server.MCPServer, deps *api.Depe
 	addTool(mcpServer, kindRead, activityTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := getArgs(req)
 		controller, _ := args["controller"].(string)
+		cluster, _ := args["cluster"].(string)
 		limit := 50
 		if n, ok := args["limit"].(float64); ok {
 			limit = int(n)
@@ -58,7 +60,7 @@ func registerActivitySearchMetaTools(mcpServer *server.MCPServer, deps *api.Depe
 			return mcp.NewToolResultError("authentication required"), nil
 		}
 		exclude, _ := boolArg(args, "excludeRoutineSignIns")
-		query := activity.Query{Controller: controller, Limit: limit, ExcludeRoutineSignIns: exclude}
+		query := activity.Query{Cluster: cluster, Controller: controller, Limit: limit, ExcludeRoutineSignIns: exclude}
 		query.Scope = activity.ScopeFromPermissions(deps.Authorizer.EffectivePermissions(claims), deps.Authorizer.CanReadGlobalActivity(claims))
 		query.Authorize = func(e activity.Event) bool {
 			return deps.Authorizer.CanReadActivityEvent(claims, e)

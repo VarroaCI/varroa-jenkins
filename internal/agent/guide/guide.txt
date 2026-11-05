@@ -70,7 +70,7 @@ A run has a `status`: `QUEUED`, `RUNNING`, or `COMPLETED`. A completed run has a
 
 1. Status: `get_controller` for the phase and `status`.
 2. Conditions: read each `True` condition and its reason and message.
-3. Activity: `list_activity` with the `controller` filter.
+3. Activity: `list_activity` with the `cluster` and `controller` filters.
 4. Logs: `get_controller_logs` for the Jenkins container log.
 5. Kubernetes events: no tool reads them. Give the person `kubectl get events -n <namespace> --sort-by=.lastTimestamp`.
 

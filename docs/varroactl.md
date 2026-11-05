@@ -128,6 +128,8 @@ varroactl get clusters
 
 Selector-based brood operations can include `--clusters <names>` or `--clusters all`. Explicit multi-cluster names use `cluster/namespace/name`. See [Adding a member cluster](install/multi-cluster.md).
 
+`varroactl activity --cluster <name>` reads the activity of one cluster. Without `--cluster`, it reads every cluster. The context default cluster does not apply to `activity`. A `--controller` value matches that controller on every cluster, so set `--cluster` to read one controller.
+
 ## Output, streams, and safety
 
 Use `-o table`, `wide`, `json`, `yaml`, or `name`. Follow controller state with `watch`, `logs`, `events controller`, `mite`, or `activity`.

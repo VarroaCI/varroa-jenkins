@@ -58,3 +58,29 @@ func TestMatches_ExcludeRoutineSignIns(t *testing.T) {
 		}
 	}
 }
+
+func TestMatches_ClusterAndController(t *testing.T) {
+	at := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	core := Event{Timestamp: at, Type: "controller.created", Cluster: "core", Namespace: "team-a", Controller: "ci"}
+	memberB := Event{Timestamp: at, Type: "controller.created", Cluster: "member-b", Namespace: "team-a", Controller: "ci"}
+	tests := []struct {
+		name string
+		q    Query
+		core bool
+		b    bool
+	}{
+		{"controller alone matches every cluster", Query{Controller: "ci"}, true, true},
+		{"cluster and controller narrow to one", Query{Cluster: "member-b", Controller: "ci"}, false, true},
+		{"cluster and namespace/name narrow to one", Query{Cluster: "member-b", Controller: "team-a/ci"}, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Matches(core, tt.q); got != tt.core {
+				t.Errorf("core: Matches = %v, want %v", got, tt.core)
+			}
+			if got := Matches(memberB, tt.q); got != tt.b {
+				t.Errorf("member-b: Matches = %v, want %v", got, tt.b)
+			}
+		})
+	}
+}
