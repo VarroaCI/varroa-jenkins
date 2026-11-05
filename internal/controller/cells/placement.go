@@ -359,36 +359,7 @@ func Place(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1al
 	cell, kind := evaluateKeep(in, tenant, status)
 	switch kind {
 	case moveNone:
-		reason := v1alpha1.TenantReasonTenantPlaced
-		if placedReason(status) == v1alpha1.TenantReasonTenantMoved {
-			reason = v1alpha1.TenantReasonTenantMoved
-		}
-		if cell.CellReady {
-			setPlaced(status, metav1.ConditionTrue, reason, "", nowT)
-		} else {
-			setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonCellNotReady,
-				"the bound cell reports CellReady=False; this tenant's builds do not start", nowT)
-		}
-		// The fence names this cell, and the cell's own tenant list does
-		// not name the tenant yet, so the tenant patch has not landed. The
-		// pass sends the tenant patch again, and the claim must live again
-		// this tick: it expires after CellClaimTTL, and a drain would then
-		// find a cell with no tenant and no claim. The claim retires only
-		// when the patch lands, so the tenant list converges or the cell
-		// stays held.
-		if !containsString(cell.Tenants, tenant.Name) {
-			out.CellClaims = append(out.CellClaims, CellClaim{
-				Name:      cell.Name,
-				Namespace: cell.Namespace,
-				Tenant:    tenant.Name,
-			})
-			out.CellPatches = append(out.CellPatches, CellPatch{
-				Name:      cell.Name,
-				Namespace: cell.Namespace,
-				Tenants:   appendUnique(cell.Tenants, tenant.Name),
-			})
-		}
-		maybeReannounce(ctx, in, tenant, status, *cell, nowT, &out)
+		keepPlacement(ctx, in, tenant, status, cell, ResolvedPoolName(tenant.Spec.Pipelines), nowT, &out)
 	case moveImmediate:
 		performMove(ctx, in, tenant, status, cell, nowT, &out)
 	case moveVoluntary:
@@ -396,13 +367,53 @@ func Place(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1al
 	}
 
 	markStaleMembers(in, tenant, status)
-	applyMemberReason(tenant, status, nowT)
+	applyMemberReason(in, tenant, status, nowT)
 	keepPlacedTransition(status, entryPlaced)
 
 	if status.Placement != nil && !hasFinalizer {
 		out.FinalizerAdd = true
 	}
 	return out, nil
+}
+
+// keepPlacement keeps the tenant on its bound cell. It writes the keep
+// reason, refreshes the claim while the cell's tenant list does not name
+// the tenant, and reannounces when a trigger is due. The keep path and a
+// held voluntary move both run it, so a long hold still reports a pod
+// roll or a policy edit to the record store. poolName is the pool whose
+// cap the announce carries: the resolved pool on the keep path, and the
+// bound cell's pool on a held move, where the tenant still runs there.
+func keepPlacement(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, cell *CellCandidate, poolName string, nowT time.Time, out *Outcome) {
+	reason := v1alpha1.TenantReasonTenantPlaced
+	if placedReason(status) == v1alpha1.TenantReasonTenantMoved {
+		reason = v1alpha1.TenantReasonTenantMoved
+	}
+	if cell.CellReady {
+		setPlaced(status, metav1.ConditionTrue, reason, "", nowT)
+	} else {
+		setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonCellNotReady,
+			"the bound cell reports CellReady=False; this tenant's builds do not start", nowT)
+	}
+	// The fence names this cell, and the cell's own tenant list does
+	// not name the tenant yet, so the tenant patch has not landed. The
+	// pass sends the tenant patch again, and the claim must live again
+	// this tick: it expires after CellClaimTTL, and a drain would then
+	// find a cell with no tenant and no claim. The claim retires only
+	// when the patch lands, so the tenant list converges or the cell
+	// stays held.
+	if !containsString(cell.Tenants, tenant.Name) {
+		out.CellClaims = append(out.CellClaims, CellClaim{
+			Name:      cell.Name,
+			Namespace: cell.Namespace,
+			Tenant:    tenant.Name,
+		})
+		out.CellPatches = append(out.CellPatches, CellPatch{
+			Name:      cell.Name,
+			Namespace: cell.Namespace,
+			Tenants:   appendUnique(cell.Tenants, tenant.Name),
+		})
+	}
+	maybeReannounce(ctx, in, tenant, status, *cell, poolName, nowT, out)
 }
 
 // applyMemberReason overrides the Placed reason with the one the member
@@ -413,7 +424,7 @@ func Place(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1al
 //
 // A tenant that asks for one member and no standby never reaches this
 // path, so every earlier reason is unchanged for it.
-func applyMemberReason(tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, nowT time.Time) {
+func applyMemberReason(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, nowT time.Time) {
 	if status.Placement == nil || tenant.Spec.Pipelines == nil {
 		return
 	}
@@ -434,7 +445,7 @@ func applyMemberReason(tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, n
 			"every active slot holds a cell and at least one standby does not", nowT)
 	case v1alpha1.TenantReasonMembersStale:
 		setPlaced(status, metav1.ConditionTrue, v1alpha1.TenantReasonMembersStale,
-			staleMembersMessage(tenant, status.Placement.Members), nowT)
+			staleMembersMessage(in, tenant, status.Placement.Members), nowT)
 	case v1alpha1.TenantReasonMembersApplied:
 		setPlaced(status, metav1.ConditionTrue, v1alpha1.TenantReasonMembersApplied, "", nowT)
 	}
@@ -457,16 +468,23 @@ func markStaleMembers(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.Tenan
 }
 
 // staleMembersMessage names each stale member in the stored order, so a
-// repeat tick writes the same message.
-func staleMembersMessage(tenant *v1alpha1.Tenant, members []v1alpha1.TenantMemberStatus) string {
+// repeat tick writes the same message. It also names the pool cap while
+// the resolved pool reports CellCapReached, because no member can move
+// until that pool gains a cell.
+func staleMembersMessage(in Inputs, tenant *v1alpha1.Tenant, members []v1alpha1.TenantMemberStatus) string {
 	var names []string
 	for _, m := range members {
 		if m.Stale {
 			names = append(names, fmt.Sprintf("%s %s/%s", memberRoleLabel(m), m.CellNamespace, m.Cell))
 		}
 	}
-	return fmt.Sprintf("these members wait for a free cell in pool %q with profile %q: %s",
-		ResolvedPoolName(tenant.Spec.Pipelines), tenant.Spec.Pipelines.Profile, strings.Join(names, ", "))
+	poolName := ResolvedPoolName(tenant.Spec.Pipelines)
+	message := fmt.Sprintf("these members wait for a free cell in pool %q with profile %q: %s",
+		poolName, tenant.Spec.Pipelines.Profile, strings.Join(names, ", "))
+	if pool := effectiveOwner(in.Pools, poolName); pool != nil && pool.CapReached {
+		message += fmt.Sprintf("; the CellPool %q holds its maxCells cells", pool.Name)
+	}
+	return message
 }
 
 // memberRoleLabel answers "slot <n>" for an active member and "standby"
@@ -733,10 +751,8 @@ func noCandidateReason(in Inputs, tenant *v1alpha1.Tenant) (string, string) {
 // spec): the fence (the new placement, with generation+1) is written before
 // either cell's tenant list is patched.
 func performMove(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, oldCell *CellCandidate, nowT time.Time, out *Outcome) {
-	newCell := promotionCellForSlotZero(in, tenant, status)
-	if newCell == nil {
-		newCell = selectCandidate(in, tenant)
-	}
+	newCell := moveTarget(in, tenant, status)
+	// Only an involuntary move reaches this branch: performVoluntaryMove calls performMove only after moveTarget answered a cell on the same inputs.
 	if newCell == nil {
 		reason, message := noCandidateReason(in, tenant)
 		setPlaced(status, metav1.ConditionFalse, reason, message, nowT)
@@ -867,23 +883,77 @@ func performMove(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status
 	}
 }
 
-// performVoluntaryMove implements the three-step voluntary move
-// (tenant-placement spec): set TenantMoving and wait for the drain signal,
-// then perform the move exactly like an involuntary one.
+// performVoluntaryMove implements the voluntary move (tenant-placement
+// spec). It starts the drain only when moveTarget answers a cell, waits
+// for the drain signal, and then moves like an involuntary move. A drain
+// with no target ends on a no-candidate tick, and the next tick starts it
+// again, so the pass holds the move instead.
 func performVoluntaryMove(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, oldCell *CellCandidate, nowT time.Time, out *Outcome) {
-	if placedReason(status) != v1alpha1.TenantReasonTenantMoving {
+	moving := placedReason(status) == v1alpha1.TenantReasonTenantMoving
+	if moving && !voluntaryDrainDone(in, tenant, status, *oldCell) {
+		// Still draining: keep the message constant so LastTransitionTime
+		// keeps recording when the wait began. A target lost during the
+		// drain does not end it, so a short CellReady=False on the target
+		// cannot restart the drain.
 		setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonTenantMoving, tenantMovingMessage, nowT)
 		return
 	}
-	if containsString(oldCell.AppliedTenants, tenant.Name) ||
-		hasPendingDeletionForTenant(oldCell.PendingDeletionPaths, tenant.Name) ||
-		!staleMembersDrained(in, tenant, status.Placement) {
-		// Still draining: keep the message constant so LastTransitionTime
-		// keeps recording when the wait began.
+	if moveTarget(in, tenant, status) == nil {
+		holdVoluntaryMove(ctx, in, tenant, status, oldCell, nowT, out)
+		return
+	}
+	if !moving {
 		setPlaced(status, metav1.ConditionFalse, v1alpha1.TenantReasonTenantMoving, tenantMovingMessage, nowT)
 		return
 	}
 	performMove(ctx, in, tenant, status, oldCell, nowT, out)
+}
+
+// voluntaryDrainDone reports whether slot 0's old cell and each stale
+// member cell have dropped the tenant's folder.
+func voluntaryDrainDone(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, oldCell CellCandidate) bool {
+	return cellDrainedTenant(oldCell, tenant.Name) && staleMembersDrained(in, tenant, status.Placement)
+}
+
+// moveTarget answers the cell slot 0 moves to: the applied standby that
+// promotionCellForSlotZero picks, else the selection rule's candidate. It
+// answers nil when neither exists. performMove and performVoluntaryMove
+// both read it, so the hold test and the move pick the same cell.
+func moveTarget(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus) *CellCandidate {
+	if promoted := promotionCellForSlotZero(in, tenant, status); promoted != nil {
+		return promoted
+	}
+	return selectCandidate(in, tenant)
+}
+
+// holdVoluntaryMove keeps a voluntary move that has no target. The tenant
+// keeps its placement and its folder on every member cell, so it keeps
+// building there. Slot 0 fails the keep rule, so the hold reports
+// MembersStale for a tenant of any member count, or CellNotReady when the
+// bound cell is not ready. The drain starts on the first tick that finds
+// a target.
+func holdVoluntaryMove(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, oldCell *CellCandidate, nowT time.Time, out *Outcome) {
+	keepPlacement(ctx, in, tenant, status, oldCell, oldCell.Pool, nowT, out)
+	if !oldCell.CellReady {
+		return
+	}
+	markStaleMembers(in, tenant, status)
+	setPlaced(status, metav1.ConditionTrue, v1alpha1.TenantReasonMembersStale,
+		staleMembersMessage(in, tenant, holdMembers(status.Placement)), nowT)
+}
+
+// holdMembers answers the stored member list. A placement with an empty
+// member list describes one slot 0 member on its scalar cell, and that
+// member is stale while the move holds.
+func holdMembers(p *v1alpha1.TenantPlacementStatus) []v1alpha1.TenantMemberStatus {
+	if len(p.Members) > 0 {
+		return p.Members
+	}
+	zero := int32(0)
+	return []v1alpha1.TenantMemberStatus{{
+		Cell: p.Cell, CellNamespace: p.CellNamespace,
+		Role: v1alpha1.TenantMemberRoleActive, Slot: &zero, Stale: true,
+	}}
 }
 
 // staleMembersDrained reports whether each member cell that fails the
@@ -992,10 +1062,16 @@ func sendAnnounce(ctx context.Context, in Inputs, req AnnounceRequest) (Announce
 // caller read from the tenant's Secret. status is the working status: the
 // badge token is minted into it before the announce is built.
 func syncPolicyFor(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus) SyncPolicy {
+	return syncPolicyForPool(in, tenant, status, ResolvedPoolName(tenant.Spec.Pipelines))
+}
+
+// syncPolicyForPool is syncPolicyFor with the pool whose cap the policy
+// carries named by the caller.
+func syncPolicyForPool(in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, poolName string) SyncPolicy {
 	policy := SyncPolicyFromPipelines(tenant.Spec.Pipelines)
 	policy.Webhook = in.Webhook
 	policy.BadgeToken = badgeTokenFor(tenant.Spec.Pipelines, status)
-	if pool := effectiveOwner(in.Pools, ResolvedPoolName(tenant.Spec.Pipelines)); pool != nil {
+	if pool := effectiveOwner(in.Pools, poolName); pool != nil {
 		policy.CellMaxRuns = pool.MaxRunsPerTenant
 	}
 	return policy
@@ -1017,8 +1093,8 @@ func badgeTokenFor(p *v1alpha1.TenantPipelinesSpec, status *v1alpha1.TenantStatu
 // agent namespace changed, the caller confirmed a departed instance gone,
 // or the resync window elapsed. cell is the tenant's current, unchanged
 // binding (moveNone): status.Placement already names it.
-func maybeReannounce(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, cell CellCandidate, nowT time.Time, out *Outcome) {
-	policy := syncPolicyFor(in, tenant, status)
+func maybeReannounce(ctx context.Context, in Inputs, tenant *v1alpha1.Tenant, status *v1alpha1.TenantStatus, cell CellCandidate, poolName string, nowT time.Time, out *Outcome) {
+	policy := syncPolicyForPool(in, tenant, status, poolName)
 	agentNamespace := tenantAgentNamespace(tenant)
 	rehydratedInstance, pendingJobs := currentRehydrationState(in, cell)
 
