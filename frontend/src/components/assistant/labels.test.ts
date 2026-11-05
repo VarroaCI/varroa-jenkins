@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { labelFor, missingLabels, stateLine, tokenLine, STATE_LABELS, SKIP_LABELS, HTTP_LABELS } from "./labels";
+import { labelFor, missingLabels, stateLine, tokenLine, A1_VALUES, STATE_LABELS, SKIP_LABELS, HTTP_LABELS, STREAM_ERROR_LABELS } from "./labels";
 
 describe("assistant labels", () => {
   it("labels every registry value", () => {
@@ -10,6 +10,15 @@ describe("assistant labels", () => {
     expect(labelFor("sessionStates", "running")).toBe(STATE_LABELS.running);
     expect(labelFor("httpCodes", "note_too_long")).toBe(HTTP_LABELS.note_too_long);
     expect(labelFor("errorCodes", "something_new")).toBe("something_new");
+  });
+
+  it("labels every stream error code and falls back to the code", () => {
+    for (const code of A1_VALUES.streamErrorCodes) {
+      expect(labelFor("streamErrorCodes", code)).toBe(STREAM_ERROR_LABELS[code]);
+      expect(STREAM_ERROR_LABELS[code]).not.toBe("");
+    }
+    expect(A1_VALUES.streamErrorCodes).toHaveLength(7);
+    expect(labelFor("streamErrorCodes", "something_new")).toBe("something_new");
   });
 
   it("builds the footer state line", () => {

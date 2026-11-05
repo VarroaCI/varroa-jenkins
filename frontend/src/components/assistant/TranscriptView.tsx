@@ -10,6 +10,7 @@ import { Markdown } from "./Markdown";
 import { currentActivity, type PendingMessage } from "./activity";
 import { callLabel, cutUtf8, type TranscriptModel } from "./transcript";
 import { useRevealedText } from "./reveal";
+import { labelFor } from "./labels";
 import styles from "./AssistantDrawer.module.css";
 
 /** PIN_SLACK_PX is the distance from the end that still counts as at the end. */
@@ -91,7 +92,11 @@ export function TranscriptView({
               </details>
             );
           }
-          return <p key={`e${row.seq}`} role="alert" className={styles.error}>{row.code}: {row.message}</p>;
+          return (
+            <p key={`e${row.seq}`} role="alert" className={styles.error} title={`${row.code}: ${row.message}`}>
+              {labelFor("streamErrorCodes", row.code)}
+            </p>
+          );
         })}
         {pending && <p className={styles.user}>{pending.text}</p>}
         <div role="status" className={styles.activity}>

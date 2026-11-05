@@ -8,6 +8,7 @@ import type {
   AssistantSessionState,
   AssistantSkipReason,
   RunNoteErrorCode,
+  StreamErrorCode,
 } from "../../types/assistant";
 
 /** A1_VALUES lists every value of the A1 registry the drawer must label. */
@@ -22,6 +23,9 @@ export const A1_VALUES = {
     "assistant_disabled", "assistant_key_unavailable", "assistant_off", "assistant_busy", "prompt_not_startable", "kill_switch",
     "approval_expired", "tenant_agent_session", "record_store_unreachable", "note_too_long", "note_session_invalid",
   ] as (AssistantErrorCode | RunNoteErrorCode)[],
+  streamErrorCodes: [
+    "budget_session", "budget_day", "steps", "kill_switch", "provider_error", "session_key_missing", "lease_lost",
+  ] as StreamErrorCode[],
   approvalStates: ["pending", "approved", "denied", "expired"] as AssistantApprovalState[],
 };
 
@@ -54,6 +58,17 @@ export const ERROR_LABELS: Record<AssistantErrorCode, string> = {
   record_store_unreachable: "The record store does not answer. Try again when it answers.",
 };
 
+/** STREAM_ERROR_LABELS labels the code of an error event on the stream. */
+export const STREAM_ERROR_LABELS: Record<StreamErrorCode, string> = {
+  budget_session: "The session token budget is spent.",
+  budget_day: "The daily token budget is spent.",
+  steps: "The session reached its step limit.",
+  kill_switch: "The assistant is paused.",
+  provider_error: "The model provider answered with an error.",
+  session_key_missing: "No provider key is set for this session.",
+  lease_lost: "The session lost its run. An approved tool may have run.",
+};
+
 export const HTTP_LABELS: Record<AssistantErrorCode | RunNoteErrorCode, string> = {
   ...ERROR_LABELS,
   note_too_long: "The note is longer than 16384 bytes.",
@@ -71,6 +86,7 @@ const TABLES = {
   sessionStates: STATE_LABELS,
   skipReasons: SKIP_LABELS,
   errorCodes: ERROR_LABELS,
+  streamErrorCodes: STREAM_ERROR_LABELS,
   httpCodes: HTTP_LABELS,
   approvalStates: APPROVAL_LABELS,
 } as const;
