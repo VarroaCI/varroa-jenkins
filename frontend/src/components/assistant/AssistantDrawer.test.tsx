@@ -421,6 +421,37 @@ describe("AssistantDrawer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(client.createAssistantSession).toHaveBeenLastCalledWith({ context: { route: "dashboard" }, message: "one more" }));
   });
+
+  it("shows a settings link when a create is refused with assistant_off", async () => {
+    vi.mocked(client.createAssistantSession).mockRejectedValueOnce(
+      new ApiError(409, "conflict", { error: "the assistant is off for this user", code: "assistant_off" }),
+    );
+    renderDrawer();
+    fireEvent.click(screen.getByText("toggle"));
+    const box = (await screen.findByLabelText("Message")) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "why did it fail" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The assistant is off.");
+    const link = screen.getByRole("link", { name: "Open assistant settings" });
+    expect(link.getAttribute("href")).toBe("/profile?tab=assistant");
+    expect(box.value).toBe("why did it fail");
+  });
+
+  it("opens the session list when a create is refused with 429 assistant_busy", async () => {
+    vi.mocked(client.createAssistantSession).mockRejectedValueOnce(
+      new ApiError(429, "busy", { error: "too many sessions are running", code: "assistant_busy" }),
+    );
+    vi.mocked(client.listAssistantSessions).mockResolvedValueOnce({ items: [{ ...session, id: "s9", firstMessage: "" }], nextCursor: null } as never);
+    renderDrawer();
+    fireEvent.click(screen.getByText("toggle"));
+    const box = (await screen.findByLabelText("Message")) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "one more" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The assistant is busy. Try again soon.");
+    expect(await screen.findByRole("list", { name: "Sessions" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sessions" }).getAttribute("aria-expanded")).toBe("true");
+    expect(box.value).toBe("one more");
+  });
 });
 
 const originalMatchMedia = window.matchMedia;

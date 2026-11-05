@@ -212,6 +212,10 @@
   align-self: flex-start;
 }
 
+.settingsLink {
+  align-self: flex-start;
+}
+
 .withheld {
   color: var(--text-2);
   font-style: italic;
