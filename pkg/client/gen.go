@@ -750,13 +750,6 @@ const (
 	ComponentsSchemasSubjectRefKindUser  ComponentsSchemasSubjectRefKind = "User"
 )
 
-// Defines values for ComponentsSchemasTenantAgentConditionStatus.
-const (
-	False   ComponentsSchemasTenantAgentConditionStatus = "False"
-	True    ComponentsSchemasTenantAgentConditionStatus = "True"
-	Unknown ComponentsSchemasTenantAgentConditionStatus = "Unknown"
-)
-
 // Defines values for ComponentsSchemasTenantAgentErrorCode.
 const (
 	Disabled           ComponentsSchemasTenantAgentErrorCode = "disabled"
@@ -1880,16 +1873,8 @@ type ComponentsSchemasCellPool struct {
 	Status ComponentsSchemasCellPoolStatus `json:"status"`
 }
 
-// ComponentsSchemasCellPoolCondition Status condition for a CellPool. Type PoolReady, with exactly the reasons Ready, CellCapReached, ProfileMissing, RecordStoreUnsupported, BlobTierUnsupported, ArtifactSecretMissing, ArtifactPluginMissing, and SecretsMissing.
-type ComponentsSchemasCellPoolCondition struct {
-	// LastTransitionTime ISO 8601 last transition time.
-	LastTransitionTime *string `json:"lastTransitionTime,omitempty"`
-	Message            *string `json:"message,omitempty"`
-	ObservedGeneration *int64  `json:"observedGeneration,omitempty"`
-	Reason             *string `json:"reason,omitempty"`
-	Status             string  `json:"status"`
-	Type               string  `json:"type"`
-}
+// ComponentsSchemasCellPoolCondition A Kubernetes status condition (metav1.Condition). The BFF serves it from the CRD status without change.
+type ComponentsSchemasCellPoolCondition = ComponentsSchemasCondition
 
 // ComponentsSchemasCellPoolGiteaServer One Gitea or Forgejo server of a pool. The operator renders it with manageHooks false and no credential.
 type ComponentsSchemasCellPoolGiteaServer struct {
@@ -5181,8 +5166,8 @@ type ComponentsSchemasTenantAgent struct {
 	Spec       ComponentsSchemasTenantAgentSpec `json:"spec"`
 	SpendToday int64                            `json:"spendToday"`
 	Status     struct {
-		Conditions      *[]ComponentsSchemasTenantAgentCondition `json:"conditions,omitempty"`
-		InstructionsSHA *string                                  `json:"instructionsSHA,omitempty"`
+		Conditions      *[]ComponentsSchemasCondition `json:"conditions,omitempty"`
+		InstructionsSHA *string                       `json:"instructionsSHA,omitempty"`
 		LastSession     *struct {
 			At      *time.Time `json:"at,omitempty"`
 			Id      *string    `json:"id,omitempty"`
@@ -5212,19 +5197,6 @@ type ComponentsSchemasTenantAgentCapability struct {
 	Name string `json:"name"`
 }
 
-// ComponentsSchemasTenantAgentCondition defines model for components_schemas_TenantAgentCondition.
-type ComponentsSchemasTenantAgentCondition struct {
-	LastTransitionTime time.Time                                   `json:"lastTransitionTime"`
-	Message            *string                                     `json:"message,omitempty"`
-	ObservedGeneration *int64                                      `json:"observedGeneration,omitempty"`
-	Reason             string                                      `json:"reason"`
-	Status             ComponentsSchemasTenantAgentConditionStatus `json:"status"`
-	Type               string                                      `json:"type"`
-}
-
-// ComponentsSchemasTenantAgentConditionStatus defines model for ComponentsSchemasTenantAgentCondition.Status.
-type ComponentsSchemasTenantAgentConditionStatus string
-
 // ComponentsSchemasTenantAgentError A Tenant agent refusal. The code names the cause, and error gives the text.
 type ComponentsSchemasTenantAgentError struct {
 	Code  ComponentsSchemasTenantAgentErrorCode `json:"code"`
@@ -5239,17 +5211,17 @@ type ComponentsSchemasTenantAgentItem struct {
 	Cluster string `json:"cluster"`
 
 	// Conditions The conditions whose status is not True.
-	Conditions          []ComponentsSchemasTenantAgentCondition `json:"conditions"`
-	Enabled             bool                                    `json:"enabled"`
-	FailedToday         int                                     `json:"failedToday"`
-	Name                string                                  `json:"name"`
-	Namespace           string                                  `json:"namespace"`
-	Paused              *ComponentsSchemasTenantAgentPaused     `json:"paused"`
-	SessionsToday       int                                     `json:"sessionsToday"`
-	SpendToday          int64                                   `json:"spendToday"`
-	Tenant              string                                  `json:"tenant"`
-	UnattendedGranted   []string                                `json:"unattendedGranted"`
-	UnattendedRequested []string                                `json:"unattendedRequested"`
+	Conditions          []ComponentsSchemasCondition        `json:"conditions"`
+	Enabled             bool                                `json:"enabled"`
+	FailedToday         int                                 `json:"failedToday"`
+	Name                string                              `json:"name"`
+	Namespace           string                              `json:"namespace"`
+	Paused              *ComponentsSchemasTenantAgentPaused `json:"paused"`
+	SessionsToday       int                                 `json:"sessionsToday"`
+	SpendToday          int64                               `json:"spendToday"`
+	Tenant              string                              `json:"tenant"`
+	UnattendedGranted   []string                            `json:"unattendedGranted"`
+	UnattendedRequested []string                            `json:"unattendedRequested"`
 }
 
 // ComponentsSchemasTenantAgentItemList defines model for components_schemas_TenantAgentItemList.
@@ -5810,13 +5782,13 @@ type ComponentsSchemasUpdateCenterClosureEntrySource string
 // ComponentsSchemasUpdateCenterClosureEntryStatus defines model for ComponentsSchemasUpdateCenterClosureEntry.Status.
 type ComponentsSchemasUpdateCenterClosureEntryStatus string
 
-// ComponentsSchemasUpdateCenterCondition defines model for components_schemas_UpdateCenterCondition.
+// ComponentsSchemasUpdateCenterCondition A status condition of the update center. Its Go type is not metav1.Condition, so lastTransitionTime is null until the operator sets it.
 type ComponentsSchemasUpdateCenterCondition struct {
 	LastTransitionTime *time.Time `json:"lastTransitionTime"`
-	Message            *string    `json:"message,omitempty"`
-	Reason             *string    `json:"reason,omitempty"`
-	Status             *string    `json:"status,omitempty"`
-	Type               *string    `json:"type,omitempty"`
+	Message            string     `json:"message"`
+	Reason             string     `json:"reason"`
+	Status             string     `json:"status"`
+	Type               string     `json:"type"`
 }
 
 // ComponentsSchemasUpdateCenterGap defines model for components_schemas_UpdateCenterGap.

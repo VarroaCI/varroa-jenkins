@@ -4079,6 +4079,10 @@ UpdateCenterPluginRef:
 
 UpdateCenterCondition:
   type: object
+  description: >-
+    A status condition of the update center. Its Go type is not
+    metav1.Condition, so lastTransitionTime is null until the operator sets it.
+  required: [type, status, lastTransitionTime, reason, message]
   properties:
     type:
       type: string
@@ -6860,29 +6864,13 @@ CellPoolStatus:
   additionalProperties: false
 
 CellPoolCondition:
-  type: object
   description: >-
     Status condition for a CellPool. Type PoolReady, with exactly the
     reasons Ready, CellCapReached, ProfileMissing, RecordStoreUnsupported,
     BlobTierUnsupported, ArtifactSecretMissing, ArtifactPluginMissing, and
     SecretsMissing.
-  required: [type, status]
-  properties:
-    type:
-      type: string
-    status:
-      type: string
-    lastTransitionTime:
-      type: string
-      description: ISO 8601 last transition time.
-    reason:
-      type: string
-    message:
-      type: string
-    observedGeneration:
-      type: integer
-      format: int64
-  additionalProperties: false
+  allOf:
+    - $ref: '#/Condition'
 
 CellPool:
   type: object
@@ -7829,17 +7817,6 @@ TenantAgentSpec:
       type: string
       enum: [none, metadata, logs]
 
-TenantAgentCondition:
-  type: object
-  required: [type, status, reason, lastTransitionTime]
-  properties:
-    type: {type: string}
-    status: {type: string, enum: ["True", "False", "Unknown"]}
-    reason: {type: string}
-    message: {type: string}
-    lastTransitionTime: {type: string, format: date-time}
-    observedGeneration: {type: integer, format: int64}
-
 TenantAgent:
   type: object
   required: [namespace, name, tenant, cluster, spec, status, accepted, pendingApprovals, spendToday, dayLimit]
@@ -7856,7 +7833,7 @@ TenantAgent:
         conditions:
           type: array
           items:
-            $ref: '#/TenantAgentCondition'
+            $ref: '#/Condition'
         instructionsSHA: {type: string}
         lastSession:
           type: object
@@ -7966,7 +7943,7 @@ TenantAgentItem:
       type: array
       description: The conditions whose status is not True.
       items:
-        $ref: '#/TenantAgentCondition'
+        $ref: '#/Condition'
     unattendedRequested:
       type: array
       items: {type: string}

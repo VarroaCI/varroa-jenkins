@@ -178,11 +178,11 @@ func runDescribeCellPool(cmd *cobra.Command, args []string) error {
 	}
 	for _, cond := range *pool.Status.Conditions {
 		fmt.Fprintf(out, "  %s=%s", cond.Type, cond.Status)
-		if cond.Reason != nil && *cond.Reason != "" {
-			fmt.Fprintf(out, " reason=%s", *cond.Reason)
+		if cond.Reason != "" {
+			fmt.Fprintf(out, " reason=%s", cond.Reason)
 		}
-		if cond.Message != nil && *cond.Message != "" {
-			fmt.Fprintf(out, " message=%s", *cond.Message)
+		if cond.Message != "" {
+			fmt.Fprintf(out, " message=%s", cond.Message)
 		}
 		_, _ = fmt.Fprintln(out)
 	}
@@ -306,8 +306,8 @@ func cellPoolReadyCell(pool client.ComponentsSchemasCellPool) string {
 		if cond.Status == "True" {
 			return "True"
 		}
-		if cond.Reason != nil && *cond.Reason != "" {
-			return "False/" + *cond.Reason
+		if cond.Reason != "" {
+			return "False/" + cond.Reason
 		}
 		return "False"
 	}
