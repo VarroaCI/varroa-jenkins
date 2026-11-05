@@ -303,14 +303,22 @@ func cellPullEvent(fieldPath string, at time.Time) corev1.Event {
 	}
 }
 
+// cellPulledEvent returns a Pulled event of the pod for the container at
+// fieldPath, last seen at at.
+func cellPulledEvent(fieldPath string, at time.Time) corev1.Event {
+	ev := cellPullEvent(fieldPath, at)
+	ev.Reason = "Pulled"
+	return ev
+}
+
 func TestObserveInitFirstInitPull(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	pullOfPlugins := map[string]time.Time{"plugins-init": t0}
+	pullOfPlugins := map[string]pullWindow{"plugins-init": {Start: t0}}
 	cases := []struct {
 		name        string
 		pod         *corev1.Pod
 		now         time.Time
-		starts      map[string]time.Time
+		pulls       map[string]pullWindow
 		progressing bool
 		firstWait   string
 		pull        *imagePull
@@ -331,7 +339,7 @@ func TestObserveInitFirstInitPull(t *testing.T) {
 			name:        "first wait with a pull of plugins-init progresses",
 			pod:         cellPullPod(t0),
 			now:         t0.Add(5 * time.Minute),
-			starts:      pullOfPlugins,
+			pulls:       pullOfPlugins,
 			progressing: true,
 			firstWait:   "plugins-init",
 			pull:        &imagePull{Container: "plugins-init", Image: "jenkins/jenkins:2.588"},
@@ -340,27 +348,41 @@ func TestObserveInitFirstInitPull(t *testing.T) {
 			name:      "a pull of another container holds no progress",
 			pod:       cellPullPod(t0),
 			now:       t0.Add(5 * time.Minute),
-			starts:    map[string]time.Time{"jenkins": t0},
+			pulls:     map[string]pullWindow{"jenkins": {Start: t0}},
+			firstWait: "plugins-init",
+		},
+		{
+			name:      "first wait after a finished pull holds no progress",
+			pod:       cellPullPod(t0),
+			now:       t0.Add(5 * time.Minute),
+			pulls:     map[string]pullWindow{"plugins-init": {Start: t0, End: t0.Add(2 * time.Minute)}},
+			firstWait: "plugins-init",
+		},
+		{
+			name:      "first wait with a Pulled event in the Pulling second holds no progress",
+			pod:       cellPullPod(t0),
+			now:       t0.Add(5 * time.Minute),
+			pulls:     map[string]pullWindow{"plugins-init": {Start: t0, End: t0}},
 			firstWait: "plugins-init",
 		},
 		{
 			name:      "a pull past the init cap holds no progress",
 			pod:       cellPullPod(t0),
 			now:       t0.Add(cellInitRollCap + time.Minute),
-			starts:    pullOfPlugins,
+			pulls:     pullOfPlugins,
 			firstWait: "",
 		},
 		{
 			name:      "a restart of the first container holds no progress",
 			pod:       initStagePod(t0, corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "PodInitializing"}}, 1),
 			now:       t0.Add(5 * time.Minute),
-			starts:    pullOfPlugins,
+			pulls:     pullOfPlugins,
 			firstWait: "",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			obs := observeInit(tc.pod, tc.now, tc.starts)
+			obs := observeInit(tc.pod, tc.now, tc.pulls)
 			if obs.Progressing != tc.progressing {
 				t.Fatalf("Progressing = %v, want %v", obs.Progressing, tc.progressing)
 			}
@@ -379,7 +401,11 @@ func TestCellRollHoldsWhileFirstInitPulls(t *testing.T) {
 	rec, client, cr := readyGateCell(t, grace)
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	client.controllerPod = cellPullPod(t0)
-	client.pullEvents = []corev1.Event{cellPullEvent("spec.initContainers{plugins-init}", t0)}
+	// A Pulled event older than the Pulling event does not end its pull.
+	client.pullEvents = []corev1.Event{
+		cellPulledEvent("spec.initContainers{plugins-init}", t0.Add(-time.Minute)),
+		cellPullEvent("spec.initContainers{plugins-init}", t0),
+	}
 
 	for _, at := range []time.Duration{0, 11 * time.Minute, 21 * time.Minute, 25 * time.Minute} {
 		rec.evaluateCellReadiness(context.Background(), cr, t0.Add(at))
@@ -422,6 +448,17 @@ func TestCellRollFiresOnFirstInitWaitWithoutPull(t *testing.T) {
 		"failed event list": {
 			err: errors.New("events is forbidden"),
 			pod: cellPullPod(t0),
+		},
+		"Pulled newer than Pulling": {
+			events: []corev1.Event{
+				cellPullEvent("spec.initContainers{plugins-init}", t0),
+				cellPulledEvent("spec.initContainers{plugins-init}", t0.Add(30*time.Second)),
+			},
+			pod: cellPullPod(t0),
+		},
+		"Pulled only, image already present": {
+			events: []corev1.Event{cellPulledEvent("spec.initContainers{plugins-init}", t0)},
+			pod:    cellPullPod(t0),
 		},
 		"restart count 1 with a pull": {
 			events: []corev1.Event{cellPullEvent("spec.initContainers{plugins-init}", t0)},

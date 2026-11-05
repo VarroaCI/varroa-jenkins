@@ -78,7 +78,7 @@ func (b provisioningBudget) failureMessage() string {
 	return fmt.Sprintf("provisioning exceeded %v", b.Limits.Base)
 }
 
-// podPullEventLister lists the Pulling events of one pod. Only the
+// podPullEventLister lists the Pulling and Pulled events of one pod. Only the
 // clientset implements it. A test double may omit it, and the budget then
 // earns no pull credit.
 type podPullEventLister interface {
@@ -113,14 +113,14 @@ func (r *Reconciler) provisioningBudgetFor(ctx context.Context, cr *v1alpha1.Con
 		}
 		return b
 	}
-	b.PullWait, b.Pull = imagePullWait(pod, pullStartsByContainer(events), since, now)
+	b.PullWait, b.Pull = imagePullWait(pod, pullWindowsByContainer(events), since, now)
 	return b
 }
 
 // isCreateWait reports whether a container waits for kubelet to create it.
 // The status does not change while the first init container pulls its
-// image, so only a Pulling event separates a pull from a volume or sandbox
-// wait.
+// image. Only a Pulling event with no later Pulled event separates a pull
+// from a volume or sandbox wait.
 func isCreateWait(s corev1.ContainerStatus) bool {
 	if s.State.Waiting == nil {
 		return false
@@ -159,32 +159,87 @@ func nextStartWaiter(pod *corev1.Pod) string {
 	return ""
 }
 
-// pullStartsByContainer keeps the latest Pulling event time of each container.
-func pullStartsByContainer(events []corev1.Event) map[string]time.Time {
-	starts := make(map[string]time.Time)
+// Kubelet event reasons that open and close an image pull.
+const (
+	kubeletPullingReason = "Pulling"
+	kubeletPulledReason  = "Pulled"
+)
+
+// pullWindow is the latest image pull of one container, read from the events
+// of its pod. End is zero while the pull runs.
+type pullWindow struct {
+	Start time.Time // time of the latest Pulling event
+	End   time.Time // time of the first Pulled event at or after Start, or zero
+}
+
+// running reports whether no Pulled event has ended the pull.
+func (w pullWindow) running() bool { return w.End.IsZero() }
+
+// endBy returns the Pulled time when it is before limit, and limit otherwise.
+func (w pullWindow) endBy(limit time.Time) time.Time {
+	if !w.End.IsZero() && w.End.Before(limit) {
+		return w.End
+	}
+	return limit
+}
+
+// pullEventTime returns the time of a pull event, or zero when it has none.
+func pullEventTime(ev corev1.Event) time.Time {
+	t := ev.LastTimestamp.Time
+	if t.IsZero() {
+		t = ev.EventTime.Time
+	}
+	if t.IsZero() {
+		t = ev.FirstTimestamp.Time
+	}
+	return t
+}
+
+// pullWindowsByContainer returns the pull window of each container. Each
+// container gets the window of its latest Pulling event. The first Pulled
+// event at or after that time ends it. Event times have one-second precision,
+// so a Pulled event in the same second ends the pull. A container with only a
+// Pulled event gets no window.
+func pullWindowsByContainer(events []corev1.Event) map[string]pullWindow {
+	windows := make(map[string]pullWindow)
 	for _, ev := range events {
-		if ev.Reason != "Pulling" {
+		if ev.Reason != kubeletPullingReason {
 			continue
 		}
 		name, ok := containerNameFromFieldPath(ev.InvolvedObject.FieldPath)
 		if !ok {
 			continue
 		}
-		t := ev.LastTimestamp.Time
-		if t.IsZero() {
-			t = ev.EventTime.Time
-		}
-		if t.IsZero() {
-			t = ev.FirstTimestamp.Time
-		}
+		t := pullEventTime(ev)
 		if t.IsZero() {
 			continue
 		}
-		if t.After(starts[name]) {
-			starts[name] = t
+		if t.After(windows[name].Start) {
+			windows[name] = pullWindow{Start: t}
 		}
 	}
-	return starts
+	for _, ev := range events {
+		if ev.Reason != kubeletPulledReason {
+			continue
+		}
+		name, ok := containerNameFromFieldPath(ev.InvolvedObject.FieldPath)
+		if !ok {
+			continue
+		}
+		w, ok := windows[name]
+		if !ok {
+			continue
+		}
+		t := pullEventTime(ev)
+		if t.IsZero() || t.Before(w.Start) {
+			continue
+		}
+		if w.End.IsZero() || t.Before(w.End) {
+			w.End = t
+			windows[name] = w
+		}
+	}
+	return windows
 }
 
 // containerNameFromFieldPath returns the container name in an event field
@@ -201,10 +256,11 @@ func containerNameFromFieldPath(fp string) (string, bool) {
 
 // imagePullWait sums the image-pull windows of the pod that overlap the
 // interval [since, now]. It also names the pull that runs now, if one does.
-// A window runs from the container's Pulling event to the container start,
-// or to now while the container still waits to be created. Kubelet starts
+// A window runs from the container's Pulling event to its Pulled event and
+// the container start, whichever comes first. A window with no Pulled event
+// runs to now while the container still waits to be created. Kubelet starts
 // one container at a time, so the windows do not overlap.
-func imagePullWait(pod *corev1.Pod, pullStarts map[string]time.Time, since, now time.Time) (time.Duration, *imagePull) {
+func imagePullWait(pod *corev1.Pod, pulls map[string]pullWindow, since, now time.Time) (time.Duration, *imagePull) {
 	images := make(map[string]string)
 	for _, c := range pod.Spec.InitContainers {
 		images[c.Name] = c.Image
@@ -219,27 +275,28 @@ func imagePullWait(pod *corev1.Pod, pullStarts map[string]time.Time, since, now 
 	var total time.Duration
 	var current *imagePull
 	for _, s := range statuses {
-		start, ok := pullStarts[s.Name]
+		w, ok := pulls[s.Name]
 		if !ok {
 			continue
 		}
+		start := w.Start
 		// A pull that began before a restart ended when the first run started.
 		// LastTerminationState keeps that start only while one run has ended.
 		// With more restarts, no start of an earlier run is known, so no credit.
 		if s.RestartCount > 0 && !pullAfterLastExit(s, start) {
 			if last := s.LastTerminationState.Terminated; s.RestartCount == 1 && last != nil {
-				total += windowOverlap(start, last.StartedAt.Time, since, now)
+				total += windowOverlap(start, w.endBy(last.StartedAt.Time), since, now)
 			}
 			continue
 		}
 		switch {
 		case s.State.Running != nil:
-			total += windowOverlap(start, s.State.Running.StartedAt.Time, since, now)
+			total += windowOverlap(start, w.endBy(s.State.Running.StartedAt.Time), since, now)
 		case s.State.Terminated != nil:
-			total += windowOverlap(start, s.State.Terminated.StartedAt.Time, since, now)
+			total += windowOverlap(start, w.endBy(s.State.Terminated.StartedAt.Time), since, now)
 		case isCreateWait(s):
-			total += windowOverlap(start, now, since, now)
-			if current == nil {
+			total += windowOverlap(start, w.endBy(now), since, now)
+			if current == nil && w.running() {
 				image := images[s.Name]
 				if image == "" {
 					image = s.Image
