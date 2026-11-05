@@ -67,7 +67,7 @@ The read applies the same tenant read check the tenant page applies, and it carr
 tenant's name, job path, run, or count. `otherTenantCount` is a count, never a list.
 
 `members` carries one entry for each member of the tenant, with that member's cell, its role, and
-its own four counts. Every other field describes the tenant's slot 0.
+its own four counts. Every other field describes the tenant's slot 0. `stale` is true for a member on a cell of another profile or pool.
 
 The `state` field holds one of five values.
 

@@ -36,15 +36,15 @@ function threeMemberCell(overrides: Partial<TenantCell> = {}): TenantCell {
     canOpenCell: false,
     members: [
       {
-        cell: "cell-a", namespace: "varroa-system", cluster: "core", role: "slot 0",
+        cell: "cell-a", namespace: "varroa-system", cluster: "core", stale: false, role: "slot 0",
         runningNow: 2, runsLast24h: 5, failedLast24h: 1, jobs: 4,
       },
       {
-        cell: "cell-b", namespace: "varroa-system", cluster: "core", role: "slot 1",
+        cell: "cell-b", namespace: "varroa-system", cluster: "core", stale: false, role: "slot 1",
         runningNow: 1, runsLast24h: 3, failedLast24h: 0, jobs: 2,
       },
       {
-        cell: "cell-c", namespace: "varroa-system", cluster: "core", role: "standby",
+        cell: "cell-c", namespace: "varroa-system", cluster: "core", stale: false, role: "standby",
         runningNow: 0, runsLast24h: 0, failedLast24h: 0, jobs: 0,
       },
     ],
@@ -92,7 +92,7 @@ describe("TenantCellCard members", () => {
       threeMemberCell({
         members: [
           {
-            cell: "cell-a", namespace: "varroa-system", cluster: "core", role: "slot 0",
+            cell: "cell-a", namespace: "varroa-system", cluster: "core", stale: false, role: "slot 0",
             runningNow: 2, runsLast24h: 5, failedLast24h: 1, jobs: 4,
           },
         ],
@@ -112,5 +112,19 @@ describe("TenantCellCard members", () => {
 
     await waitFor(() => expect(screen.getByText("Your cell")).toBeInTheDocument());
     expect(screen.queryByRole("list", { name: "Members" })).toBeNull();
+  });
+
+  // A stale member carries the Waiting to move badge, and no other member does.
+  it("labels a stale member", async () => {
+    const cell = threeMemberCell();
+    cell.members![2].stale = true;
+    mockGetTenantCell.mockResolvedValue(cell);
+    renderCard();
+
+    const list = await screen.findByRole("list", { name: "Members" });
+    const entries = within(list).getAllByRole("listitem");
+    expect(within(entries[2]).getByText("Waiting to move")).toBeInTheDocument();
+    expect(within(entries[0]).queryByText("Waiting to move")).toBeNull();
+    expect(within(entries[1]).queryByText("Waiting to move")).toBeNull();
   });
 });

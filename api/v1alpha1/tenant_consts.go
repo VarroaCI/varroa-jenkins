@@ -81,6 +81,10 @@ const (
 	// TenantReasonMembersApplied reports a tenant whose every member cell
 	// lists it as applied.
 	TenantReasonMembersApplied = "MembersApplied"
+	// TenantReasonMembersStale reports a tenant whose every slot and standby
+	// holds a cell, and at least one member's cell serves another profile or
+	// belongs to another pool. The tenant still builds.
+	TenantReasonMembersStale = "MembersStale"
 )
 
 // TenantWarnings reasons.

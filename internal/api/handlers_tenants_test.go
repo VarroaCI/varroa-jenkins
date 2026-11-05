@@ -1160,3 +1160,22 @@ func TestValidateTenantPipelinesRejectsBadSlotCounts(t *testing.T) {
 		})
 	}
 }
+
+// TestTenantPlacementEntryCarriesTheStaleFlag asserts each member entry
+// maps the stale flag from the stored status.
+func TestTenantPlacementEntryCarriesTheStaleFlag(t *testing.T) {
+	slot := int32(0)
+	entry := tenantPlacementEntryFromStatus(&v1alpha1.TenantPlacementStatus{
+		Cell: "cell-a", CellNamespace: "cells",
+		Members: []v1alpha1.TenantMemberStatus{
+			{Cell: "cell-a", CellNamespace: "cells", Role: v1alpha1.TenantMemberRoleActive, Slot: &slot, Applied: true},
+			{Cell: "cell-c", CellNamespace: "cells", Role: v1alpha1.TenantMemberRoleStandby, Applied: true, Stale: true},
+		},
+	})
+	if entry == nil || len(entry.Members) != 2 {
+		t.Fatalf("entry = %+v, want two members", entry)
+	}
+	if entry.Members[0].Stale || !entry.Members[1].Stale {
+		t.Errorf("stale flags = %t/%t, want false/true", entry.Members[0].Stale, entry.Members[1].Stale)
+	}
+}

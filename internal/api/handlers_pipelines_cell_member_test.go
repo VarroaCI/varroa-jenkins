@@ -3,10 +3,55 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
+
+// TestGetTenantCellCarriesTheStaleFlag asserts a stale standby reports
+// stale=true, the current slot-0 member reports stale=false, and the raw
+// body names the flag on every member.
+func TestGetTenantCellCarriesTheStaleFlag(t *testing.T) {
+	client, reader := tenantCellFixture(t, []string{tenantCellTenant})
+	obj := tenantCellObject("core", v1alpha1.TenantReasonMembersStale)
+	_ = unstructured.SetNestedSlice(obj.Object, []any{
+		map[string]any{
+			"cell": "cell-a", "cellNamespace": "cells", "role": "active",
+			"slot": int64(0), "applied": true, "stale": false,
+		},
+		map[string]any{
+			"cell": "cell-c", "cellNamespace": "cells", "role": "standby",
+			"applied": true, "stale": true,
+		},
+	}, "status", "placement", "members")
+	seedTenant(t, client.crdStore, obj)
+	srv := tenantCellServer(client, tenantCellAuthorizer([]string{tenantCellTenant}, nil), reader)
+
+	rec := doTenantCellRequest(t, srv, tenantCellTenant)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	body := decodeTenantCell(t, rec)
+	if body.State != tenantCellPlaced {
+		t.Errorf("state = %q, want placed", body.State)
+	}
+	if body.Reason != v1alpha1.TenantReasonMembersStale {
+		t.Errorf("reason = %q, want MembersStale", body.Reason)
+	}
+	if len(body.Members) != 2 {
+		t.Fatalf("members = %+v, want two", body.Members)
+	}
+	if body.Members[0].Stale || !body.Members[1].Stale {
+		t.Errorf("stale flags = %t/%t, want false/true", body.Members[0].Stale, body.Members[1].Stale)
+	}
+	if !strings.Contains(rec.Body.String(), `"stale":false`) {
+		t.Errorf("body lacks an explicit stale:false: %s", rec.Body.String())
+	}
+}
 
 // TestGetTenantCellReportsAMemberPlacedTenant asserts a Tenant that only a
 // member cluster holds answers its placed cell, not notCellHosted: the

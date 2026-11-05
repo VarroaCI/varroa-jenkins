@@ -5362,6 +5362,9 @@ type ComponentsSchemasTenantCellMember struct {
 	Role        string `json:"role"`
 	RunningNow  int64  `json:"runningNow"`
 	RunsLast24h int64  `json:"runsLast24h"`
+
+	// Stale True when the member's cell serves another profile or belongs to another pool. The member keeps that cell until the tenant's pool has a free cell.
+	Stale bool `json:"stale"`
 }
 
 // ComponentsSchemasTenantCellWarning The Tenant's TenantWarnings condition, verbatim, while its status is True. It is absent otherwise.
@@ -5460,6 +5463,9 @@ type ComponentsSchemasTenantMember struct {
 
 	// Slot The slot index. Set only on an active member.
 	Slot *int32 `json:"slot,omitempty"`
+
+	// Stale True when the member's cell serves another profile or belongs to another pool. The member keeps that cell until the tenant's pool has a free cell.
+	Stale *bool `json:"stale,omitempty"`
 }
 
 // ComponentsSchemasTenantMemberRole An active member holds one slot. A standby holds the folder, holds no slot, and runs no build.

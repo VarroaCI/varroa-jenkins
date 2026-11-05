@@ -1925,6 +1925,10 @@ type TenantMemberStatus struct {
 	Slot *int32 `json:"slot,omitempty"`
 	// Applied is true when the member's cell reports this tenant applied.
 	Applied bool `json:"applied,omitempty"`
+	// Stale is true when the member's cell serves another profile or
+	// belongs to another pool. The member keeps its cell until the
+	// tenant's pool has a free cell for it.
+	Stale bool `json:"stale,omitempty"`
 }
 
 // TenantPipelinesStatus carries a pipelines tenant's door credentials and

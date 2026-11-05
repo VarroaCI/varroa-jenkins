@@ -2,6 +2,7 @@ package cells
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -202,6 +203,115 @@ func TestPlaceKeepsAStaleMemberUntilAReplacementExists(t *testing.T) {
 	}
 	if len(status.Placement.Members) != 3 {
 		t.Errorf("members = %d, want 3: %+v", len(status.Placement.Members), status.Placement.Members)
+	}
+	wantStale := []bool{false, true, true}
+	for i, m := range status.Placement.Members {
+		if m.Stale != wantStale[i] {
+			t.Errorf("member %d (%s) stale = %t, want %t", i, m.Cell, m.Stale, wantStale[i])
+		}
+	}
+	assertMembersStale(t, status, "slot 1 cells-ns/cell-b", "standby cells-ns/cell-c", `pool "jenkins-lts"`)
+	if strings.Contains(placedMessage(status), "cell-d") {
+		t.Errorf("message names the fresh member cell-d: %q", placedMessage(status))
+	}
+}
+
+// assertMembersStale checks that Placed reports MembersStale as True and
+// that its message contains each wanted fragment.
+func assertMembersStale(t *testing.T, status *v1alpha1.TenantStatus, fragments ...string) {
+	t.Helper()
+	var cond *v1alpha1.TenantCondition
+	for i := range status.Conditions {
+		if status.Conditions[i].Type == v1alpha1.TenantConditionPlaced {
+			cond = &status.Conditions[i]
+		}
+	}
+	if cond == nil {
+		t.Fatalf("no Placed condition")
+	}
+	if cond.Status != metav1.ConditionTrue || cond.Reason != v1alpha1.TenantReasonMembersStale {
+		t.Fatalf("Placed = %s/%s, want True/MembersStale", cond.Status, cond.Reason)
+	}
+	for _, f := range fragments {
+		if !strings.Contains(cond.Message, f) {
+			t.Errorf("message %q lacks %q", cond.Message, f)
+		}
+	}
+}
+
+// placedMessage answers the Placed condition message, or an empty string.
+func placedMessage(status *v1alpha1.TenantStatus) string {
+	for _, c := range status.Conditions {
+		if c.Type == v1alpha1.TenantConditionPlaced {
+			return c.Message
+		}
+	}
+	return ""
+}
+
+// TestPlaceRefreshesTheStaleFlagEachTick asserts the stale flag follows
+// this tick's cells without an announcement, and that the Placed reason
+// follows the flags.
+func TestPlaceRefreshesTheStaleFlagEachTick(t *testing.T) {
+	tenant := slotTenant(2, 1)
+	status := threeMemberStatus("cell-d")
+	status.Placement.Members[1].Stale = true
+
+	in := testInputs()
+	in.Cells = []CellCandidate{
+		appliedCell("cell-d", "payments"),
+		appliedCell("cell-b", "payments"),
+		oldProfileCell("cell-c", "payments"),
+	}
+	in.Announce = failingAnnounce()
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
+		t.Fatalf("Place tick 1: %v", err)
+	}
+	if status.Placement.Members[1].Stale {
+		t.Errorf("tick 1: cell-b is current, want stale=false")
+	}
+	if !status.Placement.Members[2].Stale {
+		t.Errorf("tick 1: cell-c serves the old profile, want stale=true")
+	}
+	assertMembersStale(t, status, "standby cells-ns/cell-c")
+
+	in.Cells[2] = appliedCell("cell-c", "payments")
+	in.Announce = succeedingAnnounce()
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
+		t.Fatalf("Place tick 2: %v", err)
+	}
+	for i, m := range status.Placement.Members {
+		if m.Stale {
+			t.Errorf("tick 2: member %d (%s) stale, want false", i, m.Cell)
+		}
+	}
+	if got := placedReason(status); got != v1alpha1.TenantReasonMembersApplied {
+		t.Errorf("tick 2 reason = %q, want MembersApplied", got)
+	}
+}
+
+// TestPlaceKeepsTheMemberReasonTransitionTime asserts a repeat tick on an
+// unchanged MembersStale state keeps the Placed transition time.
+func TestPlaceKeepsTheMemberReasonTransitionTime(t *testing.T) {
+	tenant := slotTenant(2, 1)
+	status := threeMemberStatus("cell-d")
+	in := testInputs()
+	in.Cells = []CellCandidate{
+		appliedCell("cell-d", "payments"),
+		appliedCell("cell-b", "payments"),
+		oldProfileCell("cell-c", "payments"),
+	}
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
+		t.Fatalf("Place tick 1: %v", err)
+	}
+	in.Now = fixedClock(fixedNow.Add(time.Minute))
+	if _, err := Place(context.Background(), in, tenant, status); err != nil {
+		t.Fatalf("Place tick 2: %v", err)
+	}
+	for _, c := range status.Conditions {
+		if c.Type == v1alpha1.TenantConditionPlaced && !c.LastTransitionTime.Time.Equal(fixedNow) {
+			t.Errorf("Placed transition = %s, want %s", c.LastTransitionTime.Time, fixedNow)
+		}
 	}
 }
 

@@ -623,16 +623,20 @@ export interface TenantMember {
   slot?: number;
   /** True when the member's cell reports this tenant applied. */
   applied?: boolean;
+  /** True when the member's cell serves another profile or pool. */
+  stale?: boolean;
 }
 
 /**
- * tenantMemberLabel renders one member for a listing: the cell name, and the
- * slot or the standby role. A tenant with no member list falls back to the
- * scalar placement, so a single-member tenant reads as it always has.
+ * tenantMemberLabel renders one member for a listing: the cell name, the
+ * slot or the standby role, and "waiting to move" for a stale member. A
+ * tenant with no member list falls back to the scalar placement, so a
+ * single-member tenant reads as it always has.
  */
 export function tenantMemberLabel(member: TenantMember): string {
   const role = member.role === "standby" ? "standby" : `slot ${member.slot ?? 0}`;
-  return `${member.cell ?? "?"} (${role})`;
+  const stale = member.stale ? ", waiting to move" : "";
+  return `${member.cell ?? "?"} (${role}${stale})`;
 }
 
 /**
@@ -2920,6 +2924,8 @@ export interface TenantCellMember {
   cluster: string;
   /** "slot <n>" for an active member and "standby" for a standby. */
   role: string;
+  /** True when the member's cell serves another profile or pool. */
+  stale: boolean;
   runningNow: number;
   runsLast24h: number;
   failedLast24h: number;

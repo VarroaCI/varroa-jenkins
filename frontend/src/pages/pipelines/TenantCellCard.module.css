@@ -194,3 +194,9 @@
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
+
+.memberTags {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
