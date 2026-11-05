@@ -312,7 +312,7 @@ func TestCellPool_DrainsToWarm(t *testing.T) {
 		poolCellNamed("cell-lts-2-555-1", testProfileName, nil),
 		poolCellNamed("cell-lts-2-555-2", testProfileName, nil),
 		poolCellNamed("cell-lts-2-555-3", testProfileName, []string{"team-a"}),
-		poolCellNamed("cell-lts-2-555-4", testProfileName, []string{"team-b"}),
+		poolCellNamed("cell-lts-2-555-4", testProfileName, []string{"tenant-b"}),
 	)
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
@@ -339,7 +339,7 @@ func TestCellPool_NeverDeletesAPlacedCell(t *testing.T) {
 	crdstore.MustSeed(store,
 		newProfile(), newPool(0),
 		poolCellNamed("cell-lts-2-555-0", testProfileName, []string{"team-a"}),
-		poolCellNamed("cell-lts-2-555-1", testProfileName, []string{"team-b"}),
+		poolCellNamed("cell-lts-2-555-1", testProfileName, []string{"tenant-b"}),
 	)
 
 	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
@@ -1874,6 +1874,9 @@ func TestCellPool_DrainKeepsACellWithADeferredDeletion(t *testing.T) {
 	if !cellExists(t, store, "cell-lts-2-555-0") {
 		t.Fatal("the drain deleted a cell whose build still runs")
 	}
+	if got := getPool(t, store, testProfileName).Status.DepartedBuildCells; got != 1 {
+		t.Fatalf("DepartedBuildCells = %d, want 1 while the build runs", got)
+	}
 
 	crdstore.MustSeed(store, departedBuildCell("cell-lts-2-555-0", nil, nil))
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -1881,6 +1884,9 @@ func TestCellPool_DrainKeepsACellWithADeferredDeletion(t *testing.T) {
 	}
 	if cellExists(t, store, "cell-lts-2-555-0") {
 		t.Fatal("a clean free cell must be drained once its build ends")
+	}
+	if got := getPool(t, store, testProfileName).Status.DepartedBuildCells; got != 0 {
+		t.Fatalf("DepartedBuildCells = %d, want 0 once the cell is gone", got)
 	}
 }
 
@@ -1915,6 +1921,73 @@ func TestCellPool_DrainTakesAnotherFreeCellFirst(t *testing.T) {
 	got := cellNames(listCells(t, store))
 	if len(got) != 1 || got[0] != "cell-lts-2-555-1" {
 		t.Fatalf("cells = %v, want [cell-lts-2-555-1]", got)
+	}
+	status := getPool(t, store, testProfileName).Status
+	if status.WarmCells != 1 || status.DepartedBuildCells != 1 {
+		t.Fatalf("WarmCells = %d, DepartedBuildCells = %d, want 1 and 1",
+			status.WarmCells, status.DepartedBuildCells)
+	}
+}
+
+// TestCellPool_StatusCountsDepartedBuildCells checks the count against the
+// drain rule: a clean cell, a placed cell, and a cell with no instance or
+// an evacuation do not count, and each held free cell does.
+func TestCellPool_StatusCountsDepartedBuildCells(t *testing.T) {
+	store := crdstore.NewFake()
+	placed := poolCellNamed("cell-lts-2-555-5", testProfileName, []string{"alpha"})
+	placed.Status.Cell = &v1alpha1.CellStatus{
+		Tenants:        []string{"alpha"},
+		AppliedTenants: []string{"alpha", "gone"},
+		Instance:       "pod-placed",
+	}
+	placed.Status.PendingItemDeletions = []v1alpha1.PendingDeletion{{Path: "gone", Reason: "build in progress"}}
+	noInstance := departedBuildCell("cell-lts-2-555-3", []string{"tenant-c"}, nil)
+	noInstance.Status.Cell.Instance = ""
+	evacuating := departedBuildCell("cell-lts-2-555-4", nil, []string{"tenant-d"})
+	evacuating.Status.Cell.Evacuate = true
+	crdstore.MustSeed(store, newProfile(), newPool(5),
+		poolCellNamed("cell-lts-2-555-0", testProfileName, nil),
+		departedBuildCell("cell-lts-2-555-1", nil, []string{"team-a"}),
+		departedBuildCell("cell-lts-2-555-2", []string{"tenant-b"}, nil),
+		noInstance, evacuating, placed)
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	status := getPool(t, store, testProfileName).Status
+	if status.WarmCells != 5 || status.PlacedCells != 1 || status.DepartedBuildCells != 2 {
+		t.Fatalf("WarmCells = %d, PlacedCells = %d, DepartedBuildCells = %d, want 5, 1, 2",
+			status.WarmCells, status.PlacedCells, status.DepartedBuildCells)
+	}
+	if got := len(listCells(t, store)); got != 6 {
+		t.Fatalf("cells = %d, want the six seeded cells and no create or delete", got)
+	}
+}
+
+// TestCellPool_DepartedBuildCountFallsToZero checks that a count which drops
+// to zero reaches the stored status, not only a rise.
+func TestCellPool_DepartedBuildCountFallsToZero(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), newPool(1),
+		departedBuildCell("cell-lts-2-555-0", nil, []string{"team-a"}))
+
+	r := newReconciler(store, WarmPoolConfig{MaxTenantsPerCell: 10})
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	status := getPool(t, store, testProfileName).Status
+	if status.DepartedBuildCells != 1 || status.WarmCells != 1 {
+		t.Fatalf("DepartedBuildCells = %d, WarmCells = %d, want 1 and 1",
+			status.DepartedBuildCells, status.WarmCells)
+	}
+
+	crdstore.MustSeed(store, departedBuildCell("cell-lts-2-555-0", nil, nil))
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if got := getPool(t, store, testProfileName).Status.DepartedBuildCells; got != 0 {
+		t.Fatalf("DepartedBuildCells = %d, want 0 after the hold ends", got)
 	}
 }
 

@@ -162,6 +162,7 @@ function PoolBlock({
 
       <dl className={styles.counts}>
         <Count label="Warm cells" value={pool.status.warmCells} />
+        <Count label="Warm cells kept for a build" value={pool.status.departedBuildCells} />
         <Count label="Placed cells" value={pool.status.placedCells} />
         <Count label="Unready cells" value={pool.status.unreadyCells} />
         <Count label="Free slots on placed cells" value={pool.status.freeTenantSlots} />

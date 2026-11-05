@@ -157,6 +157,7 @@ func runDescribeCellPool(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "Unready grace:       %s\n", *pool.Spec.UnreadyGracePeriod)
 	}
 	fmt.Fprintf(out, "Warm cells:          %d\n", pool.Status.WarmCells)
+	fmt.Fprintf(out, "Warm cells kept for a build: %d\n", pool.Status.DepartedBuildCells)
 	fmt.Fprintf(out, "Placed cells:        %d\n", pool.Status.PlacedCells)
 	fmt.Fprintf(out, "Unready cells:       %d\n", pool.Status.UnreadyCells)
 	fmt.Fprintf(out, "Free tenant slots:   %d\n", pool.Status.FreeTenantSlots)

@@ -445,3 +445,33 @@ func TestScaleCellPool_RejectsMail(t *testing.T) {
 		t.Fatalf("status = %d, want 400; body=%s", w.Result().StatusCode, w.Body.String())
 	}
 }
+
+// TestCellPoolEntryFrom_CarriesDepartedBuildCells checks that the count
+// reaches the wire, including a zero, which the schema requires.
+func TestCellPoolEntryFrom_CarriesDepartedBuildCells(t *testing.T) {
+	pool := &v1alpha1.CellPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "lts-2-555"},
+		Spec:       v1alpha1.CellPoolSpec{ProfileRef: "lts-2-555", Warm: 1, MaxTenantsPerCell: 10},
+		Status:     v1alpha1.CellPoolStatus{WarmCells: 1, DepartedBuildCells: 1},
+	}
+	entry := cellPoolEntryFrom(pool)
+	if entry.Status.DepartedBuildCells != 1 {
+		t.Fatalf("DepartedBuildCells = %d, want 1", entry.Status.DepartedBuildCells)
+	}
+	wire, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(wire), `"departedBuildCells":1`) {
+		t.Fatalf("wire JSON lacks departedBuildCells:1: %s", wire)
+	}
+
+	pool.Status.DepartedBuildCells = 0
+	wire, err = json.Marshal(cellPoolEntryFrom(pool))
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(wire), `"departedBuildCells":0`) {
+		t.Fatalf("wire JSON lacks departedBuildCells:0: %s", wire)
+	}
+}

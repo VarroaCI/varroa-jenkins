@@ -3014,6 +3014,8 @@ export interface CellPoolStatus {
   unreadyCells: number;
   /** The spare capacity of the placed cells only. warmCells counts the empty ones. */
   freeTenantSlots: number;
+  /** Warm cells that still run a build of a tenant that left them. The drain skips them. warmCells counts them too. */
+  departedBuildCells: number;
   tenants?: string[];
   conditions?: CellPoolCondition[];
 }

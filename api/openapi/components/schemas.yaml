@@ -6748,7 +6748,7 @@ CellPoolLibrary:
 CellPoolStatus:
   type: object
   description: A CellPool's reported cell and tenant counts.
-  required: [warmCells, placedCells, unreadyCells, freeTenantSlots]
+  required: [warmCells, placedCells, unreadyCells, freeTenantSlots, departedBuildCells]
   properties:
     observedGeneration:
       type: integer
@@ -6771,6 +6771,12 @@ CellPoolStatus:
       description: >-
         Spare capacity of the placed cells only. warmCells already reports
         the empty ones.
+    departedBuildCells:
+      type: integer
+      format: int32
+      description: >-
+        Warm cells that still run a build of a tenant that left them. The
+        drain skips these cells. warmCells also counts them.
     tenants:
       type: array
       items:

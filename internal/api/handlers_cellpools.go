@@ -80,7 +80,7 @@ type cellTemplate struct {
 	PodOverrides  json.RawMessage `json:"podOverrides,omitempty"`
 }
 
-// cellPoolStatusEntry mirrors v1alpha1.CellPoolStatus. The four counters
+// cellPoolStatusEntry mirrors v1alpha1.CellPoolStatus. The five counters
 // carry no omitempty, so a count that falls to zero reaches the caller.
 type cellPoolStatusEntry struct {
 	ObservedGeneration int64                    `json:"observedGeneration,omitempty"`
@@ -88,6 +88,7 @@ type cellPoolStatusEntry struct {
 	PlacedCells        int32                    `json:"placedCells"`
 	UnreadyCells       int32                    `json:"unreadyCells"`
 	FreeTenantSlots    int32                    `json:"freeTenantSlots"`
+	DepartedBuildCells int32                    `json:"departedBuildCells"`
 	Tenants            []string                 `json:"tenants,omitempty"`
 	Conditions         []cellPoolConditionEntry `json:"conditions,omitempty"`
 }
@@ -129,6 +130,7 @@ func cellPoolEntryFrom(pool *v1alpha1.CellPool) cellPoolEntry {
 			PlacedCells:        pool.Status.PlacedCells,
 			UnreadyCells:       pool.Status.UnreadyCells,
 			FreeTenantSlots:    pool.Status.FreeTenantSlots,
+			DepartedBuildCells: pool.Status.DepartedBuildCells,
 			Tenants:            pool.Status.Tenants,
 		},
 	}

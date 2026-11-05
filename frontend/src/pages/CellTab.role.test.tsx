@@ -55,6 +55,7 @@ function rolePool(): CellPool {
       placedCells: 3,
       unreadyCells: 0,
       freeTenantSlots: 8,
+      departedBuildCells: 0,
       conditions: [{ type: "PoolReady", status: "True", reason: "Ready" }],
     },
   };

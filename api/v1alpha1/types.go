@@ -2327,7 +2327,7 @@ type CellPoolLibrary struct {
 	AllowVersionOverride bool `json:"allowVersionOverride,omitempty"`
 }
 
-// CellPoolStatus reports the pool's live cell and tenant counts. The four
+// CellPoolStatus reports the pool's live cell and tenant counts. The five
 // counters carry no omitempty, so a merge patch writes a count that falls
 // to zero.
 type CellPoolStatus struct {
@@ -2344,6 +2344,12 @@ type CellPoolStatus struct {
 	// FreeTenantSlots sums the spare capacity of the placed cells only.
 	// WarmCells already reports the empty ones.
 	FreeTenantSlots int32 `json:"freeTenantSlots"`
+	// DepartedBuildCells counts the warm cells that still run a build of a
+	// tenant that left them. The drain skips these cells. WarmCells also
+	// counts them. The schema does not require the field, so a pool stored
+	// before the field existed stays valid.
+	// +optional
+	DepartedBuildCells int32 `json:"departedBuildCells"`
 	// Tenants lists every tenant on the pool, sorted.
 	// +optional
 	Tenants []string `json:"tenants,omitempty"`

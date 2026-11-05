@@ -1977,6 +1977,9 @@ type ComponentsSchemasCellPoolSpec struct {
 type ComponentsSchemasCellPoolStatus struct {
 	Conditions *[]ComponentsSchemasCellPoolCondition `json:"conditions,omitempty"`
 
+	// DepartedBuildCells Warm cells that still run a build of a tenant that left them. The drain skips these cells. warmCells also counts them.
+	DepartedBuildCells int32 `json:"departedBuildCells"`
+
 	// FreeTenantSlots Spare capacity of the placed cells only. warmCells already reports the empty ones.
 	FreeTenantSlots    int32  `json:"freeTenantSlots"`
 	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
