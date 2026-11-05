@@ -1687,6 +1687,15 @@ PluginConflict:
       type: string
   additionalProperties: false
 
+ImagePull:
+  type: object
+  description: Read-only projection of the provisioning image pull that runs now. Absent when no pull runs.
+  properties:
+    message:
+      type: string
+  required: [message]
+  additionalProperties: false
+
 MiteImageStatus:
   type: object
   description: Read-only projection of mite image staleness.
@@ -1889,6 +1898,8 @@ ControllerDetail:
       $ref: '#/VersionStatus'
     miteImageStatus:
       $ref: '#/MiteImageStatus'
+    imagePull:
+      $ref: '#/ImagePull'
     reconcileBlocked:
       $ref: '#/ReconcileBlocked'
     attention:

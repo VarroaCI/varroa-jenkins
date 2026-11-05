@@ -104,6 +104,8 @@ Read `status.phase` and `status.conditions` when operating a controller.
 | `Hibernated` | Inactivity policy parked the controller. |
 | `Failed` | A blocking provisioning or operation error occurred. |
 
+Provisioning has a 5-minute budget. Time that kubelet spends pulling an image does not count against it. The `ImagePulling` condition names the image while a pull runs. Provisioning fails after 20 minutes in all cases. The phase is then `Failed` with reason `ProvisioningTimeout`, and the operator provisions the controller again.
+
 A phase says where the controller is in its lifecycle. It does not say whether the controller is stuck there. Varroa reports "needs attention" separately, on the dashboard, the controllers list, and the detail page. It is derived from these status signals, in precedence order.
 
 | Signal | Shown as | Meaning |

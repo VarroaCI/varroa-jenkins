@@ -2141,6 +2141,9 @@
             "description": "When the controller was last hibernated (status.hibernatedAt, RFC 3339).",
             "type": "string"
           },
+          "imagePull": {
+            "$ref": "#/components/schemas/components_schemas_ImagePull"
+          },
           "jenkinsHealth": {
             "type": "string"
           },
@@ -10103,6 +10106,9 @@
             "description": "When the controller was last hibernated (status.hibernatedAt, RFC 3339).",
             "type": "string"
           },
+          "imagePull": {
+            "$ref": "#/components/schemas/components_schemas_ImagePull"
+          },
           "jenkinsHealth": {
             "type": "string"
           },
@@ -11677,6 +11683,19 @@
           "cookieDomain",
           "defaultRead",
           "localAccounts"
+        ],
+        "type": "object"
+      },
+      "components_schemas_ImagePull": {
+        "additionalProperties": false,
+        "description": "Read-only projection of the provisioning image pull that runs now. Absent when no pull runs.",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
         ],
         "type": "object"
       },

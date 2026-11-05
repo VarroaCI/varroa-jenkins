@@ -2448,9 +2448,12 @@ type ComponentsSchemasControllerDetail struct {
 	Hibernated *bool `json:"hibernated,omitempty"`
 
 	// HibernatedAt When the controller was last hibernated (status.hibernatedAt, RFC 3339).
-	HibernatedAt   *string `json:"hibernatedAt,omitempty"`
-	JenkinsHealth  *string `json:"jenkinsHealth,omitempty"`
-	JenkinsVersion *string `json:"jenkinsVersion,omitempty"`
+	HibernatedAt *string `json:"hibernatedAt,omitempty"`
+
+	// ImagePull Read-only projection of the provisioning image pull that runs now. Absent when no pull runs.
+	ImagePull      *ComponentsSchemasImagePull `json:"imagePull,omitempty"`
+	JenkinsHealth  *string                     `json:"jenkinsHealth,omitempty"`
+	JenkinsVersion *string                     `json:"jenkinsVersion,omitempty"`
 
 	// Kind Mirrors v1alpha1.IsCell. Present for every controller.
 	Kind ComponentsSchemasControllerDetailKind `json:"kind"`
@@ -3142,6 +3145,11 @@ type ComponentsSchemasIdentitySettings struct {
 
 // ComponentsSchemasIdentitySettingsMode defines model for ComponentsSchemasIdentitySettings.Mode.
 type ComponentsSchemasIdentitySettingsMode string
+
+// ComponentsSchemasImagePull Read-only projection of the provisioning image pull that runs now. Absent when no pull runs.
+type ComponentsSchemasImagePull struct {
+	Message string `json:"message"`
+}
 
 // ComponentsSchemasIngressSpec Ingress configuration (transcribed from v1alpha1.IngressSpec).
 type ComponentsSchemasIngressSpec struct {

@@ -192,12 +192,15 @@ export function buildDeliveryNodes(ctrl: ControllerDetail, now?: number): Delive
     };
   } else if (ctrl.phase === "Provisioning" || ctrl.phase === "Running" || ctrl.phase === "Pending") {
     const pending = ctrl.phase === "Pending";
+    // imagePull is set only while provisioning waits on an image pull.
+    const pull = ctrl.phase === "Provisioning" ? ctrl.imagePull : undefined;
     jenkins = {
       id: "jenkins",
       name: "Jenkins",
       what: "waking",
       lamp: "warn",
-      line: pending ? "waking…" : "starting pod…",
+      line: pending ? "waking…" : pull ? "pulling image…" : "starting pod…",
+      ...(pull?.message ? { sub: [{ t: pull.message }] } : {}),
       // Pending: nothing has started — Provisioning is the upcoming step and
       // all three steps are still not-done.
       steps: pending

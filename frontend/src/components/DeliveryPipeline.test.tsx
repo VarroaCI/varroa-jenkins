@@ -477,4 +477,24 @@ describe("DeliveryPipeline", () => {
     );
     expect(screen.getByText("0 jobs")).toBeInTheDocument();
   });
+
+  it("provisioning with an image pull names the image in the sub-line", () => {
+    const model = buildDeliveryNodes(baseCtrl({
+      phase: "Provisioning",
+      miteConnected: false,
+      imagePull: { message: "pulling image jenkins/jenkins:2.528 for container plugins-init" },
+    }), NOW);
+    expect(model.kind).toBe("pipeline");
+    if (model.kind !== "pipeline") return;
+    const jenkins = model.nodes[2];
+    expect(jenkins.line).toBe("pulling image…");
+    expect(jenkins.sub?.map((s) => s.t).join("")).toContain("jenkins/jenkins:2.528");
+  });
+
+  it("provisioning without an image pull says starting pod", () => {
+    const model = buildDeliveryNodes(baseCtrl({ phase: "Provisioning", miteConnected: false }), NOW);
+    expect(model.kind).toBe("pipeline");
+    if (model.kind !== "pipeline") return;
+    expect(model.nodes[2].line).toBe("starting pod…");
+  });
 });

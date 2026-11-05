@@ -59,7 +59,10 @@ import (
 )
 
 const (
-	provisioningTimeout         = 5 * time.Minute
+	provisioningTimeout = 5 * time.Minute
+	// provisioningHardTimeout bounds the image-pull credit, so a pull that
+	// never ends cannot hold provisioning forever.
+	provisioningHardTimeout     = 20 * time.Minute
 	pluginRollTimeout           = 10 * time.Minute
 	finalizerName               = "varroa.dev/finalizer"
 	annotationAllowAdminLockout = "varroa.dev/allow-admin-lockout"
@@ -2778,6 +2781,9 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 	}
 
 	r.refreshMiteImageStaleness(ctx, cr)
+	if cr.Status.Phase != v1alpha1.ControllerPhaseProvisioning {
+		cr.Status.Conditions = removeConditionByType(cr.Status.Conditions, v1alpha1.ConditionImagePulling)
+	}
 
 	var err error
 	// contrib carries the tick's one runners.BuildContribution read (design
@@ -3907,29 +3913,41 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 		now := metav1Now()
 		cr.Status.ProvisioningStartedAt = &now
 	}
-	if time.Since(cr.Status.ProvisioningStartedAt.Time) > provisioningTimeout {
+	// One pod read serves the budget and both failure checks. A failed read
+	// returns the error, so no verdict is spent without the pull credit.
+	pod, err := r.client.GetControllerPod(ctx, cr.Namespace, cr.Name)
+	if err != nil {
+		r.persistStatusDiagnostics(ctx, cr)
+		return fmt.Errorf("read controller pod for provisioning budget: %w", err)
+	}
+	budget := r.provisioningBudgetFor(ctx, cr, pod, time.Now())
+	if budget.exceeded() {
+		setImagePullingCondition(cr, nil)
 		cr.Status.Phase = v1alpha1.ControllerPhaseFailed
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type:    v1alpha1.ConditionFailed,
 			Status:  metav1.ConditionTrue,
 			Reason:  "ProvisioningTimeout",
-			Message: fmt.Sprintf("provisioning exceeded %v", provisioningTimeout),
+			Message: budget.failureMessage(),
 		})
 		r.deleteWakeSlice(ctx, cr, r.Logger.With("controller", cr.Namespace+"/"+cr.Name))
 
 		r.persistStatusDiagnostics(ctx, cr)
 		return fmt.Errorf("provisioning timeout exceeded")
 	}
+	setImagePullingCondition(cr, budget.Pull)
 
 	// Surface plugins-init failures during initial provisioning. Without this, a
 	// bad plugin pin leaves the controller in Provisioning with no visible cause.
-	r.reconcileProvisioningPluginInitFailure(ctx, cr)
-	r.reconcileJenkinsBootFailure(ctx, cr)
+	if pod != nil {
+		r.applyProvisioningPluginInitFailure(cr, pod)
+		r.applyJenkinsBootFailure(ctx, cr, pod)
+	}
 
 	// Only transition to Running when the StatefulSet is actually ready.
 	ready, err := r.client.IsStatefulSetReady(ctx, pre, cr.Namespace)
 	if err != nil {
-		// reconcileProvisioningPluginInitFailure may have just recorded a
+		// applyProvisioningPluginInitFailure may have just recorded a
 		// PluginRollFailed diagnostic; don't let this error return drop it.
 		r.persistStatusDiagnostics(ctx, cr)
 		return fmt.Errorf("check statefulset readiness: %w", err)
@@ -4972,11 +4990,7 @@ func (r *Reconciler) checkPluginRollFailed(ctx context.Context, cr *v1alpha1.Con
 	}
 }
 
-func (r *Reconciler) reconcileProvisioningPluginInitFailure(ctx context.Context, cr *v1alpha1.Controller) {
-	pod, err := r.client.GetControllerPod(ctx, cr.Namespace, cr.Name)
-	if err != nil || pod == nil {
-		return
-	}
+func (r *Reconciler) applyProvisioningPluginInitFailure(cr *v1alpha1.Controller, pod *corev1.Pod) {
 	cr.Status.Conditions = applyPluginInitUCReport(cr.Status.Conditions, pluginInitUCReport(pod))
 	if reason, failed := pluginInitFailureMessage(pod); failed {
 		msg := "plugins-init failed during provisioning"
@@ -5085,7 +5099,7 @@ func jenkinsBootFailureMessage(pod *corev1.Pod) (string, bool) {
 	return "", false
 }
 
-// reconcileJenkinsBootFailure mirrors reconcileProvisioningPluginInitFailure
+// reconcileJenkinsBootFailure mirrors applyProvisioningPluginInitFailure
 // for the Jenkins container. It runs in Provisioning and Running so a
 // crash-loop after a plugin/CASC roll is surfaced the same way as at first boot.
 // miteJenkinsHealthy is the one MiteStatus.JenkinsHealth value that vouches for
@@ -5126,6 +5140,11 @@ func (r *Reconciler) reconcileJenkinsBootFailure(ctx context.Context, cr *v1alph
 	if err != nil || pod == nil {
 		return
 	}
+	r.applyJenkinsBootFailure(ctx, cr, pod)
+}
+
+// applyJenkinsBootFailure sets JenkinsBootFailed from a pod already read.
+func (r *Reconciler) applyJenkinsBootFailure(ctx context.Context, cr *v1alpha1.Controller, pod *corev1.Pod) {
 	if msg, failed := jenkinsBootFailureMessage(pod); failed {
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type:    v1alpha1.ConditionJenkinsBootFailed,
@@ -5254,25 +5273,37 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 	}
 
 	// A controller that reached Running and then crash-loops must be flagged
-	// too, not only one that never booted.
-	r.reconcileJenkinsBootFailure(ctx, cr)
+	// too, not only one that never booted. One pod read also serves the
+	// timeout budget below.
+	pod, podErr := r.client.GetControllerPod(ctx, cr.Namespace, cr.Name)
+	if podErr == nil && pod != nil {
+		r.applyJenkinsBootFailure(ctx, cr, pod)
+	}
 
 	// Same timeout guard as handleProvisioning — use ProvisioningStartedAt
 	// so an operator restart doesn't immediately fail long-lived controllers.
 	// A stream lost after the last provisioning run is not a connect timeout:
 	// ProvisioningStartedAt predates the loss, so the guard skips it.
-	if cr.Status.ProvisioningStartedAt != nil && time.Since(cr.Status.ProvisioningStartedAt.Time) > provisioningTimeout &&
-		!streamLostSince(cr, cr.Status.ProvisioningStartedAt.Time) {
-		cr.Status.Phase = v1alpha1.ControllerPhaseFailed
-		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-			Type:    v1alpha1.ConditionFailed,
-			Status:  metav1.ConditionTrue,
-			Reason:  "ProvisioningTimeout",
-			Message: "timed out waiting for mite connection",
-		})
+	// The verdict applies the image-pull credit of the pod read above.
+	if started := cr.Status.ProvisioningStartedAt; started != nil &&
+		time.Since(started.Time) > provisioningTimeout && !streamLostSince(cr, started.Time) {
+		// A failed read skips the verdict for this tick, so no pull credit is lost.
+		if podErr != nil && r.Logger != nil {
+			r.Logger.Warn("skip mite connect timeout: pod read failed",
+				"controller", cr.Namespace+"/"+cr.Name, "error", podErr)
+		}
+		if podErr == nil && r.provisioningBudgetFor(ctx, cr, pod, time.Now()).exceeded() {
+			cr.Status.Phase = v1alpha1.ControllerPhaseFailed
+			cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+				Type:    v1alpha1.ConditionFailed,
+				Status:  metav1.ConditionTrue,
+				Reason:  "ProvisioningTimeout",
+				Message: "timed out waiting for mite connection",
+			})
 
-		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedMiteConnectTimeout, "timed out waiting for mite connection")
-		return fmt.Errorf("provisioning timed out waiting for mite connection")
+			r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedMiteConnectTimeout, "timed out waiting for mite connection")
+			return fmt.Errorf("provisioning timed out waiting for mite connection")
+		}
 	}
 
 	// Check if the mite sidecar has connected. Before that, check for

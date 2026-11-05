@@ -137,6 +137,11 @@ type testClient struct {
 	podGraceDeletes  []podGraceDelete
 	controllerPod    *corev1.Pod
 	controllerPodErr error // injected error for GetControllerPod
+	// pullEvents answers ListPodPullEvents; pullEventsErr fails it.
+	// listPullEventsCalls counts the calls.
+	pullEvents          []corev1.Event
+	pullEventsErr       error
+	listPullEventsCalls int
 	// getControllerPodCalls counts GetControllerPod calls, so tests can assert
 	// a hot path does NOT fetch the pod.
 	getControllerPodCalls int
@@ -928,6 +933,11 @@ func (t *testClient) GetControllerPod(_ context.Context, _, _ string) (*corev1.P
 	return t.controllerPod, nil
 }
 
+func (t *testClient) ListPodPullEvents(_ context.Context, _ string, _ types.UID) ([]corev1.Event, error) {
+	t.listPullEventsCalls++
+	return t.pullEvents, t.pullEventsErr
+}
+
 func (t *testClient) ListPodPhases(_ context.Context, namespace string) (map[types.UID]corev1.PodPhase, error) {
 	t.listPodPhasesCalls++
 	if t.podPhasesErr != nil {
@@ -1598,6 +1608,172 @@ func TestRunningPhaseTimeoutDoesNotFireForOldCRWithRecentProvisioningStart(t *te
 	}
 	if cr.Status.Phase == v1alpha1.ControllerPhaseFailed {
 		t.Error("controller should not be Failed: ProvisioningStartedAt is recent")
+	}
+}
+
+// provisionPullPod returns a provisioning pod whose first init container
+// waits for kubelet to create it, with the given Pulling event start.
+func provisionPullPod(pullStart time.Time) (*corev1.Pod, corev1.Event) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-0", Namespace: "ns", UID: testUID},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "plugins-init", Image: "jenkins/jenkins:2.528"}},
+			Containers:     []corev1.Container{{Name: "jenkins", Image: "jenkins/jenkins:lts"}},
+		},
+		Status: corev1.PodStatus{
+			InitContainerStatuses: []corev1.ContainerStatus{{
+				Name:  "plugins-init",
+				State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "PodInitializing"}},
+			}},
+		},
+	}
+	ev := corev1.Event{
+		Reason:         "Pulling",
+		InvolvedObject: corev1.ObjectReference{UID: testUID, FieldPath: "spec.initContainers{plugins-init}"},
+		LastTimestamp:  metav1.NewTime(pullStart),
+	}
+	return pod, ev
+}
+
+func provisionPullCtrl(started time.Time) *v1alpha1.Controller {
+	startedAt := metav1.NewTime(started)
+	return &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID},
+		Status: v1alpha1.ControllerStatus{
+			Phase:                 v1alpha1.ControllerPhaseProvisioning,
+			ProvisioningStartedAt: &startedAt,
+		},
+	}
+}
+
+// TestProvisioningTimeoutPausesWhileImagePulls: an init image pull that
+// uses most of the budget does not fail provisioning.
+func TestProvisioningTimeoutPausesWhileImagePulls(t *testing.T) {
+	client := newTestClientWithBundle()
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-8 * time.Minute)
+	pod, ev := provisionPullPod(started.Add(5 * time.Second))
+	client.controllerPod = pod
+	client.pullEvents = []corev1.Event{ev}
+	cr := provisionPullCtrl(started)
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseProvisioning {
+		t.Fatalf("phase = %s, want Provisioning", cr.Status.Phase)
+	}
+	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionImagePulling)
+	if c == nil || c.Status != metav1.ConditionTrue {
+		t.Fatalf("ImagePulling = %+v, want True", c)
+	}
+	if !strings.Contains(c.Message, "jenkins/jenkins:2.528") || !strings.Contains(c.Message, "plugins-init") {
+		t.Errorf("ImagePulling message = %q, want image and container", c.Message)
+	}
+}
+
+// TestProvisioningTimeoutFiresPastHardCapWhileImagePulls: a pull that runs
+// past the hard cap fails provisioning and names the pull.
+func TestProvisioningTimeoutFiresPastHardCapWhileImagePulls(t *testing.T) {
+	client := newTestClientWithBundle()
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-21 * time.Minute)
+	pod, ev := provisionPullPod(started.Add(5 * time.Second))
+	client.controllerPod = pod
+	client.pullEvents = []corev1.Event{ev}
+	cr := provisionPullCtrl(started)
+
+	if err := rec.reconcileController(context.Background(), cr); err == nil {
+		t.Error("expected error for provisioning timeout")
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseFailed {
+		t.Fatalf("phase = %s, want Failed", cr.Status.Phase)
+	}
+	f := findCondition(cr.Status.Conditions, v1alpha1.ConditionFailed)
+	if f == nil || f.Reason != "ProvisioningTimeout" {
+		t.Fatalf("Failed = %+v, want ProvisioningTimeout", f)
+	}
+	if !strings.Contains(f.Message, "20m0s") || !strings.Contains(f.Message, "jenkins/jenkins:2.528") {
+		t.Errorf("Failed message = %q, want hard cap and image", f.Message)
+	}
+}
+
+// TestProvisioningTimeoutCountsWaitWithoutPullEvent: a container that waits
+// with no Pulling event is a volume or sandbox wait and keeps the 5-minute verdict.
+func TestProvisioningTimeoutCountsWaitWithoutPullEvent(t *testing.T) {
+	client := newTestClientWithBundle()
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-6 * time.Minute)
+	pod, _ := provisionPullPod(started)
+	client.controllerPod = pod
+	cr := provisionPullCtrl(started)
+
+	_ = rec.reconcileController(context.Background(), cr)
+	if cr.Status.Phase != v1alpha1.ControllerPhaseFailed {
+		t.Fatalf("phase = %s, want Failed", cr.Status.Phase)
+	}
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionImagePulling); c != nil {
+		t.Errorf("ImagePulling = %+v, want absent", c)
+	}
+}
+
+// TestProvisioningTimeoutCreditsFinishedPull: a pull that ended before the
+// container started counts as pull time, so the budget is not spent.
+func TestProvisioningTimeoutCreditsFinishedPull(t *testing.T) {
+	client := newTestClientWithBundle()
+	ready := false
+	client.statefulSetReady = &ready
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-7 * time.Minute)
+	pod, ev := provisionPullPod(started.Add(10 * time.Second))
+	pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+		Name:  "plugins-init",
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(started.Add(4 * time.Minute))}},
+	}}
+	client.controllerPod = pod
+	client.pullEvents = []corev1.Event{ev}
+	cr := provisionPullCtrl(started)
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if cr.Status.Phase == v1alpha1.ControllerPhaseFailed {
+		t.Fatal("controller should not be Failed: the finished pull is credited")
+	}
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionImagePulling); c != nil {
+		t.Errorf("ImagePulling = %+v, want absent once no pull runs", c)
+	}
+}
+
+// TestImagePullingConditionRemovedOutsideProvisioning: a controller that is
+// no longer Provisioning drops a stale ImagePulling condition.
+func TestImagePullingConditionRemovedOutsideProvisioning(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	started := time.Now().Add(-time.Minute)
+	cr := provisionPullCtrl(started)
+	cr.Status.Phase = v1alpha1.ControllerPhaseRunning
+	cr.Status.Conditions = []v1alpha1.ControllerCondition{{
+		Type:    v1alpha1.ConditionImagePulling,
+		Status:  metav1.ConditionTrue,
+		Reason:  v1alpha1.ReasonImagePullInProgress,
+		Message: "pulling image x for container y",
+	}}
+
+	_ = rec.reconcileController(context.Background(), cr)
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionImagePulling); c != nil {
+		t.Errorf("ImagePulling = %+v, want removed outside Provisioning", c)
 	}
 }
 
