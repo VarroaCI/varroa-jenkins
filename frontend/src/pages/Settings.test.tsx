@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -21,7 +21,7 @@ vi.mock("../hooks/usePermissions", () => ({
   canDoGlobal: vi.fn(),
 }));
 
-import { getProvisioningDefaults, updateProvisioningDefaults } from "../api/client";
+import { getProvisioningDefaults, updateProvisioningDefaults, listClusters } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { canDoGlobal } from "../hooks/usePermissions";
 import Settings from "./Settings";
@@ -32,6 +32,7 @@ const mockGetConfig = getProvisioningDefaults as ReturnType<typeof vi.fn>;
 const mockUpdateConfig = updateProvisioningDefaults as ReturnType<typeof vi.fn>;
 const mockUseAuth = useAuth as ReturnType<typeof vi.fn>;
 const mockCanDo = canDoGlobal as ReturnType<typeof vi.fn>;
+const mockListClusters = listClusters as ReturnType<typeof vi.fn>;
 
 function renderSettings() {
   const qc = new QueryClient({
@@ -362,5 +363,37 @@ describe("Settings provisioning tab without varroa-defaults", () => {
     const second = mockUpdateConfig.mock.calls[1][1];
     expect(second.metadata.resourceVersion).toBe("1");
     expect(second.spec.storageClass).toBe("fast");
+  });
+});
+
+describe("Settings provisioning tab cluster selector on a read error", () => {
+  beforeEach(() => {
+    mockListClusters.mockResolvedValue([
+      { name: "core", core: true, healthy: true, state: "active" },
+      { name: "member-b", core: false, healthy: true, state: "active" },
+    ]);
+  });
+
+  afterEach(() => {
+    mockListClusters.mockResolvedValue([{ name: "core", core: true }]);
+  });
+
+  it("keeps the cluster selector when the config read fails", async () => {
+    mockGetConfig.mockImplementation((cluster: string) =>
+      cluster === "member-b"
+        ? Promise.reject(new ApiError(500, "Varroa could not complete the request."))
+        : Promise.resolve(createProvisioningConfig()),
+    );
+    renderSettings();
+
+    await userEvent.selectOptions(await screen.findByRole("combobox"), "member-b");
+
+    expect(await screen.findByText("Error: Varroa could not complete the request.")).toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("member-b");
+
+    await userEvent.selectOptions(screen.getByRole("combobox"), "core");
+
+    expect(await screen.findByLabelText("Storage Class")).toBeInTheDocument();
+    expect(screen.queryByText(/Error:/)).not.toBeInTheDocument();
   });
 });

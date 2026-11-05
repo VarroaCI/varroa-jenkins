@@ -61,8 +61,35 @@ export default function SettingsProvisioningTab() {
       });
   }, [selectedCluster]);
 
-  if (error) return <div className={styles.errorMsg}>Error: {error}</div>;
-  if (!config) return <LoadingSpinner />;
+  // The intro and the cluster selector render in every state, so a user who
+  // picked an unreachable cluster can switch back. The form root stays the
+  // same element, which keeps the selector mounted across state changes.
+  const header = (
+    <>
+      <p className={`${styles.muted} ${styles.pageNote}`}>
+        Defaults applied to controllers on the selected cluster unless overridden.
+      </p>
+
+      <ClusterSelector value={selectedCluster} onChange={setSelectedCluster} />
+    </>
+  );
+
+  if (error) {
+    return (
+      <form onSubmit={handleSubmit}>
+        {header}
+        <div className={styles.errorMsg}>Error: {error}</div>
+      </form>
+    );
+  }
+  if (!config) {
+    return (
+      <form onSubmit={handleSubmit}>
+        {header}
+        <LoadingSpinner />
+      </form>
+    );
+  }
 
   function setField(field: string) {
     return (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -109,11 +136,7 @@ export default function SettingsProvisioningTab() {
 
   return (
     <form onSubmit={handleSubmit}>
-      <p className={`${styles.muted} ${styles.pageNote}`}>
-        Defaults applied to controllers on the selected cluster unless overridden.
-      </p>
-
-      <ClusterSelector value={selectedCluster} onChange={setSelectedCluster} />
+      {header}
       {missing && <p className={`${styles.muted} ${styles.pageNote}`}>{MISSING_NOTE}</p>}
 
       <div className={styles.formGroup}>
