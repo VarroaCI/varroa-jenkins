@@ -28,8 +28,8 @@ export interface UseEventStreamOptions<T = unknown> {
    * lastEvent. A burst of frames arrives between two renders, and React
    * renders once for the whole burst, so lastEvent keeps only the last frame
    * of that burst. A caller that must keep every frame collects them here.
-   * The hook calls this option synchronously, so a caller can keep the
-   * frames in a ref and count them.
+   * The hook calls this option synchronously. useFrameQueue keeps the frames
+   * for a caller that reads them in an effect.
    */
   onEvent?: (ev: SSEEvent<T>) => void;
 }

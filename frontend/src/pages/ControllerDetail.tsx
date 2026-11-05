@@ -5,7 +5,8 @@ import { useController } from "../hooks/useControllers";
 import type { PluginInventoryDriftEntry, ControllerDetail } from "../hooks/useControllers";
 import { useClusters, coreOf } from "../hooks/useClusters";
 import { clusterQuery, controllerRoute } from "../routing";
-import { useEventStream, type SSEEvent } from "../hooks/useEventStream";
+import { useEventStream } from "../hooks/useEventStream";
+import { useFrameQueue } from "../hooks/useFrameQueue";
 import { ApiError, bffFetch } from "../hooks/useApi";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage } from "../components/RecoveryState";
 import { useComposedBundles } from "../hooks/useCatalog";
@@ -1360,16 +1361,10 @@ function ControllerStream({
   const [chip, setChip] = useState<string>("All");
   const [lines, setLines] = useState<LogEntry[]>([]);
 
-  // Log frames wait in this queue until the drain effect below appends them.
-  // useEventStream calls onEvent once for each frame, also for each frame of
-  // a burst that reaches React as one render. lastEvent keeps only the last
-  // frame of that burst, so the stream never reads lastEvent.
-  const logQueueRef = useRef<unknown[]>([]);
-  const [logTick, setLogTick] = useState(0);
-  const onLogEvent = useCallback((ev: SSEEvent<LogEntry>) => {
-    logQueueRef.current.push(ev);
-    setLogTick((n) => n + 1);
-  }, []);
+  // The queue keeps every log frame until the drain effect below appends it.
+  // The stream never reads lastEvent, because lastEvent drops all but the
+  // last frame of a burst.
+  const { onEvent: onLogEvent, drain: drainLogs, tick: logTick } = useFrameQueue<LogEntry>();
 
   const { readyState, error: streamError } = useEventStream<LogEntry>(
     isCore
@@ -1383,9 +1378,8 @@ function ControllerStream({
   // Append every queued log frame in one lines update. A frame whose source,
   // timestamp, and message match a held line is a replay and is dropped.
   useEffect(() => {
-    const frames = logQueueRef.current;
+    const frames = drainLogs();
     if (frames.length === 0) return;
-    logQueueRef.current = [];
     const incoming: LogEntry[] = [];
     for (const frame of frames) {
       const entry = logEntryOf(frame);

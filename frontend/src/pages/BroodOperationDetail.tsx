@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -11,7 +11,8 @@ import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { useAuth } from "../context/AuthContext";
 import { canDoAnywhere } from "../hooks/usePermissions";
-import { useEventStream, type SSEEvent } from "../hooks/useEventStream";
+import { useEventStream } from "../hooks/useEventStream";
+import { useFrameQueue } from "../hooks/useFrameQueue";
 import type { BroodRun, BroodRunCluster, BroodTargetStatus } from "../types";
 import styles from "./BroodOperationDetail.module.css";
 
@@ -65,16 +66,10 @@ export default function BroodOperationDetail() {
   // never assigned here, so it can never clobber this — see the effect below
   // for why we don't otherwise need to inspect `closed` frames at all.
   const [lastStatus, setLastStatus] = useState<BroodRun | undefined>(undefined);
-  // Stream frames wait in this queue until the drain effect below reads them.
-  // useEventStream calls onEvent once for each frame, also for each frame of a
-  // burst that reaches React as one render. lastEvent keeps only the last
-  // frame of that burst, so the page never reads lastEvent.
-  const frameQueueRef = useRef<SSEEvent<BroodRun>[]>([]);
-  const [frameTick, setFrameTick] = useState(0);
-  const onFrame = useCallback((ev: SSEEvent<BroodRun>) => {
-    frameQueueRef.current.push(ev);
-    setFrameTick((n) => n + 1);
-  }, []);
+  // The queue keeps every stream frame until the drain effect below reads it.
+  // The page never reads lastEvent, because lastEvent drops all but the last
+  // frame of a burst.
+  const { onEvent: onFrame, drain: drainFrames, clear: clearFrames, tick: frameTick } = useFrameQueue<BroodRun>();
   useEventStream<BroodRun>(stopStream || initialTerminal ? null : streamUrl, streamScope, ["status", "closed"], {
     onEvent: onFrame,
   });
@@ -86,7 +81,7 @@ export default function BroodOperationDetail() {
     setStopStream(false);
     setLastStatus(undefined);
     // A frame queued before this effect came from the stream of the previous operation.
-    frameQueueRef.current = [];
+    clearFrames();
   }, [ns, opName]);
 
   // The drain applies the frames of one burst in arrival order. Only a status
@@ -95,9 +90,8 @@ export default function BroodOperationDetail() {
   // frame, so the drain applies that status first. A closed frame with no
   // terminal status before it is ambiguous, so the hook reconnects.
   useEffect(() => {
-    const frames = frameQueueRef.current;
+    const frames = drainFrames();
     if (frames.length === 0) return;
-    frameQueueRef.current = [];
     let latest: BroodRun | undefined;
     for (const ev of frames) {
       if (ev.type === "status") latest = ev.data;

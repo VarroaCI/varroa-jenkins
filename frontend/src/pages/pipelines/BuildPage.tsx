@@ -20,6 +20,7 @@ import {
 } from "../../api/client";
 import { ApiError, isRecordStoreUnreachable } from "../../hooks/useApi";
 import { useEventStream, type SSEEvent } from "../../hooks/useEventStream";
+import { useFrameQueue } from "../../hooks/useFrameQueue";
 import { canAccessTenantPipeline, usePermissions } from "../../hooks/usePermissions";
 import { useToast } from "../../components/Toast";
 import { Button } from "../../components/Button";
@@ -281,16 +282,10 @@ export default function BuildPage() {
   // The tenant's stream carries every run of the tenant. Each frame kind
   // changes a part of this run's record, so the page reads its own record
   // on a frame of any kind for its run.
-  // Stream frames wait in this queue until the drain effect below reads them.
-  // useEventStream calls onEvent once for each frame, also for each frame of a
-  // burst that reaches React as one render. lastEvent keeps only the last
-  // frame of that burst, so the page never reads lastEvent.
-  const runQueueRef = useRef<SSEEvent<RunNotification>[]>([]);
-  const [runTick, setRunTick] = useState(0);
-  const onRunEvent = useCallback((ev: SSEEvent<RunNotification>) => {
-    runQueueRef.current.push(ev);
-    setRunTick((n) => n + 1);
-  }, []);
+  // The queue keeps every stream frame until the drain effect below reads it.
+  // The page never reads lastEvent, because lastEvent drops all but the last
+  // frame of a burst.
+  const { onEvent: onRunEvent, drain: drainRunFrames, tick: runTick } = useFrameQueue<RunNotification>();
   const { readyState: runStreamReady } = useEventStream<RunNotification>(
     tenant ? tenantRunStreamUrl(tenant) : null,
     tenant ? `pipelines:${tenant}` : null,
@@ -309,7 +304,8 @@ export default function BuildPage() {
   // The log tab keeps every log frame, because the viewer unmounts while
   // another tab is active and one render can cover a whole burst of frames.
   // A ref holds the frames, and a counter tells the viewer how many of them
-  // are new.
+  // are new. Two readers read these frames, each from its own count, so the page
+  // keeps the frames and never drains them.
   const logFramesRef = useRef<SSEEvent<RunLogFrame>[]>([]);
   const [logVersion, setLogVersion] = useState(0);
   const [logEnded, setLogEnded] = useState(false);
@@ -370,9 +366,8 @@ export default function BuildPage() {
   // refetches the record on any of them. The page renders the record, never a
   // payload field.
   useEffect(() => {
-    const frames = runQueueRef.current;
+    const frames = drainRunFrames();
     if (frames.length === 0) return;
-    runQueueRef.current = [];
     const own = frames.some((ev) => RUN_STREAM_EVENTS.includes(ev.type) && ev.data?.run_id === runId);
     if (own) void refetch();
   }, [runTick, runId, refetch]);
