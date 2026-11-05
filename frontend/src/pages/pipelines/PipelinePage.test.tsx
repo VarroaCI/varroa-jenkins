@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../../test/render-utils";
@@ -25,7 +25,12 @@ vi.mock("../../api/client", () => ({
 type RunEvent = { type: string; data: RunNotification };
 
 const mockUseEventStream = vi.fn(
-  (_baseUrl?: string | null, _scope?: string | null, _eventNames?: string[]) => ({
+  (
+    _baseUrl?: string | null,
+    _scope?: string | null,
+    _eventNames?: string[],
+    _options?: { onEvent?: (ev: RunEvent) => void },
+  ) => ({
     lastEvent: null as RunEvent | null,
     readyState: "closed",
     error: null as Error | null,
@@ -61,6 +66,16 @@ beforeEach(() => {
   mockUseEventStream.mockClear();
   mockUseEventStream.mockReturnValue({ lastEvent: null, readyState: "closed", error: null });
 });
+
+/** emit delivers each frame through the onEvent the page passed to the tenant stream, in one act. */
+function emit(...frames: RunEvent[]) {
+  const call = [...mockUseEventStream.mock.calls].reverse().find(([, scope]) => (scope ?? "").startsWith("pipelines:"));
+  const onEvent = call?.[3]?.onEvent;
+  if (!onEvent) throw new Error("the tenant stream has no onEvent");
+  act(() => {
+    for (const frame of frames) onEvent(frame);
+  });
+}
 
 function LocationProbe() {
   const location = useLocation();
@@ -747,52 +762,82 @@ describe("PipelinePage — live run events", () => {
     vi.mocked(usePermissions).mockReturnValue({ data: undefined } as unknown as ReturnType<typeof usePermissions>);
   });
 
-  /** runStream makes the job page read one frame of its own job off the
-   * tenant stream. */
-  function runStream(frame: RunEvent | null, readyState = "closed") {
-    mockUseEventStream.mockImplementation((_baseUrl, scope) =>
-      (scope ?? "").startsWith("pipelines:")
-        ? { lastEvent: frame, readyState, error: null }
-        : { lastEvent: null, readyState: "closed", error: null },
-    );
-  }
-
   it("refetches the builds table, and not the job read, for a matching running event", async () => {
-    const { repaint } = renderPage();
+    renderPage();
     await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(1));
 
-    runStream({ type: "run", data: notification({ status: "RUNNING" }) });
-    repaint();
+    emit({ type: "run", data: notification({ status: "RUNNING" }) });
 
     await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(2));
     expect(mockGetPipelineJob).toHaveBeenCalledTimes(1);
   });
 
   it("refetches both reads for a completed event", async () => {
-    const { repaint } = renderPage();
+    renderPage();
     await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
 
-    runStream({ type: "run", data: notification({ status: "COMPLETED", result: "SUCCESS" }) });
-    repaint();
+    emit({ type: "run", data: notification({ status: "COMPLETED", result: "SUCCESS" }) });
 
     await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(2));
   });
 
   it("refetches nothing for an event of another job", async () => {
-    const { repaint } = renderPage();
+    renderPage();
     await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
 
-    runStream({
+    emit({
       type: "run",
       data: notification({ job_path: "payments/other/main", status: "COMPLETED" }),
     });
-    repaint();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(mockListRuns).toHaveBeenCalledTimes(1);
     expect(mockGetPipelineJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("refetches the builds table for a run frame of its job that a frame of another job follows in one burst", async () => {
+    renderPage();
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
+
+    emit(
+      { type: "run", data: notification({ status: "RUNNING" }) },
+      { type: "run", data: notification({ job_path: "payments/other/main", status: "COMPLETED" }) },
+    );
+
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(2));
+    expect(mockGetPipelineJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("refetches the job read for a completed frame of its job that a stage frame follows in one burst", async () => {
+    renderPage();
+    await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(1));
+
+    emit(
+      { type: "run", data: notification({ status: "COMPLETED", result: "SUCCESS" }) },
+      { type: "stage", data: notification({ kind: "stage" }) },
+    );
+
+    await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(2));
+  });
+
+  it("refetches each read once for a burst of several frames of its job", async () => {
+    renderPage();
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(1));
+
+    emit(
+      { type: "run", data: notification({ status: "RUNNING" }) },
+      { type: "wait", data: notification({ kind: "wait", state: "waiting" }) },
+      { type: "run", data: notification({ status: "COMPLETED", result: "SUCCESS" }) },
+    );
+
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockListRuns).toHaveBeenCalledTimes(2);
+    expect(mockGetPipelineJob).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -805,14 +850,6 @@ describe("PipelinePage — wait events", () => {
     vi.mocked(usePermissions).mockReturnValue({ data: undefined } as unknown as ReturnType<typeof usePermissions>);
   });
 
-  function runStream(frame: RunEvent | null, readyState = "closed") {
-    mockUseEventStream.mockImplementation((_baseUrl, scope) =>
-      (scope ?? "").startsWith("pipelines:")
-        ? { lastEvent: frame, readyState, error: null }
-        : { lastEvent: null, readyState: "closed", error: null },
-    );
-  }
-
   it("subscribes to wait frames", async () => {
     renderPage();
     await waitFor(() => expect(mockUseEventStream).toHaveBeenCalled());
@@ -821,27 +858,39 @@ describe("PipelinePage — wait events", () => {
   });
 
   it("refetches the job read and the builds table for a wait event of its own job", async () => {
-    const { repaint } = renderPage();
+    renderPage();
     await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(1));
 
-    runStream({ type: "wait", data: notification({ kind: "wait", state: "waiting" }) });
-    repaint();
+    emit({ type: "wait", data: notification({ kind: "wait", state: "waiting" }) });
+
+    await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(2));
+  });
+
+  it("refetches both reads for a wait frame of its job that a frame of another job follows in one burst", async () => {
+    renderPage();
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(1));
+
+    emit(
+      { type: "wait", data: notification({ kind: "wait", state: "waiting" }) },
+      { type: "run", data: notification({ job_path: "payments/other/main", status: "COMPLETED" }) },
+    );
 
     await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(2));
   });
 
   it("ignores a wait event of another job", async () => {
-    const { repaint } = renderPage();
+    renderPage();
     await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(1));
 
-    runStream({
+    emit({
       type: "wait",
       data: notification({ kind: "wait", job_path: "payments/other/main", state: "waiting" }),
     });
-    repaint();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(mockListRuns).toHaveBeenCalledTimes(1);

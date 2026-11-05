@@ -81,6 +81,8 @@ type RunPageStatus =
   | "notFoundPolling"
   | "notFoundSettled";
 
+// The tenant run stream frames that change the run record.
+const RUN_STREAM_EVENTS = ["run", "stage", "lock", "input", "wait"];
 const POLL_MS = 3000;
 const REQUESTED_TIMEOUT_MS = 60_000;
 const COLD_LOAD_TIMEOUT_MS = 30_000;
@@ -280,10 +282,21 @@ export default function BuildPage() {
   // The notifier coalesces per run, so a lock frame for this run can stand
   // in for a stage frame. The page reads its own record on any of them,
   // wait frames included.
-  const { lastEvent: runEvent, readyState: runStreamReady } = useEventStream<RunNotification>(
+  // Stream frames wait in this queue until the drain effect below reads them.
+  // useEventStream calls onEvent once for each frame, also for each frame of a
+  // burst that reaches React as one render. lastEvent keeps only the last
+  // frame of that burst, so the page never reads lastEvent.
+  const runQueueRef = useRef<SSEEvent<RunNotification>[]>([]);
+  const [runTick, setRunTick] = useState(0);
+  const onRunEvent = useCallback((ev: SSEEvent<RunNotification>) => {
+    runQueueRef.current.push(ev);
+    setRunTick((n) => n + 1);
+  }, []);
+  const { readyState: runStreamReady } = useEventStream<RunNotification>(
     tenant ? tenantRunStreamUrl(tenant) : null,
     tenant ? `pipelines:${tenant}` : null,
-    ["run", "stage", "lock", "input", "wait"],
+    RUN_STREAM_EVENTS,
+    { onEvent: onRunEvent },
   );
   const streamOpen = runStreamReady === "open";
   const { run, status, refetch } = useRunRecord(runId, requested, streamOpen);
@@ -338,7 +351,7 @@ export default function BuildPage() {
     if (frame.type === "end") setLogEnded(true);
   }, []);
 
-  const { lastEvent } = useEventStream<RunLogFrame>(
+  useEventStream<RunLogFrame>(
     logStreamUrl,
     logRunId ? `run:${logRunId}` : null,
     ["meta", "stage", "line", "gap", "live", "end"],
@@ -358,20 +371,12 @@ export default function BuildPage() {
   // refetches the record on any of them. The page renders the record, never a
   // payload field.
   useEffect(() => {
-    if (!runEvent) return;
-    if (
-      runEvent.type !== "run" &&
-      runEvent.type !== "stage" &&
-      runEvent.type !== "lock" &&
-      runEvent.type !== "input" &&
-      runEvent.type !== "wait"
-    ) {
-      return;
-    }
-    const notification = runEvent.data;
-    if (!notification || notification.run_id !== runId) return;
-    void refetch();
-  }, [runEvent, runId, refetch]);
+    const frames = runQueueRef.current;
+    if (frames.length === 0) return;
+    runQueueRef.current = [];
+    const own = frames.some((ev) => RUN_STREAM_EVENTS.includes(ev.type) && ev.data?.run_id === runId);
+    if (own) void refetch();
+  }, [runTick, runId, refetch]);
 
   // The stream sends no first frame and replays nothing, so an open stream
   // is the page's signal to refetch the record.
@@ -896,7 +901,8 @@ export default function BuildPage() {
       <Card title="Pipeline">
         <StageGraph
           stages={run.stages ?? EMPTY_STAGES}
-          lastEvent={lastEvent}
+          frames={logFramesRef.current}
+          version={logVersion}
           terminal={isTerminal(run)}
           onSelectStage={(stageId) => logViewerRef.current?.scrollToStage(stageId)}
         />

@@ -176,6 +176,49 @@ beforeEach(() => {
   mockGetRunRestart.mockResolvedValue({ restartable: false, stages: [], reason: "not-declarative" });
 });
 
+/** logStreamCall returns the arguments of the last useEventStream call for
+ * the run log stream, which the tenant run stream does not share. */
+function logStreamCall(): Parameters<typeof mockUseEventStream> {
+  const calls = mockUseEventStream.mock.calls.filter((args) => args[1] === "run:run-1");
+  const args = calls[calls.length - 1];
+  if (!args) throw new Error("useEventStream was not called for the run log stream");
+  return args;
+}
+
+/** logFrame hands the page one log frame the way the hook's onEvent does. */
+function logFrame(frame: { type: string; data: unknown }) {
+  const options = logStreamCall()[3];
+  if (!options?.onEvent) throw new Error("useEventStream was not called with an onEvent option");
+  options.onEvent(frame);
+}
+
+/** tenantStreamCall returns the arguments of the last useEventStream call for the tenant run stream. */
+function tenantStreamCall(): Parameters<typeof mockUseEventStream> {
+  const calls = mockUseEventStream.mock.calls.filter((args) => args[1] === "pipelines:payments");
+  const args = calls[calls.length - 1];
+  if (!args) throw new Error("useEventStream was not called for the tenant run stream");
+  return args;
+}
+
+/** runFrames delivers each frame through the tenant stream's onEvent, in one act, as a burst does. */
+async function runFrames(...frames: { type: string; data: unknown }[]) {
+  const options = tenantStreamCall()[3];
+  if (!options?.onEvent) throw new Error("useEventStream was not called with an onEvent option");
+  const onEvent = options.onEvent;
+  await act(async () => {
+    for (const frame of frames) onEvent(frame);
+  });
+}
+
+/** tenantStreamReady sets the readyState of the tenant run stream and holds every other stream closed. */
+function tenantStreamReady(readyState: string) {
+  mockUseEventStream.mockImplementation((_baseUrl, scope) =>
+    scope === "pipelines:payments"
+      ? { lastEvent: null, readyState, error: null }
+      : { lastEvent: null, readyState: "closed", error: null },
+  );
+}
+
 describe("BuildPage — test cases and the test report", () => {
   /** A tests read whose cases list holds two failed rows and one skipped row.
    * The skipped row sorts first by name, so an order check proves that the
@@ -623,26 +666,10 @@ describe("BuildPage — pending and not-found states", () => {
 });
 
 describe("BuildPage — log stream resume", () => {
-  /** logStreamCall returns the arguments of the last useEventStream call for
-   * the run log stream, which the tenant run stream does not share. */
-  function logStreamCall(): Parameters<typeof mockUseEventStream> {
-    const calls = mockUseEventStream.mock.calls.filter((args) => args[1] === "run:run-1");
-    const args = calls[calls.length - 1];
-    if (!args) throw new Error("useEventStream was not called for the run log stream");
-    return args;
-  }
-
   function latestResumeUrl(): () => string | null {
     const options = logStreamCall()[3];
     if (!options?.resumeUrl) throw new Error("useEventStream was not called with a resumeUrl option");
     return options.resumeUrl;
-  }
-
-  /** logFrame hands the page one log frame the way the hook's onEvent does. */
-  function logFrame(frame: { type: string; data: unknown }) {
-    const options = logStreamCall()[3];
-    if (!options?.onEvent) throw new Error("useEventStream was not called with an onEvent option");
-    options.onEvent(frame);
   }
 
   it("passes useEventStream a resumeUrl with no offset before any log frame arrives", async () => {
@@ -740,25 +767,35 @@ describe("BuildPage — stage graph identity across re-renders", () => {
     renderPage();
     await screen.findByText(/Build #42/);
 
-    mockUseEventStream.mockReturnValue({
-      lastEvent: {
+    // The log stream delivers the stage frame through onEvent, as the hook does.
+    act(() => {
+      logFrame({
         type: "stage",
         data: { stageId: "s1", name: "Build", status: "IN_PROGRESS", startOffset: 0, startLine: 0 },
-      },
-      readyState: "open",
-      error: null,
-    });
-    // Any state change re-renders BuildPage and hands StageGraph the
-    // stage event via lastEvent, matching the log-stream-resume tests above.
-    await act(async () => {
-      fireEvent.click(screen.getByRole("tab", { name: /^Artifacts/ }));
+      });
     });
     expect(document.getElementById("node-stage-s1")).toBeTruthy();
 
-    // A second, unrelated re-render — the same lastEvent, a different tab
-    // click — must not wipe the stage the live event already merged.
+    // A later, unrelated re-render — a tab click — must not wipe the stage
+    // the live frame already merged.
     await act(async () => {
       fireEvent.click(screen.getByRole("tab", { name: /^Tests/ }));
+    });
+    expect(document.getElementById("node-stage-s1")).toBeTruthy();
+  });
+
+  it("merges a stage frame that line frames follow in one burst of the log stream", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ stages: [], status: "RUNNING" }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    act(() => {
+      logFrame({
+        type: "stage",
+        data: { stageId: "s1", name: "Build", status: "IN_PROGRESS", startOffset: 0, startLine: 0 },
+      });
+      logFrame({ type: "line", data: { n: 1, off: 0, ts: 1700000000000, text: "one" } });
+      logFrame({ type: "line", data: { n: 2, off: 4, ts: 1700000000001, text: "two" } });
     });
     expect(document.getElementById("node-stage-s1")).toBeTruthy();
   });
@@ -1069,33 +1106,20 @@ describe("BuildPage — live run events", () => {
     };
   }
 
-  /** runStream makes the page read the given frame off the tenant run stream,
-   * and holds the run log stream closed. */
-  function runStream(frame: { type: string; data: unknown } | null, readyState = "closed") {
-    mockUseEventStream.mockImplementation((_baseUrl, scope) =>
-      scope === "pipelines:payments"
-        ? { lastEvent: frame, readyState, error: null }
-        : { lastEvent: null, readyState: "closed", error: null },
-    );
-  }
-
   it("refetches the record for a matching run event", async () => {
     mockGetRun.mockResolvedValue(baseRun());
-    const { repaint } = renderPage();
+    renderPage();
     await screen.findByText(/Build #42/);
     const before = mockGetRun.mock.calls.length;
 
-    runStream({ type: "run", data: notification() });
-    await act(async () => {
-      repaint();
-    });
+    await runFrames({ type: "run", data: notification() });
 
     expect(mockGetRun.mock.calls.length).toBeGreaterThan(before);
   });
 
   it("refetches the record for a matching stage event, and renders the stage the record carries", async () => {
     mockGetRun.mockResolvedValueOnce(baseRun({ status: "RUNNING", result: undefined, stages: [] }));
-    const { repaint } = renderPage();
+    renderPage();
     await screen.findByText(/Build #42/);
     expect(document.getElementById("node-stage-s1")).toBeNull();
 
@@ -1106,52 +1130,40 @@ describe("BuildPage — live run events", () => {
         stages: [{ stageId: "s1", name: "Deploy", status: "IN_PROGRESS" }],
       }),
     );
-    runStream({ type: "stage", data: notification({ kind: "stage" }) });
-    await act(async () => {
-      repaint();
-    });
+    await runFrames({ type: "stage", data: notification({ kind: "stage" }) });
 
-    expect(document.getElementById("node-stage-s1")).toBeTruthy();
+    await waitFor(() => expect(document.getElementById("node-stage-s1")).toBeTruthy());
   });
 
   it("refetches the record for a lock event of this run, which the notifier can send in place of a stage event", async () => {
     mockGetRun.mockResolvedValue(baseRun());
-    const { repaint } = renderPage();
+    renderPage();
     await screen.findByText(/Build #42/);
     const before = mockGetRun.mock.calls.length;
 
-    runStream({ type: "lock", data: notification({ kind: "lock", lock_name: "payments/deploy", state: "HELD" }) });
-    await act(async () => {
-      repaint();
-    });
+    await runFrames({ type: "lock", data: notification({ kind: "lock", lock_name: "payments/deploy", state: "HELD" }) });
 
     expect(mockGetRun.mock.calls.length).toBeGreaterThan(before);
   });
 
   it("refetches the record on a wait frame for its own run", async () => {
     mockGetRun.mockResolvedValue(baseRun());
-    const { repaint } = renderPage();
+    renderPage();
     await screen.findByText(/Build #42/);
     const before = mockGetRun.mock.calls.length;
 
-    runStream({ type: "wait", data: notification({ kind: "wait", state: "waiting" }) });
-    await act(async () => {
-      repaint();
-    });
+    await runFrames({ type: "wait", data: notification({ kind: "wait", state: "waiting" }) });
 
     expect(mockGetRun.mock.calls.length).toBeGreaterThan(before);
   });
 
   it("refetches nothing for an event of another run", async () => {
     mockGetRun.mockResolvedValue(baseRun());
-    const { repaint } = renderPage();
+    renderPage();
     await screen.findByText(/Build #42/);
     const before = mockGetRun.mock.calls.length;
 
-    runStream({ type: "run", data: notification({ run_id: "run-9" }) });
-    await act(async () => {
-      repaint();
-    });
+    await runFrames({ type: "run", data: notification({ run_id: "run-9" }) });
     await act(async () => {
       await Promise.resolve();
     });
@@ -1159,11 +1171,43 @@ describe("BuildPage — live run events", () => {
     expect(mockGetRun.mock.calls.length).toBe(before);
   });
 
+  it("refetches the record for a frame of its run that a frame of another run follows in one burst", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderPage();
+    await screen.findByText(/Build #42/);
+    const before = mockGetRun.mock.calls.length;
+
+    await runFrames(
+      { type: "run", data: notification() },
+      { type: "run", data: notification({ run_id: "run-9" }) },
+    );
+
+    expect(mockGetRun.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it("refetches the record once for a burst of several frames of its run", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderPage();
+    await screen.findByText(/Build #42/);
+    const before = mockGetRun.mock.calls.length;
+
+    await runFrames(
+      { type: "run", data: notification() },
+      { type: "stage", data: notification({ kind: "stage" }) },
+      { type: "wait", data: notification({ kind: "wait", state: "waiting" }) },
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockGetRun.mock.calls.length).toBe(before + 1);
+  });
+
   it("polls the record while the stream is not open and the run is not terminal", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mockGetRun.mockResolvedValue(baseRun({ status: "RUNNING", result: undefined }));
-      runStream(null, "closed");
+      tenantStreamReady("closed");
       renderPage();
       await screen.findByText(/Build #42/);
       const before = mockGetRun.mock.calls.length;
@@ -1182,7 +1226,7 @@ describe("BuildPage — live run events", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mockGetRun.mockResolvedValue(baseRun({ status: "RUNNING", result: undefined }));
-      runStream(null, "open");
+      tenantStreamReady("open");
       renderPage();
       await screen.findByText(/Build #42/);
       const settled = mockGetRun.mock.calls.length;
@@ -1358,16 +1402,6 @@ describe("BuildPage — pending inputs", () => {
     };
   }
 
-  /** runStream makes the page read the given frame off the tenant run stream,
-   * and holds the run log stream closed. */
-  function runStream(frame: { type: string; data: unknown } | null, readyState = "closed") {
-    mockUseEventStream.mockImplementation((_baseUrl, scope) =>
-      scope === "pipelines:payments"
-        ? { lastEvent: frame, readyState, error: null }
-        : { lastEvent: null, readyState: "closed", error: null },
-    );
-  }
-
   /** flush settles the request the page started. */
   async function flush() {
     await act(async () => {
@@ -1484,14 +1518,11 @@ describe("BuildPage — pending inputs", () => {
 
   it("refetches the record for an input frame of this run, which the page subscribes to", async () => {
     mockGetRun.mockResolvedValue(baseRun({ inputs: [pendingInput()] }));
-    const { repaint } = renderPage();
+    renderPage();
     await screen.findByText(/Build #42/);
     const before = mockGetRun.mock.calls.length;
 
-    runStream({ type: "input", data: notification({ kind: "input" }) });
-    await act(async () => {
-      repaint();
-    });
+    await runFrames({ type: "input", data: notification({ kind: "input" }) });
 
     expect(mockGetRun.mock.calls.length).toBeGreaterThan(before);
     const tenantStream = mockUseEventStream.mock.calls.find((call) => call[1] === "pipelines:payments");

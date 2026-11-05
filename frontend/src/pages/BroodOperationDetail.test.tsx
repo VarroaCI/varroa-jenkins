@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "../test/render-utils";
 import BroodOperationDetail from "./BroodOperationDetail";
-import { useEventStream } from "../hooks/useEventStream";
+import { useEventStream, type SSEEvent } from "../hooks/useEventStream";
 import type { BroodRun } from "../types";
 
 vi.mock("../hooks/useEventStream", () => ({
@@ -10,6 +10,19 @@ vi.mock("../hooks/useEventStream", () => ({
 }));
 
 const mockUseEventStream = vi.mocked(useEventStream);
+
+/** STREAM_OPTIONS matches the options object the page passes the status stream. */
+const STREAM_OPTIONS = expect.objectContaining({ onEvent: expect.any(Function) });
+
+/** emit delivers each frame through the onEvent the page passed to the status stream, in one act. */
+function emit(...frames: SSEEvent<unknown>[]) {
+  const calls = mockUseEventStream.mock.calls;
+  const onEvent = calls[calls.length - 1]?.[3]?.onEvent;
+  if (!onEvent) throw new Error("useEventStream was not called with an onEvent option");
+  act(() => {
+    for (const frame of frames) onEvent(frame as SSEEvent<BroodRun>);
+  });
+}
 const mockNavigate = vi.fn();
 
 // Mutable route params so tests can simulate navigating between operations
@@ -138,46 +151,37 @@ describe("BroodOperationDetail", () => {
 
   describe("SSE live updates", () => {
     it("updates the per-target table when an SSE status event is received", async () => {
-      const { rerender } = renderWithProviders(<BroodOperationDetail />);
+      renderWithProviders(<BroodOperationDetail />);
       expect(await screen.findByText("Dispatched")).toBeInTheDocument();
 
       // A terminal `status` frame drives the displayed run (and stops the
       // stream); there is no refetch to reconcile with.
-      mockUseEventStream.mockReturnValue({
-        lastEvent: { type: "status", data: succeededClusterOp },
-        readyState: "open",
-        error: null,
-      });
-      rerender(<BroodOperationDetail />);
+      emit({ type: "status", data: succeededClusterOp });
       const succeededElements = await screen.findAllByText("Succeeded");
       expect(succeededElements.length).toBeGreaterThanOrEqual(1);
       expect(screen.queryByText("Dispatched")).not.toBeInTheDocument();
     });
 
     it("does not let a `closed` frame clobber the last known run", async () => {
-      const { rerender } = renderWithProviders(<BroodOperationDetail />);
+      renderWithProviders(<BroodOperationDetail />);
       expect(await screen.findByText("Dispatched")).toBeInTheDocument();
 
       // A `closed` frame carries a bare payload, not a BroodRun; it must not
       // replace the live run (which would render a blank page).
-      mockUseEventStream.mockReturnValue({
-        lastEvent: { type: "closed", data: {} as BroodRun },
-        readyState: "closed",
-        error: null,
-      });
-      rerender(<BroodOperationDetail />);
+      emit({ type: "closed", data: {} as BroodRun });
       expect(screen.getByText("Dispatched")).toBeInTheDocument();
       expect(screen.queryByText("Failed to load brood operation.")).not.toBeInTheDocument();
     });
 
     it("does not stop the stream (keeps the real baseUrl) after a bare `closed` frame so it can reconnect", async () => {
-      const { rerender } = renderWithProviders(<BroodOperationDetail />);
+      renderWithProviders(<BroodOperationDetail />);
       expect(await screen.findByText("Dispatched")).toBeInTheDocument();
       // While the operation is still live the stream stays open.
       expect(mockUseEventStream).toHaveBeenLastCalledWith(
         "/api/v1/brood-operations/test-ns/test-op/stream",
         "broodop:test-ns/test-op",
         ["status", "closed"],
+        STREAM_OPTIONS,
       );
 
       // A bare `closed` frame (no accompanying terminal status) is ambiguous —
@@ -185,54 +189,75 @@ describe("BroodOperationDetail", () => {
       // disable the stream: useEventStream keeps the real baseUrl so its own
       // backoff-and-reconnect (mint a fresh ticket on error) picks the stream
       // back up.
-      mockUseEventStream.mockReturnValue({
-        lastEvent: { type: "closed", data: {} as BroodRun },
-        readyState: "closed",
-        error: null,
-      });
-      rerender(<BroodOperationDetail />);
+      emit({ type: "closed", data: {} as BroodRun });
 
       expect(mockUseEventStream).toHaveBeenLastCalledWith(
         "/api/v1/brood-operations/test-ns/test-op/stream",
         "broodop:test-ns/test-op",
         ["status", "closed"],
+        STREAM_OPTIONS,
       );
     });
 
     it("stops the stream (null baseUrl) once a status event reports a terminal phase", async () => {
-      const { rerender } = renderWithProviders(<BroodOperationDetail />);
+      renderWithProviders(<BroodOperationDetail />);
       expect(await screen.findByText("Dispatched")).toBeInTheDocument();
 
-      mockUseEventStream.mockReturnValue({
-        lastEvent: { type: "status", data: succeededClusterOp },
-        readyState: "open",
-        error: null,
-      });
-      rerender(<BroodOperationDetail />);
+      emit({ type: "status", data: succeededClusterOp });
 
       await waitFor(() =>
         expect(mockUseEventStream).toHaveBeenLastCalledWith(
           null,
           "broodop:test-ns/test-op",
           ["status", "closed"],
+          STREAM_OPTIONS,
         ),
       );
     });
 
+    it("shows the terminal status that arrives with the closed frame in one burst, and stops the stream", async () => {
+      renderWithProviders(<BroodOperationDetail />);
+      expect(await screen.findByText("Dispatched")).toBeInTheDocument();
+
+      // The BFF sends the terminal status and then the closed frame back to back,
+      // so one render can carry both frames.
+      emit({ type: "status", data: succeededClusterOp }, { type: "closed", data: {} });
+      expect((await screen.findAllByText("Succeeded")).length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByText("Dispatched")).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(mockUseEventStream).toHaveBeenLastCalledWith(
+          null,
+          "broodop:test-ns/test-op",
+          ["status", "closed"],
+          STREAM_OPTIONS,
+        ),
+      );
+    });
+
+    it("keeps the stream open for a non-terminal status and a deadline closed frame in one burst", async () => {
+      renderWithProviders(<BroodOperationDetail />);
+      expect(await screen.findByText("Dispatched")).toBeInTheDocument();
+
+      emit(
+        { type: "status", data: clusterOp },
+        { type: "closed", data: { reason: "deadline_exceeded" } },
+      );
+
+      expect(screen.getByText("Dispatched")).toBeInTheDocument();
+      expect(mockUseEventStream).toHaveBeenLastCalledWith(
+        "/api/v1/brood-operations/test-ns/test-op/stream",
+        "broodop:test-ns/test-op",
+        ["status", "closed"],
+        STREAM_OPTIONS,
+      );
+    });
+
     it("treats a deadline_exceeded `closed` frame as a no-op: stream stays open and the live phase is kept", async () => {
-      const { rerender } = renderWithProviders(<BroodOperationDetail />);
+      renderWithProviders(<BroodOperationDetail />);
       expect(await screen.findByText("Dispatched")).toBeInTheDocument();
 
       // A live `status` frame reports a non-terminal phase, so the last known
       // live status is Dispatched (not just the page-load snapshot).
-      mockUseEventStream.mockReturnValue({
-        lastEvent: { type: "status", data: clusterOp },
-        readyState: "open",
-        error: null,
-      });
-      rerender(<BroodOperationDetail />);
-      expect(await screen.findByText("Dispatched")).toBeInTheDocument();
-
       // The stream's one-hour deadline expired while the operation is still
       // running server-side; the `closed` frame carries reason
       // deadline_exceeded. This is ambiguous (the op may still be running), so
@@ -240,45 +265,31 @@ describe("BroodOperationDetail", () => {
       // (useEventStream's own backoff-and-reconnect picks it back up) and the
       // displayed phase stays at the last known non-terminal status — nothing
       // freezes or reverts.
-      mockUseEventStream.mockReturnValue({
-        lastEvent: { type: "closed", data: { reason: "deadline_exceeded" } as unknown as BroodRun },
-        readyState: "closed",
-        error: null,
-      });
-      rerender(<BroodOperationDetail />);
+      emit({ type: "closed", data: { reason: "deadline_exceeded" } });
 
       expect(mockUseEventStream).toHaveBeenLastCalledWith(
         "/api/v1/brood-operations/test-ns/test-op/stream",
         "broodop:test-ns/test-op",
         ["status", "closed"],
+        STREAM_OPTIONS,
       );
       expect(screen.getByText("Dispatched")).toBeInTheDocument();
     });
 
     it("keeps the last live `status` run after a `closed` frame instead of reverting to the initial snapshot", async () => {
-      const { rerender } = renderWithProviders(<BroodOperationDetail />);
+      renderWithProviders(<BroodOperationDetail />);
       // Initial fetch: non-terminal (Dispatched) snapshot.
       expect(await screen.findByText("Dispatched")).toBeInTheDocument();
 
       // Live `status` frame advances the run to Succeeded; a terminal status
       // also stops the stream.
-      mockUseEventStream.mockReturnValue({
-        lastEvent: { type: "status", data: succeededClusterOp },
-        readyState: "open",
-        error: null,
-      });
-      rerender(<BroodOperationDetail />);
+      emit({ type: "status", data: succeededClusterOp });
       expect((await screen.findAllByText("Succeeded")).length).toBeGreaterThanOrEqual(1);
 
       // A trailing `closed` frame (bare payload) must NOT revert the displayed
       // run back to the page-load `initial` snapshot — a `closed` frame never
       // touches `lastStatus`, so the UI stays on Succeeded.
-      mockUseEventStream.mockReturnValue({
-        lastEvent: { type: "closed", data: {} as BroodRun },
-        readyState: "closed",
-        error: null,
-      });
-      rerender(<BroodOperationDetail />);
+      emit({ type: "closed", data: {} as BroodRun });
 
       expect(screen.getAllByText("Succeeded").length).toBeGreaterThanOrEqual(1);
       expect(screen.queryByText("Dispatched")).not.toBeInTheDocument();
@@ -291,20 +302,18 @@ describe("BroodOperationDetail", () => {
         "/api/v1/brood-operations/test-ns/test-op/stream",
         "broodop:test-ns/test-op",
         ["status", "closed"],
+        STREAM_OPTIONS,
       );
 
       // Op A reaches terminal via a genuinely terminal `status` frame ->
       // stopStream sticks (a bare `closed` frame would no longer do this).
-      mockUseEventStream.mockReturnValue({
-        lastEvent: { type: "status", data: succeededClusterOp },
-        readyState: "open",
-        error: null,
-      });
+      emit({ type: "status", data: succeededClusterOp });
       rerender(<BroodOperationDetail />);
       expect(mockUseEventStream).toHaveBeenLastCalledWith(
         null,
         "broodop:test-ns/test-op",
         ["status", "closed"],
+        STREAM_OPTIONS,
       );
 
       // Navigate to op B in the same component instance (params change).
@@ -318,6 +327,7 @@ describe("BroodOperationDetail", () => {
           "/api/v1/brood-operations/test-ns-2/test-op-2/stream",
           "broodop:test-ns-2/test-op-2",
           ["status", "closed"],
+          STREAM_OPTIONS,
         );
       });
     });
