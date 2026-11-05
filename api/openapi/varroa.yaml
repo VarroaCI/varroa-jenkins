@@ -6476,29 +6476,11 @@ components:
       - status
       type: object
     components_schemas_CellPoolCondition:
-      additionalProperties: false
+      allOf:
+      - $ref: '#/components/schemas/components_schemas_Condition'
       description: Status condition for a CellPool. Type PoolReady, with exactly the
         reasons Ready, CellCapReached, ProfileMissing, RecordStoreUnsupported, BlobTierUnsupported,
         ArtifactSecretMissing, ArtifactPluginMissing, and SecretsMissing.
-      properties:
-        lastTransitionTime:
-          description: ISO 8601 last transition time.
-          type: string
-        message:
-          type: string
-        observedGeneration:
-          format: int64
-          type: integer
-        reason:
-          type: string
-        status:
-          type: string
-        type:
-          type: string
-      required:
-      - type
-      - status
-      type: object
     components_schemas_CellPoolGiteaServer:
       additionalProperties: false
       description: One Gitea or Forgejo server of a pool. The operator renders it
@@ -12435,7 +12417,7 @@ components:
           properties:
             conditions:
               items:
-                $ref: '#/components/schemas/components_schemas_TenantAgentCondition'
+                $ref: '#/components/schemas/components_schemas_Condition'
               type: array
             instructionsSHA:
               type: string
@@ -12511,32 +12493,6 @@ components:
       - description
       - kind
       type: object
-    components_schemas_TenantAgentCondition:
-      properties:
-        lastTransitionTime:
-          format: date-time
-          type: string
-        message:
-          type: string
-        observedGeneration:
-          format: int64
-          type: integer
-        reason:
-          type: string
-        status:
-          enum:
-          - "True"
-          - "False"
-          - Unknown
-          type: string
-        type:
-          type: string
-      required:
-      - type
-      - status
-      - reason
-      - lastTransitionTime
-      type: object
     components_schemas_TenantAgentError:
       additionalProperties: false
       description: A Tenant agent refusal. The code names the cause, and error gives
@@ -12563,7 +12519,7 @@ components:
         conditions:
           description: The conditions whose status is not True.
           items:
-            $ref: '#/components/schemas/components_schemas_TenantAgentCondition'
+            $ref: '#/components/schemas/components_schemas_Condition'
           type: array
         enabled:
           type: boolean
@@ -13550,6 +13506,8 @@ components:
       - status
       type: object
     components_schemas_UpdateCenterCondition:
+      description: A status condition of the update center. Its Go type is not metav1.Condition,
+        so lastTransitionTime is null until the operator sets it.
       properties:
         lastTransitionTime:
           format: date-time
@@ -13563,6 +13521,12 @@ components:
           type: string
         type:
           type: string
+      required:
+      - type
+      - status
+      - lastTransitionTime
+      - reason
+      - message
       type: object
     components_schemas_UpdateCenterGap:
       properties:

@@ -83,24 +83,15 @@ type cellTemplate struct {
 // cellPoolStatusEntry mirrors v1alpha1.CellPoolStatus. The five counters
 // carry no omitempty, so a count that falls to zero reaches the caller.
 type cellPoolStatusEntry struct {
-	ObservedGeneration int64                    `json:"observedGeneration,omitempty"`
-	WarmCells          int32                    `json:"warmCells"`
-	PlacedCells        int32                    `json:"placedCells"`
-	UnreadyCells       int32                    `json:"unreadyCells"`
-	FreeTenantSlots    int32                    `json:"freeTenantSlots"`
-	DepartedBuildCells int32                    `json:"departedBuildCells"`
-	Tenants            []string                 `json:"tenants,omitempty"`
-	Conditions         []cellPoolConditionEntry `json:"conditions,omitempty"`
-}
-
-// cellPoolConditionEntry mirrors one metav1.Condition on a CellPool.
-type cellPoolConditionEntry struct {
-	Type               string       `json:"type"`
-	Status             string       `json:"status"`
-	LastTransitionTime *metav1.Time `json:"lastTransitionTime,omitempty"`
-	Reason             string       `json:"reason,omitempty"`
-	Message            string       `json:"message,omitempty"`
-	ObservedGeneration int64        `json:"observedGeneration,omitempty"`
+	ObservedGeneration int64    `json:"observedGeneration,omitempty"`
+	WarmCells          int32    `json:"warmCells"`
+	PlacedCells        int32    `json:"placedCells"`
+	UnreadyCells       int32    `json:"unreadyCells"`
+	FreeTenantSlots    int32    `json:"freeTenantSlots"`
+	DepartedBuildCells int32    `json:"departedBuildCells"`
+	Tenants            []string `json:"tenants,omitempty"`
+	// Conditions carries the stored metav1.Condition values unchanged, so each one matches the shared Condition schema.
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // cellPoolScaleRequest is the PATCH body. Each dial is a pointer, so the
@@ -181,20 +172,7 @@ func cellPoolEntryFrom(pool *v1alpha1.CellPool) cellPoolEntry {
 			}
 		}
 	}
-	for _, c := range pool.Status.Conditions {
-		entry := cellPoolConditionEntry{
-			Type:               c.Type,
-			Status:             string(c.Status),
-			Reason:             c.Reason,
-			Message:            c.Message,
-			ObservedGeneration: c.ObservedGeneration,
-		}
-		if !c.LastTransitionTime.IsZero() {
-			t := c.LastTransitionTime
-			entry.LastTransitionTime = &t
-		}
-		e.Status.Conditions = append(e.Status.Conditions, entry)
-	}
+	e.Status.Conditions = pool.Status.Conditions
 	return e
 }
 
