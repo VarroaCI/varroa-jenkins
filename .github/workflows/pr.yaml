@@ -83,6 +83,7 @@ jobs:
               - 'go.sum'
               - 'cmd/**'
               - 'plugin/**'
+              - 'hack/build-image-binaries.sh'
               - '.github/workflows/pr.yaml'
             frontend:
               - 'frontend/**'

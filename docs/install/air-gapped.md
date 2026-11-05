@@ -52,6 +52,7 @@ Use `--registry-config` for registry credentials. Use `--insecure` only for plai
 
 - Every image needs an exact tag or a digest. The export refuses the tag `latest`. Release the chart with pinned image tags.
 - Every image must come from a chart value, a profile, a `--bundle-dir`, or an `--image` flag. The export refuses any other image.
+- The export copies every platform of each image, including `linux/amd64` and `linux/arm64`.
 
 ### What the export cannot see
 
@@ -105,7 +106,7 @@ jenkins:
   agentImage: registry.example.com/jenkins/inbound-agent:3384.v60d89463d9e0-1-jdk21
 ```
 
-Mirror and override enabled dependency images too. NATS reads `nats.container.image`. Set `ProvisioningDefaults.spec.imagePullSecrets` for controller pods. Each named Secret must exist in the controller namespace.
+Mirror every platform of each image when you copy images by hand, for example with `skopeo copy --all`. Mirror and override enabled dependency images too. NATS reads `nats.container.image`. Set `ProvisioningDefaults.spec.imagePullSecrets` for controller pods. Each named Secret must exist in the controller namespace.
 
 `jenkins.image.repository` sets the Jenkins controller image. The operator adds the core version as the tag. `jenkins.agentImage` sets the jnlp agent image for the starter bundle and for cell pod templates. Mirror the exact agent tag, as shown in the starter bundle. A bundle that names its own agent image bypasses this value.
 

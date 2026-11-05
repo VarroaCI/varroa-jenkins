@@ -75,7 +75,7 @@ GitHub Actions (`.github/workflows/`) run on GitHub-hosted `ubuntu-latest` runne
 
 `pr.yaml` runs lint, the **Checks** job, the chart golden tests, and govulncheck. It also runs the race tests, the frontend tests, and the Docker builds. The Checks job runs the comment, outbound, generated-file, proto, API client, challenge bundle, bootstrap closure, CRD, and localdev checks. The `Detect changes` job sets the outputs `go`, `charts`, `docker`, `frontend`, and `outbound`. Each build or test job gates itself with `if:` on those outputs. There is no workflow-level paths filter. A draft pull request skips every other job, and `Required checks` fails on a draft. `Required checks` is the single aggregate context that branch protection requires.
 
-`release.yaml` runs on a tag push, or on a manual dispatch against a tag ref. It publishes the images, the chart, the `varroactl` binaries, and the plugin seed packs. `release-please.yaml` cuts releases from conventional commits.
+`release.yaml` runs on a tag push, or on a manual dispatch against a tag ref. It publishes the images (each holds `linux/amd64` and `linux/arm64`), the chart, the `varroactl` binaries, and the plugin seed packs. `release-please.yaml` cuts releases from conventional commits.
 
 Never assume a CLI is on the runner image. Pull it in with `uses: ./.github/actions/setup-ci-tools`. Its inputs are `yq`, `gh`, `rg`, `make`, `helm`, `shellcheck`, `envsubst`, `python3`, and `jq`. Extend that action rather than add an inline installer.
 

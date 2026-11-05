@@ -4,7 +4,8 @@
 ARG FRONTEND_DIST=source
 
 # Stage 1: Build
-FROM node:20-alpine AS dist-source
+# The dist tree does not depend on the target arch. The stage runs on the build platform.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS dist-source
 
 WORKDIR /app
 
@@ -21,6 +22,8 @@ COPY --from=prebuilt-dist / /app/dist/
 FROM dist-${FRONTEND_DIST} AS dist
 
 # Stage 2: Serve
+# This stage holds only COPY steps, so a foreign-arch build needs no emulator.
+# Do not add a RUN step.
 FROM nginxinc/nginx-unprivileged:1.27-alpine
 
 COPY nginx.conf /etc/nginx/templates/default.conf.template

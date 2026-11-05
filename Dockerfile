@@ -4,7 +4,8 @@
 ARG GO_BINARIES=source
 
 # Stage 1: Build the auth plugin HPI
-FROM maven:3.9-eclipse-temurin-21 AS plugin-builder
+# The HPI does not depend on the target arch. The stage runs once, on the build platform.
+FROM --platform=$BUILDPLATFORM maven:3.9-eclipse-temurin-21 AS plugin-builder
 WORKDIR /build
 COPY plugin/pom.xml .
 RUN mvn dependency:go-offline -B || true
@@ -12,7 +13,9 @@ COPY plugin/src/ src/
 RUN mvn verify -DskipTests -B
 
 # Stage 2: Go binaries, built from source
-FROM golang:1.26-alpine AS binaries-source
+# This stage runs on the build platform and cross-compiles for TARGETARCH.
+# It needs no emulator for a foreign arch.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS binaries-source
 
 RUN apk add --no-cache ca-certificates git
 
@@ -26,9 +29,10 @@ COPY . .
 # Build arguments change on every commit. Declare them after the dependency layers, so those layers stay cached.
 ARG GIT_SHA=unknown
 ARG GIT_BRANCH=unknown
+ARG TARGETARCH
 
 # hack/build-image-binaries.sh holds the one binary list for both paths.
-RUN GIT_SHA="${GIT_SHA}" sh hack/build-image-binaries.sh /build/bin
+RUN GOARCH="${TARGETARCH}" GIT_SHA="${GIT_SHA}" sh hack/build-image-binaries.sh /build/bin
 
 # Go binaries, copied from the prebuilt-binaries build context
 FROM scratch AS binaries-prebuilt
@@ -38,6 +42,8 @@ COPY --from=prebuilt-binaries /linux-${TARGETARCH}/ /build/bin/
 FROM binaries-${GO_BINARIES} AS binaries
 
 # Stage 3: Runtime
+# This stage runs on the target platform. Its RUN step executes target-arch
+# binaries, so a foreign-arch build needs an emulator. Add no other RUN step here.
 FROM alpine:3.22
 
 RUN apk add --no-cache ca-certificates tzdata git openssh-client && \
