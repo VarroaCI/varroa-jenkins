@@ -26,7 +26,31 @@ function callModel(result: TranscriptModel["calls"][string]["result"]): Transcri
   };
 }
 
+function errorModel(code: string, message: string): TranscriptModel {
+  return { ...emptyModel(), rows: [{ kind: "error", seq: 1, code, message }] };
+}
+
 describe("TranscriptView", () => {
+  it("shows the label of an error code, not the raw code", () => {
+    render(<TranscriptView model={errorModel("budget_session", "")} />);
+    const row = screen.getByRole("alert");
+    expect(row.textContent).toBe("The session token budget is spent.");
+    expect(row.textContent).not.toContain("budget_session");
+    expect(row.getAttribute("title")).toBe("budget_session: ");
+  });
+
+  it("keeps the message out of the row and puts it in the title with the code", () => {
+    render(<TranscriptView model={errorModel("provider_error", "provider call failed")} />);
+    const row = screen.getByRole("alert");
+    expect(row.textContent).toBe("The model provider answered with an error.");
+    expect(row.getAttribute("title")).toBe("provider_error: provider call failed");
+  });
+
+  it("shows an unknown code as the code", () => {
+    render(<TranscriptView model={errorModel("future_code", "")} />);
+    expect(screen.getByRole("alert").textContent).toBe("future_code");
+  });
+
   it("renders a notice and no result block for a withheld result", () => {
     const { container } = render(
       <TranscriptView

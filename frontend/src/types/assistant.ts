@@ -29,6 +29,16 @@ export type AssistantErrorCode =
 /** The codes a note refusal carries. */
 export type RunNoteErrorCode = "note_too_long" | "note_session_invalid";
 
+/** The codes an error event on the stream carries. */
+export type StreamErrorCode =
+  | "budget_session"
+  | "budget_day"
+  | "steps"
+  | "kill_switch"
+  | "provider_error"
+  | "session_key_missing"
+  | "lease_lost";
+
 /** The state of one approval. */
 export type AssistantApprovalState = "pending" | "approved" | "denied" | "expired";
 

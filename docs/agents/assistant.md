@@ -209,7 +209,7 @@ with `session_key_missing`.
 | `kill_switch` | Error event | The kill switch stopped the session. |
 | `provider_error` | Error event | The provider call failed. Check the provider and its key. |
 | `session_key_missing` | Error event | The user key cookie is missing. Store the key again. |
-| `lease_lost` | Error event | Another replica stopped the run. Send a new message. |
+| `lease_lost` | Error event | Another replica stopped the run. An approved tool may have run. Send a new message. |
 | `assistant_disabled` | HTTP 503 | The assistant is off, or the record store schema is too old. Turn on the assistant, or update the recorder. |
 | `record_store_unreachable` | HTTP 503 | The record store does not answer. Retry when it answers. |
 | `assistant_key_unavailable` | HTTP 503 or 409 | No key is available for the provider. |
