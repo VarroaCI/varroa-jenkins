@@ -107,6 +107,59 @@ func TestListActivityControllerFilter(t *testing.T) {
 	}
 }
 
+func TestListActivityClusterFilter(t *testing.T) {
+	deps := backfillDeps(
+		activity.Event{Type: "controller.created", Cluster: "core", Controller: "ci", Namespace: "varroa"},
+		activity.Event{Type: "controller.deleted", Cluster: "member-b", Controller: "ci", Namespace: "varroa"},
+	)
+	if events := callListActivity(t, deps, map[string]interface{}{"controller": "ci"}); len(events) != 2 {
+		t.Fatalf("controller alone: expected 2 events across clusters, got %d", len(events))
+	}
+	events := callListActivity(t, deps, map[string]interface{}{"controller": "ci", "cluster": "member-b"})
+	if len(events) != 1 || events[0].Cluster != "member-b" {
+		t.Fatalf("controller and cluster: expected only the member-b event, got %+v", events)
+	}
+	events = callListActivity(t, deps, map[string]interface{}{"cluster": "core"})
+	if len(events) != 1 || events[0].Cluster != "core" {
+		t.Fatalf("cluster alone: expected only the core event, got %+v", events)
+	}
+}
+
+func TestListActivityDeclaresCluster(t *testing.T) {
+	handler := NewHandler(newTestDeps())
+	resp := mcpRequest(t, handler, "tools/list", nil, nil)
+	if resp.Error != nil {
+		t.Fatalf("tools/list: %v", resp.Error)
+	}
+	var wrapper struct {
+		Tools []struct {
+			Name        string `json:"name"`
+			InputSchema struct {
+				Properties map[string]struct {
+					Type string `json:"type"`
+				} `json:"properties"`
+			} `json:"inputSchema"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(resp.Result, &wrapper); err != nil {
+		t.Fatalf("decode tools/list: %v", err)
+	}
+	for _, tool := range wrapper.Tools {
+		if tool.Name != "list_activity" {
+			continue
+		}
+		prop, ok := tool.InputSchema.Properties["cluster"]
+		if !ok {
+			t.Fatal("list_activity does not declare a cluster argument")
+		}
+		if prop.Type != "string" {
+			t.Errorf("cluster declared as %q, want string", prop.Type)
+		}
+		return
+	}
+	t.Fatal("list_activity missing from tools/list")
+}
+
 func TestListActivityExcludeRoutineSignIns(t *testing.T) {
 	deps := backfillDeps(
 		activity.Event{Type: "auth.local.login", Severity: "info", Source: "user", Controller: "auditboi", Namespace: "varroa", Message: "routine"},

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -23,7 +24,8 @@ func init() {
 			RunE:  runActivity,
 		}
 		activityCmd.Flags().BoolP("follow", "f", false, "Follow activity stream")
-		activityCmd.Flags().String("controller", "", "Filter by controller name")
+		activityCmd.Flags().String("controller", "", "Filter by controller (NAME or NAMESPACE/NAME); matches on every cluster unless --cluster is set")
+		activityCmd.Flags().String("cluster", "", "Filter by cluster (default: every cluster)")
 		root.AddCommand(activityCmd)
 	})
 }
@@ -31,6 +33,8 @@ func init() {
 func runActivity(cmd *cobra.Command, args []string) error {
 	follow, _ := cmd.Flags().GetBool("follow")
 	ctrlFilter, _ := cmd.Flags().GetString("controller")
+	clusterFilter, _ := cmd.Flags().GetString("cluster")
+	query := activityQuery(ctrlFilter, clusterFilter)
 
 	rc, err := resolveContext(func(name string) string {
 		f := cmd.Flag(name)
@@ -44,10 +48,7 @@ func runActivity(cmd *cobra.Command, args []string) error {
 	}
 
 	// Backfill
-	backfillPath := "/activity"
-	if ctrlFilter != "" {
-		backfillPath = "/activity?controller=" + ctrlFilter
-	}
+	backfillPath := "/activity" + query
 
 	fullURL := strings.TrimRight(rc.server, "/") + "/api/v1" + backfillPath
 	req, err := http.NewRequest("GET", fullURL, nil)
@@ -85,10 +86,7 @@ func runActivity(cmd *cobra.Command, args []string) error {
 	ctx, cancel := signalCtx(cmd.Context())
 	defer cancel()
 
-	streamPath := "/activity/stream"
-	if ctrlFilter != "" {
-		streamPath = "/activity/stream?controller=" + ctrlFilter
-	}
+	streamPath := "/activity/stream" + query
 
 	var lastPrinted atomic.Value // stores time.Time
 
@@ -141,8 +139,25 @@ func runActivity(cmd *cobra.Command, args []string) error {
 	}
 
 	return stream.Stream(ctx, scfg, func(e stream.Event) error {
-		return printActivityStreamEvent(e, ctrlFilter, &lastPrinted)
+		return printActivityStreamEvent(e, &lastPrinted)
 	})
+}
+
+// activityQuery returns the query string of the activity filters, or "" when
+// no filter is set. The BFF applies these filters to the backfill and to the
+// stream, so the command does not filter streamed events again.
+func activityQuery(controller, cluster string) string {
+	v := url.Values{}
+	if controller != "" {
+		v.Set("controller", controller)
+	}
+	if cluster != "" {
+		v.Set("cluster", cluster)
+	}
+	if len(v) == 0 {
+		return ""
+	}
+	return "?" + v.Encode()
 }
 
 // printActivityTable renders the backfill table.
@@ -193,7 +208,7 @@ func printActivityRow(item client.ComponentsSchemasActivityEvent) {
 }
 
 // printActivityStreamEvent handles a single stream event for activity.
-func printActivityStreamEvent(e stream.Event, ctrlFilter string, lastPrinted *atomic.Value) error {
+func printActivityStreamEvent(e stream.Event, lastPrinted *atomic.Value) error {
 	// Stream frames are named "activity"
 	if e.Name != "" && e.Name != "activity" {
 		return nil
@@ -202,13 +217,6 @@ func printActivityStreamEvent(e stream.Event, ctrlFilter string, lastPrinted *at
 	var event client.ComponentsSchemasActivityEvent
 	if err := json.Unmarshal(e.Data, &event); err != nil {
 		return nil //nolint:nilerr
-	}
-
-	// Client-side controller filter
-	if ctrlFilter != "" {
-		if event.Controller == nil || *event.Controller != ctrlFilter {
-			return nil
-		}
 	}
 
 	// Dedupe

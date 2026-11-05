@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/varroaci/varroa-jenkins/pkg/client/stream"
 )
 
 // ---------------------------------------------------------------------------
@@ -80,6 +84,9 @@ func TestActivity_ControllerFilter(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.URL.RawQuery, "controller=ctrl-1") {
 			t.Errorf("expected controller=ctrl-1 in query, got %s", r.URL.RawQuery)
+		}
+		if r.URL.Query().Has("cluster") {
+			t.Errorf("expected no cluster parameter without --cluster, got %s", r.URL.RawQuery)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -155,5 +162,100 @@ func TestActivity_NoFollowExitsCleanly(t *testing.T) {
 	root.SetArgs([]string{"activity", "--server", srv.URL})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestActivity_ClusterFilterOnBackfillAndStream(t *testing.T) {
+	defer overrideSignalCtx()()
+	testSetup(t)
+	var mu sync.Mutex
+	seen := map[string]url.Values{}
+	streamed := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen[r.URL.Path] = r.URL.Query()
+		mu.Unlock()
+		if strings.HasSuffix(r.URL.Path, "/activity/stream") {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher, _ := w.(http.Flusher)
+			flusher.Flush()
+			select {
+			case streamed <- struct{}{}:
+			default:
+			}
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"items":[]}`)
+	}))
+	defer srv.Close()
+
+	version = "test"
+	root := newRootCmd()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-streamed:
+		case <-time.After(5 * time.Second):
+		}
+		cancel()
+	}()
+
+	root.SetArgs([]string{"activity", "--server", srv.URL, "-f", "--cluster", "member-b", "--controller", "ci"})
+	root.SetContext(ctx)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, path := range []string{"/api/v1/activity", "/api/v1/activity/stream"} {
+		q, ok := seen[path]
+		if !ok {
+			t.Fatalf("no request reached %s", path)
+		}
+		if got := q.Get("cluster"); got != "member-b" {
+			t.Errorf("%s: cluster = %q, want member-b", path, got)
+		}
+		if got := q.Get("controller"); got != "ci" {
+			t.Errorf("%s: controller = %q, want ci", path, got)
+		}
+	}
+}
+
+func TestActivity_BackfillClusterOnly(t *testing.T) {
+	testSetup(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("cluster"); got != "member-b" {
+			t.Errorf("cluster = %q, want member-b (query %s)", got, r.URL.RawQuery)
+		}
+		if r.URL.Query().Has("controller") {
+			t.Errorf("expected no controller parameter, got %s", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"items":[]}`)
+	}))
+	defer srv.Close()
+
+	version = "test"
+	root := newRootCmd()
+	root.SetArgs([]string{"activity", "--server", srv.URL, "--cluster", "member-b"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPrintActivityStreamEvent_PrintsWhatTheServerSends(t *testing.T) {
+	var lastPrinted atomic.Value
+	data := []byte(`{"timestamp":"2024-01-15T10:00:01Z","type":"Updated","source":"operator","cluster":"member-b","controller":"ci","namespace":"team-a","message":"controller updated"}`)
+	if err := printActivityStreamEvent(stream.Event{Name: "activity", Data: data}, &lastPrinted); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if lastPrinted.Load() == nil {
+		t.Fatal("server-filtered event was dropped by the client")
 	}
 }
