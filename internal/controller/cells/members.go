@@ -238,7 +238,8 @@ func newerApplied(a, b MemberBinding) bool {
 // memberCellDrained reports whether a member's cell holds no running build
 // of the tenant: the cell is gone, evacuates, runs no pod, or has dropped
 // the tenant's folder. A cell with no pod holds nothing, because its builds
-// stopped with the pod.
+// stopped with the pod. The member release and the voluntary move both use
+// this test.
 func memberCellDrained(in Inputs, tenant *v1alpha1.Tenant, m MemberBinding) bool {
 	cell, found := lookupCell(in.Cells, m.Cell, m.Namespace)
 	if !found || cell.Evacuate || cell.Instance == "" {
