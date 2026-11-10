@@ -138,10 +138,19 @@ jobs:
         # A separate build cache keeps the cross-compile output out of the saved setup-go cache.
         if: ${{ !cancelled() && needs.changes.outputs.go == 'true' }}
         env:
-          GOCACHE: ${{ runner.temp }}/varroactl-platforms-gocache
+          GOCACHE: ${{ runner.temp }}/cross-gocache
         run: |
           shellcheck hack/check-varroactl-platforms.sh
           make check-varroactl-platforms
+      - name: Check image binaries for arm64
+        # The release images publish linux/arm64. The Lint and Test jobs compile only the host arch.
+        # The step shares the cross-compile build cache of the varroactl step.
+        if: ${{ !cancelled() && needs.changes.outputs.go == 'true' }}
+        env:
+          GOCACHE: ${{ runner.temp }}/cross-gocache
+        run: |
+          shellcheck hack/build-image-binaries.sh
+          make check-image-binaries
       - name: Check Proto
         if: ${{ !cancelled() }}
         run: make check-proto
