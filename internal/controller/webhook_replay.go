@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -30,6 +31,18 @@ const webhookReplayConsumer = "varroa-webhook-replay"
 // under the consumer AckWait (60s) so a slow replay is redelivered rather than
 // silently expiring its ack deadline.
 const replayResultTimeout = 30 * time.Second
+
+// replayGiveUpAge is the oldest delivery the consumer still replays. It stays ten
+// minutes below the stream MaxAge, so the consumer sees the delivery once more and
+// records the drop. The stream deletes an older message and records nothing.
+const replayGiveUpAge = bus.WebhookStreamMaxAge - 10*time.Minute
+
+const (
+	replayRebuildMinBackoff     = time.Second
+	replayRebuildMaxBackoff     = 30 * time.Second
+	replayRebuildResetAfter     = time.Minute      // a pass this long restarts the backoff
+	replayConsumerCheckInterval = 30 * time.Second // a pass confirms its durable exists
+)
 
 // webhookEnvelope is the queued webhook shape the BFF writes to the
 // varroa_webhooks stream (see internal/api/handlers_hibernation.go). It
@@ -76,7 +89,59 @@ func (env webhookEnvelope) isTenantEnvelope() bool {
 //   - controller Connected and mite returns 2xx  → Ack
 //   - controller not Connected, 5xx, 429, timeout → Nak (redeliver after delay)
 //   - controller CR deleted, or Jenkins 4xx≠429   → Term + rejected activity event
+//   - delivery older than replayGiveUpAge         → Term + rejected activity event
+//
+// A failed consumer pass rebuilds the consumer after a backoff. This function
+// returns only when ctx ends.
 func (r *Reconciler) RunWebhookReplay(ctx context.Context, conn *bus.Conn, cluster string, replicas int) error {
+	superviseReplay(ctx, r.Logger, cluster, func(ctx context.Context) error {
+		return r.runWebhookReplayPass(ctx, conn, cluster, replicas, replayConsumerCheckInterval)
+	}, waitOrDone, time.Now)
+	return nil
+}
+
+// superviseReplay runs pass until ctx ends. When a pass returns, it logs the
+// error and waits before it runs the pass again. The backoff doubles from
+// replayRebuildMinBackoff up to replayRebuildMaxBackoff. A pass that ran for at
+// least replayRebuildResetAfter resets the backoff.
+func superviseReplay(ctx context.Context, logger *slog.Logger, cluster string,
+	pass func(context.Context) error, wait func(context.Context, time.Duration) bool, now func() time.Time) {
+	backoff := replayRebuildMinBackoff
+	for ctx.Err() == nil {
+		start := now()
+		err := pass(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if now().Sub(start) >= replayRebuildResetAfter {
+			backoff = replayRebuildMinBackoff
+		}
+		logger.Error("webhook replay consumer stopped; rebuilding",
+			"cluster", cluster, "error", err, "retryIn", backoff)
+		if !wait(ctx, backoff) {
+			return
+		}
+		backoff = min(2*backoff, replayRebuildMaxBackoff)
+	}
+}
+
+// waitOrDone waits for d or until ctx ends. It reports true when the wait ran out.
+func waitOrDone(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// runWebhookReplayPass runs one consumer session. It returns nil when ctx ends.
+// It returns an error when the consumer cannot be set up, a fetch fails, or the
+// durable consumer check fails. Every checkEvery, it confirms the durable still
+// exists, so a consumer deleted from outside is rebuilt.
+func (r *Reconciler) runWebhookReplayPass(ctx context.Context, conn *bus.Conn, cluster string, replicas int, checkEvery time.Duration) error {
 	if err := conn.EnsureStream(bus.WebhookStreamConfig(bus.WebhookStreamName, replicas)); err != nil {
 		return fmt.Errorf("ensure webhook stream: %w", err)
 	}
@@ -91,7 +156,7 @@ func (r *Reconciler) RunWebhookReplay(ctx context.Context, conn *bus.Conn, clust
 		FilterSubject: clusterWildcard, // webhook.<cluster>.>
 		AckPolicy:     nats.AckExplicitPolicy,
 		AckWait:       60 * time.Second,
-		MaxDeliver:    -1, // MaxAge on the stream (1h) is the real bound
+		MaxDeliver:    -1, // replayGiveUpAge is the real bound; the stream MaxAge is the backstop
 	}); err != nil {
 		return fmt.Errorf("ensure webhook replay consumer: %w", err)
 	}
@@ -119,22 +184,33 @@ func (r *Reconciler) RunWebhookReplay(ctx context.Context, conn *bus.Conn, clust
 	defer func() { _ = resultSub.Unsubscribe() }()
 
 	r.Logger.Info("webhook replay consumer started", "cluster", cluster)
+	lastCheck := time.Now()
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
+		if time.Since(lastCheck) >= checkEvery {
+			lastCheck = time.Now()
+			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			_, err := conn.ConsumerInfoContext(checkCtx, bus.WebhookStreamName, durable)
+			cancel()
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return fmt.Errorf("check webhook replay consumer: %w", err)
+			}
+		}
 		msgs, err := conn.DrainConsumer(sub, 16)
 		if err != nil {
-			// A fetch timeout with no messages is normal; anything else, back off.
+			// A fetch timeout with no messages is normal.
 			if errors.Is(err, nats.ErrTimeout) {
 				continue
 			}
-			select {
-			case <-ctx.Done():
+			if ctx.Err() != nil {
 				return nil
-			case <-time.After(time.Second):
-				continue
 			}
+			return fmt.Errorf("fetch queued webhooks: %w", err)
 		}
 		for _, msg := range msgs {
 			r.handleQueuedWebhook(ctx, cluster, msg, waiters)
@@ -150,6 +226,7 @@ func (r *Reconciler) handleQueuedWebhook(ctx context.Context, cluster string, ms
 	if err := json.Unmarshal(msg.Data, &env); err != nil {
 		// Unparseable payload will never succeed — drop it rather than loop.
 		r.Logger.Warn("dropping unparseable queued webhook", "error", err)
+		r.publishReplayRejected(webhookEnvelope{}, "unparseable queued webhook; dropped")
 		_ = msg.Term()
 		return
 	}
@@ -158,6 +235,16 @@ func (r *Reconciler) handleQueuedWebhook(ctx context.Context, cluster string, ms
 	// cluster, but never replay a webhook whose envelope names another cluster.
 	if env.Cluster != cluster {
 		r.Logger.Warn("dropping cross-cluster webhook", "envelopeCluster", env.Cluster, "cluster", cluster)
+		r.publishReplayRejected(env, fmt.Sprintf("queued webhook names cluster %s, not %s; dropped", env.Cluster, cluster))
+		_ = msg.Term()
+		return
+	}
+
+	if age, ok := deliveryAge(msg, env, time.Now()); ok && age >= replayGiveUpAge {
+		r.Logger.Warn("dropping queued webhook past the replay bound", "cluster", cluster,
+			"delivery", deliveryLabel(env), "age", age)
+		r.publishReplayRejected(env, fmt.Sprintf("delivery %s was not replayed within %s; dropped",
+			deliveryLabel(env), replayGiveUpAge))
 		_ = msg.Term()
 		return
 	}
@@ -196,6 +283,7 @@ func (r *Reconciler) handleQueuedControllerWebhook(ctx context.Context, env webh
 	if err != nil {
 		r.Logger.Warn("dropping webhook with bad body encoding",
 			"controller", env.Namespace+"/"+env.Controller, "error", err)
+		r.publishReplayRejected(env, "webhook body is not valid base64; dropped")
 		_ = msg.Term()
 		return
 	}
@@ -288,6 +376,7 @@ func (r *Reconciler) handleQueuedTenantWebhook(ctx context.Context, env webhookE
 	body, err := base64.StdEncoding.DecodeString(env.BodyB64)
 	if err != nil {
 		r.Logger.Warn("dropping tenant webhook with bad body encoding", "tenant", env.Tenant, "error", err)
+		r.publishReplayRejected(env, "webhook body is not valid base64; dropped")
 		_ = msg.Term()
 		return
 	}
@@ -422,11 +511,34 @@ func (r *Reconciler) publishReplayRejected(env webhookEnvelope, reason string) {
 	}
 	r.activityPublisher.Publish(activity.Event{
 		Type:       "webhook.replay.rejected",
+		Source:     "operator",
+		Severity:   "warning",
 		Controller: env.Controller,
 		Namespace:  env.Namespace,
 		Message:    message,
 		Timestamp:  time.Now().UTC(),
 	})
+}
+
+// deliveryAge returns how long the delivery has waited in the queue. It reads the
+// stream timestamp when present, then the envelope's receivedAt. It reports false
+// when neither is known, so a message without a timestamp is never expired.
+func deliveryAge(msg *nats.Msg, env webhookEnvelope, now time.Time) (time.Duration, bool) {
+	if md, err := msg.Metadata(); err == nil && md != nil && !md.Timestamp.IsZero() {
+		return now.Sub(md.Timestamp), true
+	}
+	if t, err := time.Parse(time.RFC3339, env.ReceivedAt); err == nil {
+		return now.Sub(t), true
+	}
+	return 0, false
+}
+
+// deliveryLabel names a queued delivery in logs and events.
+func deliveryLabel(env webhookEnvelope) string {
+	if env.isTenantEnvelope() {
+		return env.Forge + ":" + env.DeliveryID
+	}
+	return env.Path
 }
 
 // msgSequence extracts the JetStream stream sequence from a message; 0 if
