@@ -1,4 +1,4 @@
-.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-generated-test check-plugin-advisories-test check-comments check-outbound check-terminology check-varroactl-platforms outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
+.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-generated-test check-plugin-advisories-test check-comments check-outbound check-terminology check-varroactl-platforms check-image-binaries outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
 
 GIT_SHA=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -87,6 +87,11 @@ check-terminology:
 # The varroactl release job reads the same list with --list.
 check-varroactl-platforms:
 	bash hack/check-varroactl-platforms.sh
+
+# Builds each backend image binary for linux/arm64 and writes no binary.
+# The release images publish linux/arm64. The Lint and Test jobs compile only the host arch.
+check-image-binaries:
+	GOARCH=arm64 sh hack/build-image-binaries.sh --check
 
 # Regenerates docs/security/outbound-connections.md from the inventory.
 outbound-doc:
