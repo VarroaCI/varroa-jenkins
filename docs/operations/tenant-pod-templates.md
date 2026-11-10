@@ -88,6 +88,60 @@ carries the `kubernetes.jenkins.io/controller` label, and carries a valid refres
 Teardown keeps the `Tenant` finalizer until the tenant's agent pods are gone, or for ten minutes at
 most. Each check runs once a minute, and no timeout is configurable.
 
+## Agent loss after a Jenkins restart
+
+A cell's Jenkins can stop while a build runs on an agent pod. A restart in the same pod keeps the
+Jenkins home, so Jenkins resumes the build and waits for the agent to reconnect. The agent pod keeps
+its processes and connects to the restarted Jenkins process.
+
+A cell roll is different. The new pod starts with an empty Jenkins home. A tenant that runs
+[Pipeline mesh](pipeline-mesh.md) continues the build on the new pod, and that replays the work since
+the last push. Without the mesh, the run ends as `INTERRUPTED` with the reason `cell-rolled`. See
+[Cell loss](cell-loss.md).
+
+For each open `node` block, the resumed build log shows this line:
+
+```text
+Waiting for reconnection of <agent> before proceeding with build
+```
+
+This line is not an error. Jenkins writes no second line when the agent connects. A long step can
+then stay silent until it writes its next output. A line `Timeout set to expire in <time>` comes from
+the `timeout` option of the pipeline. It shows the time that remains of that option.
+
+The agent pods run in the namespace that `spec.pipelines.agentNamespace` of the `Tenant` names. The
+cell namespace holds no agent pod.
+
+When the agent does not connect within 5 minutes, Jenkins ends the `node` block with this line:
+
+```text
+<agent> has been removed for 5 min 0 sec; assuming it is not coming back, and terminating node step
+```
+
+The step fails, and the build continues as for any other failed step. Varroa keeps the Jenkins
+default of 5 minutes.
+
+To run the stage again on a new agent pod, add a `retry` option with the `kubernetesAgent()`
+condition:
+
+```groovy
+stage('Test') {
+  agent { label '<pod-template-label>' }
+  options {
+    retry(count: 2, conditions: [kubernetesAgent()])
+  }
+  steps {
+    sh 'make test'
+  }
+}
+```
+
+The Kubernetes plugin supplies `kubernetesAgent()`. It matches the loss of a Kubernetes agent, such
+as a deleted or evicted pod. It does not match a container that ran out of memory. Without
+`conditions`, `retry` repeats the stage after any error. The condition limits the retry to agent
+loss. Jenkins reruns the stage from its first step, up to `count` times. Make sure that the stage
+is safe to run again.
+
 ## Build a container image
 
 An agent pod has no Docker daemon. A `docker.build` step or an `agent { docker … }` block does
