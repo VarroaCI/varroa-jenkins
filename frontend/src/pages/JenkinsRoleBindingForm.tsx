@@ -7,7 +7,7 @@ import {
   updateJenkinsRoleBinding,
   listJenkinsRoles,
 } from "../api/client";
-import type { JenkinsRoleBinding, JenkinsRole, SubjectRef, JenkinsScope } from "../types";
+import type { JenkinsRoleBinding, JenkinsRole, SubjectRef, JenkinsScope, VarroaRoleBindingScope } from "../types";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
@@ -23,6 +23,19 @@ interface LabelEntry {
 }
 
 const JENKINS_ROLE_BINDING_CONFLICT_NOTE = "Another user or tool changed this Jenkins role binding after you opened it. Reload the page, then make the change again.";
+
+const MATCH_EXPRESSIONS_NOTE =
+  "The dashboard does not edit match expressions. A save keeps them. Use the API or kubectl to change them.";
+
+type MatchExpression = NonNullable<
+  NonNullable<VarroaRoleBindingScope["controllerSelector"]>["matchExpressions"]
+>[number];
+
+// Formats one stored selector requirement with the operator words of the CRD.
+function formatMatchExpression(req: MatchExpression): string {
+  const values = req.values && req.values.length > 0 ? ` (${req.values.join(", ")})` : "";
+  return `${req.key} ${req.operator}${values}`;
+}
 
 export default function JenkinsRoleBindingForm() {
   const { name } = useParams();
@@ -107,6 +120,20 @@ export default function JenkinsRoleBindingForm() {
         matchLabels[l.key.trim()] = l.value.trim();
       });
 
+    // The stored controller scope is the base. Only the fields this form edits
+    // are overwritten, so a stored controllerSelector.matchExpressions list
+    // survives a save. A dropped selector widens the binding.
+    const scope: VarroaRoleBindingScope = { ...loaded?.spec.controllerScope };
+    if (namespaces.length > 0) scope.namespaces = namespaces;
+    else delete scope.namespaces;
+    if (Object.keys(matchLabels).length > 0) {
+      scope.controllerSelector = { ...scope.controllerSelector, matchLabels };
+    } else if (scope.controllerSelector) {
+      const { matchLabels: _removed, ...rest } = scope.controllerSelector;
+      if (rest.matchExpressions && rest.matchExpressions.length > 0) scope.controllerSelector = rest;
+      else delete scope.controllerSelector;
+    }
+
     // Build Jenkins scope
     let jenkinsScope: JenkinsScope | undefined;
     if (jenkinsScopeType) {
@@ -126,16 +153,7 @@ export default function JenkinsRoleBindingForm() {
       spec: {
         subjects: subjects.filter((s) => s.name.trim().length > 0),
         roleRef,
-        ...(namespaces.length > 0 || Object.keys(matchLabels).length > 0
-          ? {
-              controllerScope: {
-                ...(namespaces.length > 0 ? { namespaces } : {}),
-                ...(Object.keys(matchLabels).length > 0
-                  ? { controllerSelector: { matchLabels } }
-                  : {}),
-              },
-            }
-          : {}),
+        ...(Object.keys(scope).length > 0 ? { controllerScope: scope } : {}),
         ...(jenkinsScope ? { jenkinsScope } : {}),
       },
     };
@@ -180,6 +198,8 @@ export default function JenkinsRoleBindingForm() {
   const addLabel = () => setSelectorLabels([...selectorLabels, { key: "", value: "" }]);
   const removeLabel = (idx: number) =>
     setSelectorLabels(selectorLabels.filter((_, i) => i !== idx));
+
+  const storedExpressions = loaded?.spec.controllerScope?.controllerSelector?.matchExpressions ?? [];
 
   if (ready && !cluster) return <NoAccessibleClusters />;
   if (fetching || !cluster) return <LoadingSpinner />;
@@ -294,7 +314,11 @@ export default function JenkinsRoleBindingForm() {
                     value={scopeNamespaces}
                     onChange={(e) => setScopeNamespaces(e.target.value)}
                   />
-                  <p className={styles.hint}>Leave empty for cluster-wide scope.</p>
+                  <p className={styles.hint}>
+                    {storedExpressions.length > 0
+                      ? "Leave empty for cluster-wide scope. The stored selector expressions still narrow this binding."
+                      : "Leave empty for cluster-wide scope."}
+                  </p>
                 </div>
 
                 <div className={styles.formGroup}>
@@ -329,6 +353,17 @@ export default function JenkinsRoleBindingForm() {
                     + Add Label
                   </button>
                 </div>
+                {storedExpressions.length > 0 && (
+                  <div className={styles.formGroup}>
+                    <div className={styles.formLabel}>Controller Selector Expressions</div>
+                    <ul className={styles.exprList}>
+                      {storedExpressions.map((req, idx) => (
+                        <li key={idx}>{formatMatchExpression(req)}</li>
+                      ))}
+                    </ul>
+                    <p className={styles.hint}>{MATCH_EXPRESSIONS_NOTE}</p>
+                  </div>
+                )}
               </div>
             )}
           </div>

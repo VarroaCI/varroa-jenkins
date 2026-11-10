@@ -208,6 +208,8 @@ Change a Jenkins role with `PUT /api/v1/clusters/{cluster}/jenkinsroles/{name}`.
 
 The dashboard Jenkins role and binding editors send the version of their read. Save stops with a conflict note when another writer changed the object after the editor read it. Reload the page, then make the change again.
 
+The binding editor edits `controllerSelector.matchLabels` only. It lists stored `controllerSelector.matchExpressions` entries read-only, and a save keeps them. Use the API or `kubectl` to change them.
+
 ## Troubleshoot
 
 | Symptom | Check |
