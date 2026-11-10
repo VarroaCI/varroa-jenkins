@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import JenkinsRoleBindingForm from "./JenkinsRoleBindingForm";
 import { ApiError } from "../hooks/useApi";
@@ -313,5 +313,126 @@ describe("JenkinsRoleBindingForm — the version of the read", () => {
 
     expect(await screen.findByText(/Another user or tool changed this Jenkins role binding after you opened it/)).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});
+
+describe("JenkinsRoleBindingForm — controller selector match expressions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = "my-jenkins-binding";
+    mockListJenkinsRoles.mockResolvedValue({ items: availableJenkinsRoles });
+    mockUpdateJenkinsRoleBinding.mockResolvedValue({});
+  });
+
+  async function openEditWith(scope: Record<string, unknown>) {
+    mockGetJenkinsRoleBinding.mockResolvedValueOnce(
+      createJenkinsRoleBinding({
+        metadata: { name: "my-jenkins-binding" },
+        spec: { subjects: [{ kind: "User", name: "alice" }], roleRef: "jenkins-admin", controllerScope: scope },
+      }),
+    );
+    renderWithProviders(<JenkinsRoleBindingForm />);
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role Binding: my-jenkins-binding")).toBeInTheDocument();
+    });
+  }
+
+  it("keeps stored match expressions beside the edited labels on a save", async () => {
+    const scope = {
+      namespaces: ["infra"],
+      controllerSelector: {
+        matchLabels: { tier: "prod" },
+        matchExpressions: [{ key: "env", operator: "NotIn", values: ["dev"] }],
+      },
+    };
+    await openEditWith(scope);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mockUpdateJenkinsRoleBinding).toHaveBeenCalled());
+    const sent = mockUpdateJenkinsRoleBinding.mock.calls[0][2];
+    expect(sent.spec.controllerScope).toEqual(scope);
+  });
+
+  it("keeps an expressions-only selector and does not widen the binding", async () => {
+    await openEditWith({ controllerSelector: { matchExpressions: [{ key: "tier", operator: "Exists" }] } });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mockUpdateJenkinsRoleBinding).toHaveBeenCalled());
+    const sent = mockUpdateJenkinsRoleBinding.mock.calls[0][2];
+    expect(sent.spec.controllerScope).toEqual({
+      controllerSelector: { matchExpressions: [{ key: "tier", operator: "Exists" }] },
+    });
+  });
+
+  it("keeps match expressions when the user removes every selector label", async () => {
+    await openEditWith({
+      controllerSelector: {
+        matchLabels: { tier: "prod" },
+        matchExpressions: [{ key: "env", operator: "In", values: ["qa"] }],
+      },
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByText(/Controller Scope/));
+    const labelRow = screen.getByDisplayValue("prod").closest("div")!;
+    await user.click(within(labelRow).getByRole("button", { name: "×" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mockUpdateJenkinsRoleBinding).toHaveBeenCalled());
+    const sent = mockUpdateJenkinsRoleBinding.mock.calls[0][2];
+    expect(sent.spec.controllerScope.controllerSelector).toEqual({
+      matchExpressions: [{ key: "env", operator: "In", values: ["qa"] }],
+    });
+    expect(sent.spec.controllerScope.controllerSelector).not.toHaveProperty("matchLabels");
+  });
+
+  it("lists stored match expressions read-only with a note", async () => {
+    await openEditWith({
+      controllerSelector: {
+        matchExpressions: [
+          { key: "tier", operator: "In", values: ["gold", "silver"] },
+          { key: "env", operator: "Exists" },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByText(/Controller Scope/));
+
+    expect(screen.getByText("Controller Selector Expressions")).toBeInTheDocument();
+    expect(screen.getByText("tier In (gold, silver)")).toBeInTheDocument();
+    expect(screen.getByText("env Exists")).toBeInTheDocument();
+    expect(screen.getByText(/The dashboard does not edit match expressions/)).toBeInTheDocument();
+    expect(screen.getByText(/The stored selector expressions still narrow this binding/)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(/gold/)).toBeNull();
+  });
+
+  it("shows no expression list for a binding without match expressions", async () => {
+    mockGetJenkinsRoleBinding.mockResolvedValueOnce(existingBinding);
+    renderWithProviders(<JenkinsRoleBindingForm />);
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role Binding: my-jenkins-binding")).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByText(/Controller Scope/));
+    expect(screen.queryByText("Controller Selector Expressions")).toBeNull();
+  });
+
+  it("sends no controller scope when the user clears a scope that has no expressions", async () => {
+    mockGetJenkinsRoleBinding.mockResolvedValueOnce(existingBinding);
+    renderWithProviders(<JenkinsRoleBindingForm />);
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role Binding: my-jenkins-binding")).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByText(/Controller Scope/));
+    await user.clear(screen.getByPlaceholderText("namespace-a, namespace-b"));
+    const labelRow = screen.getByDisplayValue("prod").closest("div")!;
+    await user.click(within(labelRow).getByRole("button", { name: "×" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mockUpdateJenkinsRoleBinding).toHaveBeenCalled());
+    const sent = mockUpdateJenkinsRoleBinding.mock.calls[0][2];
+    expect(sent.spec.controllerScope).toBeUndefined();
   });
 });
