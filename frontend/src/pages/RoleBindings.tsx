@@ -24,12 +24,14 @@ function formatScope(binding: VarroaRoleBinding): string {
   if (scope.namespaces && scope.namespaces.length > 0) {
     parts.push(`ns:${scope.namespaces.join(",")}`);
   }
-  if (scope.controllerSelector?.matchLabels) {
-    const labels = Object.entries(scope.controllerSelector.matchLabels)
+  if (scope.controllerSelector) {
+    const labels = Object.entries(scope.controllerSelector.matchLabels ?? {})
       .filter(([, v]) => v !== undefined && v !== "")
       .map(([k, v]) => `${k}=${v}`)
       .join(",");
     if (labels) parts.push(`sel:${labels}`);
+    // A selector of match expressions alone still narrows the binding.
+    else if ((scope.controllerSelector.matchExpressions?.length ?? 0) > 0) parts.push("Selector");
   }
   // A tenant-scoped binding is narrowed, so it never reads as cluster-wide.
   for (const tenant of scope.tenants ?? []) {
