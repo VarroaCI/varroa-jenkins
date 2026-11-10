@@ -74,6 +74,7 @@ beforeEach(() => {
   // their own invocation (multiple tests drive createController/preview).
   mockCreateController.mockClear();
   mockBffFetch.mockClear();
+  mockGetController.mockClear();
   mockPreviewComposedBundle.mockClear();
   mockListComposedBundles.mockClear();
   mockGetProvisioningConfig.mockResolvedValue(DEFAULT_CONFIG);
@@ -805,6 +806,107 @@ describe("ControllerWizard", () => {
 
     expect(screen.queryByRole("option", { name: "main-ns" })).not.toBeInTheDocument();
     expect((opt.closest("select") as HTMLSelectElement).value).toBe("dev-ns");
+  });
+
+  it("warns when the name exists on the selected cluster", async () => {
+    mockUseClustersData.data = [
+      { name: "main", core: true, healthy: true, lastHeartbeat: "2025-01-01T00:00:00Z", operatorVersion: "1.0", k8sVersion: "1.28", controllerCount: 5, connectedCount: 4, state: "active" },
+      { name: "dev-cluster", core: false, healthy: true, lastHeartbeat: "2025-01-01T00:00:00Z", operatorVersion: "1.0", k8sVersion: "1.28", controllerCount: 2, connectedCount: 2, state: "active" },
+    ];
+    mockGetController.mockImplementation((cluster: string, name: string) =>
+      cluster === "dev-cluster" && name === "taken"
+        ? Promise.resolve({ metadata: { name: "taken", namespace: "varroa" } })
+        : Promise.reject(new Error("not found")),
+    );
+
+    const user = userEvent.setup();
+    render(<ControllerWizard />);
+    await waitFor(() => {
+      expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "dev-cluster");
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "taken");
+
+    expect(await screen.findByText(/A controller with this name already exists in varroa/)).toBeInTheDocument();
+    expect(mockGetController).toHaveBeenCalledWith("dev-cluster", "taken", "varroa");
+    expect(mockGetController).not.toHaveBeenCalledWith("", expect.anything(), expect.anything());
+  });
+
+  it("checks the name again when the cluster changes", async () => {
+    mockUseClustersData.data = [
+      { name: "main", core: true, healthy: true, lastHeartbeat: "2025-01-01T00:00:00Z", operatorVersion: "1.0", k8sVersion: "1.28", controllerCount: 5, connectedCount: 4, state: "active" },
+      { name: "dev-cluster", core: false, healthy: true, lastHeartbeat: "2025-01-01T00:00:00Z", operatorVersion: "1.0", k8sVersion: "1.28", controllerCount: 2, connectedCount: 2, state: "active" },
+    ];
+    mockGetController.mockImplementation((cluster: string, name: string) =>
+      cluster === "dev-cluster" && name === "taken"
+        ? Promise.resolve({ metadata: { name: "taken", namespace: "varroa" } })
+        : Promise.reject(new Error("not found")),
+    );
+
+    const user = userEvent.setup();
+    render(<ControllerWizard />);
+    await waitFor(() => {
+      expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText("tenant-web-builds"), "taken");
+    await waitFor(() => {
+      expect(mockGetController).toHaveBeenCalledWith("main", "taken", "varroa");
+    });
+    expect(screen.queryByText(/already exists/)).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "dev-cluster");
+    expect(await screen.findByText(/A controller with this name already exists in varroa/)).toBeInTheDocument();
+    expect(mockGetController).toHaveBeenCalledWith("dev-cluster", "taken", "varroa");
+
+    mockGetController.mockClear();
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "main");
+    await waitFor(() => {
+      expect(mockGetController).toHaveBeenCalledWith("main", "taken", "varroa");
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(screen.queryByText(/already exists/)).not.toBeInTheDocument();
+  });
+
+  it("drops a name check answer for an earlier name", async () => {
+    mockUseClustersData.data = [
+      { name: "main", core: true, healthy: true, lastHeartbeat: "2025-01-01T00:00:00Z", operatorVersion: "1.0", k8sVersion: "1.28", controllerCount: 5, connectedCount: 4, state: "active" },
+      { name: "dev-cluster", core: false, healthy: true, lastHeartbeat: "2025-01-01T00:00:00Z", operatorVersion: "1.0", k8sVersion: "1.28", controllerCount: 2, connectedCount: 2, state: "active" },
+    ];
+    let resolveEarlier!: (value: unknown) => void;
+    mockGetController.mockImplementation((_cluster: string, name: string) =>
+      name === "abc"
+        ? new Promise((resolve) => {
+            resolveEarlier = resolve;
+          })
+        : Promise.reject(new Error("not found")),
+    );
+
+    const user = userEvent.setup();
+    render(<ControllerWizard />);
+    await waitFor(() => {
+      expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
+    });
+
+    const nameInput = screen.getByPlaceholderText("tenant-web-builds");
+    await user.type(nameInput, "abc");
+    await waitFor(() => {
+      expect(mockGetController).toHaveBeenCalledWith(expect.anything(), "abc", "varroa");
+    });
+    await user.clear(nameInput);
+    await user.type(nameInput, "xyz");
+    await waitFor(() => {
+      expect(mockGetController).toHaveBeenCalledWith(expect.anything(), "xyz", "varroa");
+    });
+
+    await act(async () => {
+      resolveEarlier({ metadata: { name: "abc", namespace: "varroa" } });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(screen.queryByText(/already exists/)).not.toBeInTheDocument();
   });
 
   it("renders health probes, exercises each probe toggle, and serializes startup values", async () => {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { controllerRoute } from "../routing";
 import { parse as parseYAML } from "yaml";
@@ -356,7 +356,6 @@ export default function ControllerWizard() {
   const [bundleSearch, setBundleSearch] = useState("");
   const [groups, setGroups] = useState<GroupEntry[]>([]);
   const [nameCollision, setNameCollision] = useState(false);
-  const collisionTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [previewOutput, setPreviewOutput] = useState<string>("");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [unresolvedVars, setUnresolvedVars] = useState<string[]>([]);
@@ -505,12 +504,6 @@ export default function ControllerWizard() {
     };
   }, [draft.cluster]);
 
-  useEffect(() => {
-    return () => {
-      if (collisionTimer.current) clearTimeout(collisionTimer.current);
-    };
-  }, []);
-
   // Seed cluster from useClusters when it resolves; only active clusters.
   useEffect(() => {
     if (activeClusters && !draft.cluster) {
@@ -548,22 +541,29 @@ export default function ControllerWizard() {
     };
   }, [draft.cluster]);
 
-  const debouncedNameCheck = useCallback(
-    (name: string, ns: string) => {
-      if (collisionTimer.current) clearTimeout(collisionTimer.current);
-      if (!name || !DNS1123_RE.test(name)) {
-        setNameCollision(false);
-        return;
-      }
-      collisionTimer.current = setTimeout(() => {
-        if (!ns) return;
-        getController(draft.cluster, name, ns)
-          .then(() => setNameCollision(true))
-          .catch(() => setNameCollision(false));
-      }, 400);
-    },
-    []
-  );
+  // The check reads the cluster, namespace, and name of this render.
+  // The cleanup drops the answer of a check that a newer value replaced.
+  useEffect(() => {
+    const cluster = draft.cluster;
+    const namespace = draft.namespace;
+    const name = draft.name;
+    setNameCollision(false);
+    if (!cluster || !namespace || !DNS1123_RE.test(name)) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      getController(cluster, name, namespace)
+        .then(() => {
+          if (!cancelled) setNameCollision(true);
+        })
+        .catch(() => {
+          if (!cancelled) setNameCollision(false);
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [draft.cluster, draft.namespace, draft.name]);
 
   const filteredBundles = useMemo(() => {
     if (!bundleSearch.trim()) return bundles;
@@ -1134,7 +1134,6 @@ export default function ControllerWizard() {
                     onChange={(e) => {
                       const v = e.target.value.trim().toLowerCase();
                       updateDraft({ name: v });
-                      debouncedNameCheck(v, draft.namespace);
                     }}
                     spellCheck={false}
                   />
@@ -1162,7 +1161,6 @@ export default function ControllerWizard() {
                         value={draft.namespace}
                         onChange={(e) => {
                           updateDraft({ namespace: e.target.value.trim() });
-                          if (draft.name) debouncedNameCheck(draft.name, e.target.value.trim());
                         }}
                         list="deployable-ns-suggestions"
                       />
@@ -1181,7 +1179,6 @@ export default function ControllerWizard() {
                         value={draft.namespace}
                         onChange={(e) => {
                           updateDraft({ namespace: e.target.value });
-                          if (draft.name) debouncedNameCheck(draft.name, e.target.value);
                         }}
                         disabled={!deployableNs || deployableNs.namespaces.length === 0}
                       >
