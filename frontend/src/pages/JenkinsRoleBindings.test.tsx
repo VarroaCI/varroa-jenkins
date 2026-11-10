@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import JenkinsRoleBindings from "./JenkinsRoleBindings";
 import { renderWithProviders } from "../test/render-utils";
 import { createJenkinsRoleBinding } from "../test/factories";
+import type { JenkinsRoleBinding } from "../types";
 
 const mockNavigate = vi.fn();
 vi.mock("react-router-dom", async () => {
@@ -13,8 +14,12 @@ vi.mock("react-router-dom", async () => {
 
 const mockListJenkinsRoleBindings = vi.fn();
 const mockDeleteJenkinsRoleBinding = vi.fn();
+const CORE_CLUSTER = { name: "core", core: true, healthy: true, state: "active" };
+const MEMBER_CLUSTER = { name: "member-b", core: false, healthy: true, state: "active" };
+const mockClusterList = { items: [CORE_CLUSTER] };
+
 vi.mock("../api/client", () => ({
-  listClusters: () => Promise.resolve([{ name: "core", core: true, healthy: true, state: "active" }]),
+  listClusters: () => Promise.resolve(mockClusterList.items),
   listJenkinsRoleBindings: (...args: unknown[]) => mockListJenkinsRoleBindings(...args),
   deleteJenkinsRoleBinding: (...args: unknown[]) => mockDeleteJenkinsRoleBinding(...args),
 }));
@@ -177,5 +182,71 @@ describe("JenkinsRoleBindings", () => {
     await waitFor(() => {
       expect(mockDeleteJenkinsRoleBinding).toHaveBeenCalledWith("core", "jenkins-binding-folder");
     });
+  });
+});
+
+describe("JenkinsRoleBindings cluster switch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockClusterList.items = [CORE_CLUSTER, MEMBER_CLUSTER];
+  });
+
+  afterEach(() => {
+    mockClusterList.items = [CORE_CLUSTER];
+  });
+
+  it("keeps the bindings of the selected cluster when the read of the previous cluster ends later", async () => {
+    let resolveCore!: (value: { items: JenkinsRoleBinding[] }) => void;
+    const memberBinding = createJenkinsRoleBinding({ metadata: { name: "member-b-binding" } });
+    mockListJenkinsRoleBindings.mockImplementation((cluster: string) =>
+      cluster === "core"
+        ? new Promise<{ items: JenkinsRoleBinding[] }>((resolve) => {
+            resolveCore = resolve;
+          })
+        : Promise.resolve({ items: [memberBinding] }),
+    );
+    renderWithProviders(<JenkinsRoleBindings />);
+
+    await userEvent.selectOptions(await screen.findByRole("combobox"), "member-b");
+    await screen.findByText("member-b-binding");
+
+    await act(async () => {
+      resolveCore({ items: [folderScopeBinding] });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(screen.getByText("member-b-binding")).toBeInTheDocument();
+    expect(screen.queryByText("jenkins-binding-folder")).not.toBeInTheDocument();
+  });
+});
+
+describe("JenkinsRoleBindings no accessible cluster", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListJenkinsRoleBindings.mockResolvedValue({ items: [folderScopeBinding] });
+    mockClusterList.items = [];
+  });
+
+  afterEach(() => {
+    mockClusterList.items = [CORE_CLUSTER];
+  });
+
+  it("ends the loading state and shows no rows when no cluster is accessible", async () => {
+    renderWithProviders(<JenkinsRoleBindings />);
+    await waitFor(() => {
+      expect(screen.queryByText("Loading Jenkins role bindings...")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText("jenkins-binding-folder")).not.toBeInTheDocument();
+  });
+
+  it("clears existing bindings when no cluster remains", async () => {
+    mockClusterList.items = [CORE_CLUSTER];
+    const { queryClient } = renderWithProviders(<JenkinsRoleBindings />);
+    await screen.findByText("jenkins-binding-folder");
+
+    mockClusterList.items = [];
+    void queryClient.invalidateQueries({ queryKey: ["clusters"] });
+
+    await waitFor(() => expect(screen.queryByText("jenkins-binding-folder")).not.toBeInTheDocument());
   });
 });

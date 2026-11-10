@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ControllerWizard from "./ControllerWizard";
 
@@ -775,6 +775,38 @@ describe("ControllerWizard", () => {
 
     vi.unstubAllGlobals();
   });
+  it("keeps the namespaces of the selected cluster when the read of the previous cluster ends later", async () => {
+    mockUseClustersData.data = [
+      { name: "main", core: true, healthy: true, lastHeartbeat: "2025-01-01T00:00:00Z", operatorVersion: "1.0", k8sVersion: "1.28", controllerCount: 5, connectedCount: 4, state: "active" },
+      { name: "dev-cluster", core: false, healthy: true, lastHeartbeat: "2025-01-01T00:00:00Z", operatorVersion: "1.0", k8sVersion: "1.28", controllerCount: 2, connectedCount: 2, state: "active" },
+    ];
+    let resolveMain!: (value: unknown) => void;
+    mockGetDeployableNamespaces.mockImplementation((cluster: string) =>
+      cluster === "main"
+        ? new Promise((resolve) => {
+            resolveMain = resolve;
+          })
+        : Promise.resolve({ namespaces: ["dev-ns"], defaultNamespace: "dev-ns", allowFreeform: false, degraded: false }),
+    );
+
+    const user = userEvent.setup();
+    render(<ControllerWizard />);
+    await waitFor(() => {
+      expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "dev-cluster");
+    const opt = await screen.findByRole("option", { name: "dev-ns" });
+
+    await act(async () => {
+      resolveMain({ namespaces: ["main-ns"], defaultNamespace: "main-ns", allowFreeform: false, degraded: false });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(screen.queryByRole("option", { name: "main-ns" })).not.toBeInTheDocument();
+    expect((opt.closest("select") as HTMLSelectElement).value).toBe("dev-ns");
+  });
+
   it("renders health probes, exercises each probe toggle, and serializes startup values", async () => {
     const user = userEvent.setup();
     render(<ControllerWizard />);

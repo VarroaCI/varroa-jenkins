@@ -31,14 +31,29 @@ export default function JenkinsRoles() {
   const { cluster, ready } = useConfigurationCluster();
 
   useEffect(() => {
-    if (!cluster) return;
+    if (!cluster) {
+      setLoading(!ready);
+      setRoles([]);
+      setError("");
+      return;
+    }
+    let cancelled = false;
     setLoading(true);
     setError("");
     listJenkinsRoles(cluster)
-      .then((data) => setRoles(data.items || []))
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [cluster]);
+      .then((data) => {
+        if (!cancelled) setRoles(data.items || []);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster, ready]);
 
   const counts: Record<string, number> = {};
   for (const r of roles) {

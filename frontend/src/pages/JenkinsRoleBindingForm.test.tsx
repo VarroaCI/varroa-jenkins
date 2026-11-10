@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import JenkinsRoleBindingForm from "./JenkinsRoleBindingForm";
 import { ApiError } from "../hooks/useApi";
@@ -17,8 +17,12 @@ const mockListJenkinsRoles = vi.fn();
 const mockGetJenkinsRoleBinding = vi.fn();
 const mockCreateJenkinsRoleBinding = vi.fn();
 const mockUpdateJenkinsRoleBinding = vi.fn();
+const CORE_CLUSTER = { name: "core", core: true, healthy: true, state: "active" };
+const MEMBER_CLUSTER = { name: "member-b", core: false, healthy: true, state: "active" };
+const mockClusterList = { items: [CORE_CLUSTER] };
+
 vi.mock("../api/client", () => ({
-  listClusters: () => Promise.resolve([{ name: "core", core: true, healthy: true, state: "active" }]),
+  listClusters: () => Promise.resolve(mockClusterList.items),
   listJenkinsRoles: (...args: unknown[]) => mockListJenkinsRoles(...args),
   getJenkinsRoleBinding: (...args: unknown[]) => mockGetJenkinsRoleBinding(...args),
   createJenkinsRoleBinding: (...args: unknown[]) => mockCreateJenkinsRoleBinding(...args),
@@ -509,5 +513,44 @@ describe("JenkinsRoleBindingForm — a federated copy", () => {
 
     expect(await screen.findByText("JenkinsRoleBinding my-jenkins-binding is a federated copy.")).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});
+
+describe("JenkinsRoleBindingForm — cluster switch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = undefined;
+    mockClusterList.items = [CORE_CLUSTER, MEMBER_CLUSTER];
+  });
+
+  afterEach(() => {
+    mockClusterList.items = [CORE_CLUSTER];
+  });
+
+  it("keeps the role options of the selected cluster when the read of the previous cluster ends later", async () => {
+    const user = userEvent.setup();
+    let resolveMember!: (value: { items: ReturnType<typeof createJenkinsRole>[] }) => void;
+    mockListJenkinsRoles.mockImplementation((cluster: string) =>
+      cluster === "member-b"
+        ? new Promise<{ items: ReturnType<typeof createJenkinsRole>[] }>((resolve) => {
+            resolveMember = resolve;
+          })
+        : Promise.resolve({ items: [createJenkinsRole({ metadata: { name: "core-viewer" } })] }),
+    );
+    renderWithProviders(<JenkinsRoleBindingForm />);
+
+    const clusterSelect = (await screen.findByRole("option", { name: "member-b" })).closest("select")!;
+    await screen.findByRole("option", { name: "core-viewer" });
+
+    await user.selectOptions(clusterSelect, "member-b");
+    await user.selectOptions(clusterSelect, "core");
+
+    await act(async () => {
+      resolveMember({ items: [createJenkinsRole({ metadata: { name: "member-viewer" } })] });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(screen.getByRole("option", { name: "core-viewer" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "member-viewer" })).not.toBeInTheDocument();
   });
 });

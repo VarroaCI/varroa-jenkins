@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { getProvisioningDefaults, updateProvisioningDefaults } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { canDoGlobal } from "../hooks/usePermissions";
@@ -39,12 +39,16 @@ export default function SettingsProvisioningTab() {
   const [conflict, setConflict] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [selectedCluster, setSelectedCluster] = useState("core");
+  // Each read adds one to this count. A save answer that arrives after a newer read does not change the form.
+  const readGeneration = useRef(0);
   const { permissions } = useAuth();
   const [annotations, setAnnotations] = useState<
     { key: string; value: string }[]
   >([{ ...EMPTY_ANNOTATION }]);
 
   useEffect(() => {
+    let cancelled = false;
+    readGeneration.current += 1;
     setConfig(null);
     setError(null);
     setSaveError(null);
@@ -53,10 +57,12 @@ export default function SettingsProvisioningTab() {
     setConflict(false);
     getProvisioningDefaults(selectedCluster)
       .then((cfg) => {
+        if (cancelled) return;
         setConfig(cfg);
         setAnnotations(annotationRows(cfg.spec));
       })
       .catch((e) => {
+        if (cancelled) return;
         if (e instanceof ApiError && e.status === 404) {
           setConfig(emptyDefaults());
           setAnnotations([{ ...EMPTY_ANNOTATION }]);
@@ -65,6 +71,9 @@ export default function SettingsProvisioningTab() {
         }
         setError(e.message);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedCluster, reloadKey]);
 
   // The intro and the cluster selector render in every state, so a user who
@@ -109,6 +118,7 @@ export default function SettingsProvisioningTab() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!config) return;
+    const generation = readGeneration.current;
     setSaving(true);
     setSaved(false);
     setSaveError(null);
@@ -129,10 +139,12 @@ export default function SettingsProvisioningTab() {
         },
       };
       const cfg = await updateProvisioningDefaults(selectedCluster, updated);
+      if (generation !== readGeneration.current) return;
       setConfig(cfg);
       setMissing(false);
       setSaved(true);
     } catch (e: unknown) {
+      if (generation !== readGeneration.current) return;
       if (e instanceof ApiError && e.status === 409) {
         setConflict(true);
         setMissing(false);

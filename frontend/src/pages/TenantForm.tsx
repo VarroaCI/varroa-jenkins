@@ -190,9 +190,17 @@ export default function TenantForm() {
       setBundles([]);
       return;
     }
+    let cancelled = false;
     listComposedBundles(bundleCluster)
-      .then((data) => setBundles(data.items ?? []))
-      .catch(() => setBundles([]));
+      .then((data) => {
+        if (!cancelled) setBundles(data.items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setBundles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [bundleCluster]);
 
   const updateField = <K extends keyof FormData>(key: K, value: FormData[K]) => {

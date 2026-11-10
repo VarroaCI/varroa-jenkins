@@ -464,9 +464,11 @@ export default function ControllerWizard() {
   };
 
   useEffect(() => {
+    let cancelled = false;
     const cluster = draft.cluster || "core";
     getProvisioningConfig(cluster)
       .then((cfg) => {
+        if (cancelled) return;
         setDraft((prev) => ({
           ...prev,
           config: cfg,
@@ -475,23 +477,32 @@ export default function ControllerWizard() {
       })
       .catch(() => {})
       .finally(() => {
-        setConfigLoading(false);
+        if (!cancelled) setConfigLoading(false);
       });
 
     listComposedBundles(cluster)
-      .then((data) => setBundles(data.items ?? []))
+      .then((data) => {
+        if (!cancelled) setBundles(data.items ?? []);
+      })
       .catch(() => {});
 
     listGroups()
-      .then((data) => setGroups(data))
+      .then((data) => {
+        if (!cancelled) setGroups(data);
+      })
       .catch(() => {});
 
     listCatalogItems(cluster, {})
       .then((data) => {
+        if (cancelled) return;
         setCatalogItems(data.items ?? []);
         setCatalogOperatorNs(data.operatorNamespace ?? "");
       })
       .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
   }, [draft.cluster]);
 
   useEffect(() => {
@@ -513,9 +524,11 @@ export default function ControllerWizard() {
   // Fetch deployable namespaces when cluster changes.
   useEffect(() => {
     if (!draft.cluster) return;
+    let cancelled = false;
     setDeployableNs(null); // disable the field while loading
     getDeployableNamespaces(draft.cluster)
       .then((dns) => {
+        if (cancelled) return;
         setDeployableNs(dns);
         // Reseed on cluster switch: keep a still-valid selection; replace an
         // empty or now-invalid one. Freeform text survives when allowed.
@@ -525,9 +538,14 @@ export default function ControllerWizard() {
           return keep ? prev : { ...prev, namespace: dns.defaultNamespace };
         });
       })
-      .catch(() =>
-        setDeployableNs({ namespaces: [], defaultNamespace: "", allowFreeform: false, degraded: true })
-      );
+      .catch(() => {
+        if (!cancelled) {
+          setDeployableNs({ namespaces: [], defaultNamespace: "", allowFreeform: false, degraded: true });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [draft.cluster]);
 
   const debouncedNameCheck = useCallback(

@@ -126,21 +126,29 @@ export default function SettingsVersionsTab() {
   const [loading, setLoading] = useState(true);
   const [selectedCluster, setSelectedCluster] = useState("core");
   const [promoteTarget, setPromoteTarget] = useState<VersionCandidate | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  const load = () => {
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
     Promise.all([getVersionProfiles(selectedCluster), listVersionCandidates()])
       .then(([p, c]) => {
+        if (cancelled) return;
         setProfiles(p);
         setCandidates(c.items);
         setUpstream(c.upstreamMetadata);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(load, [selectedCluster]);
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCluster, reloadKey]);
 
   // The intro and the cluster selector render in every state, so a user who
   // picked an unreachable cluster can switch back. The root element stays the
@@ -392,9 +400,9 @@ export default function SettingsVersionsTab() {
           onClose={() => setPromoteTarget(null)}
           onPromoted={() => {
             setPromoteTarget(null);
-            load();
+            setReloadKey((k) => k + 1);
           }}
-          onConflict={load}
+          onConflict={() => setReloadKey((k) => k + 1)}
         />
       )}
     </div>

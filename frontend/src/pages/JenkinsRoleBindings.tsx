@@ -36,14 +36,29 @@ export default function JenkinsRoleBindings() {
   const { cluster, ready } = useConfigurationCluster();
 
   useEffect(() => {
-    if (!cluster) return;
+    if (!cluster) {
+      setLoading(!ready);
+      setBindings([]);
+      setError("");
+      return;
+    }
+    let cancelled = false;
     setLoading(true);
     setError("");
     listJenkinsRoleBindings(cluster)
-      .then((data) => setBindings(data.items || []))
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [cluster]);
+      .then((data) => {
+        if (!cancelled) setBindings(data.items || []);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster, ready]);
 
   const filtered = useMemo(() => {
     return bindings.filter((b) => {

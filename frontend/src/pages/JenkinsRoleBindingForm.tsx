@@ -74,13 +74,16 @@ export default function JenkinsRoleBindingForm() {
   const showJenkinsScope = jenkinsScopeOpen || readOnly;
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
       if (!cluster) return;
       try {
         const roles = await listJenkinsRoles(cluster);
+        if (cancelled) return;
         setRoleOptions(roles.items || []);
         if (!name) { setFetching(false); return; }
         const binding = await getJenkinsRoleBinding(cluster, name);
+        if (cancelled) return;
         setLoaded(binding);
         setBindingName(binding.metadata.name);
         setSubjects(binding.spec.subjects || []);
@@ -101,12 +104,15 @@ export default function JenkinsRoleBindingForm() {
           setJenkinsScopePattern(binding.spec.jenkinsScope.pattern || "");
         }
       } catch (err: any) {
-        setError(err.message);
+        if (!cancelled) setError(err.message);
       } finally {
-        setFetching(false);
+        if (!cancelled) setFetching(false);
       }
     };
     load();
+    return () => {
+      cancelled = true;
+    };
   }, [cluster, name]);
 
   const handleSubmit = async (e: React.FormEvent) => {
