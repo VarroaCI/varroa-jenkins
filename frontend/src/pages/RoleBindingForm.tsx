@@ -20,6 +20,21 @@ const TENANTS_DISABLED_REASON =
   "A scope names one dimension. Clear the namespaces and the selector labels to scope by tenant.";
 const OTHERS_DISABLED_REASON =
   "A scope names one dimension. Remove every tenant entry to scope by namespace or by selector.";
+const TENANTS_EXPRESSIONS_DISABLED_REASON =
+  "A scope names one dimension. This binding has stored selector expressions. Remove them with the API or kubectl to scope by tenant.";
+
+const MATCH_EXPRESSIONS_NOTE =
+  "The dashboard does not edit match expressions. A save keeps them. Use the API or kubectl to change them.";
+
+type MatchExpression = NonNullable<
+  NonNullable<VarroaRoleBindingScope["controllerSelector"]>["matchExpressions"]
+>[number];
+
+// Formats one stored selector requirement with the operator words of the CRD.
+function formatMatchExpression(req: MatchExpression): string {
+  const values = req.values && req.values.length > 0 ? ` (${req.values.join(", ")})` : "";
+  return `${req.key} ${req.operator}${values}`;
+}
 
 const BINDING_CONFLICT_NOTE =
   "Another user or tool changed this role binding after you opened it. Reload the page, then make the change again.";
@@ -173,10 +188,14 @@ export default function RoleBindingForm() {
     setSelectorLabels(selectorLabels.filter((_, i) => i !== idx));
 
   // The one-dimension rule: a scope names tenants, or namespaces and a
-  // selector, never both. The API server's own rule stays the authority.
+  // selector, never both. A stored selector expression is part of the
+  // selector. The API server's own rule stays the authority.
+  const storedExpressions = loadedScope?.controllerSelector?.matchExpressions ?? [];
   const hasTenants = (tenants?.length ?? 0) > 0;
   const hasOtherDimension =
-    scopeNamespaces.trim().length > 0 || selectorLabels.some((l) => l.key.trim().length > 0);
+    scopeNamespaces.trim().length > 0 ||
+    selectorLabels.some((l) => l.key.trim().length > 0) ||
+    storedExpressions.length > 0;
 
   if (fetching) return <LoadingSpinner />;
 
@@ -270,7 +289,11 @@ export default function RoleBindingForm() {
                     onChange={(e) => setScopeNamespaces(e.target.value)}
                   />
                   <p className={styles.hint}>
-                    {hasTenants ? OTHERS_DISABLED_REASON : "Leave empty for cluster-wide scope."}
+                    {hasTenants
+                      ? OTHERS_DISABLED_REASON
+                      : storedExpressions.length > 0
+                        ? "Leave empty for cluster-wide scope. The stored selector expressions still narrow this binding."
+                        : "Leave empty for cluster-wide scope."}
                   </p>
                 </div>
 
@@ -309,13 +332,33 @@ export default function RoleBindingForm() {
                   {hasTenants && <p className={styles.hint}>{OTHERS_DISABLED_REASON}</p>}
                 </div>
 
+                {storedExpressions.length > 0 && (
+                  <div className={styles.formGroup}>
+                    <div className={styles.formLabel}>Controller Selector Expressions</div>
+                    <ul className={styles.exprList}>
+                      {storedExpressions.map((req, idx) => (
+                        <li key={idx}>{formatMatchExpression(req)}</li>
+                      ))}
+                    </ul>
+                    <p className={styles.hint}>{MATCH_EXPRESSIONS_NOTE}</p>
+                  </div>
+                )}
+
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>Pipelines Tenants</label>
                   <TenantScopeEditor
                     value={tenants}
                     onChange={setTenants}
                     disabled={hasOtherDimension}
-                    disabledReason={TENANTS_DISABLED_REASON}
+                    disabledReason={
+                      // The typed values are the actionable blocker. Stored
+                      // expressions name the reason only when they alone block.
+                      storedExpressions.length > 0 &&
+                      scopeNamespaces.trim().length === 0 &&
+                      !selectorLabels.some((l) => l.key.trim().length > 0)
+                        ? TENANTS_EXPRESSIONS_DISABLED_REASON
+                        : TENANTS_DISABLED_REASON
+                    }
                   />
                 </div>
               </div>

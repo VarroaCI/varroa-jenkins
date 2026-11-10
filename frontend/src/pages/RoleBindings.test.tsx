@@ -175,7 +175,8 @@ describe("RoleBindings — a tenant scope", () => {
     await waitFor(() => {
       expect(screen.getByText("tenant:payments")).toBeInTheDocument();
     });
-    expect(screen.queryByText("Cluster-wide", { selector: "td" })).not.toBeInTheDocument();
+    const row = screen.getByText("tenant-binding").parentElement!;
+    expect(within(row).queryByText("Cluster-wide")).not.toBeInTheDocument();
   });
 
   it("names the entry's job patterns in their stored order", async () => {
@@ -218,5 +219,76 @@ describe("RoleBindings — a tenant scope", () => {
     expect(screen.getByText("1 failed")).toBeInTheDocument();
     expect(screen.getByText("2 federated")).toBeInTheDocument();
     expect(screen.getByText("Not reported")).toBeInTheDocument();
+  });
+});
+
+describe("RoleBindings — a selector of match expressions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const exists = { key: "tier", operator: "Exists" as const };
+
+  it("labels an expressions-only selector Selector, not Cluster-wide", async () => {
+    mockListRoleBindings.mockResolvedValue({
+      items: [
+        createRoleBinding({
+          metadata: { name: "expr-binding" },
+          spec: {
+            subjects: [{ kind: "Group", name: "ops" }],
+            roleRef: "varroa:viewer",
+            scope: { controllerSelector: { matchExpressions: [exists] } },
+          },
+        }),
+      ],
+    });
+    renderWithProviders(<RoleBindings />);
+    await screen.findByText("expr-binding");
+    const row = screen.getByText("expr-binding").parentElement!;
+    expect(within(row).getByText("Selector")).toBeInTheDocument();
+    expect(within(row).queryByText("Cluster-wide")).not.toBeInTheDocument();
+  });
+
+  it("names a namespace beside an expressions-only selector", async () => {
+    mockListRoleBindings.mockResolvedValue({
+      items: [
+        createRoleBinding({
+          metadata: { name: "ns-expr-binding" },
+          spec: {
+            subjects: [{ kind: "Group", name: "ops" }],
+            roleRef: "varroa:viewer",
+            scope: { namespaces: ["team-a"], controllerSelector: { matchExpressions: [exists] } },
+          },
+        }),
+      ],
+    });
+    renderWithProviders(<RoleBindings />);
+    await screen.findByText("ns-expr-binding");
+    const row = screen.getByText("ns-expr-binding").parentElement!;
+    expect(within(row).getByText("ns:team-a Selector")).toBeInTheDocument();
+  });
+
+  it("keeps the label summary for a selector that also holds expressions", async () => {
+    mockListRoleBindings.mockResolvedValue({
+      items: [
+        createRoleBinding({
+          metadata: { name: "both-binding" },
+          spec: {
+            subjects: [{ kind: "Group", name: "ops" }],
+            roleRef: "varroa:viewer",
+            scope: {
+              controllerSelector: {
+                matchLabels: { tier: "prod" },
+                matchExpressions: [{ key: "env", operator: "In", values: ["qa"] }],
+              },
+            },
+          },
+        }),
+      ],
+    });
+    renderWithProviders(<RoleBindings />);
+    await screen.findByText("both-binding");
+    const row = screen.getByText("both-binding").parentElement!;
+    expect(within(row).getByText("sel:tier=prod")).toBeInTheDocument();
   });
 });

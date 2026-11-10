@@ -205,8 +205,9 @@ so a narrower view of your own produces a smaller count. When the job list
 cannot be read the editor states so, and still accepts every pattern.
 
 The editor disables the **Namespaces** and **Controller Selector Labels**
-controls while a tenant entry exists, and disables the tenant controls while
-either of those holds a value. Each disabled control states the reason.
+controls while a tenant entry exists. It disables the tenant controls while
+either of those holds a value, or while the binding holds stored selector
+expressions. Each disabled control states the reason.
 
 ### A jobs glob is a Varroa rule
 
@@ -265,6 +266,8 @@ Change a role with `PUT /api/v1/roles/{name}`. Change a binding with `PUT /api/v
 Send the `metadata.resourceVersion` of your read. A stale version answers `409`. A body without `metadata.resourceVersion` only creates the object. It answers `409` when the object exists. That body also needs the `create` verb on `roles` or `rolebindings`. Without that verb, the route answers `403`. On a `409`, read the object again and repeat the change. If that read answers `404`, the object was deleted. Repeat the change with a body that has no `metadata.resourceVersion`. That body creates the object.
 
 The dashboard role and binding editors send the version of their read. Save stops with a conflict note when another writer changed the object after the editor read it. Reload the page, then make the change again.
+
+The binding editor edits `controllerSelector.matchLabels` only. It lists stored `controllerSelector.matchExpressions` entries read-only, and a save keeps them. Use the API or `kubectl` to change them.
 
 ## Verify access
 

@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import RoleBindingForm from "./RoleBindingForm";
 import { ApiError } from "../hooks/useApi";
 import { renderWithProviders } from "../test/render-utils";
 import { createRole, createRoleBinding } from "../test/factories";
+import type { VarroaRoleBindingScope } from "../types";
 
 const mockNavigate = vi.fn();
 const mockParams: { name?: string } = {};
@@ -456,6 +457,105 @@ describe("RoleBindingForm — the tenants dimension", () => {
     renderWithProviders(<RoleBindingForm />);
     await waitFor(() => {
       expect(screen.getByText(/No hive reports this binding/)).toBeInTheDocument();
+    });
+  });
+});
+
+describe("RoleBindingForm — controller selector match expressions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = "my-binding";
+    mockListRoles.mockResolvedValue({ items: availableRoles });
+    mockListTenants.mockResolvedValue([]);
+    mockListPipelines.mockResolvedValue({
+      items: [],
+      runningNow: [],
+      tenantFolder: "",
+      truncated: false,
+    });
+    mockUpdateRoleBinding.mockResolvedValue({});
+  });
+
+  async function openEditWith(scope: VarroaRoleBindingScope) {
+    mockGetRoleBinding.mockResolvedValue(
+      createRoleBinding({
+        metadata: { name: "my-binding" },
+        spec: { subjects: [{ kind: "User", name: "alice" }], roleRef: "varroa:admin", scope },
+      }),
+    );
+    renderWithProviders(<RoleBindingForm />);
+    await waitFor(() => {
+      expect(screen.getByText("Edit Role Binding: my-binding")).toBeInTheDocument();
+    });
+    return userEvent.setup();
+  }
+
+  it("lists stored match expressions read-only with a note", async () => {
+    const user = await openEditWith({
+      controllerSelector: {
+        matchExpressions: [
+          { key: "tier", operator: "In", values: ["gold", "silver"] },
+          { key: "env", operator: "Exists" },
+        ],
+      },
+    });
+    await user.click(screen.getByText(/Scope/));
+    expect(screen.getByText("Controller Selector Expressions")).toBeInTheDocument();
+    expect(screen.getByText("tier In (gold, silver)")).toBeInTheDocument();
+    expect(screen.getByText("env Exists")).toBeInTheDocument();
+    expect(screen.getByText(/The dashboard does not edit match expressions/)).toBeInTheDocument();
+    expect(screen.getByText(/The stored selector expressions still narrow this binding/)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(/gold/)).not.toBeInTheDocument();
+  });
+
+  it("shows no expression list for a binding without match expressions", async () => {
+    const user = await openEditWith({
+      namespaces: ["team-a"],
+      controllerSelector: { matchLabels: { tenant: "frontend" } },
+    });
+    await user.click(screen.getByText(/Scope/));
+    expect(screen.queryByText("Controller Selector Expressions")).not.toBeInTheDocument();
+    expect(screen.getByText("Leave empty for cluster-wide scope.")).toBeInTheDocument();
+  });
+
+  it("disables the tenants control for an expressions-only scope and states why", async () => {
+    const user = await openEditWith({
+      controllerSelector: { matchExpressions: [{ key: "tier", operator: "Exists" }] },
+    });
+    await user.click(screen.getByText(/Scope/));
+    expect(screen.getByRole("button", { name: "+ Add tenant" })).toBeDisabled();
+    expect(screen.getByText(/This binding has stored selector expressions/)).toBeInTheDocument();
+    expect(screen.queryByText(/Clear the namespaces and the selector labels/)).not.toBeInTheDocument();
+  });
+
+  it("keeps an expressions-only selector on a save and does not widen the binding", async () => {
+    const scope: VarroaRoleBindingScope = {
+      controllerSelector: { matchExpressions: [{ key: "tier", operator: "Exists" }] },
+    };
+    const user = await openEditWith(scope);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(mockUpdateRoleBinding).toHaveBeenCalled();
+    });
+    expect(mockUpdateRoleBinding.mock.calls[0][1].spec.scope).toEqual(scope);
+  });
+
+  it("keeps match expressions when the user removes every selector label", async () => {
+    const user = await openEditWith({
+      controllerSelector: {
+        matchLabels: { tier: "prod" },
+        matchExpressions: [{ key: "env", operator: "In", values: ["qa"] }],
+      },
+    });
+    await user.click(screen.getByText(/Scope/));
+    const row = screen.getByDisplayValue("prod").closest("div")!;
+    await user.click(within(row).getByRole("button", { name: "×" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(mockUpdateRoleBinding).toHaveBeenCalled();
+    });
+    expect(mockUpdateRoleBinding.mock.calls[0][1].spec.scope).toEqual({
+      controllerSelector: { matchExpressions: [{ key: "env", operator: "In", values: ["qa"] }] },
     });
   });
 });
