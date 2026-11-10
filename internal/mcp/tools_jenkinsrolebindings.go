@@ -67,6 +67,14 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		mcp.WithString("name", mcp.Required(), mcp.Description("Binding name (DNS-1123)")),
 		mcp.WithString("roleRef", mcp.Required(), mcp.Description("JenkinsRole name to bind")),
 		mcp.WithArray("subjects", mcp.Required(), mcp.Description("Subject references, e.g. [{\"kind\":\"User\",\"name\":\"alice\"}]")),
+		mcp.WithObject("controllerScope", mcp.Description("Controller limits: namespaces, controllerSelector, or both. "+
+			"controllerSelector is a Kubernetes label selector with matchLabels and matchExpressions, e.g. "+
+			"{\"namespaces\":[\"prod-a\"],\"controllerSelector\":{\"matchLabels\":{\"env\":\"prod\"}}}. "+
+			"A Jenkins role binding takes no tenants. Omit the argument to bind on every controller.")),
+		mcp.WithObject("jenkinsScope", mcp.Description("Jenkins item limits. type is Global, Folder, or Pattern. "+
+			"A Folder scope needs folder and takes an optional propagate: None, Children, or Subtree. "+
+			"A Pattern scope needs pattern, a regular expression over item full names. "+
+			"e.g. {\"type\":\"Folder\",\"folder\":\"payments\",\"propagate\":\"Subtree\"}. Omit the argument for Global scope.")),
 	)
 	addTool(mcpServer, kindCreateStrict, createJRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -80,11 +88,21 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if !deps.Authorizer.CanCreateJenkinsRoleBinding(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsrolebindings:create permission"), nil
 		}
+		controllerScope, err := buildControllerScope(args["controllerScope"])
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		jenkinsScope, err := buildJenkinsScope(args["jenkinsScope"])
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 		binding := &v1alpha1.JenkinsRoleBinding{
 			ObjectMeta: metav1.ObjectMeta{Name: strArg(args, "name")},
 			Spec: v1alpha1.JenkinsRoleBindingSpec{
-				RoleRef:  strArg(args, "roleRef"),
-				Subjects: buildSubjectRefs(args["subjects"]),
+				RoleRef:         strArg(args, "roleRef"),
+				Subjects:        buildSubjectRefs(args["subjects"]),
+				ControllerScope: controllerScope,
+				JenkinsScope:    jenkinsScope,
 			},
 		}
 		if err := crdstore.Create[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, binding); err != nil {
@@ -102,6 +120,13 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		mcp.WithString("name", mcp.Required(), mcp.Description("Binding name")),
 		mcp.WithString("roleRef", mcp.Description("JenkinsRole name to bind")),
 		mcp.WithArray("subjects", mcp.Description("Subject references")),
+		mcp.WithObject("controllerScope", mcp.Description("Controller limits: namespaces, controllerSelector, or both. "+
+			"This argument replaces the stored controllerScope as a whole. To change one field, send the "+
+			"spec.controllerScope of get_jenkins_role_binding with that field changed. Omit the argument to keep the stored controllerScope. "+
+			"This tool never removes a stored controllerScope; to bind on every controller, use the Kubernetes API or kubectl.")),
+		mcp.WithObject("jenkinsScope", mcp.Description("Jenkins item limits: type Global, Folder, or Pattern, with folder, propagate, or pattern. "+
+			"This argument replaces the stored jenkinsScope as a whole. Omit the argument to keep the stored jenkinsScope. "+
+			"Send {\"type\":\"Global\"} to remove the item limit.")),
 	)
 	addTool(mcpServer, kindUpdate, updateJRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -125,6 +150,20 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 			}
 			if subs := buildSubjectRefs(args["subjects"]); subs != nil {
 				obj.Spec.Subjects = subs
+			}
+			controllerScope, err := buildControllerScope(args["controllerScope"])
+			if err != nil {
+				return err
+			}
+			if controllerScope != nil {
+				obj.Spec.ControllerScope = controllerScope
+			}
+			jenkinsScope, err := buildJenkinsScope(args["jenkinsScope"])
+			if err != nil {
+				return err
+			}
+			if jenkinsScope != nil {
+				obj.Spec.JenkinsScope = jenkinsScope
 			}
 			return nil
 		}, updateTexts{
@@ -190,14 +229,87 @@ func summarizeJenkinsRoleBinding(jrb *v1alpha1.JenkinsRoleBinding) jenkinsRoleBi
 		RoleRef:      jrb.Spec.RoleRef,
 		SubjectCount: len(jrb.Spec.Subjects),
 	}
-	// JenkinsScope is optional: nil means Global scope, and bindings created
-	// over MCP never set it. Guard before dereference — an unguarded read
-	// panics on every binding the MCP create path produced.
+	// JenkinsScope is optional: nil means Global scope. Guard before
+	// dereference. An unguarded read panics on every Global binding.
 	if jrb.Spec.JenkinsScope != nil {
 		s.ScopeType = jrb.Spec.JenkinsScope.Type
 		s.ScopeFolder = jrb.Spec.JenkinsScope.Folder
 	}
 	return s
+}
+
+// buildControllerScope parses a "controllerScope" argument with the rules of
+// buildBindingScope. A Jenkins role binding has no tenant meaning, so the
+// parse refuses tenants before a write.
+func buildControllerScope(raw interface{}) (*v1alpha1.VarroaRoleBindingScope, error) {
+	return parseBindingScope(raw, jenkinsControllerScopeArg)
+}
+
+// buildJenkinsScope parses a "jenkinsScope" argument into a JenkinsScope.
+// rbac lowers an unknown type to Global, so a wrong type widens the binding to
+// every item. The parse therefore refuses an unknown key, a value that is not a
+// string, an unknown type, and a field that the type does not use. An absent
+// argument returns nil.
+func buildJenkinsScope(raw interface{}) (*v1alpha1.JenkinsScope, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid jenkinsScope: jenkinsScope must be an object with a type of Global, Folder, or Pattern")
+	}
+	if len(m) == 0 {
+		return nil, fmt.Errorf("invalid jenkinsScope: an empty jenkinsScope names no type; name type Global, Folder, or Pattern, or omit jenkinsScope")
+	}
+	vals := make(map[string]string, len(m))
+	for key, v := range m {
+		switch key {
+		case "type", "folder", "propagate", "pattern":
+		default:
+			return nil, fmt.Errorf("invalid jenkinsScope: unknown jenkinsScope key %q; allowed keys are type, folder, propagate, pattern", key)
+		}
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid jenkinsScope: jenkinsScope.%s must be a string", key)
+		}
+		vals[key] = s
+	}
+	_, hasFolder := m["folder"]
+	_, hasPropagate := m["propagate"]
+	_, hasPattern := m["pattern"]
+	js := &v1alpha1.JenkinsScope{Type: vals["type"], Folder: vals["folder"], Propagate: vals["propagate"], Pattern: vals["pattern"]}
+	switch js.Type {
+	case "":
+		return nil, fmt.Errorf("invalid jenkinsScope: jenkinsScope.type is required; name Global, Folder, or Pattern")
+	case "Global":
+		if hasFolder || hasPropagate || hasPattern {
+			return nil, fmt.Errorf("invalid jenkinsScope: a Global jenkinsScope takes no folder, propagate, or pattern")
+		}
+	case "Folder":
+		if hasPattern {
+			return nil, fmt.Errorf("invalid jenkinsScope: a Folder jenkinsScope takes no pattern")
+		}
+		if js.Folder == "" {
+			return nil, fmt.Errorf("invalid jenkinsScope: a Folder jenkinsScope needs a non-empty folder")
+		}
+		if hasPropagate {
+			switch js.Propagate {
+			case "None", "Children", "Subtree":
+			default:
+				return nil, fmt.Errorf("invalid jenkinsScope: unknown jenkinsScope.propagate %q; allowed values are None, Children, Subtree", js.Propagate)
+			}
+		}
+	case "Pattern":
+		if hasFolder || hasPropagate {
+			return nil, fmt.Errorf("invalid jenkinsScope: a Pattern jenkinsScope takes no folder or propagate")
+		}
+		if js.Pattern == "" {
+			return nil, fmt.Errorf("invalid jenkinsScope: a Pattern jenkinsScope needs a non-empty pattern")
+		}
+	default:
+		return nil, fmt.Errorf("invalid jenkinsScope: unknown jenkinsScope.type %q; allowed types are Global, Folder, Pattern", js.Type)
+	}
+	return js, nil
 }
 
 var jenkinsRoleBindingListOutputSchema = listOutputSchema("Default summary projection.", []schemaField{

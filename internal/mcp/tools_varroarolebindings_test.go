@@ -818,3 +818,23 @@ func TestCreateVarroaRoleBinding_EmptyScopeMessages(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildBindingScope_TextsUnchanged pins the "scope" refusal texts after
+// the parser moved into parseBindingScope. The texts name the argument, so a
+// change to the shared parser must not reword the scope tool's errors.
+func TestBuildBindingScope_TextsUnchanged(t *testing.T) {
+	cases := []struct {
+		raw  interface{}
+		want string
+	}{
+		{"x", "invalid scope: scope must be an object naming namespaces, controllerSelector, or tenants"},
+		{map[string]interface{}{"foo": 1}, `invalid scope: unknown scope key "foo"; allowed keys are namespaces, controllerSelector, tenants`},
+		{map[string]interface{}{"controllerSelector": "x"}, "invalid scope: scope.controllerSelector must be an object"},
+	}
+	for _, c := range cases {
+		_, err := buildBindingScope(c.raw)
+		if err == nil || err.Error() != c.want {
+			t.Errorf("buildBindingScope(%v) error = %v, want %q", c.raw, err, c.want)
+		}
+	}
+}
