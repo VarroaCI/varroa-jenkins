@@ -176,7 +176,11 @@ type RunCompletedPayload struct {
 	// refused in a failed build. The plugin sets it only when a refusal
 	// failed the run.
 	RejectedSignature *string `json:"rejected_signature,omitempty"`
-	Seq               int64   `json:"seq"`
+	// SourceGone is true when a branch scan marked the run's branch job dead
+	// before the run completed. The owner completion then publishes
+	// end_commit_status with the run's result.
+	SourceGone bool  `json:"source_gone,omitempty"`
+	Seq        int64 `json:"seq"`
 }
 
 // RunStatePayload is the payload of a run.state envelope. It takes one

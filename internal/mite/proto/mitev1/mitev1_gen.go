@@ -145,6 +145,7 @@ type BuildEvent struct {
 	WarningsReports         []*BuildWarningsReport `json:"warnings_reports,omitempty"`
 	CoverageReportsDropped  int                    `json:"coverage_reports_dropped,omitempty"`
 	WarningsReportsDropped  int                    `json:"warnings_reports_dropped,omitempty"`
+	SourceGone              bool                   `json:"source_gone,omitempty"`
 }
 
 type BuildInput struct {

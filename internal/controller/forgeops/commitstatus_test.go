@@ -110,14 +110,15 @@ func TestEndPendingStatus_NoMatchingCredential(t *testing.T) {
 func TestEndPendingStatus_InvalidRequest(t *testing.T) {
 	fx := newFixture(t, "agents-payments")
 	cases := map[string]func(*forgeapi.CommitStatusRequest){
-		"no tenant":      func(r *forgeapi.CommitStatusRequest) { r.Tenant = "" },
-		"no sha":         func(r *forgeapi.CommitStatusRequest) { r.SHA = "" },
-		"no job":         func(r *forgeapi.CommitStatusRequest) { r.JobPath = "" },
-		"no reason":      func(r *forgeapi.CommitStatusRequest) { r.Reason = "" },
-		"zero build":     func(r *forgeapi.CommitStatusRequest) { r.BuildNumber = 0 },
-		"negative build": func(r *forgeapi.CommitStatusRequest) { r.BuildNumber = -1 },
-		"bad repo url":   func(r *forgeapi.CommitStatusRequest) { r.Repo = "git@[bad" },
-		"no repo at all": func(r *forgeapi.CommitStatusRequest) { r.Repo = "" },
+		"no tenant":               func(r *forgeapi.CommitStatusRequest) { r.Tenant = "" },
+		"no sha":                  func(r *forgeapi.CommitStatusRequest) { r.SHA = "" },
+		"no job":                  func(r *forgeapi.CommitStatusRequest) { r.JobPath = "" },
+		"no reason and no result": func(r *forgeapi.CommitStatusRequest) { r.Reason = "" },
+		"reason and result":       func(r *forgeapi.CommitStatusRequest) { r.Result = "FAILURE" },
+		"zero build":              func(r *forgeapi.CommitStatusRequest) { r.BuildNumber = 0 },
+		"negative build":          func(r *forgeapi.CommitStatusRequest) { r.BuildNumber = -1 },
+		"bad repo url":            func(r *forgeapi.CommitStatusRequest) { r.Repo = "git@[bad" },
+		"no repo at all":          func(r *forgeapi.CommitStatusRequest) { r.Repo = "" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -804,6 +804,7 @@ public final class VarroaRunRecorder {
                         .buildNumber(buildNumber)
                         .deliveryId(action.getDeliveryId());
                 applyCommonMetadata(b, run, true);
+                b.sourceGone(sourceGone(run));
                 b.stages(rebuildStages(run));
                 // The test report archive runs before the collector, so the
                 // collected list names the report with its own blob key (D2).
@@ -975,6 +976,7 @@ public final class VarroaRunRecorder {
         boolean recordedDuration = false;
         if (run != null) {
             applyCommonMetadata(b, run, true);
+            b.sourceGone(sourceGone(run));
             b.stages(rebuildStages(run));
             applyTemplateFields(b, run);
             VarroaSummaryAction summaryAction = run.getAction(VarroaSummaryAction.class);
@@ -1625,6 +1627,21 @@ public final class VarroaRunRecorder {
         SourceFacts git = resolveGitFacts(run, false);
         String branch = branchFrom(run, scmApi, git);
         return new SourceFacts(branch, branch, "", git.scmUrl, git.scmForge, "", List.of(), List.of());
+    }
+
+    /**
+     * Reports whether a branch scan marked the run's branch job dead. The
+     * branch-source plugins then find no source and write no commit status.
+     * A failed read answers false.
+     */
+    static boolean sourceGone(Run<?, ?> run) {
+        try {
+            BranchJobProperty property = run.getParent().getProperty(BranchJobProperty.class);
+            return property != null && property.getBranch() instanceof Branch.Dead;
+        } catch (RuntimeException | LinkageError e) {
+            LOGGER.log(Level.FINE, "VarroaRunRecorder: the branch read failed", e);
+            return false;
+        }
     }
 
     /**

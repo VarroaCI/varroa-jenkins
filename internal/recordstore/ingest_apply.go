@@ -561,6 +561,13 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 					return dispatchResult{}, err
 				}
 			}
+			if payload.SourceGone {
+				action, err := sourceGoneEndStatus(ctx, tx, intent, *payload.Result)
+				if err != nil {
+					return dispatchResult{}, err
+				}
+				res.action = action
+			}
 		}
 		return res, nil
 	case KindRunTests:

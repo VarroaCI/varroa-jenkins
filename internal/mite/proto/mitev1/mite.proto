@@ -711,6 +711,10 @@ message BuildEvent {
   int32 coverage_reports_dropped = 62;
   // The reports a COMPLETED event did not send past the bound. Zero when none.
   int32 warnings_reports_dropped = 63;
+  // source_gone is true when a branch scan marked the run's branch job dead
+  // before the run completed. The branch-source plugins then write no commit
+  // status for the run. Only COMPLETED carries it.
+  bool source_gone = 64;
 }
 
 message ClaimRequest {
