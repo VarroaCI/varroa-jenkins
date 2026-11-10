@@ -89,14 +89,13 @@ describe("Settings page", () => {
     mockGetConfig.mockResolvedValue(config);
     renderSettings();
 
-    await screen.findByText(/Defaults applied to controllers on the selected cluster/);
-
-    // Form fields should be populated
-    const rootDomainInput = screen.getByDisplayValue("example.com");
-    expect(rootDomainInput).toBeInTheDocument();
-
-    const versionInput = screen.getByDisplayValue("2.492.3");
-    expect(versionInput).toBeInTheDocument();
+    // The intro text also shows while the read is in progress.
+    // Wait for a value that only the loaded form shows.
+    expect(await screen.findByDisplayValue("example.com")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2.492.3")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Defaults applied to controllers on the selected cluster/),
+    ).toBeInTheDocument();
   });
 
   it("renders heading", async () => {
