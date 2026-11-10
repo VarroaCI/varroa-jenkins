@@ -31,7 +31,7 @@ A create request for a name that already exists answers `409`. Use the update ro
 
 ## Update a configuration object
 
-The update routes of composed bundles, catalog sources, Jenkins roles, Jenkins role bindings, version profiles, and provisioning defaults use the version of your read. Each `PUT` body replaces the stored object. Start from your read.
+The update routes of composed bundles, catalog sources, Jenkins roles, Jenkins role bindings, version profiles, and provisioning defaults use the version of your read. Each `PUT` body replaces the stored object. Start from your read. The update routes of roles and role bindings follow the same rules.
 
 - Send the `metadata.resourceVersion` of your read. A stale version answers `409` and writes nothing.
 - A version of an object that a delete removed after your read also answers `409`.

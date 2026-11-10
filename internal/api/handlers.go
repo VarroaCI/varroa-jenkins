@@ -3475,11 +3475,16 @@ func (s *Server) handleVarroaRoleDispatch(w http.ResponseWriter, r *http.Request
 			s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
+		// The body's resourceVersion fences the write. A body without one only
+		// creates, so it also needs the create verb.
+		createOnly := role.ResourceVersion == ""
+		if createOnly && !s.deps.Authorizer.CanCreateRole(claims) {
+			s.writeJSONError(w, http.StatusForbidden, createOnlyPutForbidden)
+			return
+		}
 		role.Name = name
 		role.APIVersion = "varroa.dev/v1alpha1"
 		role.Kind = "VarroaRole"
-		// The body's resourceVersion fences the write. A body without one only creates.
-		createOnly := role.ResourceVersion == ""
 		if err := crdstore.ApplyAt[v1alpha1.VarroaRole](r.Context(), s.deps.Store, &role); err != nil {
 			if k8serrors.IsConflict(err) {
 				s.writeJSONError(w, http.StatusConflict, crdstore.ApplyAtConflictMessage("role", name, createOnly))
@@ -3591,11 +3596,16 @@ func (s *Server) handleVarroaRoleBindingDispatch(w http.ResponseWriter, r *http.
 			s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
+		// The body's resourceVersion fences the write. A body without one only
+		// creates, so it also needs the create verb.
+		createOnly := binding.ResourceVersion == ""
+		if createOnly && !s.deps.Authorizer.CanCreateRoleBinding(claims) {
+			s.writeJSONError(w, http.StatusForbidden, createOnlyPutForbidden)
+			return
+		}
 		binding.Name = name
 		binding.APIVersion = "varroa.dev/v1alpha1"
 		binding.Kind = "VarroaRoleBinding"
-		// The body's resourceVersion fences the write. A body without one only creates.
-		createOnly := binding.ResourceVersion == ""
 		if err := crdstore.ApplyAt[v1alpha1.VarroaRoleBinding](r.Context(), s.deps.Store, &binding); err != nil {
 			if k8serrors.IsConflict(err) {
 				s.writeJSONError(w, http.StatusConflict, crdstore.ApplyAtConflictMessage("role binding", name, createOnly))
