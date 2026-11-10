@@ -95,6 +95,29 @@ func TestLedgerActionFieldNames(t *testing.T) {
 				"tenant": true, "repo": true, "revision": true, "reason": true,
 			},
 		},
+		{
+			name: "end_commit_status with result",
+			action: LedgerAction{
+				Kind:        LedgerActionEndCommitStatus,
+				Cluster:     "core",
+				Namespace:   "team-a",
+				Controller:  "cell-1",
+				Actor:       LedgerActionRecorder,
+				RunID:       "run-4",
+				JobPath:     "folder/job",
+				BuildNumber: &buildNumber,
+				Tenant:      "payments",
+				Repo:        "https://git.example.org/acme/app",
+				Revision:    "0123456789abcdef0123456789abcdef01234567",
+				Result:      "FAILURE",
+			},
+			want: map[string]bool{
+				"kind": true, "cluster": true, "namespace": true, "controller": true,
+				"actor": true, "run_id": true, "job_path": true, "build_number": true,
+				"tenant": true, "repo": true, "revision": true, "result": true,
+				"reason": false,
+			},
+		},
 	}
 
 	for _, tc := range cases {

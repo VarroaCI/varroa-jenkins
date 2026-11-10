@@ -238,4 +238,12 @@ public class BuildEventJsonTest {
         assertEquals(4, o.getInt("metrics_dropped"));
     }
 
+    @Test
+    public void sourceGoneWritesItsProtoKeyOnlyWhenTrue() {
+        assertFalse(BuildEvent.builder().build().toJson().has("source_gone"));
+        JSONObject o = BuildEvent.builder().sourceGone(true).build().toJson();
+        assertTrue(o.getBoolean("source_gone"));
+        assertTrue(BuildEvent.builder().sourceGone(true).build().toBuilder().build().isSourceGone());
+    }
+
 }

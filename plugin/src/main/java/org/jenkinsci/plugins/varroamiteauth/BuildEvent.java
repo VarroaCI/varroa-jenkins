@@ -74,6 +74,10 @@ import java.util.Map;
  * warnings_reports_dropped}, count the reports of each kind the plugin did
  * not send past the bound. {@link #toJson()} writes no key for zero.
  *
+ * <p>Field 64, {@code source_gone}, is true when a branch scan marked the
+ * run's branch job dead before the run completed. Only the {@code COMPLETED}
+ * event carries it. {@link #toJson()} writes no key for false.
+ *
  * <p>Field 56, {@code change_request}, names the change request a
  * multibranch pull-request run builds. Only the {@code STARTED} event
  * carries it. {@link #toJson()} writes no key for a null value or an
@@ -155,6 +159,7 @@ public final class BuildEvent implements PostableEvent {
     private final List<BuildWarningsReport> warningsReports;
     private final int coverageReportsDropped;
     private final int warningsReportsDropped;
+    private final boolean sourceGone;
 
     private BuildEvent(Builder b) {
         this.phase = orEmpty(b.phase);
@@ -220,6 +225,7 @@ public final class BuildEvent implements PostableEvent {
         this.warningsReports = List.copyOf(b.warningsReports);
         this.coverageReportsDropped = b.coverageReportsDropped;
         this.warningsReportsDropped = b.warningsReportsDropped;
+        this.sourceGone = b.sourceGone;
     }
 
     private static String orEmpty(String s) {
@@ -490,6 +496,11 @@ public final class BuildEvent implements PostableEvent {
         return warningsReportsDropped;
     }
 
+    /** Field 64: true when a branch scan marked the run's branch job dead. */
+    public boolean isSourceGone() {
+        return sourceGone;
+    }
+
     /** Field 51: the grant the run applied. Zero for a run with no grant. */
     public long getGrantedBuildNumber() {
         return grantedBuildNumber;
@@ -670,6 +681,9 @@ public final class BuildEvent implements PostableEvent {
         if (warningsReportsDropped > 0) {
             o.put("warnings_reports_dropped", warningsReportsDropped);
         }
+        if (sourceGone) {
+            o.put("source_gone", true);
+        }
         return o;
     }
 
@@ -750,7 +764,8 @@ public final class BuildEvent implements PostableEvent {
                 .coverageReports(coverageReports)
                 .warningsReports(warningsReports)
                 .coverageReportsDropped(coverageReportsDropped)
-                .warningsReportsDropped(warningsReportsDropped);
+                .warningsReportsDropped(warningsReportsDropped)
+                .sourceGone(sourceGone);
     }
 
     /**
@@ -876,6 +891,7 @@ public final class BuildEvent implements PostableEvent {
         private List<BuildWarningsReport> warningsReports = new ArrayList<>();
         private int coverageReportsDropped;
         private int warningsReportsDropped;
+        private boolean sourceGone;
 
         private Builder() {
         }
@@ -1191,6 +1207,12 @@ public final class BuildEvent implements PostableEvent {
         /** Field 63: the warnings reports past the bound. A negative value becomes zero. */
         public Builder warningsReportsDropped(int v) {
             this.warningsReportsDropped = Math.max(0, v);
+            return this;
+        }
+
+        /** Field 64: true when a branch scan marked the run's branch job dead. */
+        public Builder sourceGone(boolean v) {
+            this.sourceGone = v;
             return this;
         }
 

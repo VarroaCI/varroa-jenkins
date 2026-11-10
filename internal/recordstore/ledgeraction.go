@@ -24,10 +24,10 @@ const (
 	// agent pods of a cell instance that the operator confirmed gone. The
 	// action names the nodes a resume can still adopt, and those pods stay.
 	LedgerActionReleaseInstanceAgents = "release_instance_agents"
-	// LedgerActionEndCommitStatus asks the operator to set the pending
-	// commit statuses of a build the recorder ended to error. Only Jenkins
-	// writes a status on build completion, so a synthetic end leaves it
-	// pending.
+	// LedgerActionEndCommitStatus asks the operator to end the pending
+	// commit statuses of a build that no branch-source plugin ends. The
+	// recorder publishes it for a run it ended, and for a completed run
+	// whose branch job lost its source.
 	LedgerActionEndCommitStatus = "end_commit_status"
 )
 
@@ -100,13 +100,16 @@ type LedgerAction struct {
 	KeepPods        []string   `json:"keep_pods,omitempty"`
 	RefreshedBefore *time.Time `json:"refreshed_before,omitempty"`
 
-	// Repo, Revision, and Reason apply to end_commit_status alone, along
-	// with RunID, JobPath, BuildNumber, and Tenant above. Repo is the
-	// repository URL of the run and Revision its commit SHA. Reason is
-	// the synthetic end reason that the recorder recorded.
+	// Repo, Revision, Reason, and Result apply to end_commit_status alone,
+	// along with RunID, JobPath, BuildNumber, and Tenant above. Repo is the
+	// repository URL of the run and Revision its commit SHA. Reason is the
+	// synthetic end reason of a run the recorder ended. Result is the
+	// Jenkins result of a completed run whose branch job lost its branch
+	// source. An action sets exactly one of Reason and Result.
 	Repo     string `json:"repo,omitempty"`
 	Revision string `json:"revision,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	Result   string `json:"result,omitempty"`
 }
 
 // ResumeFile is one stored state file of a resume action: the path under

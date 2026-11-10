@@ -146,7 +146,8 @@ func dispatchEndCommitStatus(ctx context.Context, logger *slog.Logger, forge com
 }
 
 // endCommitStatus asks the forge answerer to end the pending commit
-// statuses of a build that the recorder ended. It runs only when the
+// statuses of a build that the recorder ended, or of a completed build
+// whose branch job lost its branch source. It runs only when the
 // action names the tenant, the repository, the commit, and the build
 // number, and the operator has a forge answerer. A failure is logged and
 // never retried: the status then stays pending.
@@ -165,6 +166,7 @@ func endCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatu
 		JobPath:     action.JobPath,
 		BuildNumber: *action.BuildNumber,
 		Reason:      action.Reason,
+		Result:      action.Result,
 	})
 	if err != nil {
 		logger.Warn("end_commit_status failed", "run_id", action.RunID, "tenant", action.Tenant, "error", err)
@@ -181,7 +183,8 @@ func endCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatu
 // WakeHibernatedController call. trigger_run and resume_run both wake
 // the target through the same call before they send the command. An
 // unknown kind takes no action and is counted. end_commit_status asks the
-// forge answerer to end the pending commit statuses of the build.
+// forge answerer to end the pending commit statuses of the build, from the
+// recorder's synthetic reason or from a completed run's result.
 // release_instance_agents deletes the idle agent pods of a confirmed gone
 // cell instance, except the nodes the action names.
 //

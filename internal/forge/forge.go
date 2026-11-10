@@ -176,6 +176,8 @@ func readStatusPages(fetch func(page int) (items []CommitStatus, total int, err 
 const (
 	StatePending = "pending"
 	StateError   = "error"
+	StateSuccess = "success"
+	StateFailure = "failure"
 )
 
 // CommitStatus is one status on a commit. Context names the check and

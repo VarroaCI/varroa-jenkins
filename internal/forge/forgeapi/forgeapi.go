@@ -199,12 +199,17 @@ type PullRequestReply struct {
 
 // CommitStatusRequest asks the operator to end the pending commit statuses
 // of one build. The recorder sends it when it ends a run that Jenkins never
-// completes. It has no reply: the operator logs the outcome.
+// completes, and when a completed run of a dead branch job lost its branch
+// source. It has no reply: the operator logs the outcome.
 type CommitStatusRequest struct {
 	Tenant      string `json:"tenant"`
 	Repo        string `json:"repo"`
 	SHA         string `json:"sha"`
 	JobPath     string `json:"jobPath"`
 	BuildNumber int64  `json:"buildNumber"`
-	Reason      string `json:"reason"`
+	// Reason is the synthetic end reason of a run the recorder ended.
+	Reason string `json:"reason,omitempty"`
+	// Result is the Jenkins result of a completed run whose branch job lost its
+	// branch source. A request sets exactly one of Reason and Result.
+	Result string `json:"result,omitempty"`
 }

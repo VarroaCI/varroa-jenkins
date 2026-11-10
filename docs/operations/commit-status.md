@@ -175,12 +175,33 @@ that stops before its checkout still names it.
 
 A failed write leaves the status `pending`. The operator logs the failure and does not retry.
 
+An interrupted build never changes a status that links to the job, because an automatic retry owns that status.
+
 The operator runs at most four of these writes at once on each replica. When all four are busy, the
 operator drops the write and logs it at `Info`. The status then stays `pending`.
 
 The write can race the retry. If the retry's own `pending` status lands first, the `error` write can
 land after it. The context then shows `error` until the retry build completes. The retry build then
 writes its own end state, which replaces the `error`.
+
+## Dropped branch jobs
+
+A scan can mark a branch job dead while the branch job builds. The default Gitea branch discovery
+drops a branch that a pull request also files. The branch-source plugin then finds no source for
+the job. It writes no status, so the context keeps its `pending` status.
+
+At completion, the operator sets that `pending` status from the Jenkins result:
+
+| Result | Status |
+|---|---|
+| `SUCCESS` | `success` |
+| `UNSTABLE`, `FAILURE` | `failure` |
+| Any other result | `error` |
+
+The description reads `Varroa reported the build result: <result>`. The operator also ends the
+queued status that links to the job, `Build queued...`, because a dead branch job queues no other build.
+
+The credential, rate-limit, and four-write rules of [Interrupted builds](#interrupted-builds) apply.
 
 ## Pull-request revision
 
