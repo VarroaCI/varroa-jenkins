@@ -108,7 +108,7 @@ Jenkins projection federates only this copy.
 
 A copy carries the label `varroa.dev/federated-from`. Federation rewrites each copy on each pass. A change to a copy does not last.
 
-- The dashboard opens a copy read-only. A note names the source objects.
+- The dashboard opens a copy read-only. A note names the source objects. The Jenkins role and binding lists mark a copy `Federated`, and its row action reads View.
 - The `PUT` routes for `jenkinsroles` and `jenkinsrolebindings` answer `409` with the code `federated_copy`. The write changes nothing. A retry does not succeed.
 - The MCP tools `update_jenkins_role` and `update_jenkins_role_binding` refuse a copy too.
 - `DELETE` still works. Delete a stale copy on the hive as described below.

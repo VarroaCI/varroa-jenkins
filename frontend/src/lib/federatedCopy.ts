@@ -45,3 +45,12 @@ export function federatedCopySource(
     .filter((n) => n.length > 0);
   return { kind: sourceKind, names };
 }
+
+/**
+ * federatedCopySummary returns one line that names the source of a federated
+ * copy. A list row shows it as the title of its Federated badge.
+ */
+export function federatedCopySummary(source: FederatedCopySource): string {
+  const names = source.names.length > 0 ? ` ${source.names.join(", ")}` : "";
+  return `Federated copy of ${source.kind}${names}. Change the source on the core cluster.`;
+}

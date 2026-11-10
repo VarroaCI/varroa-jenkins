@@ -121,6 +121,44 @@ describe("JenkinsRoleBindings", () => {
     expect(mockNavigate).toHaveBeenCalledWith(expect.stringContaining("/edit"));
   });
 
+  it("shows View and a Federated badge for a federated copy", async () => {
+    const user = userEvent.setup();
+    const copyBinding = createJenkinsRoleBinding({
+      metadata: {
+        name: "varroa-fed-writer-0123456789ab",
+        labels: { "varroa.dev/federated-from": "writer" },
+        annotations: { "varroa.dev/federated-bindings": "bind-a" },
+      },
+      spec: {
+        subjects: [{ kind: "Group", name: "writers" }],
+        roleRef: "writer",
+        jenkinsScope: { type: "Global" },
+      },
+    });
+    mockListJenkinsRoleBindings.mockResolvedValue({ items: [folderScopeBinding, copyBinding] });
+    renderWithProviders(<JenkinsRoleBindings />);
+    await screen.findByText("varroa-fed-writer-0123456789ab");
+
+    const copyName = screen.getByText("varroa-fed-writer-0123456789ab");
+    expect(copyName.closest("td")).toHaveAttribute("data-label", "Name");
+    const copyRow = copyName.closest("tr")!;
+    expect(within(copyRow).getByText("Federated")).toHaveAttribute(
+      "title",
+      "Federated copy of VarroaRoleBinding bind-a. Change the source on the core cluster.",
+    );
+    expect(within(copyRow).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(copyRow).getByRole("button", { name: "Delete" })).toBeInTheDocument();
+
+    const plainRow = screen.getByText("jenkins-binding-folder").closest("tr")!;
+    expect(within(plainRow).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(within(plainRow).queryByText("Federated")).toBeNull();
+
+    await user.click(within(copyRow).getByRole("button", { name: "View" }));
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/access/jenkins-role-bindings/varroa-fed-writer-0123456789ab/edit?cluster=core",
+    );
+  });
+
   it("shows delete confirmation and executes deletion", async () => {
     mockDeleteJenkinsRoleBinding.mockResolvedValueOnce(undefined);
     const user = userEvent.setup();

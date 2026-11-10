@@ -10,6 +10,7 @@ import { canDoGlobal } from "../hooks/usePermissions";
 import { clusterQuery } from "../routing";
 import NoAccessibleClusters from "../components/NoAccessibleClusters";
 import { useConfigurationCluster } from "../hooks/useConfigurationCluster";
+import { federatedCopySource, federatedCopySummary } from "../lib/federatedCopy";
 import styles from "./JenkinsRoles.module.css";
 import tableStyles from "./JenkinsRBACTable.module.css";
 
@@ -132,8 +133,18 @@ export default function JenkinsRoles() {
             <thead><tr><th>Name</th><th>Cluster</th><th>Global</th><th>Item</th><th>Agent</th><th>Actions</th></tr></thead>
             <tbody>{filtered.map((role) => {
               const permissionList = role.spec.permissions?.join(", ") || "—";
+              const copy = federatedCopySource("JenkinsRole", role.metadata);
               return <tr key={role.metadata.name}>
-              <td data-label="Name" className={tableStyles.name}>{role.metadata.name}</td>
+              <td data-label="Name" className={tableStyles.name}>
+                <span>
+                  {role.metadata.name}
+                  {copy && (
+                    <span className={tableStyles.federatedBadge} title={federatedCopySummary(copy)}>
+                      Federated
+                    </span>
+                  )}
+                </span>
+              </td>
               <td data-label="Cluster" className={tableStyles.mono}>{cluster}</td>
               <td data-label="Global" className={tableStyles.mono}>{role.spec.roleType === "Global" ? permissionList : "—"}</td>
               <td data-label="Item" className={tableStyles.mono}>{role.spec.roleType === "Item" ? permissionList : "—"}</td>
@@ -145,7 +156,7 @@ export default function JenkinsRoles() {
                     variant="ghost"
                     onClick={() => navigate(`/access/jenkins-roles/${role.metadata.name}/edit${clusterQuery(cluster)}`)}
                   >
-                    Edit
+                    {copy ? "View" : "Edit"}
                   </Button>
                 )}
                 {canDoGlobal(permissions, "jenkinsroles", "delete") && (
