@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { federatedCopySource } from "./federatedCopy";
+import { federatedCopySource, federatedCopySummary } from "./federatedCopy";
 
 describe("federatedCopySource", () => {
   it("returns null without the federated-from label", () => {
@@ -43,5 +43,19 @@ describe("federatedCopySource", () => {
       annotations: { "varroa.dev/federated-roles": " alpha , ,zeta," },
     });
     expect(got?.names).toEqual(["alpha", "zeta"]);
+  });
+});
+
+describe("federatedCopySummary", () => {
+  it("names the kind and the sources", () => {
+    expect(federatedCopySummary({ kind: "VarroaRole", names: ["alpha", "zeta"] })).toBe(
+      "Federated copy of VarroaRole alpha, zeta. Change the source on the core cluster.",
+    );
+  });
+
+  it("omits the names when none are known", () => {
+    expect(federatedCopySummary({ kind: "VarroaRoleBinding", names: [] })).toBe(
+      "Federated copy of VarroaRoleBinding. Change the source on the core cluster.",
+    );
   });
 });

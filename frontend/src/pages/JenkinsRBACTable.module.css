@@ -67,6 +67,14 @@
   color: var(--text-2);
 }
 
+/* Marks a federated copy row. The info pair is a text-safe status pair. */
+.federatedBadge {
+  composes: badge;
+  margin: 0 0 0 8px;
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+
 /*
  * Above the card-stack breakpoint, keep a floor width so columns are not
  * squeezed to the point of wrapping; .scroll takes over instead. Scoped to

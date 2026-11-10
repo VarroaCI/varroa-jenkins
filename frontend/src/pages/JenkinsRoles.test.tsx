@@ -112,6 +112,40 @@ describe("JenkinsRoles", () => {
     expect(mockNavigate).toHaveBeenCalledWith(expect.stringContaining("/edit"));
   });
 
+  it("shows View and a Federated badge for a federated copy", async () => {
+    const user = userEvent.setup();
+    const copyRole = createJenkinsRole({
+      metadata: {
+        name: "varroa-fed-alpha-0123456789ab",
+        labels: { "varroa.dev/federated-from": "alpha" },
+        annotations: { "varroa.dev/federated-roles": "alpha,zeta" },
+      },
+      spec: { roleType: "Global", permissions: ["hudson.model.Hudson.Read"], description: "" },
+    });
+    mockListJenkinsRoles.mockResolvedValue({ items: [globalRole, copyRole] });
+    renderWithProviders(<JenkinsRoles />);
+    await screen.findByText("varroa-fed-alpha-0123456789ab");
+
+    const copyName = screen.getByText("varroa-fed-alpha-0123456789ab");
+    expect(copyName.closest("td")).toHaveAttribute("data-label", "Name");
+    const copyRow = copyName.closest("tr")!;
+    expect(within(copyRow).getByText("Federated")).toHaveAttribute(
+      "title",
+      "Federated copy of VarroaRole alpha, zeta. Change the source on the core cluster.",
+    );
+    expect(within(copyRow).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(copyRow).getByRole("button", { name: "Delete" })).toBeInTheDocument();
+
+    const plainRow = screen.getByText("jenkins-global-reader").closest("tr")!;
+    expect(within(plainRow).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(within(plainRow).queryByText("Federated")).toBeNull();
+
+    await user.click(within(copyRow).getByRole("button", { name: "View" }));
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/access/jenkins-roles/varroa-fed-alpha-0123456789ab/edit?cluster=core",
+    );
+  });
+
   it("shows delete confirmation and executes deletion", async () => {
     mockDeleteJenkinsRole.mockResolvedValueOnce(undefined);
     const user = userEvent.setup();

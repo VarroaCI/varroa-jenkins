@@ -10,6 +10,7 @@ import { canDoGlobal } from "../hooks/usePermissions";
 import { clusterQuery } from "../routing";
 import NoAccessibleClusters from "../components/NoAccessibleClusters";
 import { useConfigurationCluster } from "../hooks/useConfigurationCluster";
+import { federatedCopySource, federatedCopySummary } from "../lib/federatedCopy";
 import styles from "./JenkinsRoleBindings.module.css";
 import tableStyles from "./JenkinsRBACTable.module.css";
 
@@ -116,9 +117,19 @@ export default function JenkinsRoleBindings() {
           <div className={tableStyles.scroll}>
           <table className={tableStyles.table}>
             <thead><tr><th>Name</th><th>Cluster</th><th>Role</th><th>Subjects</th><th>Scope</th><th>Actions</th></tr></thead>
-            <tbody>{filtered.map((b) => (
-            <tr key={b.metadata.name}>
-              <td data-label="Name" className={tableStyles.name}>{b.metadata.name}</td>
+            <tbody>{filtered.map((b) => {
+              const copy = federatedCopySource("JenkinsRoleBinding", b.metadata);
+              return <tr key={b.metadata.name}>
+              <td data-label="Name" className={tableStyles.name}>
+                <span>
+                  {b.metadata.name}
+                  {copy && (
+                    <span className={tableStyles.federatedBadge} title={federatedCopySummary(copy)}>
+                      Federated
+                    </span>
+                  )}
+                </span>
+              </td>
               <td data-label="Cluster" className={tableStyles.mono}>{cluster}</td>
               <td data-label="Role" className={tableStyles.mono}>{b.spec.roleRef}</td>
               <td data-label="Subjects">{(b.spec.subjects || []).map((subject) => <span className={tableStyles.badge} key={`${subject.kind}:${subject.name}`}>{subject.kind}: {subject.name}</span>)}</td>
@@ -132,7 +143,7 @@ export default function JenkinsRoleBindings() {
                       navigate(`/access/jenkins-role-bindings/${b.metadata.name}/edit${clusterQuery(cluster)}`)
                     }
                   >
-                    Edit
+                    {copy ? "View" : "Edit"}
                   </Button>
                 )}
                 {canDoGlobal(permissions, "jenkinsrolebindings", "delete") && (
@@ -145,8 +156,8 @@ export default function JenkinsRoleBindings() {
                   </Button>
                 )}
               </div></td>
-            </tr>
-          ))}</tbody>
+            </tr>;
+            })}</tbody>
           </table>
           </div>
           {filtered.length === 0 && (
