@@ -191,17 +191,22 @@ func (c *Conn) ConsumerInfoContext(ctx context.Context, stream, name string) (*n
 	return info, nil
 }
 
+// WebhookStreamMaxAge is the age at which the webhook stream deletes a queued
+// delivery. The stream deletes it without a record, so a consumer must act on a
+// delivery before this age.
+const WebhookStreamMaxAge = time.Hour
+
 // WebhookStreamConfig returns a JetStream stream config for the bounded
 // webhook replay stream. It captures webhook.> with LimitsPolicy so that
 // multiple independent consumers can each read independently.
-// MaxAge=1h, MaxMsgsPerSubject=1000, MaxBytes=64MiB, Discard=Old.
+// MaxAge=WebhookStreamMaxAge, MaxMsgsPerSubject=1000, MaxBytes=64MiB, Discard=Old.
 // replicas matches the caller-supplied value (same as activity stream).
 func WebhookStreamConfig(name string, replicas int) *nats.StreamConfig {
 	return &nats.StreamConfig{
 		Name:              name,
 		Subjects:          []string{WebhookWildcard},
 		Retention:         nats.LimitsPolicy,
-		MaxAge:            1 * time.Hour,
+		MaxAge:            WebhookStreamMaxAge,
 		MaxMsgsPerSubject: 1000,
 		MaxBytes:          64 * 1024 * 1024, // 64 MiB
 		Discard:           nats.DiscardOld,

@@ -198,13 +198,19 @@ Here `comment.json` holds an `issue_comment` payload with `action` set to `creat
 
 ## Buffering
 
-A delivery buffers for up to one hour, so a tenant that moves cells in that hour still
-receives it. After that, only the forge's retry recovers it.
+The door answers `202` when it stores the delivery. It does not wait for the cell. The operator
+then sends the delivery to the cell of the tenant. While the cell is not `Connected`, the
+operator tries again every 30 seconds. A tenant that moves cells receives the delivery on its
+new cell. The operator stops 50 minutes after the door stored the delivery. It then drops the
+delivery and records a `webhook.replay.rejected` activity event that names the tenant and the
+delivery identifier. The forge does not send the delivery again, because the door answered
+`202`. To recover a dropped delivery, redeliver it from the forge, or start the run by hand.
 
 ## Verify
 
 A `202` response means that the door buffered the delivery. It does not mean that a build
-started. A build starts only when the job trigger matches.
+started. A build starts only when the job trigger matches. A delivery can wait several minutes,
+for example while the cell reconnects.
 
 This GitHub delivery checks the signature and the path:
 
