@@ -104,6 +104,20 @@ A binding with no `scope` whose role grants pipelines `write` also gets one
 member role of every tenant that it hosts. A role with pipelines `write` and no
 Jenkins projection federates only this copy.
 
+### A federated copy is read-only
+
+A copy carries the label `varroa.dev/federated-from`. Federation rewrites each copy on each pass. A change to a copy does not last.
+
+- The dashboard opens a copy read-only. A note names the source objects.
+- The `PUT` routes for `jenkinsroles` and `jenkinsrolebindings` answer `409` with the code `federated_copy`. The write changes nothing. A retry does not succeed.
+- The MCP tools `update_jenkins_role` and `update_jenkins_role_binding` refuse a copy too.
+- `DELETE` still works. Delete a stale copy on the hive as described below.
+
+To change a copy, change its source on the core cluster:
+
+- A role copy takes its permissions from each `VarroaRole` that `varroa.dev/federated-roles` names. The `VarroaRole` supplies `jenkinsPermissions`, or the core `JenkinsRole` that its `jenkinsRoleRef` names.
+- A binding copy takes its subjects and scope from each `VarroaRoleBinding` that `varroa.dev/federated-bindings` names.
+
 ### Read the federation status
 
 Each core `VarroaRoleBinding` reports its result on each hive in
@@ -209,6 +223,7 @@ Change a Jenkins role with `PUT /api/v1/clusters/{cluster}/jenkinsroles/{name}`.
 The dashboard Jenkins role and binding editors send the version of their read. Save stops with a conflict note when another writer changed the object after the editor read it. Reload the page, then make the change again.
 
 The binding editor edits `controllerSelector.matchLabels` only. It lists stored `controllerSelector.matchExpressions` entries read-only, and a save keeps them. Use the API or `kubectl` to change them.
+A federated copy answers `409` with the code `federated_copy`. The dashboard editors show a copy read-only. Change the source object instead.
 
 ## Troubleshoot
 

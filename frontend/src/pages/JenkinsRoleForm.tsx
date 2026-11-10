@@ -7,10 +7,12 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import ClusterSelector from "../components/ClusterSelector";
+import FederatedCopyNote from "../components/FederatedCopyNote";
 import { clusterQuery } from "../routing";
 import styles from "./JenkinsRoleForm.module.css";
 import NoAccessibleClusters from "../components/NoAccessibleClusters";
 import { useConfigurationCluster } from "../hooks/useConfigurationCluster";
+import { FEDERATED_COPY_CODE, federatedCopySource } from "../lib/federatedCopy";
 
 const ROLE_TYPES: JenkinsRoleType[] = ["Global", "Item", "Agent"];
 
@@ -34,6 +36,9 @@ export default function JenkinsRoleForm() {
   const [fetching, setFetching] = useState(isEdit);
   // The role as the editor read it. A save sends its metadata, which carries the resourceVersion that fences the write.
   const [loaded, setLoaded] = useState<JenkinsRole | null>(null);
+  // A federated copy is owned by federation. The editor shows it read-only.
+  const source = loaded ? federatedCopySource("JenkinsRole", loaded.metadata) : null;
+  const readOnly = source !== null;
 
   useEffect(() => {
     if (!cluster) return;
@@ -52,6 +57,7 @@ export default function JenkinsRoleForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (readOnly) return;
     setLoading(true);
     setError("");
 
@@ -75,7 +81,9 @@ export default function JenkinsRoleForm() {
       }
       navigate(`/access/jenkins-roles${clusterQuery(cluster)}`);
     } catch (err: any) {
-      if (err instanceof ApiError && err.status === 409) {
+      if (err instanceof ApiError && err.code === FEDERATED_COPY_CODE) {
+        setError(err.serverMessage);
+      } else if (err instanceof ApiError && err.status === 409) {
         setError(isEdit ? JENKINS_ROLE_CONFLICT_NOTE : "A Jenkins role with this name already exists.");
       } else {
         setError(err.message);
@@ -92,77 +100,86 @@ export default function JenkinsRoleForm() {
     <div className={styles.page}>
       <div className={styles.pageHead}>
         <div>
-          <div className={styles.pageTitle}>{isEdit ? `Edit Jenkins Role: ${name}` : "Create Jenkins Role"}</div>
+          <div className={styles.pageTitle}>
+            {readOnly ? `Jenkins Role: ${name}` : isEdit ? `Edit Jenkins Role: ${name}` : "Create Jenkins Role"}
+          </div>
           <div className={styles.pageDesc}>Define a pure Jenkins permission set (Global, Item, or Agent)</div>
         </div>
       </div>
 
       {error && <div className={styles.errorBanner}>{error}</div>}
+      {source && <FederatedCopyNote objectNoun="Jenkins role" source={source} />}
 
       <form onSubmit={handleSubmit}>
         <Card>
-          {!isEdit && (
+          <fieldset disabled={readOnly} className={styles.fieldset}>
+            {!isEdit && (
+              <div className={styles.formGroup}>
+                <ClusterSelector value={cluster} onChange={(value) => {
+                  const next = new URLSearchParams(searchParams);
+                  next.set("cluster", value);
+                  setSearchParams(next);
+                }} />
+              </div>
+            )}
+
             <div className={styles.formGroup}>
-              <ClusterSelector value={cluster} onChange={(value) => {
-                const next = new URLSearchParams(searchParams);
-                next.set("cluster", value);
-                setSearchParams(next);
-              }} />
+              <label className={styles.formLabel}>Name</label>
+              <input
+                className={styles.formInput}
+                value={roleName}
+                onChange={(e) => setRoleName(e.target.value)}
+                disabled={isEdit}
+                required
+              />
             </div>
-          )}
 
-          <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Name</label>
-            <input
-              className={styles.formInput}
-              value={roleName}
-              onChange={(e) => setRoleName(e.target.value)}
-              disabled={isEdit}
-              required
-            />
-          </div>
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>Role Type</label>
+              <select
+                className={styles.formSelect}
+                value={roleType}
+                onChange={(e) => setRoleType(e.target.value as JenkinsRoleType)}
+              >
+                {ROLE_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Role Type</label>
-            <select
-              className={styles.formSelect}
-              value={roleType}
-              onChange={(e) => setRoleType(e.target.value as JenkinsRoleType)}
-            >
-              {ROLE_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>Permissions (one per line)</label>
+              <textarea
+                className={styles.formTextarea}
+                rows={10}
+                placeholder="hudson.model.Hudson.Read&#10;hudson.model.Item.Build&#10;hudson.model.Computer.Configure"
+                value={permissions}
+                onChange={(e) => setPermissions(e.target.value)}
+              />
+            </div>
 
-          <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Permissions (one per line)</label>
-            <textarea
-              className={styles.formTextarea}
-              rows={10}
-              placeholder="hudson.model.Hudson.Read&#10;hudson.model.Item.Build&#10;hudson.model.Computer.Configure"
-              value={permissions}
-              onChange={(e) => setPermissions(e.target.value)}
-            />
-          </div>
-
-          <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Description</label>
-            <input
-              className={styles.formInput}
-              placeholder="Optional description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>Description</label>
+              <input
+                className={styles.formInput}
+                placeholder="Optional description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </div>
+          </fieldset>
 
           <div className={styles.actions}>
-            <Button variant="primary" type="submit" disabled={loading}>
-              {loading ? "Saving..." : "Save"}
+            {!readOnly && (
+              <Button variant="primary" type="submit" disabled={loading}>
+                {loading ? "Saving..." : "Save"}
+              </Button>
+            )}
+            <Button type="button" onClick={() => navigate(`/access/jenkins-roles${clusterQuery(cluster)}`)}>
+              {readOnly ? "Back" : "Cancel"}
             </Button>
-            <Button type="button" onClick={() => navigate(`/access/jenkins-roles${clusterQuery(cluster)}`)}>Cancel</Button>
           </div>
         </Card>
       </form>

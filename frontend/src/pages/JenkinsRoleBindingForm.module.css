@@ -233,3 +233,10 @@
   font-weight: 600;
   margin-bottom: 16px;
 }
+
+.fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}

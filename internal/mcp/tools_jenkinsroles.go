@@ -3,6 +3,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -13,6 +14,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
 
 // =============================================================================
@@ -98,7 +100,7 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 	})
 
 	updateJR := mcp.NewTool("update_jenkins_role",
-		mcp.WithDescription("Update an existing Jenkins role. When another writer changes the object during the call, the tool reads it again and merges again, up to three times."),
+		mcp.WithDescription("Update an existing Jenkins role. When another writer changes the object during the call, the tool reads it again and merges again, up to three times. The tool refuses a federated copy: an object with the label varroa.dev/federated-from."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Role name")),
 		mcp.WithString("description", mcp.Description("Human-readable description")),
 		mcp.WithString("roleType", mcp.Description("Role type: Global, Item, Agent")),
@@ -118,6 +120,9 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 			return mcp.NewToolResultError("access denied: missing jenkinsroles:update permission"), nil
 		}
 		existing, res := updateLocal[v1alpha1.JenkinsRole](ctx, deps.Store, name, "", func(obj *v1alpha1.JenkinsRole) error {
+			if msg := rbac.FederatedCopyMessage("JenkinsRole", obj.Name, obj.Labels, obj.Annotations); msg != "" {
+				return errors.New(msg)
+			}
 			if v := strArg(args, "description"); v != "" {
 				obj.Spec.Description = v
 			}
