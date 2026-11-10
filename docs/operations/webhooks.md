@@ -206,6 +206,11 @@ delivery and records a `webhook.replay.rejected` activity event that names the t
 delivery identifier. The forge does not send the delivery again, because the door answered
 `202`. To recover a dropped delivery, redeliver it from the forge, or start the run by hand.
 
+The operator can resend a delivery that the mite already posted. A resend that reaches the same
+mite answers the earlier result and does not post again. The mite keeps the newest 4096 accepted
+replays in memory, for up to 24 hours. A mite restart clears them. A resend to another cell, after a tenant move, can
+post a second time.
+
 ## Verify
 
 A `202` response means that the door buffered the delivery. It does not mean that a build

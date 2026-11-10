@@ -286,6 +286,9 @@ type Agent struct {
 	// eventRetention holds every forwarded, unacknowledged build event so a
 	// reconnect can replay it. Bounded by VARROA_EVENT_RETAIN_BYTES.
 	eventRetention *eventRetentionStore
+	// replays remembers the webhook replays that Jenkins accepted, so a
+	// resend of the same delivery posts nothing. See replay_ledger.go.
+	replays *replayLedger
 
 	// eventAcks buffers EventAck values read from the stream since the last
 	// /v1/events response, so the plugin can release its spool.
@@ -417,6 +420,7 @@ func NewAgent(mp metric.MeterProvider, cfg Config) (*Agent, error) {
 		claimTimeout:           claimTimeoutFromEnv(),
 		claimWaiters:           newClaimWaiterMap(),
 		eventRetention:         newEventRetentionStore(eventRetainBytesFromEnv()),
+		replays:                newReplayLedger(time.Now),
 		eventAcks:              newAckBuffer(),
 		logRetention:           newLogRetentionStore(logRetainBytesFromEnv()),
 		crossTenantTimeout:     defaultCrossTenantMiteTimeoutMS * time.Millisecond,
@@ -1722,6 +1726,17 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				errStr = fmt.Sprintf("replay path %q not allowlisted", payload.Path)
 				break
 			}
+			// A resend of a delivery that this mite already saw Jenkins accept
+			// answers the earlier status and posts nothing. A timed-out or
+			// failed post is not recorded, so a resend can post it again.
+			replayID := replayKey(cmd)
+			if prior, done := a.replays.accepted(replayID); done {
+				a.Logger.Info("webhook replay already accepted; not posting again",
+					"command_id", cmd.CommandId, "delivery_id", payload.DeliveryId, "status", prior)
+				httpStatus = prior
+				success = true
+				break
+			}
 			// Build the upstream URL. The mite always replays to the local
 			// Jenkins process on the standard port.
 			u := fmt.Sprintf("http://localhost:8080/%s", payload.Path)
@@ -1766,6 +1781,7 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			httpStatus = resp.StatusCode
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				success = true // leave errStr empty on success — HttpStatus carries the code
+				a.replays.record(replayID, resp.StatusCode)
 			} else {
 				errStr = fmt.Sprintf("upstream status: %d", resp.StatusCode)
 			}
