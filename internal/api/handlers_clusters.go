@@ -1211,6 +1211,11 @@ func (s *Server) dispatchJenkinsRoles(w http.ResponseWriter, r *http.Request, cl
 			s.writeJSONError(w, http.StatusForbidden, createOnlyPutForbidden)
 			return
 		}
+		if s.refuseFederatedCopy(w, cluster, "JenkinsRole", name, func() (json.RawMessage, error) {
+			return s.deps.ConfigBrood.GetJenkinsRole(r.Context(), cluster, name)
+		}) {
+			return
+		}
 		role.Name = name
 		role.APIVersion = "varroa.dev/v1alpha1"
 		role.Kind = "JenkinsRole"
@@ -1324,6 +1329,11 @@ func (s *Server) dispatchJenkinsRoleBindings(w http.ResponseWriter, r *http.Requ
 		}
 		if binding.ResourceVersion == "" && !s.deps.Authorizer.CanCreateJenkinsRoleBinding(claims) {
 			s.writeJSONError(w, http.StatusForbidden, createOnlyPutForbidden)
+			return
+		}
+		if s.refuseFederatedCopy(w, cluster, "JenkinsRoleBinding", name, func() (json.RawMessage, error) {
+			return s.deps.ConfigBrood.GetJenkinsRoleBinding(r.Context(), cluster, name)
+		}) {
 			return
 		}
 		binding.Name = name

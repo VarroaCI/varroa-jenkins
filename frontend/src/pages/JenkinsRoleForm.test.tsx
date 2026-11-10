@@ -236,3 +236,59 @@ describe("JenkinsRoleForm — the version of the read", () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 });
+
+describe("JenkinsRoleForm — a federated copy", () => {
+  const copy = createJenkinsRole({
+    metadata: {
+      name: "jenkins-viewer",
+      labels: { "varroa.dev/federated-from": "alpha" },
+      annotations: { "varroa.dev/federated-roles": "alpha,zeta" },
+    },
+    spec: { roleType: "Global", permissions: ["hudson.model.Hudson.Read"] },
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = "jenkins-viewer";
+    mockGetJenkinsRole.mockResolvedValue(copy);
+  });
+
+  it("renders a federated copy read-only with a note that names the source", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Jenkins Role: jenkins-viewer")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "This Jenkins role is a federated copy of VarroaRole alpha, zeta.",
+    );
+    expect(getDescriptionInput()).toBeDisabled();
+    expect(getRoleTypeSelect()).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(mockNavigate).toHaveBeenCalledWith("/access/jenkins-roles?cluster=core");
+  });
+
+  it("shows the server message on a federated_copy refusal", async () => {
+    // The editor read an object without the label. The copy appeared before the save.
+    mockGetJenkinsRole.mockResolvedValue(createJenkinsRole({
+      metadata: { name: "jenkins-viewer", resourceVersion: "7" },
+      spec: { roleType: "Global", permissions: [] },
+    }));
+    mockUpdateJenkinsRole.mockRejectedValueOnce(
+      new ApiError(409, "conflict", { error: "JenkinsRole jenkins-viewer is a federated copy of VarroaRole alpha.", code: "federated_copy" }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role: jenkins-viewer")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("JenkinsRole jenkins-viewer is a federated copy of VarroaRole alpha.")).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});

@@ -22,9 +22,31 @@ import (
 // a cluster. It answers each update with its input, or with err when err is set.
 type putRecordingBrood struct {
 	ConfigBrood
-	calls int
-	obj   json.RawMessage
-	err   error
+	calls  int
+	obj    json.RawMessage
+	err    error
+	stored json.RawMessage // the object a read of a role or binding answers
+	getErr error           // the error a read of a role or binding answers
+}
+
+// readStored answers a read of a stored role or binding. A missing object is a
+// not_found error.
+func (b *putRecordingBrood) readStored() (json.RawMessage, error) {
+	if b.getErr != nil {
+		return nil, b.getErr
+	}
+	if b.stored != nil {
+		return b.stored, nil
+	}
+	return nil, &BroodError{Code: bus.CodeNotFound, Msg: "not found"}
+}
+
+func (b *putRecordingBrood) GetJenkinsRole(_ context.Context, _, _ string) (json.RawMessage, error) {
+	return b.readStored()
+}
+
+func (b *putRecordingBrood) GetJenkinsRoleBinding(_ context.Context, _, _ string) (json.RawMessage, error) {
+	return b.readStored()
 }
 
 func (b *putRecordingBrood) record(obj json.RawMessage) (json.RawMessage, error) {

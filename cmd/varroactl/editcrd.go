@@ -123,7 +123,7 @@ func editLoop(fetch func() (map[string]any, error), put func(orig, mod map[strin
 	// supplies a patch callback (put decides which).
 	if err := put(doc, mod); err != nil {
 		var statusErr *httpStatusError
-		if errors.As(err, &statusErr) && statusErr.code == http.StatusConflict {
+		if errors.As(err, &statusErr) && statusErr.code == http.StatusConflict && statusErr.reason == "" {
 			_, _ = fmt.Fprintln(os.Stderr, editConflictMessage)
 			_, _ = fmt.Fprintf(os.Stderr, "Edits saved to %s\n", tmpPath)
 			return fmt.Errorf("edit conflict")

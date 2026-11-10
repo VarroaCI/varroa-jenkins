@@ -436,3 +436,78 @@ describe("JenkinsRoleBindingForm — controller selector match expressions", () 
     expect(sent.spec.controllerScope).toBeUndefined();
   });
 });
+
+describe("JenkinsRoleBindingForm — a federated copy", () => {
+  const copy = createJenkinsRoleBinding({
+    metadata: {
+      name: "my-jenkins-binding",
+      labels: { "varroa.dev/federated-from": "writer" },
+      annotations: { "varroa.dev/federated-bindings": "bind-a,bind-b" },
+    },
+    spec: {
+      subjects: [{ kind: "Group", name: "ops" }],
+      roleRef: "jenkins-admin",
+      jenkinsScope: { type: "Folder", folder: "/tenants/infra", propagate: "Children" },
+    },
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = "my-jenkins-binding";
+    mockListJenkinsRoles.mockResolvedValue({ items: availableJenkinsRoles });
+    mockGetJenkinsRoleBinding.mockResolvedValue(copy);
+  });
+
+  it("renders a federated copy read-only with a note that names the source", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleBindingForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Jenkins Role Binding: my-jenkins-binding")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "This Jenkins role binding is a federated copy of VarroaRoleBinding bind-a, bind-b.",
+    );
+    expect(getNameInput()).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Jenkins Scope/ })).toBeDisabled();
+    expect(screen.getByDisplayValue("/tenants/infra")).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(mockNavigate).toHaveBeenCalledWith("/access/jenkins-role-bindings?cluster=core");
+  });
+
+  it("shows a tenant-member roleRef that is not a listed role", async () => {
+    mockGetJenkinsRoleBinding.mockResolvedValue(createJenkinsRoleBinding({
+      metadata: { name: "my-jenkins-binding" },
+      spec: { subjects: [{ kind: "Group", name: "ops" }], roleRef: "varroa:tenant-member:alpha" },
+    }));
+    renderWithProviders(<JenkinsRoleBindingForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role Binding: my-jenkins-binding")).toBeInTheDocument();
+    });
+    const select = screen.getByText("Role Ref").nextElementSibling as HTMLSelectElement;
+    expect(select).toHaveValue("varroa:tenant-member:alpha");
+  });
+
+  it("shows the server message on a federated_copy refusal", async () => {
+    mockGetJenkinsRoleBinding.mockResolvedValue(createJenkinsRoleBinding({
+      metadata: { name: "my-jenkins-binding", resourceVersion: "7" },
+      spec: { subjects: [{ kind: "Group", name: "ops" }], roleRef: "jenkins-admin" },
+    }));
+    mockUpdateJenkinsRoleBinding.mockRejectedValueOnce(
+      new ApiError(409, "conflict", { error: "JenkinsRoleBinding my-jenkins-binding is a federated copy.", code: "federated_copy" }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleBindingForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role Binding: my-jenkins-binding")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("JenkinsRoleBinding my-jenkins-binding is a federated copy.")).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});

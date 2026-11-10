@@ -318,6 +318,7 @@
       When the Jenkins role exists, that body answers 409 and writes nothing. The body
       replaces the stored Jenkins role, so start from your read.
       A body without metadata.resourceVersion also needs the create permission, and answers 403 without it.
+      A federated copy (label varroa.dev/federated-from) answers 409 with code federated_copy and writes nothing.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/name'
@@ -445,6 +446,7 @@
       role binding. When the Jenkins role binding exists, that body answers 409 and writes
       nothing. The body replaces the stored Jenkins role binding, so start from your read.
       A body without metadata.resourceVersion also needs the create permission, and answers 403 without it.
+      A federated copy (label varroa.dev/federated-from) answers 409 with code federated_copy and writes nothing.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/name'

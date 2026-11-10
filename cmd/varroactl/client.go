@@ -48,15 +48,18 @@ func errFromResponse(body []byte, statusCode int) error {
 	}
 	var env struct {
 		Error     string `json:"error"`
+		Code      string `json:"code"`
 		Conflicts []struct {
 			Field   string `json:"field"`
 			Manager string `json:"manager"`
 		} `json:"conflicts"`
 	}
+	code := ""
 	if json.Unmarshal(body, &env) == nil {
 		if env.Error != "" {
 			msg = env.Error
 		}
+		code = env.Code
 		if len(env.Conflicts) > 0 {
 			owned := make([]string, 0, len(env.Conflicts))
 			for _, c := range env.Conflicts {
@@ -66,15 +69,16 @@ func errFromResponse(body []byte, statusCode int) error {
 				" — retry with --force to take ownership"
 		}
 	}
-	return &httpStatusError{code: statusCode, msg: msg}
+	return &httpStatusError{code: statusCode, reason: code, msg: msg}
 }
 
 // httpStatusError is a non-2xx answer from the server. Its text is the same
 // as the message errFromResponse always printed; callers test code to act on
 // one status, such as a 409 on an edit.
 type httpStatusError struct {
-	code int
-	msg  string
+	code   int
+	reason string // the machine code of the answer, when the server sends one
+	msg    string
 }
 
 func (e *httpStatusError) Error() string {

@@ -12,10 +12,12 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import ClusterSelector from "../components/ClusterSelector";
+import FederatedCopyNote from "../components/FederatedCopyNote";
 import { clusterQuery } from "../routing";
 import styles from "./JenkinsRoleBindingForm.module.css";
 import NoAccessibleClusters from "../components/NoAccessibleClusters";
 import { useConfigurationCluster } from "../hooks/useConfigurationCluster";
+import { FEDERATED_COPY_CODE, federatedCopySource } from "../lib/federatedCopy";
 
 interface LabelEntry {
   key: string;
@@ -65,6 +67,11 @@ export default function JenkinsRoleBindingForm() {
   const [fetching, setFetching] = useState(true);
   // The binding as the editor read it. A save sends its metadata, which carries the resourceVersion that fences the write.
   const [loaded, setLoaded] = useState<JenkinsRoleBinding | null>(null);
+  // A federated copy is owned by federation. The editor shows it read-only, and the scope sections open.
+  const source = loaded ? federatedCopySource("JenkinsRoleBinding", loaded.metadata) : null;
+  const readOnly = source !== null;
+  const showScope = scopeOpen || readOnly;
+  const showJenkinsScope = jenkinsScopeOpen || readOnly;
 
   useEffect(() => {
     const load = async () => {
@@ -104,6 +111,7 @@ export default function JenkinsRoleBindingForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (readOnly) return;
     setLoading(true);
     setError("");
 
@@ -166,7 +174,9 @@ export default function JenkinsRoleBindingForm() {
       }
       navigate(`/access/jenkins-role-bindings${clusterQuery(cluster)}`);
     } catch (err: any) {
-      if (err instanceof ApiError && err.status === 409) {
+      if (err instanceof ApiError && err.code === FEDERATED_COPY_CODE) {
+        setError(err.serverMessage);
+      } else if (err instanceof ApiError && err.status === 409) {
         setError(isEdit ? JENKINS_ROLE_BINDING_CONFLICT_NOTE : "A Jenkins role binding with this name already exists.");
       } else {
         setError(err.message);
@@ -199,6 +209,10 @@ export default function JenkinsRoleBindingForm() {
   const removeLabel = (idx: number) =>
     setSelectorLabels(selectorLabels.filter((_, i) => i !== idx));
 
+  // A tenant-member copy names a roleRef that is not a JenkinsRole object. The
+  // select keeps that value visible instead of showing an empty choice.
+  const roleRefListed = roleOptions.some((r) => r.metadata.name === roleRef);
+
   const storedExpressions = loaded?.spec.controllerScope?.controllerSelector?.matchExpressions ?? [];
 
   if (ready && !cluster) return <NoAccessibleClusters />;
@@ -209,7 +223,9 @@ export default function JenkinsRoleBindingForm() {
       <div className={styles.pageHead}>
         <div>
           <div className={styles.pageTitle}>
-            {isEdit ? `Edit Jenkins Role Binding: ${name}` : "Create Jenkins Role Binding"}
+            {readOnly
+              ? `Jenkins Role Binding: ${name}`
+              : isEdit ? `Edit Jenkins Role Binding: ${name}` : "Create Jenkins Role Binding"}
           </div>
           <div className={styles.pageDesc}>
             Bind a JenkinsRole to subjects with optional controller and Jenkins scope
@@ -218,9 +234,11 @@ export default function JenkinsRoleBindingForm() {
       </div>
 
       {error && <div className={styles.errorBanner}>{error}</div>}
+      {source && <FederatedCopyNote objectNoun="Jenkins role binding" source={source} />}
 
       <form onSubmit={handleSubmit}>
         <Card>
+          <fieldset disabled={readOnly} className={styles.fieldset}>
           {!isEdit && (
             <div className={styles.formGroup}>
               <ClusterSelector value={cluster} onChange={(value) => {
@@ -283,6 +301,7 @@ export default function JenkinsRoleBindingForm() {
               required
             >
               <option value="">-- Select a Jenkins role --</option>
+              {roleRef && !roleRefListed && <option value={roleRef}>{roleRef}</option>}
               {roleOptions.map((r) => (
                 <option key={r.metadata.name} value={r.metadata.name}>
                   {r.metadata.name}
@@ -298,11 +317,11 @@ export default function JenkinsRoleBindingForm() {
               className={styles.scopeToggle}
               onClick={() => setScopeOpen(!scopeOpen)}
             >
-              {scopeOpen ? "▼" : "▶"} Controller Scope{" "}
-              {scopeOpen ? "(click to collapse)" : "(click to expand)"}
+              {showScope ? "▼" : "▶"} Controller Scope{" "}
+              {readOnly ? "" : showScope ? "(click to collapse)" : "(click to expand)"}
             </button>
 
-            {scopeOpen && (
+            {showScope && (
               <div className={styles.scopeBody}>
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>
@@ -375,11 +394,11 @@ export default function JenkinsRoleBindingForm() {
               className={styles.scopeToggle}
               onClick={() => setJenkinsScopeOpen(!jenkinsScopeOpen)}
             >
-              {jenkinsScopeOpen ? "▼" : "▶"} Jenkins Scope{" "}
-              {jenkinsScopeOpen ? "(click to collapse)" : "(click to expand)"}
+              {showJenkinsScope ? "▼" : "▶"} Jenkins Scope{" "}
+              {readOnly ? "" : showJenkinsScope ? "(click to collapse)" : "(click to expand)"}
             </button>
 
-            {jenkinsScopeOpen && (
+            {showJenkinsScope && (
               <div className={styles.scopeBody}>
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>Type</label>
@@ -436,13 +455,16 @@ export default function JenkinsRoleBindingForm() {
               </div>
             )}
           </div>
+          </fieldset>
 
           <div className={styles.actions}>
-            <Button variant="primary" type="submit" disabled={loading}>
-              {loading ? "Saving..." : "Save"}
-            </Button>
+            {!readOnly && (
+              <Button variant="primary" type="submit" disabled={loading}>
+                {loading ? "Saving..." : "Save"}
+              </Button>
+            )}
             <Button type="button" onClick={() => navigate(`/access/jenkins-role-bindings${clusterQuery(cluster)}`)}>
-              Cancel
+              {readOnly ? "Back" : "Cancel"}
             </Button>
           </div>
         </Card>
