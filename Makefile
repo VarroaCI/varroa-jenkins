@@ -9,6 +9,8 @@ FRONTEND_IMAGE_NAME=varroa-frontend
 # `latest-alpine` here would let the documented local gate drift past CI and
 # report failures nobody can reproduce in Actions, or miss ones CI will catch.
 GOLANGCI_LINT_VERSION=v2.12.2
+# The client generator runs from its own module graph. The module kin-openapi version moves on its own.
+OAPI_CODEGEN_VERSION ?= v2.4.1
 
 lint:
 	docker run --rm -v "$(CURDIR):/workspace" -w /workspace \
@@ -144,7 +146,7 @@ localdev-controller: ## (Re-)apply the localdev sample controller
 
 generate-client:
 	go run ./hack/openapi-bundle
-	go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen -config api/openapi/oapi-codegen.yaml api/openapi/varroa.yaml
+	go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION) -config api/openapi/oapi-codegen.yaml api/openapi/varroa.yaml
 	gofmt -w pkg/client
 
 check-client:

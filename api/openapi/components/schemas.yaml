@@ -348,7 +348,8 @@ TenantPipelines:
         Kubernetes namespace this tenant's agents run in. Must be one of
         the tenant's own namespaces. Required when pipelines is set.
     composedBundleRef:
-      $ref: '#/ComposedBundleRef'
+      allOf:
+        - $ref: '#/ComposedBundleRef'
       description: >-
         The ComposedBundle this tenant's items come from. Both name and
         namespace are set: a Tenant is cluster-scoped and has no namespace
