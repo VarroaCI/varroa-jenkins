@@ -66,6 +66,14 @@ func (b *putRecordingBrood) UpdateCatalogSource(_ context.Context, _, _, _ strin
 	return b.record(obj)
 }
 
+func (b *putRecordingBrood) CreateJenkinsRole(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	return b.record(obj)
+}
+
+func (b *putRecordingBrood) CreateJenkinsRoleBinding(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	return b.record(obj)
+}
+
 func (b *putRecordingBrood) UpdateJenkinsRole(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
 	return b.record(obj)
 }
@@ -153,9 +161,19 @@ func configPutServer(brood ConfigBrood) *Server {
 // is not empty.
 func configPutRequest(t *testing.T, user string, rv string) *http.Request {
 	t.Helper()
+	return configWriteRequest(t, http.MethodPut, user, rv, nil)
+}
+
+// configWriteRequest sends a write of the given method. The metadata carries
+// resourceVersion when rv is not empty, and labels when labels is not nil.
+func configWriteRequest(t *testing.T, method, user, rv string, labels map[string]string) *http.Request {
+	t.Helper()
 	md := map[string]any{"name": "x"}
 	if rv != "" {
 		md["resourceVersion"] = rv
+	}
+	if labels != nil {
+		md["labels"] = labels
 	}
 	body, err := json.Marshal(map[string]any{
 		"apiVersion": "varroa.dev/v1alpha1",
@@ -165,7 +183,7 @@ func configPutRequest(t *testing.T, user string, rv string) *http.Request {
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPut, "/", bytes.NewReader(body))
+	req := httptest.NewRequest(method, "/", bytes.NewReader(body))
 	return req.WithContext(contextWithClaims(req.Context(), &auth.Claims{Subject: user}))
 }
 

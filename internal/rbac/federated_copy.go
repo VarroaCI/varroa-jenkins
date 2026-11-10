@@ -31,3 +31,15 @@ func FederatedCopyMessage(kind, name string, labels, annotations map[string]stri
 	return fmt.Sprintf("%s %s is a federated copy of %s %s. Federation replaces each change to the copy. Change the source on the core cluster.",
 		kind, name, sourceKind, strings.ReplaceAll(sources, ",", ", "))
 }
+
+// FederatedLabelMessage answers the refusal text for a request body that sets
+// LabelFederatedFrom. kind is "JenkinsRole" or "JenkinsRoleBinding". It answers
+// "" when labels hold no LabelFederatedFrom value. An empty value marks no copy,
+// so it is not refused.
+func FederatedLabelMessage(kind string, labels map[string]string) string {
+	if labels[LabelFederatedFrom] == "" {
+		return ""
+	}
+	return fmt.Sprintf("The %s request sets the label %s. The label marks a federated copy, and only federation writes it. Remove the label from the request.",
+		kind, LabelFederatedFrom)
+}

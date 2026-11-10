@@ -1158,6 +1158,9 @@ func (s *Server) dispatchJenkinsRoles(w http.ResponseWriter, r *http.Request, cl
 				s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
 				return
 			}
+			if s.refuseFederatedLabel(w, "JenkinsRole", role.Labels) {
+				return
+			}
 			role.APIVersion = "varroa.dev/v1alpha1"
 			role.Kind = "JenkinsRole"
 			obj, _ := json.Marshal(role)
@@ -1214,6 +1217,9 @@ func (s *Server) dispatchJenkinsRoles(w http.ResponseWriter, r *http.Request, cl
 		if s.refuseFederatedCopy(w, cluster, "JenkinsRole", name, func() (json.RawMessage, error) {
 			return s.deps.ConfigBrood.GetJenkinsRole(r.Context(), cluster, name)
 		}) {
+			return
+		}
+		if s.refuseFederatedLabel(w, "JenkinsRole", role.Labels) {
 			return
 		}
 		role.Name = name
@@ -1278,6 +1284,9 @@ func (s *Server) dispatchJenkinsRoleBindings(w http.ResponseWriter, r *http.Requ
 				s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
 				return
 			}
+			if s.refuseFederatedLabel(w, "JenkinsRoleBinding", binding.Labels) {
+				return
+			}
 			binding.APIVersion = "varroa.dev/v1alpha1"
 			binding.Kind = "JenkinsRoleBinding"
 			obj, _ := json.Marshal(binding)
@@ -1334,6 +1343,9 @@ func (s *Server) dispatchJenkinsRoleBindings(w http.ResponseWriter, r *http.Requ
 		if s.refuseFederatedCopy(w, cluster, "JenkinsRoleBinding", name, func() (json.RawMessage, error) {
 			return s.deps.ConfigBrood.GetJenkinsRoleBinding(r.Context(), cluster, name)
 		}) {
+			return
+		}
+		if s.refuseFederatedLabel(w, "JenkinsRoleBinding", binding.Labels) {
 			return
 		}
 		binding.Name = name

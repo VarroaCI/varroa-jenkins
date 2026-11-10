@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -63,5 +64,40 @@ func TestUpdateJenkinsRoleBinding_RefusesFederatedCopy(t *testing.T) {
 	}
 	if got.Spec.RoleRef != "viewer" {
 		t.Errorf("roleRef = %q, want viewer", got.Spec.RoleRef)
+	}
+}
+
+// TestJenkinsRBACTools_DeclareNoMetadataArgs pins that the Jenkins RBAC tools
+// declare no metadata argument. The server rejects an undeclared argument, so
+// the MCP path cannot set the federation label. A new metadata argument needs
+// the BFF label guard first.
+func TestJenkinsRBACTools_DeclareNoMetadataArgs(t *testing.T) {
+	want := map[string]bool{
+		"create_jenkins_role":         false,
+		"update_jenkins_role":         false,
+		"create_jenkins_role_binding": false,
+		"update_jenkins_role_binding": false,
+	}
+	for _, tool := range liveTools(t) {
+		if _, ok := want[tool.Name]; !ok {
+			continue
+		}
+		want[tool.Name] = true
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+			t.Fatalf("%s: decode input schema: %v", tool.Name, err)
+		}
+		for _, arg := range []string{"labels", "annotations", "metadata"} {
+			if _, ok := schema.Properties[arg]; ok {
+				t.Errorf("%s declares argument %q, want none", tool.Name, arg)
+			}
+		}
+	}
+	for name, seen := range want {
+		if !seen {
+			t.Errorf("tool %s not listed", name)
+		}
 	}
 }
