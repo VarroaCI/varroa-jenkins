@@ -203,35 +203,69 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 // top-level scope key is refused for the same reason: a dropped key can
 // widen the binding.
 func buildBindingScope(raw interface{}) (*v1alpha1.VarroaRoleBindingScope, error) {
+	return parseBindingScope(raw, varroaScopeArg)
+}
+
+// scopeArg names a binding scope argument and the dimensions that it takes.
+type scopeArg struct {
+	name    string // the argument name in error texts, for example "scope"
+	tenants bool   // the argument takes a tenants dimension
+}
+
+var (
+	varroaScopeArg            = scopeArg{name: "scope", tenants: true}
+	jenkinsControllerScopeArg = scopeArg{name: "controllerScope"}
+)
+
+func (a scopeArg) dims() string {
+	if a.tenants {
+		return "namespaces, controllerSelector, or tenants"
+	}
+	return "namespaces or controllerSelector"
+}
+
+func (a scopeArg) keys() string {
+	if a.tenants {
+		return "namespaces, controllerSelector, tenants"
+	}
+	return "namespaces, controllerSelector"
+}
+
+// parseBindingScope parses a scope argument named a.name. The texts name the
+// argument, so one parser serves "scope" and "controllerScope".
+func parseBindingScope(raw interface{}, a scopeArg) (*v1alpha1.VarroaRoleBindingScope, error) {
 	if raw == nil {
 		return nil, nil
 	}
 	m, ok := raw.(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid scope: scope must be an object naming namespaces, controllerSelector, or tenants")
+		return nil, fmt.Errorf("invalid %s: %s must be an object naming %s", a.name, a.name, a.dims())
 	}
 	if len(m) == 0 {
-		return nil, fmt.Errorf("invalid scope: an empty scope sets no limit, so the binding becomes cluster-wide; name namespaces, controllerSelector, or tenants, or omit scope")
+		return nil, fmt.Errorf("invalid %s: an empty %s sets no limit, so the binding becomes cluster-wide; name %s, or omit %s", a.name, a.name, a.dims(), a.name)
 	}
 	for key := range m {
-		switch key {
-		case "namespaces", "controllerSelector", "tenants":
+		switch {
+		case key == "namespaces", key == "controllerSelector":
+		case key == "tenants" && a.tenants:
+		case key == "tenants":
+			return nil, fmt.Errorf("invalid %s: a Jenkins role binding has no tenant meaning; name %s", a.name, a.dims())
 		default:
-			return nil, fmt.Errorf("invalid scope: unknown scope key %q; allowed keys are namespaces, controllerSelector, tenants", key)
+			return nil, fmt.Errorf("invalid %s: unknown %s key %q; allowed keys are %s", a.name, a.name, key, a.keys())
 		}
 	}
 	var namespaces []string
 	if nsRaw, present := m["namespaces"]; present {
 		nsArr, ok := nsRaw.([]interface{})
 		if !ok {
-			return nil, fmt.Errorf("invalid scope: scope.namespaces must be a list of strings")
+			return nil, fmt.Errorf("invalid %s: %s.namespaces must be a list of strings", a.name, a.name)
 		}
 		if len(nsArr) == 0 {
-			return nil, fmt.Errorf("invalid scope: scope.namespaces is empty and sets no namespace limit; name one namespace or omit the key")
+			return nil, fmt.Errorf("invalid %s: %s.namespaces is empty and sets no namespace limit; name one namespace or omit the key", a.name, a.name)
 		}
 		for i, ns := range nsArr {
 			if _, ok := ns.(string); !ok {
-				return nil, fmt.Errorf("invalid scope: scope.namespaces[%d] must be a string", i)
+				return nil, fmt.Errorf("invalid %s: %s.namespaces[%d] must be a string", a.name, a.name, i)
 			}
 		}
 		namespaces = strSliceAny(nsRaw)
@@ -249,7 +283,7 @@ func buildBindingScope(raw interface{}) (*v1alpha1.VarroaRoleBindingScope, error
 		Tenants:    tenants,
 	}
 	if csRaw, present := m["controllerSelector"]; present {
-		sel, err := buildLabelSelector(csRaw)
+		sel, err := buildLabelSelector(csRaw, a.name)
 		if err != nil {
 			return nil, err
 		}
@@ -258,27 +292,27 @@ func buildBindingScope(raw interface{}) (*v1alpha1.VarroaRoleBindingScope, error
 	return scope, nil
 }
 
-// buildLabelSelector parses a "controllerSelector" argument into a
-// metav1.LabelSelector with its matchLabels and matchExpressions. A dropped
-// term widens the selector, so the decode refuses an unknown key and a value
-// of the wrong type. metav1.LabelSelectorAsSelector then refuses a selector
-// that the resolver cannot evaluate.
-func buildLabelSelector(raw interface{}) (*metav1.LabelSelector, error) {
+// buildLabelSelector parses a "controllerSelector" term of the argument arg
+// into a metav1.LabelSelector with its matchLabels and matchExpressions. A
+// dropped term widens the selector, so the decode refuses an unknown key and a
+// value of the wrong type. metav1.LabelSelectorAsSelector then refuses a
+// selector that the resolver cannot evaluate.
+func buildLabelSelector(raw interface{}, arg string) (*metav1.LabelSelector, error) {
 	if _, ok := raw.(map[string]interface{}); !ok {
-		return nil, fmt.Errorf("invalid scope: scope.controllerSelector must be an object")
+		return nil, fmt.Errorf("invalid %s: %s.controllerSelector must be an object", arg, arg)
 	}
 	b, err := json.Marshal(raw)
 	if err != nil {
-		return nil, fmt.Errorf("invalid scope: scope.controllerSelector: %w", err)
+		return nil, fmt.Errorf("invalid %s: %s.controllerSelector: %w", arg, arg, err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	sel := &metav1.LabelSelector{}
 	if err := dec.Decode(sel); err != nil {
-		return nil, fmt.Errorf("invalid scope: scope.controllerSelector: %w", err)
+		return nil, fmt.Errorf("invalid %s: %s.controllerSelector: %w", arg, arg, err)
 	}
 	if _, err := metav1.LabelSelectorAsSelector(sel); err != nil {
-		return nil, fmt.Errorf("invalid scope: scope.controllerSelector: %w", err)
+		return nil, fmt.Errorf("invalid %s: %s.controllerSelector: %w", arg, arg, err)
 	}
 	return sel, nil
 }
