@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
@@ -490,6 +492,328 @@ func TestCreateVarroaRoleBinding_InvalidTenantScopeRejected(t *testing.T) {
 
 			if _, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), deps.Store, "vrb-invalid-tenant-scope", ""); err == nil {
 				t.Fatalf("rejected scope must not create a binding")
+			}
+		})
+	}
+}
+
+// TestUpdateVarroaRoleBinding_ExpressionsOnlySelectorRoundTrips proves that a
+// get, edit, update round trip keeps a stored matchExpressions term. Before
+// the fix, the update dropped the term and left an empty selector, which
+// matches every controller.
+func TestUpdateVarroaRoleBinding_ExpressionsOnlySelectorRoundTrips(t *testing.T) {
+	deps := adminDeps()
+	store := deps.Store.(*crdstore.Fake)
+	want := []metav1.LabelSelectorRequirement{{Key: "env", Operator: metav1.LabelSelectorOpIn, Values: []string{"prod"}}}
+	crdstore.MustSeed(store, &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "vrb-expr"},
+		Spec: v1alpha1.VarroaRoleBindingSpec{
+			RoleRef:  "developer",
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}},
+			Scope: &v1alpha1.VarroaRoleBindingScope{
+				ControllerSelector: &metav1.LabelSelector{MatchExpressions: want},
+			},
+		},
+	})
+
+	read := callToolAs(t, deps, mcpAdminClaims, "get_varroa_role_binding", map[string]interface{}{"name": "vrb-expr"})
+	if read.IsError {
+		t.Fatalf("get_varroa_role_binding returned error: %v", read.Content)
+	}
+	var got struct {
+		Spec struct {
+			Scope map[string]interface{} `json:"scope"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(read.StructuredContent, &got); err != nil {
+		t.Fatalf("decode get result: %v", err)
+	}
+	if got.Spec.Scope == nil {
+		t.Fatalf("get result has no scope")
+	}
+
+	upd := callToolAs(t, deps, mcpAdminClaims, "update_varroa_role_binding", map[string]interface{}{
+		"name": "vrb-expr",
+		"subjects": []interface{}{
+			map[string]interface{}{"kind": "User", "name": "alice"},
+			map[string]interface{}{"kind": "User", "name": "bob"},
+		},
+		"scope": got.Spec.Scope,
+	})
+	if upd.IsError {
+		t.Fatalf("update_varroa_role_binding returned error: %v", upd.Content)
+	}
+
+	stored, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), store, "vrb-expr", "")
+	if err != nil {
+		t.Fatalf("get updated binding: %v", err)
+	}
+	if len(stored.Spec.Subjects) != 2 {
+		t.Errorf("stored subjects = %+v, want 2 subjects", stored.Spec.Subjects)
+	}
+	if stored.Spec.Scope == nil || stored.Spec.Scope.ControllerSelector == nil {
+		t.Fatalf("stored scope lost its controllerSelector: %+v", stored.Spec.Scope)
+	}
+	sel := stored.Spec.Scope.ControllerSelector
+	if !apiequality.Semantic.DeepEqual(sel.MatchExpressions, want) {
+		t.Errorf("stored matchExpressions = %+v, want %+v", sel.MatchExpressions, want)
+	}
+	if len(sel.MatchLabels) != 0 {
+		t.Errorf("stored matchLabels = %+v, want none", sel.MatchLabels)
+	}
+	parsed, err := metav1.LabelSelectorAsSelector(sel)
+	if err != nil {
+		t.Fatalf("stored selector does not parse: %v", err)
+	}
+	if parsed.Matches(labels.Set{"env": "dev"}) {
+		t.Errorf("stored selector matches env=dev; the binding widened")
+	}
+}
+
+// TestCreateVarroaRoleBinding_ControllerSelectorKeepsExpressions proves that
+// create_varroa_role_binding stores both matchLabels and matchExpressions.
+func TestCreateVarroaRoleBinding_ControllerSelectorKeepsExpressions(t *testing.T) {
+	deps := varroaRoleBindingWriterDeps(t)
+	tr := callToolAs(t, deps, mcpRBWriterClaims, "create_varroa_role_binding", map[string]interface{}{
+		"name":     "vrb-selector",
+		"roleRef":  "developer",
+		"subjects": []interface{}{map[string]interface{}{"kind": "User", "name": "alice"}},
+		"scope": map[string]interface{}{
+			"namespaces": []interface{}{"team-a"},
+			"controllerSelector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{"app": "jenkins"},
+				"matchExpressions": []interface{}{
+					map[string]interface{}{"key": "env", "operator": "In", "values": []interface{}{"prod", "staging"}},
+					map[string]interface{}{"key": "tier", "operator": "Exists"},
+				},
+			},
+		},
+	})
+	if tr.IsError {
+		t.Fatalf("create_varroa_role_binding returned error: %v", tr.Content)
+	}
+
+	stored, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), deps.Store, "vrb-selector", "")
+	if err != nil {
+		t.Fatalf("get created binding: %v", err)
+	}
+	if stored.Spec.Scope == nil {
+		t.Fatalf("stored binding has no scope")
+	}
+	if len(stored.Spec.Scope.Namespaces) != 1 || stored.Spec.Scope.Namespaces[0] != "team-a" {
+		t.Errorf("stored namespaces = %v, want [team-a]", stored.Spec.Scope.Namespaces)
+	}
+	want := &metav1.LabelSelector{
+		MatchLabels: map[string]string{"app": "jenkins"},
+		MatchExpressions: []metav1.LabelSelectorRequirement{
+			{Key: "env", Operator: metav1.LabelSelectorOpIn, Values: []string{"prod", "staging"}},
+			{Key: "tier", Operator: metav1.LabelSelectorOpExists},
+		},
+	}
+	if !apiequality.Semantic.DeepEqual(stored.Spec.Scope.ControllerSelector, want) {
+		t.Errorf("stored controllerSelector = %+v, want %+v", stored.Spec.Scope.ControllerSelector, want)
+	}
+}
+
+// TestCreateVarroaRoleBinding_EmptyControllerSelectorAccepted proves that an
+// empty selector is stored as an empty selector, so it survives a round trip.
+func TestCreateVarroaRoleBinding_EmptyControllerSelectorAccepted(t *testing.T) {
+	deps := varroaRoleBindingWriterDeps(t)
+	tr := callToolAs(t, deps, mcpRBWriterClaims, "create_varroa_role_binding", map[string]interface{}{
+		"name":     "vrb-empty-selector",
+		"roleRef":  "developer",
+		"subjects": []interface{}{map[string]interface{}{"kind": "User", "name": "alice"}},
+		"scope":    map[string]interface{}{"controllerSelector": map[string]interface{}{}},
+	})
+	if tr.IsError {
+		t.Fatalf("create_varroa_role_binding returned error: %v", tr.Content)
+	}
+	stored, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), deps.Store, "vrb-empty-selector", "")
+	if err != nil {
+		t.Fatalf("get created binding: %v", err)
+	}
+	if stored.Spec.Scope == nil || stored.Spec.Scope.ControllerSelector == nil {
+		t.Fatalf("stored binding lost its empty controllerSelector: %+v", stored.Spec.Scope)
+	}
+}
+
+// TestCreateVarroaRoleBinding_InvalidScopeRejected proves that a scope shape
+// the parser cannot keep whole is refused before any object is written.
+func TestCreateVarroaRoleBinding_InvalidScopeRejected(t *testing.T) {
+	cases := []struct {
+		name  string
+		scope map[string]interface{}
+	}{
+		{
+			name:  "controllerSelector is a string",
+			scope: map[string]interface{}{"controllerSelector": "app=jenkins"},
+		},
+		{
+			name: "unknown selector key",
+			scope: map[string]interface{}{"controllerSelector": map[string]interface{}{
+				"matchExpression": []interface{}{map[string]interface{}{"key": "env", "operator": "In", "values": []interface{}{"prod"}}},
+			}},
+		},
+		{
+			name: "non-string label value",
+			scope: map[string]interface{}{"controllerSelector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{"app": 5},
+			}},
+		},
+		{
+			name: "unknown operator",
+			scope: map[string]interface{}{"controllerSelector": map[string]interface{}{
+				"matchExpressions": []interface{}{map[string]interface{}{"key": "env", "operator": "Equals", "values": []interface{}{"prod"}}},
+			}},
+		},
+		{
+			name: "In without values",
+			scope: map[string]interface{}{"controllerSelector": map[string]interface{}{
+				"matchExpressions": []interface{}{map[string]interface{}{"key": "env", "operator": "In"}},
+			}},
+		},
+		{
+			name: "Exists with values",
+			scope: map[string]interface{}{"controllerSelector": map[string]interface{}{
+				"matchExpressions": []interface{}{map[string]interface{}{"key": "env", "operator": "Exists", "values": []interface{}{"prod"}}},
+			}},
+		},
+		{
+			name: "unknown requirement key",
+			scope: map[string]interface{}{"controllerSelector": map[string]interface{}{
+				"matchExpressions": []interface{}{map[string]interface{}{"key": "env", "operator": "In", "value": []interface{}{"prod"}}},
+			}},
+		},
+		{
+			name:  "namespaces is not a list",
+			scope: map[string]interface{}{"namespaces": "team-a"},
+		},
+		{
+			name:  "scope names no dimension",
+			scope: map[string]interface{}{},
+		},
+		{
+			name:  "namespaces is null",
+			scope: map[string]interface{}{"namespaces": nil},
+		},
+		{
+			name:  "controllerSelector is null",
+			scope: map[string]interface{}{"controllerSelector": nil},
+		},
+		{
+			name:  "namespaces is an empty list",
+			scope: map[string]interface{}{"namespaces": []interface{}{}},
+		},
+		{
+			name:  "namespaces holds a non-string",
+			scope: map[string]interface{}{"namespaces": []interface{}{7}},
+		},
+		{
+			name:  "unknown top-level scope key",
+			scope: map[string]interface{}{"controllerScope": map[string]interface{}{"matchLabels": map[string]interface{}{"app": "jenkins"}}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := varroaRoleBindingWriterDeps(t)
+			tr := callToolAs(t, deps, mcpRBWriterClaims, "create_varroa_role_binding", map[string]interface{}{
+				"name":     "vrb-invalid-scope",
+				"roleRef":  "developer",
+				"subjects": []interface{}{map[string]interface{}{"kind": "User", "name": "alice"}},
+				"scope":    tc.scope,
+			})
+			if !tr.IsError {
+				t.Fatalf("create_varroa_role_binding did not reject scope %+v", tc.scope)
+			}
+			if !strings.Contains(toolText(tr), "invalid scope") {
+				t.Errorf("error %q does not name an invalid scope", toolText(tr))
+			}
+			if _, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), deps.Store, "vrb-invalid-scope", ""); err == nil {
+				t.Fatalf("rejected scope must not create a binding")
+			}
+		})
+	}
+}
+
+// TestUpdateVarroaRoleBinding_InvalidControllerSelectorKeepsStoredScope proves
+// that a refused selector leaves the stored binding unchanged.
+func TestUpdateVarroaRoleBinding_InvalidControllerSelectorKeepsStoredScope(t *testing.T) {
+	deps := adminDeps()
+	store := deps.Store.(*crdstore.Fake)
+	seed := []metav1.LabelSelectorRequirement{{Key: "env", Operator: metav1.LabelSelectorOpIn, Values: []string{"prod"}}}
+	crdstore.MustSeed(store, &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "vrb-keep"},
+		Spec: v1alpha1.VarroaRoleBindingSpec{
+			RoleRef:  "developer",
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}},
+			Scope: &v1alpha1.VarroaRoleBindingScope{
+				ControllerSelector: &metav1.LabelSelector{MatchExpressions: seed},
+			},
+		},
+	})
+
+	tr := callToolAs(t, deps, mcpAdminClaims, "update_varroa_role_binding", map[string]interface{}{
+		"name":    "vrb-keep",
+		"roleRef": "admin",
+		"scope": map[string]interface{}{"controllerSelector": map[string]interface{}{
+			"matchExpressions": []interface{}{map[string]interface{}{"key": "env", "operator": "Equals", "values": []interface{}{"prod"}}},
+		}},
+	})
+	if !tr.IsError {
+		t.Fatalf("update_varroa_role_binding did not reject the selector")
+	}
+	if !strings.Contains(toolText(tr), "invalid scope") {
+		t.Errorf("error %q does not name an invalid scope", toolText(tr))
+	}
+
+	stored, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), store, "vrb-keep", "")
+	if err != nil {
+		t.Fatalf("get binding: %v", err)
+	}
+	if stored.Spec.RoleRef != "developer" {
+		t.Errorf("stored roleRef = %q, want developer; a refused update wrote", stored.Spec.RoleRef)
+	}
+	if stored.Spec.Scope == nil || stored.Spec.Scope.ControllerSelector == nil ||
+		!apiequality.Semantic.DeepEqual(stored.Spec.Scope.ControllerSelector.MatchExpressions, seed) {
+		t.Errorf("stored scope = %+v, want the seeded selector", stored.Spec.Scope)
+	}
+}
+
+// TestCreateVarroaRoleBinding_EmptyScopeMessages pins the refusal text for the
+// two empty shapes. Both keep the binding cluster-wide if accepted, so each
+// message must name the fix and must not claim the scope grants nothing.
+func TestCreateVarroaRoleBinding_EmptyScopeMessages(t *testing.T) {
+	cases := []struct {
+		name  string
+		scope map[string]interface{}
+		want  string
+	}{
+		{
+			name:  "empty scope",
+			scope: map[string]interface{}{},
+			want:  "invalid scope: an empty scope sets no limit, so the binding becomes cluster-wide; name namespaces, controllerSelector, or tenants, or omit scope",
+		},
+		{
+			name:  "empty namespaces list",
+			scope: map[string]interface{}{"namespaces": []interface{}{}},
+			want:  "invalid scope: scope.namespaces is empty and sets no namespace limit; name one namespace or omit the key",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := varroaRoleBindingWriterDeps(t)
+			tr := callToolAs(t, deps, mcpRBWriterClaims, "create_varroa_role_binding", map[string]interface{}{
+				"name":     "vrb-empty-message",
+				"roleRef":  "developer",
+				"subjects": []interface{}{map[string]interface{}{"kind": "User", "name": "alice"}},
+				"scope":    tc.scope,
+			})
+			if !tr.IsError {
+				t.Fatalf("create_varroa_role_binding did not reject scope %+v", tc.scope)
+			}
+			if got := toolText(tr); got != tc.want {
+				t.Errorf("error text = %q, want %q", got, tc.want)
 			}
 		})
 	}

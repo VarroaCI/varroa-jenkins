@@ -23,6 +23,8 @@ reports `destructiveHint: false`.
 
 `update_jenkins_version_profile` applies its `object` argument as a JSON merge patch. A key that `object` leaves out keeps its stored value, and a `null` value removes the key. A call that names no object, or an empty object, changes nothing and writes nothing.
 
+`update_varroa_role_binding` keeps the stored `scope` when the call omits it. A `scope` argument replaces the stored scope as a whole. The tool never removes a stored scope; to make a binding cluster-wide, use the Kubernetes API or kubectl. To change one scope field, read the binding with `get_varroa_role_binding`. Send its `spec.scope` with that field changed. In `create_varroa_role_binding` and `update_varroa_role_binding`, `controllerSelector` is a Kubernetes label selector with `matchLabels` and `matchExpressions`. Both tools refuse a scope with an unknown key, a scope that names no dimension, a `namespaces` value that is not a non-empty list of strings, a `null` dimension, and a selector that Kubernetes cannot evaluate. A refused call writes nothing.
+
 `call_jenkins_tool` is open-world because the target Jenkins plugin defines the
 remote tool's effect. Review its discovered schema for every controller.
 

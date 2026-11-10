@@ -2,7 +2,9 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -70,7 +72,9 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 		mcp.WithArray("subjects", mcp.Required(), mcp.Description("Subject references, e.g. [{\"kind\":\"User\",\"name\":\"alice\"}]")),
 		mcp.WithObject("scope", mcp.Description("Scope restrictions: namespaces, controllerSelector, or tenants "+
 			"(e.g. [{\"name\":\"tenant-a\",\"jobs\":[\"release/*\"]}]). A scope names one dimension: tenants "+
-			"never combines with namespaces or controllerSelector.")),
+			"never combines with namespaces or controllerSelector. controllerSelector is a Kubernetes label "+
+			"selector with matchLabels and matchExpressions, e.g. {\"matchExpressions\":[{\"key\":\"env\","+
+			"\"operator\":\"In\",\"values\":[\"prod\"]}]}.")),
 	)
 	addTool(mcpServer, kindCreateStrict, createRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -111,7 +115,11 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 		mcp.WithString("name", mcp.Required(), mcp.Description("Binding name")),
 		mcp.WithString("roleRef", mcp.Description("VarroaRole name to bind")),
 		mcp.WithArray("subjects", mcp.Description("Subject references")),
-		mcp.WithObject("scope", mcp.Description("Scope restrictions: namespaces, controllerSelector, or tenants")),
+		mcp.WithObject("scope", mcp.Description("Scope restrictions: namespaces, controllerSelector, or tenants. "+
+			"controllerSelector is a Kubernetes label selector with matchLabels and matchExpressions. "+
+			"This argument replaces the stored scope as a whole. To change one scope field, send the "+
+			"spec.scope of get_varroa_role_binding with that field changed. Omit the argument to keep the stored scope. "+
+			"This tool never removes a stored scope; to make a binding cluster-wide, use the Kubernetes API or kubectl.")),
 	)
 	addTool(mcpServer, kindUpdate, updateRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -188,13 +196,45 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 // those shapes locally before the request is built. The CEL rules on
 // api/v1alpha1.VarroaRoleBindingScope remain the server-side guard for the
 // direct Kubernetes path.
+//
+// controllerSelector goes through buildLabelSelector, which keeps every
+// matchLabels and matchExpressions term. A selector that loses its terms
+// matches every controller, so a lossy parse widens the binding. An unknown
+// top-level scope key is refused for the same reason: a dropped key can
+// widen the binding.
 func buildBindingScope(raw interface{}) (*v1alpha1.VarroaRoleBindingScope, error) {
 	if raw == nil {
 		return nil, nil
 	}
 	m, ok := raw.(map[string]interface{})
 	if !ok {
-		return nil, nil
+		return nil, fmt.Errorf("invalid scope: scope must be an object naming namespaces, controllerSelector, or tenants")
+	}
+	if len(m) == 0 {
+		return nil, fmt.Errorf("invalid scope: an empty scope sets no limit, so the binding becomes cluster-wide; name namespaces, controllerSelector, or tenants, or omit scope")
+	}
+	for key := range m {
+		switch key {
+		case "namespaces", "controllerSelector", "tenants":
+		default:
+			return nil, fmt.Errorf("invalid scope: unknown scope key %q; allowed keys are namespaces, controllerSelector, tenants", key)
+		}
+	}
+	var namespaces []string
+	if nsRaw, present := m["namespaces"]; present {
+		nsArr, ok := nsRaw.([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("invalid scope: scope.namespaces must be a list of strings")
+		}
+		if len(nsArr) == 0 {
+			return nil, fmt.Errorf("invalid scope: scope.namespaces is empty and sets no namespace limit; name one namespace or omit the key")
+		}
+		for i, ns := range nsArr {
+			if _, ok := ns.(string); !ok {
+				return nil, fmt.Errorf("invalid scope: scope.namespaces[%d] must be a string", i)
+			}
+		}
+		namespaces = strSliceAny(nsRaw)
 	}
 	var tenants []v1alpha1.TenantScope
 	if tenantsRaw, present := m["tenants"]; present {
@@ -205,21 +245,42 @@ func buildBindingScope(raw interface{}) (*v1alpha1.VarroaRoleBindingScope, error
 		}
 	}
 	scope := &v1alpha1.VarroaRoleBindingScope{
-		Namespaces: strSliceAny(m["namespaces"]),
+		Namespaces: namespaces,
 		Tenants:    tenants,
 	}
-	if cs, ok := m["controllerSelector"].(map[string]interface{}); ok {
-		scope.ControllerSelector = &metav1.LabelSelector{}
-		if ml, ok := cs["matchLabels"].(map[string]interface{}); ok {
-			scope.ControllerSelector.MatchLabels = make(map[string]string, len(ml))
-			for k, v := range ml {
-				if s, ok := v.(string); ok {
-					scope.ControllerSelector.MatchLabels[k] = s
-				}
-			}
+	if csRaw, present := m["controllerSelector"]; present {
+		sel, err := buildLabelSelector(csRaw)
+		if err != nil {
+			return nil, err
 		}
+		scope.ControllerSelector = sel
 	}
 	return scope, nil
+}
+
+// buildLabelSelector parses a "controllerSelector" argument into a
+// metav1.LabelSelector with its matchLabels and matchExpressions. A dropped
+// term widens the selector, so the decode refuses an unknown key and a value
+// of the wrong type. metav1.LabelSelectorAsSelector then refuses a selector
+// that the resolver cannot evaluate.
+func buildLabelSelector(raw interface{}) (*metav1.LabelSelector, error) {
+	if _, ok := raw.(map[string]interface{}); !ok {
+		return nil, fmt.Errorf("invalid scope: scope.controllerSelector must be an object")
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid scope: scope.controllerSelector: %w", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	sel := &metav1.LabelSelector{}
+	if err := dec.Decode(sel); err != nil {
+		return nil, fmt.Errorf("invalid scope: scope.controllerSelector: %w", err)
+	}
+	if _, err := metav1.LabelSelectorAsSelector(sel); err != nil {
+		return nil, fmt.Errorf("invalid scope: scope.controllerSelector: %w", err)
+	}
+	return sel, nil
 }
 
 // buildTenantScopes parses a "tenants" argument: a list of objects each
@@ -318,7 +379,7 @@ var varroaRoleBindingListOutputSchema = listOutputSchema("Default summary projec
 	{Name: "name", Type: "string", Desc: "VarroaRoleBinding name."},
 	{Name: "roleRef", Type: "string", Desc: "VarroaRole name this binding grants."},
 	{Name: "subjectCount", Type: "integer", Desc: "Number of bound subjects."},
-	{Name: "scopeNamespaces", Type: "integer", Desc: "Number of namespaces the binding is scoped to; 0 means cluster-wide."},
+	{Name: "scopeNamespaces", Type: "integer", Desc: "Number of namespaces the binding names; 0 means no namespace limit. A controllerSelector or tenants entry can still narrow the binding."},
 	{Name: "hivesFederated", Type: "integer", Desc: "Number of hive clusters that hold the binding's federated Jenkins grant."},
 	{Name: "hivesSkipped", Type: "integer", Desc: "Number of hive clusters where federation skips the binding on purpose."},
 	{Name: "hivesFailed", Type: "integer", Desc: "Number of hive clusters where federation of the binding failed. get_varroa_role_binding gives the reason in status.federation."},
