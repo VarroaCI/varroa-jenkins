@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ApiError } from "../hooks/useApi";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import TenantForm from "./TenantForm";
 
@@ -116,6 +116,50 @@ describe("TenantForm", () => {
 
     expect(await screen.findByText(/Another user or tool changed this tenant/)).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the bundles of the selected cluster when the read of the previous cluster ends later", async () => {
+    const user = userEvent.setup();
+    mockUseClustersData.data = [
+      { name: "core", core: true },
+      { name: "member-b", core: false },
+    ];
+    try {
+      let resolveCore!: (value: unknown) => void;
+      mockListComposedBundles.mockImplementation((cluster: string) =>
+        cluster === "core"
+          ? new Promise((resolve) => {
+              resolveCore = resolve;
+            })
+          : Promise.resolve({
+              items: [
+                {
+                  apiVersion: "varroa.dev/v1alpha1",
+                  kind: "ComposedBundle",
+                  metadata: { name: "edge", namespace: "beta-ns" },
+                  spec: { inputs: [] },
+                },
+              ],
+            }),
+      );
+      render(<TenantForm />);
+
+      await user.click(screen.getByLabelText(/Pipelines tenant/));
+      const sel = screen.getByText("Select a cluster").closest("select")!;
+      await user.selectOptions(sel, "core");
+      await user.selectOptions(sel, "member-b");
+      expect(await screen.findByText("beta-ns/edge")).toBeInTheDocument();
+
+      await act(async () => {
+        resolveCore(bundleList);
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(screen.getByText("beta-ns/edge")).toBeInTheDocument();
+      expect(screen.queryByText("team-alpha/starter")).not.toBeInTheDocument();
+    } finally {
+      mockUseClustersData.data = [{ name: "core", core: true }];
+    }
   });
 
   it("emits pipelines with the selected bundle's namespace explicitly", async () => {

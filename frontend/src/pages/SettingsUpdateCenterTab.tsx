@@ -80,15 +80,19 @@ export default function SettingsUpdateCenterTab() {
   // Debounced re-fetch of plugins when query changes, only when enabled.
   useEffect(() => {
     if (!status?.enabled) return;
+    let cancelled = false;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       getUpdateCenterPlugins(query)
-        .then(setPlugins)
+        .then((p) => {
+          if (!cancelled) setPlugins(p);
+        })
         .catch((e) => {
-          setError(e instanceof Error ? e.message : String(e));
+          if (!cancelled) setError(e instanceof Error ? e.message : String(e));
         });
     }, 250);
     return () => {
+      cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query, status?.enabled, reloadKey]);

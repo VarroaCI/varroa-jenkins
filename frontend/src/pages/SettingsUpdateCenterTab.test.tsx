@@ -280,4 +280,49 @@ describe("SettingsUpdateCenterTab", () => {
 
     expect(lastQuery).toBe("blue");
   });
+
+  it("keeps the newer search result when an older search ends later", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let releaseOlder!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseOlder = resolve;
+    });
+    createServer(
+      () => HttpResponse.json(enabledStatus),
+      async ({ request }) => {
+        const q = new URL(request.url).searchParams.get("q") || "";
+        if (q === "c") {
+          await gate;
+          return HttpResponse.json({
+            enabled: true,
+            plugins: [{ name: "credentials", version: "2.0.1", sha256: "ghi", sizeBytes: 512 }],
+          });
+        }
+        if (q === "cx") {
+          return HttpResponse.json({
+            enabled: true,
+            plugins: [{ name: "git-client", version: "4.0.0", sha256: "jkl", sizeBytes: 256 }],
+          });
+        }
+        return HttpResponse.json(pluginsData);
+      },
+    );
+    renderWithProviders(<SettingsUpdateCenterTab />);
+    await vi.runAllTimersAsync();
+
+    const input = await screen.findByPlaceholderText("Search plugins...");
+    await screen.findByText("credentials");
+
+    await user.type(input, "c");
+    await vi.advanceTimersByTimeAsync(300);
+    await user.type(input, "x");
+    await vi.advanceTimersByTimeAsync(300);
+
+    await screen.findByText("git-client");
+    expect(screen.queryByText("credentials")).not.toBeInTheDocument();
+
+    releaseOlder();
+    await expect(screen.findByText("credentials", undefined, { timeout: 500 })).rejects.toThrow();
+    expect(screen.getByText("git-client")).toBeInTheDocument();
+  });
 });

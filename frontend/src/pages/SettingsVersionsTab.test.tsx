@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -387,5 +387,73 @@ describe("SettingsVersionsTab cluster selector on a read error", () => {
 
     expect(await screen.findByText("Ready")).toBeInTheDocument();
     expect(screen.queryByText(/Error:/)).not.toBeInTheDocument();
+  });
+});
+
+describe("SettingsVersionsTab cluster switch", () => {
+  beforeEach(() => {
+    mockListClusters.mockResolvedValue([
+      { name: "core", core: true, healthy: true, state: "active" },
+      { name: "member-b", core: false, healthy: true, state: "active" },
+    ]);
+  });
+
+  afterEach(() => {
+    mockListClusters.mockResolvedValue([{ name: "core", core: true }]);
+  });
+
+  it("keeps the profiles of the selected cluster when the read of the previous cluster ends later", async () => {
+    let resolveCore!: (value: VersionProfileDetail[]) => void;
+    mockGet.mockImplementation((cluster: string) =>
+      cluster === "core"
+        ? new Promise<VersionProfileDetail[]>((resolve) => {
+            resolveCore = resolve;
+          })
+        : Promise.resolve([unreadyWeekly]),
+    );
+    renderTab();
+
+    await userEvent.selectOptions(await screen.findByRole("combobox"), "member-b");
+    expect(await screen.findByText("2.570")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveCore([readyLts]);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(screen.getByText("2.570")).toBeInTheDocument();
+    expect(screen.queryByText("2.555")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("member-b");
+  });
+
+  it("shows no profile while the read of the selected cluster is open", async () => {
+    let resolveCore!: (value: VersionProfileDetail[]) => void;
+    let resolveMember!: (value: VersionProfileDetail[]) => void;
+    mockGet.mockImplementation((cluster: string) =>
+      cluster === "core"
+        ? new Promise<VersionProfileDetail[]>((resolve) => {
+            resolveCore = resolve;
+          })
+        : new Promise<VersionProfileDetail[]>((resolve) => {
+            resolveMember = resolve;
+          }),
+    );
+    renderTab();
+
+    await userEvent.selectOptions(await screen.findByRole("combobox"), "member-b");
+    await act(async () => {
+      resolveCore([readyLts]);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(screen.queryByText("2.555")).not.toBeInTheDocument();
+    expect(screen.queryByText("No version profiles installed")).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveMember([unreadyWeekly]);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(await screen.findByText("2.570")).toBeInTheDocument();
   });
 });

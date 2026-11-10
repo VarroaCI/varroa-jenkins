@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import JenkinsRoles from "./JenkinsRoles";
 import { renderWithProviders } from "../test/render-utils";
 import { createJenkinsRole } from "../test/factories";
+import type { JenkinsRole } from "../types";
 
 const mockNavigate = vi.fn();
 vi.mock("react-router-dom", async () => {
@@ -13,8 +14,12 @@ vi.mock("react-router-dom", async () => {
 
 const mockListJenkinsRoles = vi.fn();
 const mockDeleteJenkinsRole = vi.fn();
+const CORE_CLUSTER = { name: "core", core: true, healthy: true, state: "active" };
+const MEMBER_CLUSTER = { name: "member-b", core: false, healthy: true, state: "active" };
+const mockClusterList = { items: [CORE_CLUSTER] };
+
 vi.mock("../api/client", () => ({
-  listClusters: () => Promise.resolve([{ name: "core", core: true, healthy: true, state: "active" }]),
+  listClusters: () => Promise.resolve(mockClusterList.items),
   listJenkinsRoles: (...args: unknown[]) => mockListJenkinsRoles(...args),
   deleteJenkinsRole: (...args: unknown[]) => mockDeleteJenkinsRole(...args),
 }));
@@ -189,5 +194,74 @@ describe("JenkinsRoles", () => {
 
     await user.click(screen.getByRole("button", { name: /^Agent/ }));
     expect(screen.getByText(/No Jenkins roles match the current filters/)).toBeInTheDocument();
+  });
+});
+
+describe("JenkinsRoles cluster switch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockClusterList.items = [CORE_CLUSTER, MEMBER_CLUSTER];
+  });
+
+  afterEach(() => {
+    mockClusterList.items = [CORE_CLUSTER];
+  });
+
+  it("keeps the roles of the selected cluster when the read of the previous cluster ends later", async () => {
+    let resolveCore!: (value: { items: JenkinsRole[] }) => void;
+    const memberRole = createJenkinsRole({
+      metadata: { name: "member-b-reader" },
+      spec: { roleType: "Global", permissions: ["hudson.model.Hudson.Read"] },
+    });
+    mockListJenkinsRoles.mockImplementation((cluster: string) =>
+      cluster === "core"
+        ? new Promise<{ items: JenkinsRole[] }>((resolve) => {
+            resolveCore = resolve;
+          })
+        : Promise.resolve({ items: [memberRole] }),
+    );
+    renderWithProviders(<JenkinsRoles />);
+
+    await userEvent.selectOptions(await screen.findByRole("combobox"), "member-b");
+    await screen.findByText("member-b-reader");
+
+    await act(async () => {
+      resolveCore({ items: [globalRole] });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(screen.getByText("member-b-reader")).toBeInTheDocument();
+    expect(screen.queryByText("jenkins-global-reader")).not.toBeInTheDocument();
+  });
+});
+
+describe("JenkinsRoles no accessible cluster", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListJenkinsRoles.mockResolvedValue({ items: [globalRole, itemRole] });
+    mockClusterList.items = [];
+  });
+
+  afterEach(() => {
+    mockClusterList.items = [CORE_CLUSTER];
+  });
+
+  it("ends the loading state and shows no rows when no cluster is accessible", async () => {
+    renderWithProviders(<JenkinsRoles />);
+    await waitFor(() => {
+      expect(screen.queryByText("Loading Jenkins roles...")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText("jenkins-global-reader")).not.toBeInTheDocument();
+  });
+
+  it("clears existing roles when no cluster remains", async () => {
+    mockClusterList.items = [CORE_CLUSTER];
+    const { queryClient } = renderWithProviders(<JenkinsRoles />);
+    await screen.findByText("jenkins-global-reader");
+
+    mockClusterList.items = [];
+    void queryClient.invalidateQueries({ queryKey: ["clusters"] });
+
+    await waitFor(() => expect(screen.queryByText("jenkins-global-reader")).not.toBeInTheDocument());
   });
 });

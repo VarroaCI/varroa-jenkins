@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -27,6 +27,7 @@ import { canDoGlobal } from "../hooks/usePermissions";
 import Settings from "./Settings";
 import { createProvisioningConfig } from "../test/factories";
 import { ApiError } from "../hooks/useApi";
+import type { ProvisioningDefaults } from "../types";
 
 const mockGetConfig = getProvisioningDefaults as ReturnType<typeof vi.fn>;
 const mockUpdateConfig = updateProvisioningDefaults as ReturnType<typeof vi.fn>;
@@ -467,5 +468,97 @@ describe("Settings provisioning tab cluster selector on a read error", () => {
 
     expect(await screen.findByLabelText("Storage Class")).toBeInTheDocument();
     expect(screen.queryByText(/Error:/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Settings provisioning tab cluster switch", () => {
+  beforeEach(() => {
+    mockListClusters.mockResolvedValue([
+      { name: "core", core: true, healthy: true, state: "active" },
+      { name: "member-b", core: false, healthy: true, state: "active" },
+    ]);
+  });
+
+  afterEach(() => {
+    mockListClusters.mockResolvedValue([{ name: "core", core: true }]);
+  });
+
+  it("keeps the values of the selected cluster when the read of the previous cluster ends later", async () => {
+    let resolveCore!: (value: ProvisioningDefaults) => void;
+    mockGetConfig.mockImplementation((cluster: string) =>
+      cluster === "core"
+        ? new Promise<ProvisioningDefaults>((resolve) => {
+            resolveCore = resolve;
+          })
+        : Promise.resolve(createProvisioningConfig({ spec: { storageClass: "member-sc" } })),
+    );
+    renderSettings();
+
+    await userEvent.selectOptions(await screen.findByRole("combobox"), "member-b");
+    expect(await screen.findByLabelText("Storage Class")).toHaveValue("member-sc");
+
+    await act(async () => {
+      resolveCore(createProvisioningConfig({ spec: { storageClass: "core-sc" } }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(screen.getByLabelText("Storage Class")).toHaveValue("member-sc");
+    expect(screen.getByRole("combobox")).toHaveValue("member-b");
+  });
+
+  it("ignores a late not-found answer for the previous cluster", async () => {
+    let rejectCore!: (reason: unknown) => void;
+    mockGetConfig.mockImplementation((cluster: string) =>
+      cluster === "core"
+        ? new Promise<ProvisioningDefaults>((_resolve, reject) => {
+            rejectCore = reject;
+          })
+        : Promise.resolve(createProvisioningConfig({ spec: { storageClass: "member-sc" } })),
+    );
+    renderSettings();
+
+    await userEvent.selectOptions(await screen.findByRole("combobox"), "member-b");
+    expect(await screen.findByLabelText("Storage Class")).toHaveValue("member-sc");
+
+    await act(async () => {
+      rejectCore(new ApiError(404, "not found"));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(screen.getByLabelText("Storage Class")).toHaveValue("member-sc");
+    expect(
+      screen.queryByText("This cluster has no provisioning defaults. Save creates them."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("ignores a save answer for the previous cluster", async () => {
+    let resolveSave!: (value: ProvisioningDefaults) => void;
+    mockGetConfig.mockImplementation((cluster: string) =>
+      Promise.resolve(
+        createProvisioningConfig({
+          spec: { storageClass: cluster === "core" ? "core-sc" : "member-sc" },
+        }),
+      ),
+    );
+    mockUpdateConfig.mockReturnValue(
+      new Promise<ProvisioningDefaults>((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    renderSettings();
+
+    await waitFor(() => expect(screen.getByLabelText("Storage Class")).toHaveValue("core-sc"));
+    await userEvent.click(screen.getByText("Save"));
+    await userEvent.selectOptions(screen.getByRole("combobox"), "member-b");
+    await waitFor(() => expect(screen.getByLabelText("Storage Class")).toHaveValue("member-sc"));
+
+    await act(async () => {
+      resolveSave(createProvisioningConfig({ spec: { storageClass: "core-saved" } }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(screen.getByLabelText("Storage Class")).toHaveValue("member-sc");
+    expect(screen.queryByText("Saved.")).not.toBeInTheDocument();
+    expect(screen.getByText("Save")).toBeEnabled();
   });
 });
