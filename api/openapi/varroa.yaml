@@ -2015,7 +2015,7 @@ components:
       properties:
         code:
           description: |
-            Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed. The value federated_copy means that the object is a federated copy. The response is 409, and a retry does not succeed.
+            Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed. The value federated_copy means that the object is a federated copy. The response is 409, and a retry does not succeed. The value federated_label means that the request body sets the label varroa.dev/federated-from. The response is 400, and a repeat of the same body does not succeed.
           type: string
         error:
           description: Human-readable error message.
@@ -8203,7 +8203,7 @@ components:
       properties:
         code:
           description: |
-            Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed. The value federated_copy means that the object is a federated copy. The response is 409, and a retry does not succeed.
+            Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed. The value federated_copy means that the object is a federated copy. The response is 409, and a retry does not succeed. The value federated_label means that the request body sets the label varroa.dev/federated-from. The response is 400, and a repeat of the same body does not succeed.
           type: string
         error:
           description: Human-readable error message.
@@ -17107,6 +17107,9 @@ paths:
       tags:
       - rbac
     post:
+      description: A body that sets the label varroa.dev/federated-from answers 400
+        with code federated_label and writes nothing. Only federation writes that
+        label.
       operationId: createJenkinsRoleBinding
       parameters:
       - $ref: '#/components/parameters/components_parameters_cluster'
@@ -17182,7 +17185,9 @@ paths:
         role binding, so start from your read. A body without metadata.resourceVersion
         also needs the create permission, and answers 403 without it. A federated
         copy (label varroa.dev/federated-from) answers 409 with code federated_copy
-        and writes nothing.
+        and writes nothing. A body that sets the label varroa.dev/federated-from on
+        an object that is not a copy answers 400 with code federated_label and writes
+        nothing.
       operationId: updateJenkinsRoleBinding
       parameters:
       - $ref: '#/components/parameters/components_parameters_cluster'
@@ -17239,6 +17244,9 @@ paths:
       tags:
       - rbac
     post:
+      description: A body that sets the label varroa.dev/federated-from answers 400
+        with code federated_label and writes nothing. Only federation writes that
+        label.
       operationId: createJenkinsRole
       parameters:
       - $ref: '#/components/parameters/components_parameters_cluster'
@@ -17313,7 +17321,9 @@ paths:
         409 and writes nothing. The body replaces the stored Jenkins role, so start
         from your read. A body without metadata.resourceVersion also needs the create
         permission, and answers 403 without it. A federated copy (label varroa.dev/federated-from)
-        answers 409 with code federated_copy and writes nothing.
+        answers 409 with code federated_copy and writes nothing. A body that sets
+        the label varroa.dev/federated-from on an object that is not a copy answers
+        400 with code federated_label and writes nothing.
       operationId: updateJenkinsRole
       parameters:
       - $ref: '#/components/parameters/components_parameters_cluster'

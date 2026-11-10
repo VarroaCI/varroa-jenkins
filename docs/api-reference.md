@@ -37,6 +37,7 @@ The update routes of composed bundles, catalog sources, Jenkins roles, Jenkins r
 - A version of an object that a delete removed after your read also answers `409`.
 - A body without `metadata.resourceVersion` only creates the object. It answers `409` when the object exists.
 - A federated copy of a Jenkins role or binding answers `409` with the code `federated_copy`. A repeat does not succeed. The response text names the source object.
+- A create or update body for a Jenkins role or binding that sets the label `varroa.dev/federated-from` answers `400` with the code `federated_label`. Only federation sets that label.
 - A body without `metadata.resourceVersion` needs the create permission as well as the update permission. Without it, the route answers `403`. Provisioning defaults have no create permission, so their route needs the update permission only.
 
 On a `409` without a code, read the object again and repeat the change. If that read answers `404`, send the change without `metadata.resourceVersion`.

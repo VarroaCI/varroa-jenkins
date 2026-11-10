@@ -262,6 +262,9 @@
     operationId: createJenkinsRole
     tags: [rbac]
     summary: Creates a JenkinsRole on a cluster.
+    description: >-
+      A body that sets the label varroa.dev/federated-from answers 400 with code federated_label
+      and writes nothing. Only federation writes that label.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
     requestBody:
@@ -319,6 +322,7 @@
       replaces the stored Jenkins role, so start from your read.
       A body without metadata.resourceVersion also needs the create permission, and answers 403 without it.
       A federated copy (label varroa.dev/federated-from) answers 409 with code federated_copy and writes nothing.
+      A body that sets the label varroa.dev/federated-from on an object that is not a copy answers 400 with code federated_label and writes nothing.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/name'
@@ -390,6 +394,9 @@
     operationId: createJenkinsRoleBinding
     tags: [rbac]
     summary: Creates a JenkinsRoleBinding on a cluster.
+    description: >-
+      A body that sets the label varroa.dev/federated-from answers 400 with code federated_label
+      and writes nothing. Only federation writes that label.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
     requestBody:
@@ -447,6 +454,7 @@
       nothing. The body replaces the stored Jenkins role binding, so start from your read.
       A body without metadata.resourceVersion also needs the create permission, and answers 403 without it.
       A federated copy (label varroa.dev/federated-from) answers 409 with code federated_copy and writes nothing.
+      A body that sets the label varroa.dev/federated-from on an object that is not a copy answers 400 with code federated_label and writes nothing.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/name'

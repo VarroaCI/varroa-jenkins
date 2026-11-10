@@ -43,3 +43,21 @@ func (s *Server) refuseFederatedCopy(w http.ResponseWriter, cluster, kind, name 
 	s.writeJSONErrorStatus(w, http.StatusConflict, msg, map[string]any{"code": federatedCopyCode})
 	return true
 }
+
+// federatedLabelCode is the machine code of the 400 that refuses a request body
+// that sets the federation label. A repeat of the same body does not succeed.
+const federatedLabelCode = "federated_label"
+
+// refuseFederatedLabel answers true after it writes a 400 when the request body
+// sets rbac.LabelFederatedFrom. The federation reconciler writes its copies
+// through ConfigBrood directly, never through these routes, so this guard sees
+// only callers. A PUT calls it after refuseFederatedCopy, so a write to a stored
+// copy keeps the 409 federated_copy answer.
+func (s *Server) refuseFederatedLabel(w http.ResponseWriter, kind string, labels map[string]string) bool {
+	msg := rbac.FederatedLabelMessage(kind, labels)
+	if msg == "" {
+		return false
+	}
+	s.writeJSONErrorStatus(w, http.StatusBadRequest, msg, map[string]any{"code": federatedLabelCode})
+	return true
+}

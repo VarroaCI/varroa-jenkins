@@ -16,6 +16,7 @@ Error:
         on it. The value record_store_unreachable means the record store did
         not answer; the response is 503 and a retry can succeed.
         The value federated_copy means that the object is a federated copy. The response is 409, and a retry does not succeed.
+        The value federated_label means that the request body sets the label varroa.dev/federated-from. The response is 400, and a repeat of the same body does not succeed.
   additionalProperties: false
 
 ApproveConflict:
