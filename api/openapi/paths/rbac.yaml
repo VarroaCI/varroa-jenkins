@@ -77,6 +77,7 @@
       nothing. A body without metadata.resourceVersion only creates the role. When the
       role exists, that body answers 409 and writes nothing. The body replaces the stored
       role, so start from your read.
+      A body without metadata.resourceVersion also needs the create permission, and answers 403 without it.
     parameters:
       - $ref: '../components/parameters.yaml#/name'
     requestBody:
@@ -193,6 +194,7 @@
       nothing. A body without metadata.resourceVersion only creates the binding. When the
       binding exists, that body answers 409 and writes nothing. The body replaces the stored
       binding, so start from your read.
+      A body without metadata.resourceVersion also needs the create permission, and answers 403 without it.
     parameters:
       - $ref: '../components/parameters.yaml#/name'
     requestBody:

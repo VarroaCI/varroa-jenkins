@@ -11,7 +11,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
 
 // rbacPutBody builds a PUT body that carries the given resourceVersion. An
@@ -61,18 +63,18 @@ func getBindingForPut(t *testing.T, srv *Server) v1alpha1.VarroaRoleBinding {
 	return b
 }
 
-func seedRolePut(t *testing.T, srv *Server, name, ref string) {
+func seedRolePut(t *testing.T, srv *Server) {
 	t.Helper()
 	crdstore.MustSeed(srv.deps.Store.(*crdstore.Fake), &v1alpha1.VarroaRole{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       v1alpha1.VarroaRoleSpec{JenkinsRoleRef: ref},
+		ObjectMeta: metav1.ObjectMeta{Name: "role-a"},
+		Spec:       v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "first"},
 	})
 }
 
-func seedBindingPut(t *testing.T, srv *Server, name string, subjects ...v1alpha1.SubjectRef) {
+func seedBindingPut(t *testing.T, srv *Server, subjects ...v1alpha1.SubjectRef) {
 	t.Helper()
 	crdstore.MustSeed(srv.deps.Store.(*crdstore.Fake), &v1alpha1.VarroaRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		ObjectMeta: metav1.ObjectMeta{Name: "binding-a"},
 		Spec:       v1alpha1.VarroaRoleBindingSpec{Subjects: subjects, RoleRef: "admin"},
 	})
 }
@@ -82,7 +84,7 @@ func seedBindingPut(t *testing.T, srv *Server, name string, subjects ...v1alpha1
 func TestHandleVarroaRolePut_ConcurrentWriteAnswers409(t *testing.T) {
 	srv, sink := publishTestServer(t)
 	ctx := context.Background()
-	seedRolePut(t, srv, "role-a", "first")
+	seedRolePut(t, srv)
 	read := getRoleForPut(t, srv, "role-a")
 	sink.events = nil
 
@@ -113,7 +115,7 @@ func TestHandleVarroaRolePut_ConcurrentWriteAnswers409(t *testing.T) {
 // version of its read writes and publishes the update.
 func TestHandleVarroaRolePut_CurrentVersionWrites(t *testing.T) {
 	srv, sink := publishTestServer(t)
-	seedRolePut(t, srv, "role-a", "first")
+	seedRolePut(t, srv)
 	read := getRoleForPut(t, srv, "role-a")
 	sink.events = nil
 
@@ -136,7 +138,7 @@ func TestHandleVarroaRolePut_CurrentVersionWrites(t *testing.T) {
 // without a version does not overwrite an existing role.
 func TestHandleVarroaRolePut_WithoutVersionOnExistingAnswers409(t *testing.T) {
 	srv, _ := publishTestServer(t)
-	seedRolePut(t, srv, "role-a", "first")
+	seedRolePut(t, srv)
 
 	w := httptest.NewRecorder()
 	r := withClaims(httptest.NewRequest(http.MethodPut, "/roles/role-a",
@@ -192,7 +194,7 @@ func TestHandleVarroaRolePut_DeletedAfterReadAnswers409(t *testing.T) {
 func TestHandleVarroaRoleBindingPut_ConcurrentWriteAnswers409(t *testing.T) {
 	srv, sink := publishTestServer(t)
 	ctx := context.Background()
-	seedBindingPut(t, srv, "binding-a", v1alpha1.SubjectRef{Kind: "User", Name: "alice"})
+	seedBindingPut(t, srv, v1alpha1.SubjectRef{Kind: "User", Name: "alice"})
 	read := getBindingForPut(t, srv)
 	sink.events = nil
 
@@ -225,7 +227,7 @@ func TestHandleVarroaRoleBindingPut_ConcurrentWriteAnswers409(t *testing.T) {
 // body without a version does not overwrite an existing binding.
 func TestHandleVarroaRoleBindingPut_WithoutVersionOnExistingAnswers409(t *testing.T) {
 	srv, _ := publishTestServer(t)
-	seedBindingPut(t, srv, "binding-a", v1alpha1.SubjectRef{Kind: "User", Name: "alice"})
+	seedBindingPut(t, srv, v1alpha1.SubjectRef{Kind: "User", Name: "alice"})
 
 	w := httptest.NewRecorder()
 	r := withClaims(httptest.NewRequest(http.MethodPut, "/rolebindings/binding-a",
@@ -240,7 +242,7 @@ func TestHandleVarroaRoleBindingPut_WithoutVersionOnExistingAnswers409(t *testin
 // version of its read writes.
 func TestHandleVarroaRoleBindingPut_CurrentVersionWrites(t *testing.T) {
 	srv, _ := publishTestServer(t)
-	seedBindingPut(t, srv, "binding-a", v1alpha1.SubjectRef{Kind: "User", Name: "alice"})
+	seedBindingPut(t, srv, v1alpha1.SubjectRef{Kind: "User", Name: "alice"})
 	read := getBindingForPut(t, srv)
 
 	w := httptest.NewRecorder()
@@ -285,4 +287,217 @@ func createdResourceVersion(t *testing.T, w *httptest.ResponseRecorder) string {
 		t.Fatalf("create response has no resourceVersion: %s", w.Body.String())
 	}
 	return obj.Metadata.ResourceVersion
+}
+
+// rbacPutAuthorizer grants roles and rolebindings to two users. editor holds
+// read and update. author holds read, create and update. The bindings are
+// unscoped.
+func rbacPutAuthorizer() *Authorizer {
+	resources := []string{"roles", "rolebindings"}
+	roles := []*v1alpha1.VarroaRole{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "rbac-editor"},
+			Spec: v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{
+				{Resources: resources, Verbs: []string{"read", "update"}},
+			}},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "rbac-author"},
+			Spec: v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{
+				{Resources: resources, Verbs: []string{"read", "create", "update"}},
+			}},
+		},
+	}
+	bindings := []*v1alpha1.VarroaRoleBinding{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "editor-binding"},
+			Spec: v1alpha1.VarroaRoleBindingSpec{
+				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "editor"}},
+				RoleRef:  "rbac-editor",
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "author-binding"},
+			Spec: v1alpha1.VarroaRoleBindingSpec{
+				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "author"}},
+				RoleRef:  "rbac-author",
+			},
+		},
+	}
+	return NewAuthorizer(rbac.NewTestResolverWithRoles(roles, bindings), false)
+}
+
+// rbacPutAs attaches the claims of user to the request.
+func rbacPutAs(r *http.Request, user string) *http.Request {
+	return r.WithContext(contextWithClaims(r.Context(), &auth.Claims{Subject: user}))
+}
+
+// rbacPutErrorText returns the error text of a JSON error response.
+func rbacPutErrorText(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode error body: %v; body %s", err, w.Body.String())
+	}
+	return body.Error
+}
+
+// TestHandleVarroaRolePut_WithoutVersionNeedsCreatePermission pins that a body
+// without a version from a caller with only update answers 403 and creates
+// nothing.
+func TestHandleVarroaRolePut_WithoutVersionNeedsCreatePermission(t *testing.T) {
+	srv, sink := publishTestServer(t)
+	srv.deps.Authorizer = rbacPutAuthorizer()
+
+	w := httptest.NewRecorder()
+	r := rbacPutAs(httptest.NewRequest(http.MethodPut, "/roles/role-new",
+		rbacPutBody(t, "role-new", "", v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "mine"})), "editor")
+	srv.handleVarroaRoleDispatch(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body %s; want 403", w.Code, w.Body.String())
+	}
+	if got := rbacPutErrorText(t, w); got != createOnlyPutForbidden {
+		t.Errorf("error = %q, want %q", got, createOnlyPutForbidden)
+	}
+	if _, err := crdstore.Get[v1alpha1.VarroaRole](context.Background(), srv.deps.Store, "role-new", ""); err == nil {
+		t.Error("role-new exists after a 403, want none")
+	}
+	if len(sink.events) != 0 {
+		t.Errorf("activity events = %d, want 0", len(sink.events))
+	}
+}
+
+// TestHandleVarroaRolePut_WithoutVersionCreatesWithCreatePermission pins that a
+// body without a version creates the role for a caller with create.
+func TestHandleVarroaRolePut_WithoutVersionCreatesWithCreatePermission(t *testing.T) {
+	srv, _ := publishTestServer(t)
+	srv.deps.Authorizer = rbacPutAuthorizer()
+
+	w := httptest.NewRecorder()
+	r := rbacPutAs(httptest.NewRequest(http.MethodPut, "/roles/role-new",
+		rbacPutBody(t, "role-new", "", v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "mine"})), "author")
+	srv.handleVarroaRoleDispatch(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s; want 200", w.Code, w.Body.String())
+	}
+	got, err := crdstore.Get[v1alpha1.VarroaRole](context.Background(), srv.deps.Store, "role-new", "")
+	if err != nil {
+		t.Fatalf("get role-new: %v", err)
+	}
+	if got.Spec.JenkinsRoleRef != "mine" {
+		t.Errorf("jenkinsRoleRef = %q, want mine", got.Spec.JenkinsRoleRef)
+	}
+}
+
+// TestHandleVarroaRolePut_WithVersionNeedsOnlyUpdatePermission pins that a
+// body with the current version writes for a caller with update alone.
+func TestHandleVarroaRolePut_WithVersionNeedsOnlyUpdatePermission(t *testing.T) {
+	srv, _ := publishTestServer(t)
+	srv.deps.Authorizer = rbacPutAuthorizer()
+	seedRolePut(t, srv)
+	cur, err := crdstore.Get[v1alpha1.VarroaRole](context.Background(), srv.deps.Store, "role-a", "")
+	if err != nil {
+		t.Fatalf("get role-a: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	r := rbacPutAs(httptest.NewRequest(http.MethodPut, "/roles/role-a",
+		rbacPutBody(t, "role-a", cur.ResourceVersion, v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "mine"})), "editor")
+	srv.handleVarroaRoleDispatch(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s; want 200", w.Code, w.Body.String())
+	}
+	got, err := crdstore.Get[v1alpha1.VarroaRole](context.Background(), srv.deps.Store, "role-a", "")
+	if err != nil {
+		t.Fatalf("get role-a: %v", err)
+	}
+	if got.Spec.JenkinsRoleRef != "mine" {
+		t.Errorf("jenkinsRoleRef = %q, want mine", got.Spec.JenkinsRoleRef)
+	}
+}
+
+// TestHandleVarroaRoleBindingPut_WithoutVersionNeedsCreatePermission pins that a
+// binding body without a version from a caller with only update answers 403
+// and creates nothing.
+func TestHandleVarroaRoleBindingPut_WithoutVersionNeedsCreatePermission(t *testing.T) {
+	srv, sink := publishTestServer(t)
+	srv.deps.Authorizer = rbacPutAuthorizer()
+
+	w := httptest.NewRecorder()
+	r := rbacPutAs(httptest.NewRequest(http.MethodPut, "/rolebindings/binding-new",
+		rbacPutBody(t, "binding-new", "", v1alpha1.VarroaRoleBindingSpec{
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}},
+			RoleRef:  "viewer",
+		})), "editor")
+	srv.handleVarroaRoleBindingDispatch(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body %s; want 403", w.Code, w.Body.String())
+	}
+	if got := rbacPutErrorText(t, w); got != createOnlyPutForbidden {
+		t.Errorf("error = %q, want %q", got, createOnlyPutForbidden)
+	}
+	if _, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), srv.deps.Store, "binding-new", ""); err == nil {
+		t.Error("binding-new exists after a 403, want none")
+	}
+	if len(sink.events) != 0 {
+		t.Errorf("activity events = %d, want 0", len(sink.events))
+	}
+}
+
+// TestHandleVarroaRoleBindingPut_WithoutVersionCreatesWithCreatePermission pins
+// that a binding body without a version creates the binding for a caller with
+// create.
+func TestHandleVarroaRoleBindingPut_WithoutVersionCreatesWithCreatePermission(t *testing.T) {
+	srv, _ := publishTestServer(t)
+	srv.deps.Authorizer = rbacPutAuthorizer()
+
+	w := httptest.NewRecorder()
+	r := rbacPutAs(httptest.NewRequest(http.MethodPut, "/rolebindings/binding-new",
+		rbacPutBody(t, "binding-new", "", v1alpha1.VarroaRoleBindingSpec{
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}},
+			RoleRef:  "viewer",
+		})), "author")
+	srv.handleVarroaRoleBindingDispatch(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s; want 200", w.Code, w.Body.String())
+	}
+	got, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), srv.deps.Store, "binding-new", "")
+	if err != nil {
+		t.Fatalf("get binding-new: %v", err)
+	}
+	if got.Spec.RoleRef != "viewer" {
+		t.Errorf("roleRef = %q, want viewer", got.Spec.RoleRef)
+	}
+}
+
+// TestHandleVarroaRoleBindingPut_WithVersionNeedsOnlyUpdatePermission pins that
+// a binding body with the current version writes for a caller with update alone.
+func TestHandleVarroaRoleBindingPut_WithVersionNeedsOnlyUpdatePermission(t *testing.T) {
+	srv, _ := publishTestServer(t)
+	srv.deps.Authorizer = rbacPutAuthorizer()
+	seedBindingPut(t, srv, v1alpha1.SubjectRef{Kind: "User", Name: "alice"})
+	cur, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), srv.deps.Store, "binding-a", "")
+	if err != nil {
+		t.Fatalf("get binding-a: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	r := rbacPutAs(httptest.NewRequest(http.MethodPut, "/rolebindings/binding-a",
+		rbacPutBody(t, "binding-a", cur.ResourceVersion, v1alpha1.VarroaRoleBindingSpec{
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}},
+			RoleRef:  "viewer",
+		})), "editor")
+	srv.handleVarroaRoleBindingDispatch(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s; want 200", w.Code, w.Body.String())
+	}
+	got, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), srv.deps.Store, "binding-a", "")
+	if err != nil {
+		t.Fatalf("get binding-a: %v", err)
+	}
+	if got.Spec.RoleRef != "viewer" {
+		t.Errorf("roleRef = %q, want viewer", got.Spec.RoleRef)
+	}
 }
