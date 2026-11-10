@@ -5553,7 +5553,7 @@ type ComponentsSchemasTenantPipelines struct {
 	// CellPool The CellPool the placement pass selects a cell from. Empty means the profile's default pool: the pool whose name equals profile. A tenant that needs a cell of its own names a pool whose maxTenantsPerCell is 1.
 	CellPool *string `json:"cellPool,omitempty"`
 
-	// ComposedBundleRef Reference to a ComposedBundle from a Controller.
+	// ComposedBundleRef The ComposedBundle this tenant's items come from. Both name and namespace are set: a Tenant is cluster-scoped and has no namespace to default to.
 	ComposedBundleRef *ComponentsSchemasComposedBundleRef `json:"composedBundleRef,omitempty"`
 
 	// Concurrency This tenant's job concurrency policy. "allow" (default) runs builds side by side. "cancelInProgress" cancels the running build of the same job path when a new one starts.

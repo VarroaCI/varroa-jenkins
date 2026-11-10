@@ -13135,7 +13135,11 @@ components:
             is 1.'
           type: string
         composedBundleRef:
-          $ref: '#/components/schemas/components_schemas_ComposedBundleRef'
+          allOf:
+          - $ref: '#/components/schemas/components_schemas_ComposedBundleRef'
+          description: 'The ComposedBundle this tenant''s items come from. Both name
+            and namespace are set: a Tenant is cluster-scoped and has no namespace
+            to default to.'
         concurrency:
           description: This tenant's job concurrency policy. "allow" (default) runs
             builds side by side. "cancelInProgress" cancels the running build of the
