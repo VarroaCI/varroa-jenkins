@@ -199,7 +199,9 @@ Here `comment.json` holds an `issue_comment` payload with `action` set to `creat
 ## Buffering
 
 The door answers `202` when it stores the delivery. It does not wait for the cell. The operator
-then sends the delivery to the cell of the tenant. While the cell is not `Connected`, the
+then sends the delivery to the cell of the tenant. The operator sends the deliveries of one cell
+in order, one at a time. It waits up to 30 seconds for each answer. A cell that does not answer
+delays only its own deliveries. While the cell is not `Connected`, the
 operator tries again every 30 seconds. A tenant that moves cells receives the delivery on its
 new cell. The operator stops 50 minutes after the door stored the delivery. It then drops the
 delivery and records a `webhook.replay.rejected` activity event that names the tenant and the

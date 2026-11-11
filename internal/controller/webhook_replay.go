@@ -26,11 +26,24 @@ import (
 // leader binds to drain queued webhooks for its cluster.
 const webhookReplayConsumer = "varroa-webhook-replay"
 
-// replayResultTimeout bounds how long a single replay waits for the mite's
-// result before the message is nak'd for later redelivery. Kept comfortably
-// under the consumer AckWait (60s) so a slow replay is redelivered rather than
-// silently expiring its ack deadline.
+// replayResultTimeout bounds the wait for the mite's result. The message then
+// gets a nak for later redelivery. It stays below replayAckWait.
 const replayResultTimeout = 30 * time.Second
+
+// replayAckWait is the AckWait of the replay consumer.
+const replayAckWait = 60 * time.Second
+
+// replayHoldRefresh is the interval of the progress acks for held messages. It
+// stays well below replayAckWait, so the server never delivers a held message
+// again.
+const replayHoldRefresh = replayAckWait / 3
+
+// replayFetchBatch is the most messages that one fetch returns.
+const replayFetchBatch = 16
+
+// replayLaneReadTimeout bounds the Tenant read that picks the lane of a tenant
+// delivery.
+const replayLaneReadTimeout = 5 * time.Second
 
 // replayGiveUpAge is the oldest delivery the consumer still replays. It stays ten
 // minutes below the stream MaxAge, so the consumer sees the delivery once more and
@@ -90,6 +103,9 @@ func (env webhookEnvelope) isTenantEnvelope() bool {
 //   - controller not Connected, 5xx, 429, timeout → Nak (redeliver after delay)
 //   - controller CR deleted, or Jenkins 4xx≠429   → Term + rejected activity event
 //   - delivery older than replayGiveUpAge         → Term + rejected activity event
+//
+// Each target cell has its own lane, so a replay that waits for its result holds
+// only its own cell.
 //
 // A failed consumer pass rebuilds the consumer after a backoff. This function
 // returns only when ctx ends.
@@ -155,7 +171,7 @@ func (r *Reconciler) runWebhookReplayPass(ctx context.Context, conn *bus.Conn, c
 		Durable:       durable,
 		FilterSubject: clusterWildcard, // webhook.<cluster>.>
 		AckPolicy:     nats.AckExplicitPolicy,
-		AckWait:       60 * time.Second,
+		AckWait:       replayAckWait,
 		MaxDeliver:    -1, // replayGiveUpAge is the real bound; the stream MaxAge is the backstop
 	}); err != nil {
 		return fmt.Errorf("ensure webhook replay consumer: %w", err)
@@ -183,6 +199,18 @@ func (r *Reconciler) runWebhookReplayPass(ctx context.Context, conn *bus.Conn, c
 	}
 	defer func() { _ = resultSub.Unsubscribe() }()
 
+	// The lanes stop before the result subscription ends, so a handler in
+	// flight still receives its result or the end of laneCtx.
+	laneCtx, cancelLanes := context.WithCancel(ctx)
+	lanes := newReplayLanes(laneCtx, func(hctx context.Context, msg *nats.Msg) {
+		r.handleQueuedWebhook(hctx, cluster, msg, waiters)
+	})
+	lanes.keepAlive()
+	defer func() {
+		cancelLanes()
+		lanes.wait()
+	}()
+
 	r.Logger.Info("webhook replay consumer started", "cluster", cluster)
 	lastCheck := time.Now()
 	for {
@@ -201,7 +229,7 @@ func (r *Reconciler) runWebhookReplayPass(ctx context.Context, conn *bus.Conn, c
 				return fmt.Errorf("check webhook replay consumer: %w", err)
 			}
 		}
-		msgs, err := conn.DrainConsumer(sub, 16)
+		msgs, err := conn.DrainConsumer(sub, replayFetchBatch)
 		if err != nil {
 			// A fetch timeout with no messages is normal.
 			if errors.Is(err, nats.ErrTimeout) {
@@ -212,8 +240,23 @@ func (r *Reconciler) runWebhookReplayPass(ctx context.Context, conn *bus.Conn, c
 			}
 			return fmt.Errorf("fetch queued webhooks: %w", err)
 		}
-		for _, msg := range msgs {
-			r.handleQueuedWebhook(ctx, cluster, msg, waiters)
+		// Resolve the lane keys at once. A read per message in turn could
+		// hold a late message past AckWait before any progress ack covers it.
+		keys := make([]string, len(msgs))
+		var keyWG sync.WaitGroup
+		for i, msg := range msgs {
+			keyWG.Add(1)
+			go func(i int, msg *nats.Msg) {
+				defer keyWG.Done()
+				keys[i] = r.replayLaneKey(laneCtx, msg)
+			}(i, msg)
+		}
+		keyWG.Wait()
+		for i, msg := range msgs {
+			seq := msgSequence(msg)
+			if !lanes.add(keys[i], seq, msg) {
+				r.Logger.Debug("skipping a redelivery of a held webhook", "cluster", cluster, "sequence", seq)
+			}
 		}
 	}
 }
@@ -539,6 +582,30 @@ func deliveryLabel(env webhookEnvelope) string {
 		return env.Forge + ":" + env.DeliveryID
 	}
 	return env.Path
+}
+
+// replayLaneKey names the lane of a queued webhook. A lane sends one replay at
+// a time, because the mite of a controller runs one command at a time. A
+// controller envelope uses "<namespace>/<controller>". A tenant envelope uses
+// the placement cell of the tenant in the same form, so the tenants of one cell
+// share a lane. A tenant with no readable placement uses "tenant:<name>". An
+// envelope that does not decode uses the empty key.
+func (r *Reconciler) replayLaneKey(ctx context.Context, msg *nats.Msg) string {
+	var env webhookEnvelope
+	if err := json.Unmarshal(msg.Data, &env); err != nil {
+		return ""
+	}
+	if !env.isTenantEnvelope() {
+		return env.Namespace + "/" + env.Controller
+	}
+	readCtx, cancel := context.WithTimeout(ctx, replayLaneReadTimeout)
+	defer cancel()
+	tenant, err := crdstore.Get[v1alpha1.Tenant](readCtx, r.store, env.Tenant, "")
+	if err != nil || tenant.Status.Placement == nil ||
+		tenant.Status.Placement.Cell == "" || tenant.Status.Placement.CellNamespace == "" {
+		return "tenant:" + env.Tenant
+	}
+	return tenant.Status.Placement.CellNamespace + "/" + tenant.Status.Placement.Cell
 }
 
 // msgSequence extracts the JetStream stream sequence from a message; 0 if

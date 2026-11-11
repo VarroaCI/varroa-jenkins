@@ -214,17 +214,3 @@ func WebhookStreamConfig(name string, replicas int) *nats.StreamConfig {
 		Replicas:          clampReplicas(replicas),
 	}
 }
-
-// ReplayConsumerConfig returns a durable pull consumer config for the
-// varroa-webhook-replay consumer. Filter subject webhook.<cluster>.>,
-// AckWait=60s, MaxDeliver=-1 (unbounded; MaxAge is the real bound).
-func ReplayConsumerConfig(cluster string) *nats.ConsumerConfig {
-	filterSubject := fmt.Sprintf("webhook.%s.>", cluster)
-	return &nats.ConsumerConfig{
-		Durable:       "varroa-webhook-replay",
-		FilterSubject: filterSubject,
-		AckPolicy:     nats.AckExplicitPolicy,
-		AckWait:       60 * time.Second,
-		MaxDeliver:    -1,
-	}
-}
