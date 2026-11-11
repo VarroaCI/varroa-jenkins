@@ -33,7 +33,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -57,6 +56,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/election"
 	"github.com/varroaci/varroa-jenkins/internal/forgerelay"
 	"github.com/varroaci/varroa-jenkins/internal/logging"
 	mcp "github.com/varroaci/varroa-jenkins/internal/mcp"
@@ -1195,22 +1195,14 @@ func runRBACFederationLeaderElection(ctx context.Context, clientset kubernetes.I
 		logger.Error("failed to create RBAC federation lease lock", "error", err)
 		return
 	}
-	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
-		Lock:            lock,
-		LeaseDuration:   30 * time.Second,
-		RenewDeadline:   20 * time.Second,
-		RetryPeriod:     5 * time.Second,
-		ReleaseOnCancel: true,
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(leaderCtx context.Context) {
-				logger.Info("started RBAC federation leader loop", "lease", "varroa-rbac-federation", "identity", identity)
-				reconciler.Run(leaderCtx)
-			},
-			OnStoppedLeading: func() {
-				logger.Warn("stopped RBAC federation leader loop", "lease", "varroa-rbac-federation", "identity", identity)
-			},
-		},
+	err = election.Run(ctx, lock, "varroa-rbac-federation", func(leaderCtx context.Context) {
+		logger.Info("started RBAC federation leader loop", "lease", "varroa-rbac-federation", "identity", identity)
+		reconciler.Run(leaderCtx)
+		logger.Warn("stopped RBAC federation leader loop", "lease", "varroa-rbac-federation", "identity", identity)
 	})
+	if err != nil {
+		logger.Error("RBAC federation leader election stopped", "error", err)
+	}
 }
 
 var _ = apierrors.IsNotFound // keep apierrors import

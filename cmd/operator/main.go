@@ -675,15 +675,11 @@ func main() {
 		logger.Info("scoped CronJob/Secret informer cache to managed namespaces", "namespaces", nsList)
 	}
 
-	mgr, err := manager.New(clientsetClient.RESTConfig(), manager.Options{
-		Scheme:                  scheme,
-		Cache:                   cacheOpts,
-		HealthProbeBindAddress:  ":8090",
-		LeaderElection:          true,
-		LeaderElectionID:        "varroa-operator.varroa.dev",
-		LeaderElectionNamespace: operatorNamespace,
-		// Use controller-runtime defaults: LeaseDuration 15s, RenewDeadline 10s, RetryPeriod 2s.
-	})
+	mgr, err := manager.New(clientsetClient.RESTConfig(), withLeaderElection(manager.Options{
+		Scheme:                 scheme,
+		Cache:                  cacheOpts,
+		HealthProbeBindAddress: ":8090",
+	}, operatorNamespace))
 	if err != nil {
 		logger.Error("failed to create manager", "error", err)
 		os.Exit(1)
