@@ -163,8 +163,8 @@ func (s *stubTransport) DrainResults(_, _ string) []*mitev1.CommandResult { retu
 func (s *stubTransport) Snapshot(_, _ string) *mitev1.StateSnapshot       { return nil }
 func (s *stubTransport) Health(_, _ string) string                        { return "" }
 func (s *stubTransport) Connected(_, _ string) bool                       { return s.connected }
-func (s *stubTransport) Info(_, _ string) (string, time.Time, time.Time, bool) {
-	return "", time.Time{}, time.Time{}, false
+func (s *stubTransport) Info(_, _ string) (transport.MiteInfo, bool, error) {
+	return transport.MiteInfo{}, false, nil
 }
 func (s *stubTransport) ConnEpoch(_, _ string) (int64, bool)       { return 0, false }
 func (s *stubTransport) StreamDegraded(_, _ string) (string, bool) { return "", false }

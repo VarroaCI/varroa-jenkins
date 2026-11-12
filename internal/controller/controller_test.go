@@ -4160,8 +4160,8 @@ func (c *captureTransport) Send(_ context.Context, ns, name string, msg *mitev1.
 	return c.sendErr
 }
 
-func (c *captureTransport) Info(ns, name string) (version string, lastHeartbeat, certExpiry time.Time, connected bool) {
-	return "v1.0.0", time.Now(), time.Now().Add(24 * time.Hour), true
+func (c *captureTransport) Info(ns, name string) (transport.MiteInfo, bool, error) {
+	return transport.MiteInfo{Version: "v1.0.0", LastHeartbeat: time.Now(), CertExpiry: time.Now().Add(24 * time.Hour)}, true, nil
 }
 
 func (c *captureTransport) Snapshot(ns, name string) *mitev1.StateSnapshot {

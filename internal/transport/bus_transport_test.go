@@ -153,9 +153,43 @@ func TestBusTransport_PresenceInfo(t *testing.T) {
 	if !tr.Connected("ns", "c1") {
 		t.Fatal("should be connected after presence write")
 	}
-	ver, lastHB, certExp, ok := tr.Info("ns", "c1")
-	if !ok || ver != "2.4" || !lastHB.Equal(hb) || !certExp.Equal(ce) {
-		t.Fatalf("Info mismatch: ver=%q hb=%v ce=%v ok=%v", ver, lastHB, certExp, ok)
+	info, ok, err := tr.Info("ns", "c1")
+	if err != nil || !ok || info.Version != "2.4" || !info.LastHeartbeat.Equal(hb) || !info.CertExpiry.Equal(ce) {
+		t.Fatalf("Info mismatch: info=%+v ok=%v err=%v", info, ok, err)
+	}
+}
+
+// TestBusTransport_InfoMissingRecord asserts that a key with no record is a
+// clean miss: no error, so the caller can count it as a lost presence.
+func TestBusTransport_InfoMissingRecord(t *testing.T) {
+	tr := newBusTransport(t, startNATS(t))
+	_, ok, err := tr.Info("ns", "absent")
+	if ok || err != nil {
+		t.Fatalf("Info on a missing record = ok %v err %v, want false and nil", ok, err)
+	}
+}
+
+// TestBusTransport_InfoReadError asserts that a failed KV read is reported
+// as an error, not as a missing record.
+func TestBusTransport_InfoReadError(t *testing.T) {
+	tr := newBusTransport(t, startNATS(t))
+	tr.conn.Close()
+	_, ok, err := tr.Info("ns", "c1")
+	if ok || err == nil {
+		t.Fatalf("Info after close = ok %v err %v, want false and an error", ok, err)
+	}
+}
+
+// TestBusTransport_InfoDecodeError asserts that an undecodable record is
+// reported as an error.
+func TestBusTransport_InfoDecodeError(t *testing.T) {
+	tr := newBusTransport(t, startNATS(t))
+	if err := tr.presenceKV.Put(bus.PresenceKey(bus.DefaultCluster, "ns", "c1"), []byte("not-json")); err != nil {
+		t.Fatalf("put presence: %v", err)
+	}
+	_, ok, err := tr.Info("ns", "c1")
+	if ok || err == nil {
+		t.Fatalf("Info on a bad record = ok %v err %v, want false and an error", ok, err)
 	}
 }
 
@@ -334,9 +368,9 @@ func TestBusReadModel_NoInboundSubscription(t *testing.T) {
 	if m.Connected(ns, name) {
 		t.Error("BusReadModel.Connected should not subscribe nor report connected without presence data")
 	}
-	_, _, _, ok := m.Info(ns, name)
-	if ok {
-		t.Error("BusReadModel.Info should not subscribe")
+	_, ok, err := m.Info(ns, name)
+	if ok || err != nil {
+		t.Error("BusReadModel.Info should not subscribe and should find no record")
 	}
 	snap := m.Snapshot(ns, name)
 	if snap != nil {
@@ -514,5 +548,29 @@ func TestBusTransport_SendImperativeRefusesAnEndedContext(t *testing.T) {
 	}
 	if msg, err := sub.NextMsg(200 * time.Millisecond); err == nil {
 		t.Fatalf("an ended context published %q", msg.Data)
+	}
+}
+
+// TestBusReadModel_InfoReadError asserts that a failed KV read in the read
+// model is reported as an error, not as a missing record.
+func TestBusReadModel_InfoReadError(t *testing.T) {
+	s := startNATS(t)
+	busConn, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("bus connect: %v", err)
+	}
+	snapshotKV, err := busConn.EnsureKV(bus.KVSnapshotBucket, 0)
+	if err != nil {
+		t.Fatalf("ensure snapshot kv: %v", err)
+	}
+	presenceKV, err := busConn.EnsureKV(bus.KVPresenceBucket, 90*time.Second)
+	if err != nil {
+		t.Fatalf("ensure presence kv: %v", err)
+	}
+	m := NewBusReadModel(bus.DefaultCluster, busConn, snapshotKV, presenceKV)
+	busConn.Close()
+	_, ok, err := m.Info("ns", "ctrl")
+	if ok || err == nil {
+		t.Fatalf("Info after close = ok %v err %v, want false and an error", ok, err)
 	}
 }

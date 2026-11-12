@@ -126,7 +126,10 @@ func TestReplayLanes_SkipsRedeliveryOfHeldSequence(t *testing.T) {
 	rec := &msgRecorder{}
 	lanes := newReplayLanes(ctx, func(hctx context.Context, msg *nats.Msg) {
 		rec.record(msg)
-		started <- struct{}{}
+		select {
+		case started <- struct{}{}:
+		default:
+		}
 		select {
 		case <-unblock:
 		case <-hctx.Done():
@@ -160,7 +163,10 @@ func TestReplayLanes_RefreshSendsProgressForEveryHeldMessage(t *testing.T) {
 	started := make(chan struct{}, 1)
 	unblock := make(chan struct{})
 	lanes := newReplayLanes(ctx, func(hctx context.Context, _ *nats.Msg) {
-		started <- struct{}{}
+		select {
+		case started <- struct{}{}:
+		default:
+		}
 		select {
 		case <-unblock:
 		case <-hctx.Done():
@@ -196,7 +202,10 @@ func TestReplayLanes_ReleasesQueuedMessagesAfterContextEnds(t *testing.T) {
 	released := &msgRecorder{}
 	lanes := newReplayLanes(ctx, func(hctx context.Context, msg *nats.Msg) {
 		handled.record(msg)
-		started <- struct{}{}
+		select {
+		case started <- struct{}{}:
+		default:
+		}
 		<-hctx.Done()
 	})
 	lanes.release = released.record
@@ -378,7 +387,10 @@ func TestReplayLanes_RefreshExpiresWaitingMessagePastBound(t *testing.T) {
 	lanes := newReplayLanes(ctx, func(hctx context.Context, msg *nats.Msg) {
 		handled.record(msg)
 		if string(msg.Data) == "current" {
-			started <- struct{}{}
+			select {
+			case started <- struct{}{}:
+			default:
+			}
 			select {
 			case <-unblock:
 			case <-hctx.Done():

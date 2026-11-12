@@ -152,30 +152,31 @@ type miteTokenEntry struct {
 
 // Reconciler reconciles Controller CRs.
 type Reconciler struct {
-	metrics            controllerMetrics
-	Resolver           *bundle.Resolver
-	Composer           *bundle.Composer
-	rbacGenerator      *rbac.Generator
-	client             ResourceClient
-	store              crdstore.Backend
-	miteTransport      transport.Transport
-	tokenSigner        *mite.TokenSigner
-	miteTokenSigner    *mite.MiteTokenSigner
-	miteTokenMu        sync.Mutex
-	miteTokens         map[string]miteTokenEntry // key "ns/name"; cached signed JWT
-	lastMiteEpoch      map[string]int64          // key "ns/name"; for reconnect detect
-	varroaEndpoint     string
-	varroaRedirectURL  string
-	clusterName        string
-	disconnectedTicks  map[string]int
-	Logger             *slog.Logger
-	caPEM              string
-	ucBaseURL          string // VARROA_UPDATE_CENTER_URL, read once at boot
-	jenkinsUpstreamURL string // VARROA_JENKINS_UPSTREAM_URL, read once at boot; "" turns the upstream reads off
-	claimGate          string // VARROA_CLAIM_GATE, read once at boot; "0" or "1"
-	claimTimeoutMS     int    // VARROA_CLAIM_TIMEOUT_MS, read once at boot; 0 means unset
-	blobstoreURL       string // VARROA_BLOBSTORE_URL, read once at boot; drives the artifact-storage fragment
-	artifactSecretBase string // VARROA_ARTIFACT_SECRET, read once at boot; a base Secret name, "" disables artifact storage
+	metrics             controllerMetrics
+	Resolver            *bundle.Resolver
+	Composer            *bundle.Composer
+	rbacGenerator       *rbac.Generator
+	client              ResourceClient
+	store               crdstore.Backend
+	miteTransport       transport.Transport
+	tokenSigner         *mite.TokenSigner
+	miteTokenSigner     *mite.MiteTokenSigner
+	miteTokenMu         sync.Mutex
+	miteTokens          map[string]miteTokenEntry // key "ns/name"; cached signed JWT
+	lastMiteEpoch       map[string]int64          // key "ns/name"; for reconnect detect
+	varroaEndpoint      string
+	varroaRedirectURL   string
+	clusterName         string
+	disconnectedTicks   map[string]int // streamLossMisses counter per "ns/name"; guarded by disconnectedTicksMu
+	disconnectedTicksMu sync.Mutex
+	Logger              *slog.Logger
+	caPEM               string
+	ucBaseURL           string // VARROA_UPDATE_CENTER_URL, read once at boot
+	jenkinsUpstreamURL  string // VARROA_JENKINS_UPSTREAM_URL, read once at boot; "" turns the upstream reads off
+	claimGate           string // VARROA_CLAIM_GATE, read once at boot; "0" or "1"
+	claimTimeoutMS      int    // VARROA_CLAIM_TIMEOUT_MS, read once at boot; 0 means unset
+	blobstoreURL        string // VARROA_BLOBSTORE_URL, read once at boot; drives the artifact-storage fragment
+	artifactSecretBase  string // VARROA_ARTIFACT_SECRET, read once at boot; a base Secret name, "" disables artifact storage
 	// artifactSTS is the STS issuing configuration; a zero value keeps the
 	// static Secret path. artifactIssuer, artifactNow, and artifactFailures
 	// serve STS mode only (artifactsts.go).
@@ -2763,6 +2764,7 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		delete(r.miteTokens, cr.Namespace+"/"+cr.Name)
 		delete(r.lastMiteEpoch, cr.Namespace+"/"+cr.Name)
 		r.miteTokenMu.Unlock()
+		r.resetPresenceMisses(cr.Namespace + "/" + cr.Name)
 		r.forgetMite(cr.Namespace, cr.Name)
 
 		// Reset both per-controller gauges to 0 on deletion so series do not
@@ -3977,7 +3979,27 @@ const (
 	// staleMiteThreshold is how long after LastSeen we consider a mite
 	// definitively gone, even if the registry has stale data.
 	staleMiteThreshold = 2 * time.Minute
+
+	// streamLossMisses is the number of counted presence misses in a row that
+	// move a Connected controller to Running.
+	streamLossMisses = 3
 )
+
+// countPresenceMiss adds one counted presence miss for key and returns the count.
+// Reconciles of different controllers run at once, so disconnectedTicksMu guards the map.
+func (r *Reconciler) countPresenceMiss(key string) int {
+	r.disconnectedTicksMu.Lock()
+	defer r.disconnectedTicksMu.Unlock()
+	r.disconnectedTicks[key]++
+	return r.disconnectedTicks[key]
+}
+
+// resetPresenceMisses drops the presence miss count for key.
+func (r *Reconciler) resetPresenceMisses(key string) {
+	r.disconnectedTicksMu.Lock()
+	defer r.disconnectedTicksMu.Unlock()
+	delete(r.disconnectedTicks, key)
+}
 
 // reconcileStreamDegradedCondition mirrors the gateway's bus→stream bridge
 // health onto the Controller as ConditionMiteStreamDegraded.
@@ -4063,26 +4085,32 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 
 	// Gather the transport observation; derivation is table-tested in
 	// desiredstate_test.go.
-	version, lastHeartbeat, certExpiry, transportConnected := r.miteTransport.Info(cr.Namespace, cr.Name)
+	info, transportConnected, readErr := r.miteTransport.Info(cr.Namespace, cr.Name)
 	snapshot := r.miteTransport.Snapshot(cr.Namespace, cr.Name)
 	if err := r.recordPendingSignatures(ctx, cr, snapshot); err != nil {
 		logger.Warn("read pool approvals for pending signatures", "error", err)
 	}
 	health := deriveMiteHealth(miteObservation{
 		TransportConnected: transportConnected,
-		Version:            version,
-		LastHeartbeat:      lastHeartbeat,
-		CertExpiry:         certExpiry,
+		ReadErr:            readErr,
+		Version:            info.Version,
+		LastHeartbeat:      info.LastHeartbeat,
+		CertExpiry:         info.CertExpiry,
 		Health:             r.miteTransport.Health(cr.Namespace, cr.Name),
 		Snapshot:           snapshot,
 	}, cr.Status.LiveDrift, metav1Now())
-	if health.StaleOverride {
-		logger.Warn("stale heartbeat, forcing disconnect", "age", time.Since(lastHeartbeat), "threshold", staleMiteThreshold)
-	}
 
 	if !health.Connected {
 		key = cr.Namespace + "/" + cr.Name
-		r.disconnectedTicks[key]++
+		var lastSeen *metav1.Time
+		if cr.Status.MiteStatus != nil {
+			lastSeen = cr.Status.MiteStatus.LastSeen
+		}
+		if !presenceMissCounts(health.Miss, lastSeen, time.Now()) {
+			// A fresh read error keeps the phase and the miss count.
+			logger.Warn("mite presence read failed; phase kept", "error", readErr, "lastSeen", lastSeen)
+			return nil
+		}
 		// MiteStreamDegraded means "connected, but the bridge is starving it",
 		// so it stops being meaningful the moment the mite is gone — including
 		// during the reconnect grace window below. Nothing else clears it
@@ -4090,9 +4118,13 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		// stale True while the controller waits in Running.
 		cr.Status.Conditions = removeConditionByType(cr.Status.Conditions,
 			v1alpha1.ConditionMiteStreamDegraded)
-		if r.disconnectedTicks[key] < 3 {
+		detail := presenceMissDetail(health.Miss, readErr)
+		misses := r.countPresenceMiss(key)
+		if misses < streamLossMisses {
 			// Grace period: mite may be reconnecting after operator restart.
 			// Stay in Connected for a few ticks to allow reconnection.
+			logger.Info("mite presence miss", "cause", health.Miss, "detail", detail,
+				"miss", misses, "limit", streamLossMisses)
 			return nil
 		}
 
@@ -4101,12 +4133,14 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		r.miteTokenMu.Lock()
 		delete(r.miteTokens, key)
 		r.miteTokenMu.Unlock()
-		delete(r.disconnectedTicks, key)
-		markStreamLost(cr, key, lastHeartbeat)
+		r.resetPresenceMisses(key)
+		logger.Warn("mite stream lost; phase set to Running", "cause", health.Miss,
+			"detail", detail, "lastHeartbeat", info.LastHeartbeat)
+		markStreamLost(cr, key, info.LastHeartbeat, detail)
 		return nil
 	}
 	// Reset disconnected counter when mite is connected.
-	delete(r.disconnectedTicks, cr.Namespace+"/"+cr.Name)
+	r.resetPresenceMisses(cr.Namespace + "/" + cr.Name)
 
 	// A mite can hold a healthy gRPC stream while the gateway's bus→stream
 	// bridge is broken, in which case no desired state reaches it and every
@@ -5277,7 +5311,7 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 	// mite's post-Failed retries presenting a dead token. A connected mite
 	// never reads this token, so the refresh is always safe; a still-valid
 	// token is never rotated. Warn-only on failure — the next tick retries.
-	if _, _, _, connectedNow := r.miteTransport.Info(cr.Namespace, cr.Name); !connectedNow {
+	if _, connectedNow, _ := r.miteTransport.Info(cr.Namespace, cr.Name); !connectedNow {
 		if err := r.ensureBootstrapToken(ctx, cr, controllerPrefix(cr)); err != nil {
 			r.Logger.Warn("bootstrap token remint failed",
 				"controller", cr.Namespace+"/"+cr.Name, "error", err)
@@ -5327,10 +5361,11 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 	r.reconcileFleetPodLabel(ctx, cr)
 	r.checkPluginRollFailed(ctx, cr, nil, logger)
 
-	version, lastHeartbeat, certExpiry, connected := r.miteTransport.Info(cr.Namespace, cr.Name)
+	info, connected, _ := r.miteTransport.Info(cr.Namespace, cr.Name)
 	// handleConnected treats a stale heartbeat as a lost stream. The same rule
 	// applies here, or the two handlers flap the phase on one presence record.
-	connected = connected && !heartbeatStale(lastHeartbeat)
+	connected = connected && !heartbeatStale(info.LastHeartbeat)
+	version, lastHeartbeat, certExpiry := info.Version, info.LastHeartbeat, info.CertExpiry
 	if !connected {
 		// A disconnected mite never moves a Running controller back to
 		// Pending. Reprovisioning an unchanged pod does not reconnect it.
@@ -5338,7 +5373,7 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 		// is stale, and provisioningTimeout fails a pod that never connects.
 		return nil
 	}
-	delete(r.disconnectedTicks, cr.Namespace+"/"+cr.Name)
+	r.resetPresenceMisses(cr.Namespace + "/" + cr.Name)
 
 	// Mite is connected — transition to Connected and populate MiteStatus.
 	cr.Status.Phase = v1alpha1.ControllerPhaseConnected
@@ -5375,8 +5410,9 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 // markStreamLost moves a Connected controller whose mite stream stays lost to
 // Running. The pod is unchanged, so the controller must not reprovision.
 // lastHeartbeat is the transport's last heartbeat; a zero value falls back to
-// status.miteStatus.lastSeen.
-func markStreamLost(cr *v1alpha1.Controller, key string, lastHeartbeat time.Time) {
+// status.miteStatus.lastSeen. cause names the miss, and the MiteConnected
+// message carries it.
+func markStreamLost(cr *v1alpha1.Controller, key string, lastHeartbeat time.Time, cause string) {
 	if lastHeartbeat.IsZero() && cr.Status.MiteStatus != nil && cr.Status.MiteStatus.LastSeen != nil {
 		lastHeartbeat = cr.Status.MiteStatus.LastSeen.Time
 	}
@@ -5396,7 +5432,7 @@ func markStreamLost(cr *v1alpha1.Controller, key string, lastHeartbeat time.Time
 		Type:    v1alpha1.ConditionMiteConnected,
 		Status:  metav1.ConditionFalse,
 		Reason:  v1alpha1.ReasonStreamLost,
-		Message: fmt.Sprintf("mite %s command stream lost; last heartbeat %s", key, last),
+		Message: fmt.Sprintf("mite %s command stream lost: %s; last heartbeat %s", key, cause, last),
 	})
 }
 
@@ -5433,7 +5469,14 @@ func (r *Reconciler) reconcileMiteTransportEnvRoll(ctx context.Context, cr *v1al
 	if cr.Status.Phase != v1alpha1.ControllerPhaseRunning || !isStreamLost(cr) {
 		return false
 	}
-	if _, lastHeartbeat, _, connected := r.miteTransport.Info(cr.Namespace, cr.Name); connected && !heartbeatStale(lastHeartbeat) {
+	info, present, readErr := r.miteTransport.Info(cr.Namespace, cr.Name)
+	if readErr != nil {
+		// A failed read says nothing about the mite, so it must not drive a roll.
+		r.Logger.Warn("mite transport env roll evaluation skipped: presence read failed",
+			"controller", cr.Namespace+"/"+cr.Name, "error", readErr)
+		return false
+	}
+	if present && !heartbeatStale(info.LastHeartbeat) {
 		return false
 	}
 	env, found, err := r.client.GetStatefulSetContainerEnv(ctx, controllerPrefix(cr), cr.Namespace, overlay.MiteContainerName)
@@ -7327,6 +7370,15 @@ func (r *Reconciler) emitOperatorEvent(eventType string, cr *v1alpha1.Controller
 	})
 }
 
+// phaseEventReason returns the cause of a stream-loss phase change: the
+// MiteConnected message. Other phase changes carry no reason.
+func phaseEventReason(cr *v1alpha1.Controller, oldPhase v1alpha1.ControllerPhase) string {
+	if oldPhase != v1alpha1.ControllerPhaseConnected || cr.Status.Phase != v1alpha1.ControllerPhaseRunning || !isStreamLost(cr) {
+		return ""
+	}
+	return findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected).Message
+}
+
 // emitPhaseEvent emits a phase transition event plus any associated
 // provisioning lifecycle events (started, completed, failed).
 func (r *Reconciler) emitPhaseEvent(cr *v1alpha1.Controller, oldPhase v1alpha1.ControllerPhase) {
@@ -7336,14 +7388,20 @@ func (r *Reconciler) emitPhaseEvent(cr *v1alpha1.Controller, oldPhase v1alpha1.C
 	}
 
 	// Phase transition event (source: mite, same as existing phase events).
-	r.activityPublisher.Publish(activity.Event{
+	event := activity.Event{
 		Type:       "phase",
 		Source:     "mite",
 		Controller: cr.Name,
 		Namespace:  cr.Namespace,
 		Message:    "phase changed from " + string(oldPhase) + " to " + string(newPhase),
 		Phase:      string(newPhase),
-	})
+		Reason:     phaseEventReason(cr, oldPhase),
+	}
+	if event.Reason != "" {
+		// A fixed severity keeps Normalize from reading the cause text.
+		event.Severity = "warning"
+	}
+	r.activityPublisher.Publish(event)
 
 	// Emit provisioning lifecycle events.
 	if oldPhase == v1alpha1.ControllerPhasePending && newPhase == v1alpha1.ControllerPhaseProvisioning {

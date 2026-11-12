@@ -64,9 +64,11 @@ func (l *LocalRegistry) Connected(ns, name string) bool {
 	return l.reg.IsConnected(name, ns)
 }
 
-// Info delegates to Registry.GetMiteInfo.
-func (l *LocalRegistry) Info(ns, name string) (version string, lastHeartbeat, certExpiry time.Time, ok bool) {
-	return l.reg.GetMiteInfo(name, ns)
+// Info delegates to Registry.GetMiteInfo. The in-process registry cannot fail
+// to read, so the error is always nil.
+func (l *LocalRegistry) Info(ns, name string) (MiteInfo, bool, error) {
+	v, hb, ce, ok := l.reg.GetMiteInfo(name, ns)
+	return MiteInfo{Version: v, LastHeartbeat: hb, CertExpiry: ce}, ok, nil
 }
 
 // IdleGauges delegates to Registry.GetIdleGauges.
