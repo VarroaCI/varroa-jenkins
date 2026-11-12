@@ -255,7 +255,32 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
-      - run: govulncheck ./...
+      # Exit code 3 means that the code calls a vulnerable symbol. The step fails at once.
+      # Exit codes 137 and 143 mean that the kernel or the runner killed the scan. The step fails at once.
+      # Any other failure means that the scan did not finish. The step then tries again.
+      - name: Run govulncheck
+        run: |
+          for attempt in 1 2 3; do
+            rc=0
+            govulncheck ./... || rc=$?
+            case "$rc" in
+              0) exit 0 ;;
+              3)
+                echo "::error title=Vulncheck::The code calls a vulnerable symbol. The report above names the fixed version."
+                exit 3
+                ;;
+              # The kernel or the runner killed the scan (heap cap, cgroup limit).
+              # A retry meets the same cap on the same runner.
+              137|143)
+                echo "::error title=Vulncheck::govulncheck was killed (exit $rc). Reduce the memory the scan needs, or raise the runner memory limit. A rerun on the same runner repeats this."
+                exit "$rc"
+                ;;
+            esac
+            echo "::warning title=Vulncheck::govulncheck stopped with exit code $rc before the scan finished. Attempt $attempt of 3."
+            if [ "$attempt" -lt 3 ]; then sleep 30; fi
+          done
+          echo "::error title=Vulncheck::govulncheck did not finish in 3 attempts. A network error such as \"tls: bad record MAC\" causes this. Run the failed jobs again."
+          exit 1
 
   test:
     name: Test
@@ -343,7 +368,7 @@ jobs:
   required:
     name: Required checks
     if: always()
-    needs: [changes, lint, checks, chart-tests, test, frontend-test]
+    needs: [changes, lint, checks, chart-tests, govulncheck, test, frontend-test]
     # GitHub-hosted: this job only reads the results of the jobs it needs.
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -357,6 +382,14 @@ jobs:
       - name: Fail when a needed job did not succeed or skip
         env:
           RESULTS: ${{ toJSON(needs) }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key)\t\(.value.result)"'
-          echo "$RESULTS" | jq -e '[.[] | select(.result != "success" and .result != "skipped")] | length == 0'
+          failed=$(echo "$RESULTS" | jq -r '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key] | join(", ")')
+          if [ -n "$failed" ]; then
+            echo "::error title=Required checks::These needed jobs did not pass: $failed."
+            echo "Read the log of each failed job."
+            echo "If a failed job shows a network error such as \"tls: bad record MAC\", the runner caused it. Run the failed jobs again: gh run rerun $RUN_ID --failed"
+            echo "If the log shows a compile error, a test failure, or a finding, fix the code. A rerun does not help."
+            exit 1
+          fi
