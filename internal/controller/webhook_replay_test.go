@@ -112,6 +112,9 @@ type recordingTransport struct {
 	mu   sync.Mutex
 	sent []recordedSend
 	err  error
+	// onSend, when set, runs after each recorded send, outside the lock, with
+	// the number of sends so far.
+	onSend func(n int)
 }
 
 type recordedSend struct {
@@ -122,7 +125,11 @@ type recordedSend struct {
 func (rt *recordingTransport) SendImperative(_ context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
 	rt.mu.Lock()
 	rt.sent = append(rt.sent, recordedSend{ns: ns, name: name, cmd: cmd})
+	n := len(rt.sent)
 	rt.mu.Unlock()
+	if rt.onSend != nil {
+		rt.onSend(n)
+	}
 	return rt.err
 }
 
