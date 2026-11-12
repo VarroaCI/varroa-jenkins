@@ -7,6 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	v1alpha1 "github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -140,24 +141,8 @@ func checkRBAC(ctx context.Context, deps Deps, draft *v1alpha1.Controller, opts 
 		return Check{ID: "rbac", Status: "pass", Message: "no RBAC groups configured"}
 	}
 
-	roles, err := crdstore.List[v1alpha1.VarroaRole](ctx, deps, "", "")
-	if err != nil {
-		return Check{
-			ID:      "rbac",
-			Status:  "warn",
-			Message: "unable to list roles: " + err.Error(),
-		}
-	}
-
-	validRoles := make(map[string]bool)
-	for _, r := range roles {
-		if r.Labels != nil && r.Labels[v1alpha1.LabelBuiltin] == "true" {
-			validRoles[r.Name] = true
-		}
-	}
-
 	for _, g := range draft.Spec.RBACSpec.Groups {
-		if !validRoles[g.Role] {
+		if !controller.IsRBACSpecRole(g.Role) {
 			return Check{
 				ID:      "rbac",
 				Status:  "fail",

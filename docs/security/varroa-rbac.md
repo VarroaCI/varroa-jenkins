@@ -259,6 +259,13 @@ spec:
 The shorthand accepts `admin`, `operator`, `developer`, and `viewer`. Use role
 bindings for custom or cross-controller scope.
 
+The operator writes one Jenkins role binding for each role in the shorthand. The binding name is `ctrl-<namespace>-<controller>-<role>`. The operator removes a binding only when both conditions are true:
+
+- The name has that form for this controller and one of the four roles.
+- The labels `varroa.dev/managed-by: varroa-operator`, `varroa.dev/controller-namespace`, and `varroa.dev/controller-name` name this controller.
+
+A binding with another name stays, also when it carries these labels. Do not give your own binding one of these names. The operator replaces that binding when the shorthand contains its role.
+
 ## Change a role or a binding through the API
 
 Change a role with `PUT /api/v1/roles/{name}`. Change a binding with `PUT /api/v1/rolebindings/{name}`. The body replaces the stored object. Start from your read.

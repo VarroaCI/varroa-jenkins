@@ -6,7 +6,10 @@ import (
 	"reflect"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -19,8 +22,7 @@ func TestBuildDesiredRoleBindings_EmptyRBACSpec(t *testing.T) {
 			Namespace: "ns",
 		},
 	}
-	builtins := []*v1alpha1.VarroaRole{}
-	bindings, unknown := buildDesiredRoleBindings(cr, builtins)
+	bindings, unknown := buildDesiredRoleBindings(cr)
 	if bindings != nil {
 		t.Errorf("expected nil bindings, got %v", bindings)
 	}
@@ -39,8 +41,7 @@ func TestBuildDesiredRoleBindings_NilRBACSpec(t *testing.T) {
 			RBACSpec: nil,
 		},
 	}
-	builtins := []*v1alpha1.VarroaRole{}
-	bindings, unknown := buildDesiredRoleBindings(cr, builtins)
+	bindings, unknown := buildDesiredRoleBindings(cr)
 	if bindings != nil {
 		t.Errorf("expected nil bindings, got %v", bindings)
 	}
@@ -61,8 +62,7 @@ func TestBuildDesiredRoleBindings_EmptyGroups(t *testing.T) {
 			},
 		},
 	}
-	builtins := []*v1alpha1.VarroaRole{}
-	bindings, unknown := buildDesiredRoleBindings(cr, builtins)
+	bindings, unknown := buildDesiredRoleBindings(cr)
 	if bindings != nil {
 		t.Errorf("expected nil bindings, got %v", bindings)
 	}
@@ -86,20 +86,7 @@ func TestBuildDesiredRoleBindings_TwoGroupsOneRole(t *testing.T) {
 			},
 		},
 	}
-	builtins := []*v1alpha1.VarroaRole{
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "developer",
-				Labels: map[string]string{
-					v1alpha1.LabelBuiltin: "true",
-				},
-			},
-			Spec: v1alpha1.VarroaRoleSpec{
-				JenkinsRoleRef: "varroa-developer",
-			},
-		},
-	}
-	bindings, unknown := buildDesiredRoleBindings(cr, builtins)
+	bindings, unknown := buildDesiredRoleBindings(cr)
 	if len(unknown) != 0 {
 		t.Errorf("expected 0 unknown, got %v", unknown)
 	}
@@ -171,20 +158,7 @@ func TestBuildDesiredRoleBindings_UnknownRoleSkipped(t *testing.T) {
 			},
 		},
 	}
-	builtins := []*v1alpha1.VarroaRole{
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "admin",
-				Labels: map[string]string{
-					v1alpha1.LabelBuiltin: "true",
-				},
-			},
-			Spec: v1alpha1.VarroaRoleSpec{
-				JenkinsRoleRef: "varroa-admin",
-			},
-		},
-	}
-	bindings, unknown := buildDesiredRoleBindings(cr, builtins)
+	bindings, unknown := buildDesiredRoleBindings(cr)
 	if len(unknown) != 1 || unknown[0] != "superuser" {
 		t.Errorf("expected unknown=[superuser], got %v", unknown)
 	}
@@ -215,42 +189,7 @@ func TestBuildDesiredRoleBindings_MultipleRoles(t *testing.T) {
 			},
 		},
 	}
-	builtins := []*v1alpha1.VarroaRole{
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "admin",
-				Labels: map[string]string{
-					v1alpha1.LabelBuiltin: "true",
-				},
-			},
-			Spec: v1alpha1.VarroaRoleSpec{
-				JenkinsRoleRef: "varroa-admin",
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "developer",
-				Labels: map[string]string{
-					v1alpha1.LabelBuiltin: "true",
-				},
-			},
-			Spec: v1alpha1.VarroaRoleSpec{
-				JenkinsRoleRef: "varroa-developer",
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "operator",
-				Labels: map[string]string{
-					v1alpha1.LabelBuiltin: "true",
-				},
-			},
-			Spec: v1alpha1.VarroaRoleSpec{
-				JenkinsRoleRef: "varroa-operator",
-			},
-		},
-	}
-	bindings, unknown := buildDesiredRoleBindings(cr, builtins)
+	bindings, unknown := buildDesiredRoleBindings(cr)
 	if len(unknown) != 0 {
 		t.Errorf("expected 0 unknown, got %v", unknown)
 	}
@@ -285,6 +224,236 @@ func TestBuildDesiredRoleBindings_MultipleRoles(t *testing.T) {
 	}
 	if len(opBinding.Spec.Subjects) != 1 || opBinding.Spec.Subjects[0].Name != "ops" {
 		t.Errorf("unexpected operator subjects: %+v", opBinding.Spec.Subjects)
+	}
+}
+
+// seedRBACController seeds ns/test with one group per role. The controller
+// carries the LabelControllerName label, so the label stamp issues no patch.
+func seedRBACController(t *testing.T, store *crdstore.Fake, roles ...string) *v1alpha1.Controller {
+	t.Helper()
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
+			Namespace: "ns",
+			Labels:    map[string]string{v1alpha1.LabelControllerName: "test"},
+		},
+	}
+	if len(roles) > 0 {
+		cr.Spec.RBACSpec = &v1alpha1.RBACSpec{}
+	}
+	for _, role := range roles {
+		cr.Spec.RBACSpec.Groups = append(cr.Spec.RBACSpec.Groups,
+			v1alpha1.RBACGroupBinding{Name: role + "-group", Role: role})
+	}
+	crdstore.MustSeed(store, cr)
+	return cr
+}
+
+// labeledBinding returns a JenkinsRoleBinding that carries the three operator
+// ownership labels for ns/ctrl.
+func labeledBinding(name, ns, ctrl string) *v1alpha1.JenkinsRoleBinding {
+	return &v1alpha1.JenkinsRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+			UID:  types.UID("uid-" + name),
+			Labels: map[string]string{
+				v1alpha1.LabelManagedBy:           v1alpha1.ManagedByOperator,
+				v1alpha1.LabelControllerNamespace: ns,
+				v1alpha1.LabelControllerName:      ctrl,
+			},
+		},
+		Spec: v1alpha1.JenkinsRoleBindingSpec{
+			RoleRef:  "varroa-viewer",
+			Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "hand"}},
+		},
+	}
+}
+
+func bindingExists(t *testing.T, store crdstore.Backend, name string) bool {
+	t.Helper()
+	_, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](context.Background(), store, name, "")
+	if apierrors.IsNotFound(err) {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("get JenkinsRoleBinding %s: %v", name, err)
+	}
+	return true
+}
+
+// rbacDeleteRecorder fails the test on an unfenced delete and records each
+// fenced one as "name uid resourceVersion".
+type rbacDeleteRecorder struct {
+	*crdstore.Fake
+	t       *testing.T
+	deletes []string
+}
+
+func (f *rbacDeleteRecorder) DeleteObject(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) error {
+	f.t.Errorf("unfenced delete of %s", name)
+	return f.Fake.DeleteObject(ctx, gvr, namespace, name)
+}
+
+func (f *rbacDeleteRecorder) DeleteObjectIfUnchanged(ctx context.Context, gvr schema.GroupVersionResource, namespace, name, uid, resourceVersion string) error {
+	f.deletes = append(f.deletes, name+" "+uid+" "+resourceVersion)
+	return f.Fake.DeleteObjectIfUnchanged(ctx, gvr, namespace, name, uid, resourceVersion)
+}
+
+func TestSyncRBACBindings_KeepsLabeledBindingWithOtherName(t *testing.T) {
+	store := crdstore.NewFake()
+	cr := seedRBACController(t, store, "developer")
+	crdstore.MustSeed(store, labeledBinding("payments-admins", "ns", "test"))
+
+	r := &Reconciler{store: store, Logger: slog.Default()}
+	if err := r.syncRBACBindings(context.Background(), cr); err != nil {
+		t.Fatalf("syncRBACBindings: %v", err)
+	}
+	if !bindingExists(t, store, "payments-admins") {
+		t.Error("labeled binding with a non-derived name was deleted")
+	}
+	if !bindingExists(t, store, "ctrl-ns-test-developer") {
+		t.Error("desired binding ctrl-ns-test-developer was not written")
+	}
+}
+
+func TestSyncRBACBindings_DeletesOwnedBindingOfRemovedRole(t *testing.T) {
+	store := crdstore.NewFake()
+	cr := seedRBACController(t, store, "developer")
+	crdstore.MustSeed(store, labeledBinding("ctrl-ns-test-admin", "ns", "test"))
+
+	r := &Reconciler{store: store, Logger: slog.Default()}
+	if err := r.syncRBACBindings(context.Background(), cr); err != nil {
+		t.Fatalf("syncRBACBindings: %v", err)
+	}
+	if bindingExists(t, store, "ctrl-ns-test-admin") {
+		t.Error("owned binding of a removed role survived")
+	}
+	if !bindingExists(t, store, "ctrl-ns-test-developer") {
+		t.Error("desired binding ctrl-ns-test-developer missing")
+	}
+}
+
+func TestSyncRBACBindings_KeepsUnlabeledBindingAtDerivedName(t *testing.T) {
+	store := crdstore.NewFake()
+	cr := seedRBACController(t, store, "developer")
+	unlabeled := labeledBinding("ctrl-ns-test-admin", "ns", "test")
+	unlabeled.Labels = nil
+	crdstore.MustSeed(store, unlabeled)
+
+	r := &Reconciler{store: store, Logger: slog.Default()}
+	if err := r.syncRBACBindings(context.Background(), cr); err != nil {
+		t.Fatalf("syncRBACBindings: %v", err)
+	}
+	if !bindingExists(t, store, "ctrl-ns-test-admin") {
+		t.Error("unlabeled object at a derived name was deleted")
+	}
+}
+
+func TestSyncRBACBindings_DeleteCarriesListedVersion(t *testing.T) {
+	store := crdstore.NewFake()
+	cr := seedRBACController(t, store, "developer")
+	stale := labeledBinding("ctrl-ns-test-admin", "ns", "test")
+	crdstore.MustSeed(store, stale)
+
+	rec := &rbacDeleteRecorder{Fake: store, t: t}
+	r := &Reconciler{store: rec, Logger: slog.Default()}
+	if err := r.syncRBACBindings(context.Background(), cr); err != nil {
+		t.Fatalf("syncRBACBindings: %v", err)
+	}
+	want := []string{"ctrl-ns-test-admin uid-ctrl-ns-test-admin " + stale.ResourceVersion}
+	if !reflect.DeepEqual(rec.deletes, want) {
+		t.Errorf("deletes = %q, want %q", rec.deletes, want)
+	}
+}
+
+func TestSyncRBACBindings_DeleteConflictKeepsBinding(t *testing.T) {
+	store := crdstore.NewFake()
+	cr := seedRBACController(t, store, "developer")
+	crdstore.MustSeed(store, labeledBinding("ctrl-ns-test-admin", "ns", "test"))
+	jrbGVR, err := crdstore.GVRFor[v1alpha1.JenkinsRoleBinding]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.FailNext("delete", jrbGVR, apierrors.NewConflict(jrbGVR.GroupResource(), "ctrl-ns-test-admin", nil))
+
+	r := &Reconciler{store: store, Logger: slog.Default()}
+	if err := r.syncRBACBindings(context.Background(), cr); err != nil {
+		t.Fatalf("syncRBACBindings: %v", err)
+	}
+	if !bindingExists(t, store, "ctrl-ns-test-admin") {
+		t.Error("binding was deleted despite a conflict")
+	}
+}
+
+func TestDeleteControllerBindings_DeletesOnlyOwned(t *testing.T) {
+	store := crdstore.NewFake()
+	cr := seedRBACController(t, store)
+	crdstore.MustSeed(store,
+		labeledBinding("ctrl-ns-test-viewer", "ns", "test"),
+		labeledBinding("copy-of-viewer", "ns", "test"),
+		labeledBinding("ctrl-ns-other-viewer", "ns", "other"),
+	)
+	unlabeled := labeledBinding("ctrl-ns-test-admin", "ns", "test")
+	unlabeled.Labels = nil
+	crdstore.MustSeed(store, unlabeled)
+
+	r := &Reconciler{store: store, Logger: slog.Default()}
+	if err := r.deleteControllerBindings(context.Background(), cr); err != nil {
+		t.Fatalf("deleteControllerBindings: %v", err)
+	}
+	if bindingExists(t, store, "ctrl-ns-test-viewer") {
+		t.Error("owned binding survived the finalizer")
+	}
+	for _, kept := range []string{"copy-of-viewer", "ctrl-ns-other-viewer", "ctrl-ns-test-admin"} {
+		if !bindingExists(t, store, kept) {
+			t.Errorf("%s was deleted but is not owned", kept)
+		}
+	}
+}
+
+func TestOwnsRBACBinding(t *testing.T) {
+	cases := []struct {
+		name    string
+		binding *v1alpha1.JenkinsRoleBinding
+		ns, ctl string
+		want    bool
+	}{
+		{"owned", labeledBinding("ctrl-ns-test-admin", "ns", "test"), "ns", "test", true},
+		{"labels with another name", labeledBinding("payments-admins", "ns", "test"), "ns", "test", false},
+		{"derived name without labels", func() *v1alpha1.JenkinsRoleBinding {
+			b := labeledBinding("ctrl-ns-test-admin", "ns", "test")
+			b.Labels = nil
+			return b
+		}(), "ns", "test", false},
+		{"suffix not an rbacSpec role", labeledBinding("ctrl-ns-test-superuser", "ns", "test"), "ns", "test", false},
+		{"managed-by not the operator", func() *v1alpha1.JenkinsRoleBinding {
+			b := labeledBinding("ctrl-ns-test-admin", "ns", "test")
+			b.Labels[v1alpha1.LabelManagedBy] = "local"
+			return b
+		}(), "ns", "test", false},
+		{"labels of another controller", labeledBinding("ctrl-ns-test-admin", "ns", "other"), "ns", "test", false},
+		{"dash-joined names collide", labeledBinding("ctrl-a-b-c-admin", "a-b", "c"), "a", "b-c", false},
+		{"dash-joined names owned by the labeled controller", labeledBinding("ctrl-a-b-c-admin", "a-b", "c"), "a-b", "c", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ownsRBACBinding(tc.binding, tc.ns, tc.ctl); got != tc.want {
+				t.Errorf("ownsRBACBinding = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRBACSpecRoleRefs(t *testing.T) {
+	want := map[string]string{
+		"admin":     "varroa-admin",
+		"operator":  "varroa-operator",
+		"developer": "varroa-developer",
+		"viewer":    "varroa-viewer",
+	}
+	// The CRD enum on RBACGroupBinding.Role lists these same four roles.
+	if got := rbacSpecRoleRefs(); !reflect.DeepEqual(got, want) {
+		t.Errorf("rbacSpecRoleRefs = %v, want %v", got, want)
 	}
 }
 
