@@ -451,6 +451,50 @@ func TestCheckRBAC_EmptyGroup(t *testing.T) {
 	}
 }
 
+// A label alone does not make a role valid. spec.rbacSpec takes its roles from
+// the code, so a custom VarroaRole with the builtin label is still refused.
+func TestCheckRBAC_BuiltinLabelIsNotARole(t *testing.T) {
+	deps := newFakeDeps()
+	crdstore.MustSeed(deps.Fake, &v1alpha1.VarroaRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "release", Labels: map[string]string{v1alpha1.LabelBuiltin: "true"}},
+		Spec:       v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "varroa-release"},
+	})
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
+		Spec: v1alpha1.ControllerSpec{
+			RBACSpec: &v1alpha1.RBACSpec{
+				Groups: []v1alpha1.RBACGroupBinding{{Name: "devs", Role: "release"}},
+			},
+		},
+	}
+	c := checkRBAC(context.Background(), deps, cr, Options{})
+	if c.Status != "fail" || !strings.Contains(c.Message, "not a known built-in role") {
+		t.Errorf("expected fail naming the unknown built-in role, got %s: %s", c.Status, c.Message)
+	}
+}
+
+// A role in the shorthand needs no VarroaRole object. The operator takes the
+// role set from code.
+func TestCheckRBAC_RoleNeedsNoRoleObject(t *testing.T) {
+	deps := newFakeDeps()
+	crdstore.MustSeed(deps.Fake, &v1alpha1.Group{
+		ObjectMeta: metav1.ObjectMeta{Name: "devs"},
+		Spec:       v1alpha1.GroupSpec{Members: []string{"alice"}},
+	})
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
+		Spec: v1alpha1.ControllerSpec{
+			RBACSpec: &v1alpha1.RBACSpec{
+				Groups: []v1alpha1.RBACGroupBinding{{Name: "devs", Role: "developer"}},
+			},
+		},
+	}
+	c := checkRBAC(context.Background(), deps, cr, Options{})
+	if c.Status != "pass" {
+		t.Errorf("expected pass, got %s: %s", c.Status, c.Message)
+	}
+}
+
 // A draft with no composedBundleRef must check the starter bundle it
 // resolves to rather than report a bare "no bundle referenced" pass, which
 // would hide the one thing that can go wrong on the zero-config path: the
