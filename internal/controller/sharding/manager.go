@@ -28,25 +28,37 @@ const (
 )
 
 // shutdownDrainWait, shutdownCancelWait, and shutdownReleaseTimeout limit the
-// shutdown release. Their sum must stay under the 30-second graceful shutdown
-// timeout of the controller-runtime manager.
+// shutdown release. The release budget is the two waits plus two release
+// timeouts: one for the presence delete and one for the shard releases. That
+// sum must stay under the 30-second graceful shutdown timeout of the
+// controller-runtime manager.
 const (
 	shutdownDrainWait      = 10 * time.Second
 	shutdownCancelWait     = 2 * time.Second
 	shutdownReleaseTimeout = 2 * time.Second
 )
 
+// shardLeaseDuration is the duration in seconds of the shard and presence
+// leases. Other replicas take the shards of a crashed replica after its leases
+// expire, at most one rebalance interval later.
+const shardLeaseDuration int32 = 60
+
+// shardRenewAge is the renew time age at which a pass renews a held shard. It
+// lies between one and two rebalance intervals. A healthy replica therefore
+// renews each shard on every second pass, about 20 seconds after its last
+// renewal. A pass that starts up to 5 seconds early or late keeps that rhythm.
+const shardRenewAge = 15 * time.Second
+
 // heldLeaseMargin is how long before the lease expiry a replica drops a shard
 // that it could not confirm. Other replicas judge the expiry by their own wall
 // clock, and a cancel needs time to stop a send that is in flight. The margin
 // gives that time. The revoke deadline is the lease duration minus this
-// margin: 25 seconds of the 30-second lease. A pass renews each due shard
-// before each claim and after the last claim. A healthy replica therefore
-// renews a shard at most about 20 seconds after its last renewal. The presence
-// write and the two List calls come before the renewals, and add to that age.
-// The deadline must stay above 20 seconds, and the margin must stay at or under
-// 5 seconds. A lease call that runs near its timeout can still carry a held
-// shard past the deadline. The sweep then drops that shard.
+// margin: 55 seconds of the 60-second lease. A healthy replica renews a shard
+// about 20 seconds after its last renewal. The deadline then leaves about 35
+// seconds for an API stall. A link loss stalls API calls for up to 25.4
+// seconds, until the TCP retransmit timer fires. The margin must stay at or
+// under 5 seconds. A lease call that runs near its timeout can still carry a
+// held shard past the deadline. The sweep then drops that shard.
 const heldLeaseMargin = 5 * time.Second
 
 // staleSweepInterval is the period of the sweep that revokes unconfirmed
@@ -55,11 +67,26 @@ const heldLeaseMargin = 5 * time.Second
 // and a pass can wait in the release drain.
 const staleSweepInterval = 1 * time.Second
 
-// leaseCallTimeout limits each lease API call of the shard manager. It is below
-// the 25 s revoke deadline, so a hung call ends before the deadline. A shorter
-// bound would drop every shard on a slow apiserver. It is a context per call:
-// watches share rest.Config, so rest.Config.Timeout must stay unset.
-const leaseCallTimeout = 20 * time.Second
+// leaseCallTimeout limits each lease API call of the shard manager. It is above
+// the 25.4-second retransmit stall, so a call that the stall holds ends with its
+// response, not with a timeout. A renewal that starts at the healthy age of 20
+// seconds and runs to this timeout ends before the 55-second deadline. It is a
+// context per call: watches share rest.Config, so rest.Config.Timeout must stay
+// unset.
+const leaseCallTimeout = 30 * time.Second
+
+// presenceGCDurations is how many lease durations a pass waits after a presence
+// lease of another replica expires. The pass then deletes the lease. A replica
+// that stops without its shutdown release leaves its presence lease, and no
+// other path deletes it.
+const presenceGCDurations = 10
+
+// presenceGCBatch and presenceGCTimeout limit the presence deletes of one pass,
+// so that a large backlog or a slow API server does not delay the next pass.
+const (
+	presenceGCBatch   = 16
+	presenceGCTimeout = 5 * time.Second
+)
 
 // ShardManager claims per-shard Kubernetes Leases so operator replicas divide
 // Controller CRs among themselves (active/active). It runs on every replica.
@@ -81,7 +108,7 @@ type ShardManager struct {
 	logger     *slog.Logger
 
 	interval      time.Duration    // rebalance period, default 10s
-	leaseDuration int32            // seconds, default 30
+	leaseDuration int32            // seconds, default shardLeaseDuration
 	clock         func() time.Time // test seam
 
 	// The drain waits. A zero value selects the matching constant. Tests
@@ -118,7 +145,7 @@ func NewShardManager(mp metric.MeterProvider, leases coordinationv1client.LeaseI
 		onReleased:    onReleased,
 		logger:        logger,
 		interval:      10 * time.Second,
-		leaseDuration: 30,
+		leaseDuration: shardLeaseDuration,
 		clock:         time.Now,
 	}
 
@@ -188,7 +215,7 @@ func (m *ShardManager) Start(ctx context.Context) error {
 			m.logger.Info("shard manager shutting down, releasing all shards")
 			releaseCtx, cancel := context.WithTimeout(context.Background(),
 				orDefault(m.shutdownDrainWait, shutdownDrainWait)+
-					orDefault(m.shutdownCancelWait, shutdownCancelWait)+shutdownReleaseTimeout)
+					orDefault(m.shutdownCancelWait, shutdownCancelWait)+2*shutdownReleaseTimeout)
 			defer cancel()
 			m.releaseAll(releaseCtx)
 			return nil
@@ -249,14 +276,13 @@ func (m *ShardManager) revokeInPass(ctx context.Context, shard int, released *[]
 	}
 }
 
-// renewalDue returns true when a held lease has two rebalance intervals or
-// less of validity left. A lease without a renew time is due.
+// renewalDue returns true when the renew time of a held lease is shardRenewAge
+// or more before now. A lease without a renew time is due.
 func (m *ShardManager) renewalDue(lease *coordinationv1.Lease, now time.Time) bool {
 	if lease.Spec.RenewTime == nil {
 		return true
 	}
-	remaining := lease.Spec.RenewTime.Add(time.Duration(m.leaseDuration) * time.Second).Sub(now)
-	return remaining <= 2*m.interval
+	return now.Sub(lease.Spec.RenewTime.Time) >= shardRenewAge
 }
 
 // renewDue renews every held shard that is due, oldest renewal first. A shard
@@ -524,6 +550,9 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 	if len(newly) > 0 && m.onAcquired != nil {
 		m.onAcquired(newly)
 	}
+
+	// Step 9: Delete the presence leases that other replicas left behind.
+	m.deleteStalePresence(ctx, replicaLeases.Items)
 }
 
 // heldLeaseSpec returns a LeaseSpec holding a lease as this replica, renewed
@@ -560,7 +589,7 @@ func (m *ShardManager) buildLease(name, role string, now time.Time, withAcquireT
 
 // upsertPresence creates or updates the replica presence lease.
 func (m *ShardManager) upsertPresence(ctx context.Context) {
-	leaseName := "varroa-replica-" + m.identity + ".varroa.dev"
+	leaseName := presenceLeaseName(m.identity)
 	now := m.clock()
 
 	lease := m.buildLease(leaseName, "replica", now, false)
@@ -625,10 +654,23 @@ func (m *ShardManager) releaseLease(ctx context.Context, lease *coordinationv1.L
 	}
 }
 
-// releaseAll waits for the work on all held shards, releases the shards, and
-// deletes the presence lease. It keeps the lease of a shard whose work still
-// runs after the cancel, so that lease expires.
+// presenceLeaseName returns the name of the presence lease of identity.
+func presenceLeaseName(identity string) string { return "varroa-replica-" + identity + ".varroa.dev" }
+
+// releaseAll deletes the presence lease, waits for the work on all held
+// shards, and releases the shards. The presence delete comes first and has its
+// own timeout, so a long drain cannot leave the lease behind. Other replicas
+// still wait for each shard lease. releaseAll keeps the lease of a shard whose
+// work still runs after the cancel, so that lease expires.
 func (m *ShardManager) releaseAll(ctx context.Context) {
+	presenceName := presenceLeaseName(m.identity)
+	presenceCtx, cancel := context.WithTimeout(ctx, shutdownReleaseTimeout)
+	err := m.deleteLease(presenceCtx, presenceName, "")
+	cancel()
+	if err != nil && !apierrors.IsNotFound(err) {
+		m.logger.Warn("failed to delete presence lease on shutdown", "lease", presenceName, "error", err)
+	}
+
 	shards := m.held.Shards()
 	busy := make(map[int]bool)
 	for _, shard := range m.held.Drain(shards,
@@ -650,14 +692,6 @@ func (m *ShardManager) releaseAll(ctx context.Context) {
 			continue
 		}
 		m.releaseLease(ctx, existing)
-	}
-
-	// Delete presence lease.
-	presenceName := "varroa-replica-" + m.identity + ".varroa.dev"
-	if err := m.deleteLease(ctx, presenceName); err != nil {
-		if !apierrors.IsNotFound(err) {
-			m.logger.Warn("failed to delete presence lease on shutdown", "lease", presenceName, "error", err)
-		}
 	}
 }
 
@@ -697,11 +731,49 @@ func (m *ShardManager) updateLease(ctx context.Context, lease *coordinationv1.Le
 	return m.leases.Update(ctx, lease, metav1.UpdateOptions{})
 }
 
-// deleteLease deletes one lease under the lease call timeout.
-func (m *ShardManager) deleteLease(ctx context.Context, name string) error {
+// deleteLease deletes one lease under the lease call timeout. A non-empty
+// resourceVersion is a precondition of the delete.
+func (m *ShardManager) deleteLease(ctx context.Context, name, resourceVersion string) error {
 	ctx, cancel := m.callCtx(ctx)
 	defer cancel()
-	return m.leases.Delete(ctx, name, metav1.DeleteOptions{})
+	opts := metav1.DeleteOptions{}
+	if resourceVersion != "" {
+		opts.Preconditions = &metav1.Preconditions{ResourceVersion: &resourceVersion}
+	}
+	return m.leases.Delete(ctx, name, opts)
+}
+
+// deleteStalePresence deletes the presence leases of other replicas that
+// expired presenceGCDurations lease durations ago. It makes at most
+// presenceGCBatch delete calls within presenceGCTimeout. Each delete carries
+// the listed resourceVersion as a precondition, so a lease that its replica
+// renewed after the List stays. A NotFound or Conflict answer skips the lease.
+// Any other error ends the deletes until the next pass.
+func (m *ShardManager) deleteStalePresence(ctx context.Context, leases []coordinationv1.Lease) {
+	ctx, cancel := context.WithTimeout(ctx, presenceGCTimeout)
+	defer cancel()
+	own := presenceLeaseName(m.identity)
+	now := m.clock()
+	calls := 0
+	for i := range leases {
+		l := &leases[i]
+		if l.Name == own || !presenceStale(l, now, m.leaseDuration) {
+			continue
+		}
+		if calls >= presenceGCBatch {
+			return
+		}
+		calls++
+		err := m.deleteLease(ctx, l.Name, l.ResourceVersion)
+		switch {
+		case err == nil:
+			m.logger.Info("deleted a stale presence lease", "lease", l.Name)
+		case apierrors.IsNotFound(err) || apierrors.IsConflict(err):
+		default:
+			m.logger.Warn("failed to delete a stale presence lease", "lease", l.Name, "error", err)
+			return
+		}
+	}
 }
 
 // orDefault returns d, or def when d is zero.
@@ -712,13 +784,36 @@ func orDefault(d, def time.Duration) time.Duration {
 	return d
 }
 
-// isLeaseExpired returns true if the lease has expired (renewTime + duration < now).
-func isLeaseExpired(lease *coordinationv1.Lease, now time.Time, durationSec int32) bool {
+// leaseDurationOf returns the duration that a lease states. A lease without a
+// positive leaseDurationSeconds uses fallback seconds. Every replica judges a
+// lease by the duration that its holder wrote, so replicas with different
+// durations agree on its expiry.
+func leaseDurationOf(lease *coordinationv1.Lease, fallback int32) time.Duration {
+	if d := lease.Spec.LeaseDurationSeconds; d != nil && *d > 0 {
+		return time.Duration(*d) * time.Second
+	}
+	return time.Duration(fallback) * time.Second
+}
+
+// isLeaseExpired returns true when the lease has no renew time, or when its
+// renew time plus its own duration is before now. fallback seconds apply to a
+// lease that states no duration.
+func isLeaseExpired(lease *coordinationv1.Lease, now time.Time, fallback int32) bool {
 	if lease.Spec.RenewTime == nil {
 		return true
 	}
-	expiry := lease.Spec.RenewTime.Add(time.Duration(durationSec) * time.Second)
-	return now.After(expiry)
+	return now.After(lease.Spec.RenewTime.Add(leaseDurationOf(lease, fallback)))
+}
+
+// presenceStale returns true when a presence lease expired presenceGCDurations
+// lease durations before now. A lease without a renew time is stale: isLeaseExpired
+// already treats it as expired, and no other path deletes it.
+func presenceStale(lease *coordinationv1.Lease, now time.Time, fallback int32) bool {
+	if lease.Spec.RenewTime == nil {
+		return true
+	}
+	d := leaseDurationOf(lease, fallback)
+	return now.After(lease.Spec.RenewTime.Add(time.Duration(1+presenceGCDurations) * d))
 }
 
 // isLeaseHeldBy returns true if identity holds the lease.
