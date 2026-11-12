@@ -66,7 +66,7 @@ func (t *BusReadModelTransport) Connected(ns, name string) bool {
 }
 
 // Info delegates to the underlying BusReadModel.
-func (t *BusReadModelTransport) Info(ns, name string) (string, time.Time, time.Time, bool) {
+func (t *BusReadModelTransport) Info(ns, name string) (MiteInfo, bool, error) {
 	return t.model.Info(ns, name)
 }
 

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -364,7 +365,7 @@ func TestDeriveMiteHealth(t *testing.T) {
 		obs := base()
 		obs.TransportConnected = false
 		got := deriveMiteHealth(obs, nil, now)
-		if got.Connected || got.StaleOverride || len(got.Conditions) != 0 {
+		if got.Connected || got.Miss != presenceMissMissing || len(got.Conditions) != 0 {
 			t.Errorf("got %+v, want plain disconnect", got)
 		}
 	})
@@ -372,8 +373,19 @@ func TestDeriveMiteHealth(t *testing.T) {
 		obs := base()
 		obs.LastHeartbeat = stale
 		got := deriveMiteHealth(obs, nil, now)
-		if got.Connected || !got.StaleOverride {
+		if got.Connected || got.Miss != presenceMissStale {
 			t.Errorf("got %+v, want stale-forced disconnect", got)
+		}
+	})
+	t.Run("read error reports unreadable and no status", func(t *testing.T) {
+		obs := base()
+		obs.ReadErr = fmt.Errorf("kv get presence: timeout")
+		got := deriveMiteHealth(obs, nil, now)
+		if got.Connected || got.Miss != presenceMissUnreadable {
+			t.Errorf("got %+v, want unreadable disconnect", got)
+		}
+		if len(got.Conditions) != 0 || got.MiteStatus.Connected {
+			t.Errorf("got %+v, want no conditions and no mite status", got)
 		}
 	})
 	t.Run("connected without snapshot sets only Ready", func(t *testing.T) {
@@ -462,5 +474,32 @@ func TestResolveUpdateCenterGate_PluginInfoURL(t *testing.T) {
 	got = resolveUpdateCenterGate(explicit, readyUC, "http://uc:8080")
 	if got.PluginInfoURL != "https://mirror.example.org/plugin-versions.json" {
 		t.Errorf("PluginInfoURL = %q, want the explicit pluginInfoURL", got.PluginInfoURL)
+	}
+}
+
+// TestPresenceMissCounts pins which passes count toward streamLossMisses.
+func TestPresenceMissCounts(t *testing.T) {
+	now := time.Now()
+	fresh := &metav1.Time{Time: now.Add(-10 * time.Second)}
+	old := &metav1.Time{Time: now.Add(-3 * time.Minute)}
+	tests := []struct {
+		name     string
+		miss     presenceMiss
+		lastSeen *metav1.Time
+		want     bool
+	}{
+		{"connected does not count", presenceMissNone, nil, false},
+		{"missing record counts", presenceMissMissing, fresh, true},
+		{"stale heartbeat counts", presenceMissStale, fresh, true},
+		{"read error with fresh lastSeen does not count", presenceMissUnreadable, fresh, false},
+		{"read error with old lastSeen counts", presenceMissUnreadable, old, true},
+		{"read error without lastSeen counts", presenceMissUnreadable, nil, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := presenceMissCounts(tc.miss, tc.lastSeen, now); got != tc.want {
+				t.Errorf("presenceMissCounts(%q) = %v, want %v", tc.miss, got, tc.want)
+			}
+		})
 	}
 }

@@ -981,8 +981,8 @@ type lastSeenMiteTransport struct {
 	lastSeen time.Time
 }
 
-func (m *lastSeenMiteTransport) Info(_, _ string) (string, time.Time, time.Time, bool) {
-	return "mite-1.0", m.lastSeen, m.lastSeen.Add(72 * time.Hour), true
+func (m *lastSeenMiteTransport) Info(_, _ string) (transport.MiteInfo, bool, error) {
+	return transport.MiteInfo{Version: "mite-1.0", LastHeartbeat: m.lastSeen, CertExpiry: m.lastSeen.Add(72 * time.Hour)}, true, nil
 }
 
 func (m *lastSeenMiteTransport) Snapshot(_, _ string) *mitev1.StateSnapshot {
@@ -1072,8 +1072,8 @@ type absentMiteTransport struct {
 	transport.Transport
 }
 
-func (m *absentMiteTransport) Info(_, _ string) (string, time.Time, time.Time, bool) {
-	return "", time.Time{}, time.Time{}, false
+func (m *absentMiteTransport) Info(_, _ string) (transport.MiteInfo, bool, error) {
+	return transport.MiteInfo{}, false, nil
 }
 
 func (m *absentMiteTransport) Snapshot(_, _ string) *mitev1.StateSnapshot { return nil }
@@ -1147,8 +1147,8 @@ type blankHealthMiteTransport struct {
 	lastSeen time.Time
 }
 
-func (m *blankHealthMiteTransport) Info(_, _ string) (string, time.Time, time.Time, bool) {
-	return "mite-1.0", m.lastSeen, m.lastSeen.Add(72 * time.Hour), true
+func (m *blankHealthMiteTransport) Info(_, _ string) (transport.MiteInfo, bool, error) {
+	return transport.MiteInfo{Version: "mite-1.0", LastHeartbeat: m.lastSeen, CertExpiry: m.lastSeen.Add(72 * time.Hour)}, true, nil
 }
 
 func (m *blankHealthMiteTransport) Snapshot(_, _ string) *mitev1.StateSnapshot {
@@ -1214,9 +1214,9 @@ func (m *concurrencyMiteTransport) track() {
 	time.Sleep(m.delay)
 }
 
-func (m *concurrencyMiteTransport) Info(_, name string) (string, time.Time, time.Time, bool) {
+func (m *concurrencyMiteTransport) Info(_, name string) (transport.MiteInfo, bool, error) {
 	m.track()
-	return "mite-" + name, time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC), time.Time{}, true
+	return transport.MiteInfo{Version: "mite-" + name, LastHeartbeat: time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC), CertExpiry: time.Time{}}, true, nil
 }
 
 func (m *concurrencyMiteTransport) Snapshot(_, _ string) *mitev1.StateSnapshot {

@@ -21,6 +21,13 @@ var ErrContentUnavailable = errors.New("mite last-applied content unavailable")
 // stored anywhere, so the caller must send it again.
 var ErrMiteUnreachable = errors.New("no gateway forwarded the desired state to the mite")
 
+// MiteInfo is what the presence record of one mite holds.
+type MiteInfo struct {
+	Version       string
+	LastHeartbeat time.Time
+	CertExpiry    time.Time
+}
+
 // Transport is how the operator talks to a mite. The interface uses
 // (ns, name) argument order — the conventional Kubernetes ordering.
 type Transport interface {
@@ -44,9 +51,11 @@ type Transport interface {
 	// Connected reports whether a mite stream is currently held (anywhere).
 	Connected(ns, name string) bool
 
-	// Info returns version, last heartbeat, and cert expiry for the connected
-	// mite. The final return value is false if no mite is connected.
-	Info(ns, name string) (version string, lastHeartbeat, certExpiry time.Time, ok bool)
+	// Info returns the presence record of the mite of ns/name. ok is false
+	// when no record exists. err is non-nil when the transport cannot read or
+	// decode the record; ok is then false. A read error is no evidence that
+	// the mite is disconnected.
+	Info(ns, name string) (info MiteInfo, ok bool, err error)
 
 	// IdleGauges returns the latest idle gauge snapshot from the mite's
 	// heartbeat, along with the timestamp it was received. The final return

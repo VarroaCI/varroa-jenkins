@@ -1346,13 +1346,13 @@ func (s *Server) mergeMiteStatus(name, namespace string, cr *controllerResponse)
 	if s.deps.MiteRegistry == nil {
 		return
 	}
-	miteVersion, lastHeartbeat, _, ok := s.deps.MiteRegistry.Info(namespace, name)
-	if !ok {
+	info, ok, err := s.deps.MiteRegistry.Info(namespace, name)
+	if err != nil || !ok {
 		return
 	}
 	cr.MiteConnected = true
-	cr.MiteVersion = miteVersion
-	cr.LastSeen = lastHeartbeat.UTC().Format("2006-01-02T15:04:05Z")
+	cr.MiteVersion = info.Version
+	cr.LastSeen = info.LastHeartbeat.UTC().Format("2006-01-02T15:04:05Z")
 
 	if snap := s.deps.MiteRegistry.Snapshot(namespace, name); snap != nil {
 		// "NORMAL" is the Jenkins mode sentinel, never a valid version — drop it.
@@ -1370,14 +1370,14 @@ func (s *Server) mergeMiteTelemetry(name, namespace string, cr *controllerDetail
 	if s.deps.MiteRegistry == nil {
 		return
 	}
-	miteVersion, lastHeartbeat, certExpiry, ok := s.deps.MiteRegistry.Info(namespace, name)
-	if !ok {
+	info, ok, err := s.deps.MiteRegistry.Info(namespace, name)
+	if err != nil || !ok {
 		return
 	}
 	cr.MiteConnected = true
-	cr.MiteVersion = miteVersion
-	cr.LastSeen = lastHeartbeat.UTC().Format("2006-01-02T15:04:05Z")
-	cr.CertExpiry = certExpiry.Format("2006-01-02")
+	cr.MiteVersion = info.Version
+	cr.LastSeen = info.LastHeartbeat.UTC().Format("2006-01-02T15:04:05Z")
+	cr.CertExpiry = info.CertExpiry.Format("2006-01-02")
 
 	if snap := s.deps.MiteRegistry.Snapshot(namespace, name); snap != nil {
 		// "NORMAL" is the Jenkins mode sentinel, never a valid version — drop it.

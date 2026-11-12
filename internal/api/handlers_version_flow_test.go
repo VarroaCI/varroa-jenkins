@@ -13,6 +13,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
+	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -273,8 +274,8 @@ type normalMiteTransport struct{ stubTransport }
 func (n *normalMiteTransport) Snapshot(_, _ string) *mitev1.StateSnapshot {
 	return &mitev1.StateSnapshot{JenkinsVersion: "NORMAL", JenkinsHealth: "healthy"}
 }
-func (n *normalMiteTransport) Info(_, _ string) (string, time.Time, time.Time, bool) {
-	return "mite-1.0", time.Now(), time.Now(), true
+func (n *normalMiteTransport) Info(_, _ string) (transport.MiteInfo, bool, error) {
+	return transport.MiteInfo{Version: "mite-1.0", LastHeartbeat: time.Now(), CertExpiry: time.Now()}, true, nil
 }
 
 // TestNormalVersionGuard asserts the "NORMAL" Jenkins mode sentinel is never

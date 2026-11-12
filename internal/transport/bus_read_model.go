@@ -53,18 +53,21 @@ func (m *BusReadModel) Connected(ns, name string) bool {
 	return err == nil && data != nil
 }
 
-// Info returns version, last heartbeat, and cert expiry for the mite
-// from the gateway-written presence record.
-func (m *BusReadModel) Info(ns, name string) (version string, lastHeartbeat, certExpiry time.Time, ok bool) {
+// Info returns the presence record of the mite of ns/name. A missing record
+// gives ok=false and a nil error. A read or decode failure gives an error.
+func (m *BusReadModel) Info(ns, name string) (info MiteInfo, ok bool, err error) {
 	data, err := m.presenceKV.Get(bus.PresenceKey(m.cluster, ns, name))
-	if err != nil || data == nil {
-		return "", time.Time{}, time.Time{}, false
+	if err != nil {
+		return MiteInfo{}, false, err
+	}
+	if data == nil {
+		return MiteInfo{}, false, nil
 	}
 	var p bus.Presence
 	if err := json.Unmarshal(data, &p); err != nil {
-		return "", time.Time{}, time.Time{}, false
+		return MiteInfo{}, false, fmt.Errorf("decode presence %s/%s: %w", ns, name, err)
 	}
-	return p.Version, p.LastHeartbeat, p.CertExpiry, true
+	return MiteInfo{Version: p.Version, LastHeartbeat: p.LastHeartbeat, CertExpiry: p.CertExpiry}, true, nil
 }
 
 // StreamDegraded reports whether the gateway's bus→gRPC bridge for this mite
