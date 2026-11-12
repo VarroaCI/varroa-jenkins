@@ -19,6 +19,8 @@ On the core, with network policies enabled, set `nats.external.allowedCIDRs` to 
 
 With `nats.external.externalTrafficPolicy: Local`, each node sends NATS traffic only to a NATS pod on that node. A load balancer checks each node and skips a node without a NATS pod. A NodePort drops the connection on a node without a NATS pod. For a NodePort, set the member `bus.url` to a comma-separated list of node addresses that run NATS pods. Add each address to `nats.external.ipSANs` on the core and to `networkPolicy.coreNatsEgress.cidrs` on the member. Pin the NATS pods to those nodes with `nats.podTemplate.merge.spec.nodeSelector`.
 
+Each member operator and gateway sends a NATS ping every 20 seconds. The pings add less than 1 MB a day for each connection. The member reconnects when two pings in a row get no answer. A NATS write that waits more than 10 seconds fails, and the blocked ping does not reach the server.
+
 ## Install the member
 
 Create in the member namespace a `varroa-nats-creds` Secret containing only `operator-password`, `gateway-password`, and `ca.crt`, copied securely from the core deployment. Do not copy private keys or BFF credentials.

@@ -60,6 +60,10 @@ type Config struct {
 	// logger assigned after Connect returns would be an unsynchronized write
 	// to a field already being read. Nil disables that logging.
 	Logger *slog.Logger
+
+	// pingInterval replaces PingInterval when it is above zero. Only tests of
+	// this package set it, to see a dead connection in milliseconds.
+	pingInterval time.Duration
 }
 
 // IsZero returns true when no options are set (empty config).
@@ -73,6 +77,24 @@ func (c Config) IsZero() bool {
 // rotation reaching a mounted Secret, and short enough that a permanently
 // broken configuration still surfaces as a failing process.
 const DefaultStartupTimeout = 3 * time.Minute
+
+// Liveness bounds of every bus connection. A Conn pings its server every
+// PingInterval. When MaxPingsOut pings in a row get no answer, the Conn drops
+// the connection and reconnects. A write that waits longer than WriteTimeout
+// fails. A blocked write holds the connection lock and delays the next ping.
+// On TLS, a write that timed out makes every later write fail at once.
+// The ping timer resets only after its write returns, so each ping adds up
+// to WriteTimeout to the interval. MaxPingsOut sends fill the window, and the
+// stale check runs on the tick after them. DeadConnectionBound is the longest
+// time a Conn stays on a silent dead connection, and the activity publisher
+// retries an event for two minutes. This bound plus one reconnect must stay
+// inside that budget.
+const (
+	PingInterval        = 20 * time.Second
+	MaxPingsOut         = 2
+	WriteTimeout        = 10 * time.Second
+	DeadConnectionBound = MaxPingsOut*(PingInterval+WriteTimeout) + PingInterval
+)
 
 // Conn wraps a NATS connection and its JetStream context.
 type Conn struct {
@@ -134,16 +156,25 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 	// outside the IsZero gate below because a Config carrying nothing but a
 	// Logger is still worth honouring.
 	startupTimeout := DefaultStartupTimeout
+	pingInterval := PingInterval
 	if len(cfg) > 0 {
 		c.logger = cfg[0].Logger
 		if cfg[0].StartupTimeout > 0 {
 			startupTimeout = cfg[0].StartupTimeout
+		}
+		if cfg[0].pingInterval > 0 {
+			pingInterval = cfg[0].pingInterval
 		}
 	}
 	opts := []nats.Option{
 		nats.Name("varroa"),
 		nats.ReconnectWait(2 * time.Second),
 		nats.MaxReconnects(-1),
+		// The nats.go defaults keep a silent dead connection for four to seven
+		// minutes, longer than the activity retry budget. See DeadConnectionBound.
+		nats.PingInterval(pingInterval),
+		nats.MaxPingsOutstanding(MaxPingsOut),
+		nats.FlusherTimeout(WriteTimeout),
 		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
 			if c.logger != nil {
 				c.logger.Warn("nats disconnected", "error", err)

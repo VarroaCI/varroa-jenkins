@@ -158,6 +158,8 @@ The recorder writes each event once into the `activity` table. The activity read
 
 The operator, the gateway, and the BFF wait for the stream to acknowledge each event. A JetStream leader election or a short NATS outage can stop the acknowledgement. The component then keeps the event in memory and sends it again. It keeps at most 4096 events, and it tries each event for at most two minutes. Past either limit, it drops the event. It logs `activity event dropped` at Error level with the full event. It also adds one to `varroa_activity_publish_dropped_total`, with the attributes `component` and `reason`.
 
+Each component sends a NATS ping every 20 seconds. When two pings in a row get no answer, it reconnects. A NATS write that waits more than 10 seconds fails. A component thus leaves a silently broken connection within 80 seconds, inside the two-minute budget.
+
 ```yaml
 recordStore:
   retention:
