@@ -215,6 +215,42 @@ func TestValidateJenkinsRoleBinding(t *testing.T) {
 			},
 			wantErr: "jenkinsScope",
 		},
+		{
+			name: "empty scope type refused",
+			binding: &JenkinsRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: "empty-scope"},
+				Spec: JenkinsRoleBindingSpec{
+					RoleRef:      "varroa:viewer",
+					Subjects:     []SubjectRef{{Kind: "Group", Name: "devs"}},
+					JenkinsScope: &JenkinsScope{},
+				},
+			},
+			wantErr: "jenkinsScope.type",
+		},
+		{
+			name: "lowercase folder type refused",
+			binding: &JenkinsRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: "lower-scope"},
+				Spec: JenkinsRoleBindingSpec{
+					RoleRef:      "varroa:viewer",
+					Subjects:     []SubjectRef{{Kind: "Group", Name: "devs"}},
+					JenkinsScope: &JenkinsScope{Type: "folder", Folder: "payments"},
+				},
+			},
+			wantErr: "jenkinsScope.type",
+		},
+		{
+			name: "unknown propagate refused",
+			binding: &JenkinsRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: "bad-propagate"},
+				Spec: JenkinsRoleBindingSpec{
+					RoleRef:      "varroa:viewer",
+					Subjects:     []SubjectRef{{Kind: "Group", Name: "devs"}},
+					JenkinsScope: &JenkinsScope{Type: "Folder", Folder: "payments", Propagate: "subtree"},
+				},
+			},
+			wantErr: "propagate",
+		},
 	}
 
 	for _, tt := range tests {

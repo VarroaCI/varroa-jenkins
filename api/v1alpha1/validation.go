@@ -38,6 +38,16 @@ func ValidateJenkinsRole(r *JenkinsRole) error {
 	return nil
 }
 
+// IsJenkinsScopeType reports whether t is one of the JenkinsScope types. The
+// match is case-sensitive, and the empty string is not a type.
+func IsJenkinsScopeType(t string) bool {
+	switch t {
+	case JenkinsScopeGlobal, JenkinsScopeFolder, JenkinsScopePattern:
+		return true
+	}
+	return false
+}
+
 // ValidateJenkinsRoleBinding validates a JenkinsRoleBinding spec.
 func ValidateJenkinsRoleBinding(b *JenkinsRoleBinding) error {
 	if b == nil {
@@ -66,11 +76,13 @@ func ValidateJenkinsRoleBinding(b *JenkinsRoleBinding) error {
 
 	// Validate JenkinsScope if present.
 	if js := b.Spec.JenkinsScope; js != nil {
-		switch js.Type {
-		case "Global", "Folder", "Pattern", "":
-			// valid (empty = Global)
-		default:
+		if !IsJenkinsScopeType(js.Type) {
 			return fmt.Errorf("spec.jenkinsScope.type must be Global, Folder, or Pattern (got %q)", js.Type)
+		}
+		switch js.Propagate {
+		case "", "None", "Children", "Subtree":
+		default:
+			return fmt.Errorf("spec.jenkinsScope.propagate must be None, Children, or Subtree (got %q)", js.Propagate)
 		}
 	}
 

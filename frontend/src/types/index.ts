@@ -411,7 +411,7 @@ export interface JenkinsRoleList {
 }
 
 export interface JenkinsScope {
-  type?: string; // "Global" | "Folder" | "Pattern"
+  type: "Global" | "Folder" | "Pattern";
   folder?: string;
   propagate?: "None" | "Children" | "Subtree";
   pattern?: string;

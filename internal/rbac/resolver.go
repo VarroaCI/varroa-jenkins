@@ -1345,7 +1345,10 @@ func (r *Resolver) collectFromJenkinsRoleBindings(controller *v1alpha1.Controlle
 		if len(jr.Spec.Permissions) == 0 {
 			continue
 		}
-		roleType, pattern := lowerScope(jr.Spec.RoleType, binding.Spec.JenkinsScope)
+		roleType, pattern, ok := lowerScope(jr.Spec.RoleType, binding.Spec.JenkinsScope)
+		if !ok {
+			continue
+		}
 		scopeKey := scopeSuffix(binding.Spec.JenkinsScope)
 		name := binding.Spec.RoleRef
 		if !strings.HasPrefix(name, "varroa:") {
@@ -1469,37 +1472,41 @@ func controllerScopeMatches(scope *v1alpha1.VarroaRoleBindingScope, controller *
 	return true
 }
 
-// lowerScope converts a JenkinsRole.RoleType + JenkinsScope into a
-// concrete (roleType, pattern) pair for role-strategy.
-func lowerScope(roleType string, js *v1alpha1.JenkinsScope) (string, string) {
+// lowerScope converts a JenkinsRole.RoleType and a JenkinsScope into the
+// role-strategy (roleType, pattern) pair. A nil scope is Global. ok is false
+// for a type other than Global, Folder, or Pattern, and the caller then grants
+// nothing: a wrong type must never widen a binding to every item. The CRD enum
+// refuses such a type on a write. A stored object can still hold one, because
+// the apiserver keeps an unchanged invalid value.
+func lowerScope(roleType string, js *v1alpha1.JenkinsScope) (string, string, bool) {
+	if js != nil && !v1alpha1.IsJenkinsScopeType(js.Type) {
+		return "", "", false
+	}
 	// Agent roles go into the "agents" bucket regardless of scope.
 	// TODO: thread agent-name pattern through for Agent-type roles
 	// so that JenkinsScope.Pattern can scope an agent role to specific
 	// agents by name regex.
 	if roleType == "Agent" {
-		return "Agent", ""
+		return "Agent", "", true
 	}
-	if js == nil || js.Type == "" || js.Type == "Global" {
-		return "Global", ""
+	if js == nil || js.Type == v1alpha1.JenkinsScopeGlobal {
+		return "Global", "", true
 	}
 	switch js.Type {
-	case "Pattern":
-		return "Item", js.Pattern
-	case "Folder":
+	case v1alpha1.JenkinsScopePattern:
+		return "Item", js.Pattern, true
+	case v1alpha1.JenkinsScopeFolder:
 		f := regexp.QuoteMeta(js.Folder)
 		switch js.Propagate {
-		case "None", "":
-			return "Item", "^" + f + "$"
 		case "Children":
-			return "Item", "^" + f + "/[^/]*$"
+			return "Item", "^" + f + "/[^/]*$", true
 		case "Subtree":
-			return "Item", "^" + f + "($|/.*)$"
+			return "Item", "^" + f + "($|/.*)$", true
 		default:
-			return "Item", "^" + f + "$"
+			return "Item", "^" + f + "$", true
 		}
-	default:
-		return "Global", ""
 	}
+	return "", "", false
 }
 
 // scopeSuffix makes a role name unique per scope.

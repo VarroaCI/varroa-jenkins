@@ -131,8 +131,9 @@ spec:
                   Global.
                 properties:
                   folder:
-                    description: Folder is the folder path, e.g. "tenant-a/project-x".
-                      Only for Type=Folder.
+                    description: |-
+                      Folder is the full Jenkins folder name, with no leading slash, e.g.
+                      "tenant-a/project-x". Only for Type=Folder.
                     type: string
                   pattern:
                     description: Pattern is the raw regex pattern. Only for Type=Pattern.
@@ -140,9 +141,17 @@ spec:
                   propagate:
                     description: Propagate is "None", "Children", or "Subtree". Only
                       for Type=Folder.
+                    enum:
+                    - None
+                    - Children
+                    - Subtree
                     type: string
                   type:
                     description: Type is "Global", "Folder", or "Pattern".
+                    enum:
+                    - Global
+                    - Folder
+                    - Pattern
                     type: string
                 required:
                 - type

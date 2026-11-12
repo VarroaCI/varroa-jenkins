@@ -54,7 +54,7 @@ export default function JenkinsRoleBindingForm() {
   const [scopeNamespaces, setScopeNamespaces] = useState("");
   const [selectorLabels, setSelectorLabels] = useState<LabelEntry[]>([]);
   // JenkinsScope fields
-  const [jenkinsScopeType, setJenkinsScopeType] = useState<string>("");
+  const [jenkinsScopeType, setJenkinsScopeType] = useState<JenkinsScope["type"] | "">("");
   const [jenkinsScopeFolder, setJenkinsScopeFolder] = useState("");
   const [jenkinsScopePropagate, setJenkinsScopePropagate] = useState<string>("");
   const [jenkinsScopePattern, setJenkinsScopePattern] = useState("");
@@ -152,12 +152,13 @@ export default function JenkinsRoleBindingForm() {
     let jenkinsScope: JenkinsScope | undefined;
     if (jenkinsScopeType) {
       jenkinsScope = { type: jenkinsScopeType };
-      if (jenkinsScopeType === "Folder" && jenkinsScopeFolder)
-        jenkinsScope.folder = jenkinsScopeFolder;
+      if (jenkinsScopeType === "Folder") {
+        if (jenkinsScopeFolder) jenkinsScope.folder = jenkinsScopeFolder;
+        if (jenkinsScopePropagate)
+          jenkinsScope.propagate = jenkinsScopePropagate as JenkinsScope["propagate"];
+      }
       if (jenkinsScopeType === "Pattern" && jenkinsScopePattern)
         jenkinsScope.pattern = jenkinsScopePattern;
-      if (jenkinsScopePropagate)
-        jenkinsScope.propagate = jenkinsScopePropagate as JenkinsScope["propagate"];
     }
 
     const binding: JenkinsRoleBinding = {
@@ -411,7 +412,9 @@ export default function JenkinsRoleBindingForm() {
                   <select
                     className={styles.formSelect}
                     value={jenkinsScopeType}
-                    onChange={(e) => setJenkinsScopeType(e.target.value)}
+                    onChange={(e) =>
+                      setJenkinsScopeType(e.target.value as JenkinsScope["type"] | "")
+                    }
                   >
                     <option value="">-- No Jenkins scope --</option>
                     <option value="Global">Global</option>
@@ -425,10 +428,13 @@ export default function JenkinsRoleBindingForm() {
                     <label className={styles.formLabel}>Folder</label>
                     <input
                       className={styles.formInput}
-                      placeholder="e.g. /tenants/backend"
+                      placeholder="e.g. payments/backend"
                       value={jenkinsScopeFolder}
                       onChange={(e) => setJenkinsScopeFolder(e.target.value)}
                     />
+                    <p className={styles.hint}>
+                      Enter the full name of the folder, with no leading slash.
+                    </p>
                   </div>
                 )}
 
@@ -444,7 +450,7 @@ export default function JenkinsRoleBindingForm() {
                   </div>
                 )}
 
-                {jenkinsScopeType && (
+                {jenkinsScopeType === "Folder" && (
                   <div className={styles.formGroup}>
                     <label className={styles.formLabel}>Propagate</label>
                     <select
