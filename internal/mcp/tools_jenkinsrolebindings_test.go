@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -30,6 +31,7 @@ func jenkinsRoleBindingDeps(t *testing.T) *api.Dependencies {
 				RoleRef:  "ci-deploy",
 				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}, {Kind: "Group", Name: "devs"}},
 				ControllerScope: &v1alpha1.VarroaRoleBindingScope{
+					Namespaces:         []string{"prod-a"},
 					ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "jenkins"}},
 				},
 				JenkinsScope: &v1alpha1.JenkinsScope{
@@ -149,11 +151,18 @@ func TestListJenkinsRoleBindings_DefaultsToSummary(t *testing.T) {
 		t.Fatalf("expected 2 items, got %v", sc["items"])
 	}
 	scoped, nilScope := findJenkinsRoleBindings(t, items)
+	if _, present := nilScope["controllerScope"]; present {
+		t.Errorf("a binding with no controller scope must omit controllerScope: %v", nilScope)
+	}
+	wantCS := map[string]any{"namespaces": []any{"prod-a"}, "selector": true}
+	if got := scoped["controllerScope"]; !reflect.DeepEqual(got, wantCS) {
+		t.Errorf("controllerScope = %v, want %v", got, wantCS)
+	}
 
 	for _, item := range []map[string]any{scoped, nilScope} {
 		allowed := map[string]bool{
 			"name": true, "roleRef": true, "subjectCount": true,
-			"scopeType": true, "scopeFolder": true,
+			"controllerScope": true, "scopeType": true, "scopeFolder": true,
 		}
 		for k := range item {
 			if !allowed[k] {
@@ -757,5 +766,64 @@ func TestJenkinsRoleBindingTools_DeclareScopeArgs(t *testing.T) {
 	}
 	for name := range want {
 		t.Errorf("tool %s is not listed", name)
+	}
+}
+
+func TestSummarizeJenkinsRoleBinding_ControllerScope(t *testing.T) {
+	cases := []struct {
+		name  string
+		scope *v1alpha1.VarroaRoleBindingScope
+		want  *jenkinsControllerScopeSummary
+	}{
+		{name: "nil scope", scope: nil, want: nil},
+		{name: "empty scope", scope: &v1alpha1.VarroaRoleBindingScope{}, want: nil},
+		{name: "empty selector", scope: &v1alpha1.VarroaRoleBindingScope{ControllerSelector: &metav1.LabelSelector{}}, want: nil},
+		{
+			name:  "namespaces only",
+			scope: &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"prod-a", "prod-b"}},
+			want:  &jenkinsControllerScopeSummary{Namespaces: []string{"prod-a", "prod-b"}, Selector: false},
+		},
+		{
+			name: "matchLabels only",
+			scope: &v1alpha1.VarroaRoleBindingScope{ControllerSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"secret-key": "secret-value"},
+			}},
+			want: &jenkinsControllerScopeSummary{Selector: true},
+		},
+		{
+			name: "matchExpressions only",
+			scope: &v1alpha1.VarroaRoleBindingScope{ControllerSelector: &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "tier", Operator: metav1.LabelSelectorOpExists}},
+			}},
+			want: &jenkinsControllerScopeSummary{Selector: true},
+		},
+		{
+			name: "both",
+			scope: &v1alpha1.VarroaRoleBindingScope{
+				Namespaces:         []string{"prod-a"},
+				ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "jenkins"}},
+			},
+			want: &jenkinsControllerScopeSummary{Namespaces: []string{"prod-a"}, Selector: true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := summarizeControllerScope(tc.scope)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("summarizeControllerScope() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+	// A label key or value must never reach the summary.
+	raw, err := json.Marshal(summarizeControllerScope(&v1alpha1.VarroaRoleBindingScope{
+		ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"secret-key": "secret-value"}},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range []string{"secret-key", "secret-value"} {
+		if strings.Contains(string(raw), leak) {
+			t.Errorf("summary leaks label text %q: %s", leak, raw)
+		}
 	}
 }

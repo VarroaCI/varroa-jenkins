@@ -27,6 +27,8 @@ reports `destructiveHint: false`.
 
 `create_jenkins_role_binding` and `update_jenkins_role_binding` take `controllerScope` and `jenkinsScope`. `controllerScope` takes `namespaces` and `controllerSelector` under the rules of `scope` above. It refuses `tenants`, because a Jenkins role binding has no tenant meaning. `jenkinsScope` takes `type`, which is `Global`, `Folder`, or `Pattern`. A `Folder` scope needs `folder` and takes an optional `propagate`: `None`, `Children`, or `Subtree`. A `Pattern` scope needs `pattern`. Both tools refuse an empty `jenkinsScope`, an unknown key, and a value that is not a string. They also refuse an unknown type and a field that the type does not use. A create that omits both arguments binds on every controller at Global scope. The update tool keeps a stored scope that the call omits. A scope argument replaces the stored scope as a whole. The tool never removes a stored `controllerScope`; use the Kubernetes API or kubectl. Send `{"type": "Global"}` to remove an item limit. A refused call writes nothing.
 
+`list_jenkins_role_bindings` shows `controllerScope` with `namespaces` and `selector`. `selector` is true when the binding sets a label selector; the label keys and values are not shown. A row without `controllerScope` binds on every controller. `get_jenkins_role_binding` returns the selector terms.
+
 `call_jenkins_tool` is open-world because the target Jenkins plugin defines the
 remote tool's effect. Review its discovered schema for every controller.
 

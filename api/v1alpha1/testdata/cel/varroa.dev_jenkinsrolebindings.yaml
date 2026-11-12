@@ -10,7 +10,7 @@ base:
       - kind: Group
         name: tenant-a
     jenkinsScope:
-      type: item
+      type: Global
 cases:
   - name: controller scope with tenants refused
     rule: |-

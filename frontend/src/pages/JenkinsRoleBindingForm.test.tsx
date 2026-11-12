@@ -45,7 +45,7 @@ const existingBinding = createJenkinsRoleBinding({
     subjects: [{ kind: "User", name: "alice" }],
     roleRef: "jenkins-admin",
     controllerScope: { namespaces: ["infra"], controllerSelector: { matchLabels: { tier: "prod" } } },
-    jenkinsScope: { type: "Folder", folder: "/tenants/infra", propagate: "Children" },
+    jenkinsScope: { type: "Folder", folder: "tenants/infra", propagate: "Children" },
   },
 });
 
@@ -183,7 +183,7 @@ describe("JenkinsRoleBindingForm — create mode", () => {
 
     // Both scopes start collapsed
     expect(screen.queryByPlaceholderText("namespace-a, namespace-b")).not.toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("e.g. /tenants/backend")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("e.g. payments/backend")).not.toBeInTheDocument();
 
     // Expand Controller Scope
     await user.click(screen.getByText(/Controller Scope/));
@@ -197,7 +197,7 @@ describe("JenkinsRoleBindingForm — create mode", () => {
 
     // Select Folder type and see folder input
     await user.selectOptions(combos[2], "Folder");
-    expect(screen.getByPlaceholderText("e.g. /tenants/backend")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("e.g. payments/backend")).toBeInTheDocument();
   });
 
   it("navigates to /jenkins-rolebindings on Cancel", async () => {
@@ -249,7 +249,7 @@ describe("JenkinsRoleBindingForm — edit mode", () => {
     // Expand Jenkins Scope
     await user.click(screen.getByText(/Jenkins Scope/));
     expect(screen.getByDisplayValue("Folder")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("/tenants/infra")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("tenants/infra")).toBeInTheDocument();
   });
 
   it("submits update and navigates to /jenkins-rolebindings", async () => {
@@ -451,7 +451,7 @@ describe("JenkinsRoleBindingForm — a federated copy", () => {
     spec: {
       subjects: [{ kind: "Group", name: "ops" }],
       roleRef: "jenkins-admin",
-      jenkinsScope: { type: "Folder", folder: "/tenants/infra", propagate: "Children" },
+      jenkinsScope: { type: "Folder", folder: "tenants/infra", propagate: "Children" },
     },
   });
 
@@ -475,7 +475,7 @@ describe("JenkinsRoleBindingForm — a federated copy", () => {
     expect(getNameInput()).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Jenkins Scope/ })).toBeDisabled();
-    expect(screen.getByDisplayValue("/tenants/infra")).toBeDisabled();
+    expect(screen.getByDisplayValue("tenants/infra")).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect(mockNavigate).toHaveBeenCalledWith("/access/jenkins-role-bindings?cluster=core");
@@ -552,5 +552,158 @@ describe("JenkinsRoleBindingForm — cluster switch", () => {
 
     expect(screen.getByRole("option", { name: "core-viewer" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "member-viewer" })).not.toBeInTheDocument();
+  });
+});
+
+describe("JenkinsRoleBindingForm — Jenkins scope fields", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = undefined;
+    mockListJenkinsRoles.mockResolvedValue({ items: availableJenkinsRoles });
+  });
+
+  // fillCreateForm fills the name, the subject, and the role, then opens the
+  // Jenkins Scope section. Comboboxes: [0] subject kind, [1] role ref,
+  // [2] scope type, [3] propagate (Folder only).
+  async function fillCreateForm(user: ReturnType<typeof userEvent.setup>) {
+    renderWithProviders(<JenkinsRoleBindingForm />);
+    await waitFor(() => {
+      expect(screen.getByText("Create Jenkins Role Binding")).toBeInTheDocument();
+    });
+    await user.type(getNameInput(), "scoped-binding");
+    await user.type(screen.getAllByPlaceholderText("Subject name")[0], "test-user");
+    await user.selectOptions(screen.getAllByRole("combobox")[1], "jenkins-viewer");
+    await user.click(screen.getByText(/Jenkins Scope/));
+  }
+
+  function savedJenkinsScope(): unknown {
+    const body = mockCreateJenkinsRoleBinding.mock.calls[0][1] as {
+      spec: { jenkinsScope?: unknown };
+    };
+    return body.spec.jenkinsScope;
+  }
+
+  it("shows a Folder placeholder and hint with no leading slash", async () => {
+    const user = userEvent.setup();
+    await fillCreateForm(user);
+    await user.selectOptions(screen.getAllByRole("combobox")[2], "Folder");
+    expect(screen.getByPlaceholderText("e.g. payments/backend")).toBeInTheDocument();
+    expect(
+      screen.getByText("Enter the full name of the folder, with no leading slash."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows Propagate only for a Folder scope", async () => {
+    const user = userEvent.setup();
+    await fillCreateForm(user);
+    const typeSelect = screen.getAllByRole("combobox")[2];
+
+    await user.selectOptions(typeSelect, "Global");
+    expect(screen.queryByText("Propagate")).not.toBeInTheDocument();
+
+    await user.selectOptions(typeSelect, "Pattern");
+    expect(screen.queryByText("Propagate")).not.toBeInTheDocument();
+
+    await user.selectOptions(typeSelect, "Folder");
+    expect(screen.getByText("Propagate")).toBeInTheDocument();
+  });
+
+  it("sends propagate for a Folder scope", async () => {
+    mockCreateJenkinsRoleBinding.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    await fillCreateForm(user);
+    await user.selectOptions(screen.getAllByRole("combobox")[2], "Folder");
+    await user.type(screen.getByPlaceholderText("e.g. payments/backend"), "payments/backend");
+    await user.selectOptions(screen.getAllByRole("combobox")[3], "Subtree");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockCreateJenkinsRoleBinding).toHaveBeenCalled();
+    });
+    expect(savedJenkinsScope()).toEqual({
+      type: "Folder",
+      folder: "payments/backend",
+      propagate: "Subtree",
+    });
+  });
+
+  it("drops a chosen propagate when the type changes from Folder to Global", async () => {
+    mockCreateJenkinsRoleBinding.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    await fillCreateForm(user);
+    await user.selectOptions(screen.getAllByRole("combobox")[2], "Folder");
+    await user.selectOptions(screen.getAllByRole("combobox")[3], "Subtree");
+    await user.selectOptions(screen.getAllByRole("combobox")[2], "Global");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockCreateJenkinsRoleBinding).toHaveBeenCalled();
+    });
+    expect(savedJenkinsScope()).toEqual({ type: "Global" });
+  });
+
+  it("drops a chosen propagate when the type changes to Pattern", async () => {
+    mockCreateJenkinsRoleBinding.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    await fillCreateForm(user);
+    await user.selectOptions(screen.getAllByRole("combobox")[2], "Folder");
+    await user.selectOptions(screen.getAllByRole("combobox")[3], "Subtree");
+    await user.selectOptions(screen.getAllByRole("combobox")[2], "Pattern");
+    await user.type(screen.getByPlaceholderText("e.g. .*tenant-a.*"), "payments/.*");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockCreateJenkinsRoleBinding).toHaveBeenCalled();
+    });
+    expect(savedJenkinsScope()).toEqual({ type: "Pattern", pattern: "payments/.*" });
+  });
+
+  it("drops a stored propagate from a Global scope on save", async () => {
+    mockParams.name = "my-jenkins-binding";
+    mockGetJenkinsRoleBinding.mockResolvedValue(
+      createJenkinsRoleBinding({
+        metadata: { name: "my-jenkins-binding" },
+        spec: {
+          subjects: [{ kind: "User", name: "alice" }],
+          roleRef: "jenkins-admin",
+          jenkinsScope: { type: "Global", propagate: "Subtree" },
+        },
+      }),
+    );
+    mockUpdateJenkinsRoleBinding.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleBindingForm />);
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role Binding: my-jenkins-binding")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockUpdateJenkinsRoleBinding).toHaveBeenCalled();
+    });
+    const body = mockUpdateJenkinsRoleBinding.mock.calls[0][2] as { spec: { jenkinsScope?: unknown } };
+    expect(body.spec.jenkinsScope).toEqual({ type: "Global" });
+  });
+
+  it("keeps a stored propagate on a Folder scope", async () => {
+    mockParams.name = "my-jenkins-binding";
+    mockGetJenkinsRoleBinding.mockResolvedValue(existingBinding);
+    mockUpdateJenkinsRoleBinding.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleBindingForm />);
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role Binding: my-jenkins-binding")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockUpdateJenkinsRoleBinding).toHaveBeenCalled();
+    });
+    const body = mockUpdateJenkinsRoleBinding.mock.calls[0][2] as { spec: { jenkinsScope?: unknown } };
+    expect(body.spec.jenkinsScope).toEqual({
+      type: "Folder",
+      folder: "tenants/infra",
+      propagate: "Children",
+    });
   });
 });

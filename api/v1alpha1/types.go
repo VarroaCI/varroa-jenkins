@@ -3272,17 +3272,28 @@ type JenkinsRoleBindingSpec struct {
 // JenkinsScope defines the in-Jenkins scope for a binding.
 type JenkinsScope struct {
 	// Type is "Global", "Folder", or "Pattern".
+	// +kubebuilder:validation:Enum=Global;Folder;Pattern
 	Type string `json:"type"`
-	// Folder is the folder path, e.g. "tenant-a/project-x". Only for Type=Folder.
+	// Folder is the full Jenkins folder name, with no leading slash, e.g.
+	// "tenant-a/project-x". Only for Type=Folder.
 	// +optional
 	Folder string `json:"folder,omitempty"`
 	// Propagate is "None", "Children", or "Subtree". Only for Type=Folder.
+	// +kubebuilder:validation:Enum=None;Children;Subtree
 	// +optional
 	Propagate string `json:"propagate,omitempty"`
 	// Pattern is the raw regex pattern. Only for Type=Pattern.
 	// +optional
 	Pattern string `json:"pattern,omitempty"`
 }
+
+// The three JenkinsScope types. The Enum marker on JenkinsScope.Type lists the
+// same values, because a marker cannot name a Go constant.
+const (
+	JenkinsScopeGlobal  = "Global"
+	JenkinsScopeFolder  = "Folder"
+	JenkinsScopePattern = "Pattern"
+)
 
 // JenkinsRoleBindingList contains a list of JenkinsRoleBinding objects.
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

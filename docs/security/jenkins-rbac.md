@@ -54,6 +54,11 @@ Connected controllers get role changes without reprovisioning.
 | `jenkinsScope.type` | `Global`, `Folder`, `Pattern` | Limits Jenkins objects |
 | `jenkinsScope.propagate` | `None`, `Children`, `Subtree` | Controls folder inheritance |
 
+The API server refuses a `type` or `propagate` value outside the table. The match is case-sensitive.
+A binding stored with another type grants nothing.
+Set `folder` to the full folder name, such as `payments/backend`, with no leading slash.
+Set `propagate` only on a `Folder` scope. Without it, the scope covers the folder alone, as `None` does.
+
 Pattern scope matches item names with a regular expression:
 
 ```yaml

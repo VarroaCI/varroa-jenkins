@@ -24,8 +24,9 @@ import (
 func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listJRB := mcp.NewTool("list_jenkins_role_bindings",
 		mcp.WithDescription("List Jenkins role bindings managed by Varroa. Returns a compact "+
-			"summary per binding (name, roleRef, subjectCount, scopeType, scopeFolder) \u2014 enough to "+
-			"survey a fleet and see who is bound to which role and how broadly. Use "+
+			"summary per binding (name, roleRef, subjectCount, controllerScope, scopeType, scopeFolder) \u2014 enough to "+
+			"survey a fleet and see who is bound to which role and how broadly. A row without "+
+			"controllerScope binds on every controller. Use "+
 			"get_jenkins_role_binding for the full resource."),
 		mcp.WithBoolean("verbose", mcp.Description("Return full JenkinsRoleBinding resources instead "+
 			"of summaries. Expensive: full resources carry spec.subjects and the controllerScope "+
@@ -213,11 +214,37 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 // cluster-scoped (kubebuilder scope=Cluster), so the summary carries no
 // namespace.
 type jenkinsRoleBindingSummary struct {
-	Name         string `json:"name"`
-	RoleRef      string `json:"roleRef,omitempty"`
-	SubjectCount int    `json:"subjectCount"`
-	ScopeType    string `json:"scopeType,omitempty"`
-	ScopeFolder  string `json:"scopeFolder,omitempty"`
+	Name            string                         `json:"name"`
+	RoleRef         string                         `json:"roleRef,omitempty"`
+	SubjectCount    int                            `json:"subjectCount"`
+	ControllerScope *jenkinsControllerScopeSummary `json:"controllerScope,omitempty"`
+	ScopeType       string                         `json:"scopeType,omitempty"`
+	ScopeFolder     string                         `json:"scopeFolder,omitempty"`
+}
+
+// jenkinsControllerScopeSummary names the controllers a binding covers. It
+// carries the namespace names and a flag for a label selector. It never carries
+// label keys or values.
+type jenkinsControllerScopeSummary struct {
+	Namespaces []string `json:"namespaces,omitempty"`
+	Selector   bool     `json:"selector"`
+}
+
+// summarizeControllerScope returns nil when the binding applies to every
+// controller: a nil scope, or a scope with no namespaces and no selector terms.
+func summarizeControllerScope(scope *v1alpha1.VarroaRoleBindingScope) *jenkinsControllerScopeSummary {
+	if scope == nil {
+		return nil
+	}
+	sel := scope.ControllerSelector != nil &&
+		(len(scope.ControllerSelector.MatchLabels) > 0 || len(scope.ControllerSelector.MatchExpressions) > 0)
+	if len(scope.Namespaces) == 0 && !sel {
+		return nil
+	}
+	return &jenkinsControllerScopeSummary{
+		Namespaces: append([]string(nil), scope.Namespaces...),
+		Selector:   sel,
+	}
 }
 
 func summarizeJenkinsRoleBinding(jrb *v1alpha1.JenkinsRoleBinding) jenkinsRoleBindingSummary {
@@ -225,9 +252,10 @@ func summarizeJenkinsRoleBinding(jrb *v1alpha1.JenkinsRoleBinding) jenkinsRoleBi
 		return jenkinsRoleBindingSummary{}
 	}
 	s := jenkinsRoleBindingSummary{
-		Name:         jrb.Name,
-		RoleRef:      jrb.Spec.RoleRef,
-		SubjectCount: len(jrb.Spec.Subjects),
+		Name:            jrb.Name,
+		RoleRef:         jrb.Spec.RoleRef,
+		SubjectCount:    len(jrb.Spec.Subjects),
+		ControllerScope: summarizeControllerScope(jrb.Spec.ControllerScope),
 	}
 	// JenkinsScope is optional: nil means Global scope. Guard before
 	// dereference. An unguarded read panics on every Global binding.
@@ -246,8 +274,7 @@ func buildControllerScope(raw interface{}) (*v1alpha1.VarroaRoleBindingScope, er
 }
 
 // buildJenkinsScope parses a "jenkinsScope" argument into a JenkinsScope.
-// rbac lowers an unknown type to Global, so a wrong type widens the binding to
-// every item. The parse therefore refuses an unknown key, a value that is not a
+// The parse refuses an unknown key, a value that is not a
 // string, an unknown type, and a field that the type does not use. An absent
 // argument returns nil.
 func buildJenkinsScope(raw interface{}) (*v1alpha1.JenkinsScope, error) {
@@ -316,6 +343,7 @@ var jenkinsRoleBindingListOutputSchema = listOutputSchema("Default summary proje
 	{Name: "name", Type: "string", Desc: "JenkinsRoleBinding name."},
 	{Name: "roleRef", Type: "string", Desc: "JenkinsRole name this binding grants."},
 	{Name: "subjectCount", Type: "integer", Desc: "Number of bound subjects."},
+	{Name: "controllerScope", Type: "object", Desc: "Controller limits: namespaces, and selector (true when a label selector is set). Absent when the binding applies to every controller."},
 	{Name: "scopeType", Type: "string", Desc: "In-Jenkins scope type: Global, Folder, or Pattern."},
 	{Name: "scopeFolder", Type: "string", Desc: "Folder path, when scopeType is Folder."},
 })
