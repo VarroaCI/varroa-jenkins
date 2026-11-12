@@ -295,6 +295,10 @@ type Reconciler struct {
 	// and hash still match. A result lost on an operator restart or a
 	// shard move costs one more push.
 	parkedCellResults map[string]*mitev1.DesiredStateResult
+	// replayResultWait and replayProbeEvery replace replayResultTimeout and
+	// replayProbeInterval when they are above zero. Only tests set them.
+	replayResultWait time.Duration
+	replayProbeEvery time.Duration
 }
 
 // rehydrationPendingMark is one cell key + tenant's deadline-anchor

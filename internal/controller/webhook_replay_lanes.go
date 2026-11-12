@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -22,6 +23,11 @@ type replayLanes struct {
 	// ran. Tests replace both before the first add.
 	progress func(*nats.Msg)
 	release  func(*nats.Msg)
+	// pastBound reports a message past the replay bound. refresh hands each
+	// waiting message that pastBound reports to expire, which terms it and
+	// records the drop. Tests replace both before the first add.
+	pastBound func(*nats.Msg) bool
+	expire    func(*nats.Msg)
 
 	mu    sync.Mutex
 	lanes map[string]*replayLane
@@ -47,8 +53,12 @@ func newReplayLanes(ctx context.Context, handle func(context.Context, *nats.Msg)
 		handle:   handle,
 		progress: func(m *nats.Msg) { _ = m.InProgress() },
 		release:  func(m *nats.Msg) { _ = m.NakWithDelay(replayResultTimeout) },
-		lanes:    make(map[string]*replayLane),
-		seqs:     make(map[uint64]bool),
+		pastBound: func(m *nats.Msg) bool {
+			return pastReplayBound(m, time.Now())
+		},
+		expire: func(m *nats.Msg) { _ = m.Term() },
+		lanes:  make(map[string]*replayLane),
+		seqs:   make(map[uint64]bool),
 	}
 }
 
@@ -107,21 +117,36 @@ func (l *replayLanes) run(key string, lane *replayLane) {
 	}
 }
 
-// refresh sends a progress ack for every held message.
+// refresh sends a progress ack for every held message. It also expires each
+// waiting message that is past the replay bound. A handler in progress has its
+// own give-up timer, so the sweep never touches the current message.
 func (l *replayLanes) refresh() {
 	// Collect the messages under the lock, and send the acks after it. A slow
 	// publish must not block add or the lane handoffs.
 	l.mu.Lock()
-	var held []*nats.Msg
+	var held, expired []*nats.Msg
 	for _, lane := range l.lanes {
 		if lane.current != nil {
 			held = append(held, lane.current)
 		}
+		lane.queue = slices.DeleteFunc(lane.queue, func(h heldReplay) bool {
+			if !l.pastBound(h.msg) {
+				return false
+			}
+			expired = append(expired, h.msg)
+			if h.seq != 0 {
+				delete(l.seqs, h.seq)
+			}
+			return true
+		})
 		for _, h := range lane.queue {
 			held = append(held, h.msg)
 		}
 	}
 	l.mu.Unlock()
+	for _, msg := range expired {
+		l.expire(msg)
+	}
 	for _, msg := range held {
 		l.progress(msg)
 	}

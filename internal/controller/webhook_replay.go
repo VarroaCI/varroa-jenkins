@@ -26,9 +26,15 @@ import (
 // leader binds to drain queued webhooks for its cluster.
 const webhookReplayConsumer = "varroa-webhook-replay"
 
-// replayResultTimeout bounds the wait for the mite's result. The message then
-// gets a nak for later redelivery. It stays below replayAckWait.
+// replayResultTimeout is the wait for the result of a replay before the replay is
+// held. It is also the nak delay of a delivery that waits. It stays below
+// replayAckWait.
 const replayResultTimeout = 30 * time.Second
+
+// replayProbeInterval is the time between two sends of a held replay. Each send
+// uses the same command id. A mite that still holds the command drops the copy,
+// and a mite that posted it already answers from its replay ledger.
+const replayProbeInterval = 5 * time.Minute
 
 // replayAckWait is the AckWait of the replay consumer.
 const replayAckWait = 60 * time.Second
@@ -100,7 +106,8 @@ func (env webhookEnvelope) isTenantEnvelope() bool {
 // command-result buffer — drives the ack/nak/term decision (design D8):
 //
 //   - controller Connected and mite returns 2xx  → Ack
-//   - controller not Connected, 5xx, 429, timeout → Nak (redeliver after delay)
+//   - controller not Connected, 5xx, 429         → Nak (redeliver after delay)
+//   - no result within replayResultTimeout       → hold the lane (awaitReplayResult)
 //   - controller CR deleted, or Jenkins 4xx≠429   → Term + rejected activity event
 //   - delivery older than replayGiveUpAge         → Term + rejected activity event
 //
@@ -205,6 +212,7 @@ func (r *Reconciler) runWebhookReplayPass(ctx context.Context, conn *bus.Conn, c
 	lanes := newReplayLanes(laneCtx, func(hctx context.Context, msg *nats.Msg) {
 		r.handleQueuedWebhook(hctx, cluster, msg, waiters)
 	})
+	lanes.expire = r.giveUpWaitingReplay
 	lanes.keepAlive()
 	defer func() {
 		cancelLanes()
@@ -284,11 +292,7 @@ func (r *Reconciler) handleQueuedWebhook(ctx context.Context, cluster string, ms
 	}
 
 	if age, ok := deliveryAge(msg, env, time.Now()); ok && age >= replayGiveUpAge {
-		r.Logger.Warn("dropping queued webhook past the replay bound", "cluster", cluster,
-			"delivery", deliveryLabel(env), "age", age)
-		r.publishReplayRejected(env, fmt.Sprintf("delivery %s was not replayed within %s; dropped",
-			deliveryLabel(env), replayGiveUpAge))
-		_ = msg.Term()
+		r.giveUpReplay(msg, env, age)
 		return
 	}
 
@@ -354,15 +358,7 @@ func (r *Reconciler) handleQueuedControllerWebhook(ctx context.Context, env webh
 		return
 	}
 
-	select {
-	case <-ctx.Done():
-		_ = msg.NakWithDelay(replayResultTimeout)
-	case <-time.After(replayResultTimeout):
-		// No result in time — mite may be slow or gone. Redeliver.
-		_ = msg.NakWithDelay(replayResultTimeout)
-	case res := <-resultCh:
-		r.applyReplayResult(msg, env, res)
-	}
+	r.awaitReplayResult(ctx, msg, env, env.Namespace, env.Controller, cmd, resultCh)
 }
 
 // handleQueuedTenantWebhook applies the decision table to a tenant-shape
@@ -480,15 +476,159 @@ func (r *Reconciler) handleQueuedTenantWebhook(ctx context.Context, env webhookE
 		return
 	}
 
-	select {
-	case <-ctx.Done():
-		_ = msg.NakWithDelay(replayResultTimeout)
-	case <-time.After(replayResultTimeout):
-		// No result in time — mite may be slow or gone. Redeliver.
-		_ = msg.NakWithDelay(replayResultTimeout)
-	case res := <-resultCh:
-		r.applyReplayResult(msg, env, res)
+	r.awaitReplayResult(ctx, msg, env, placement.CellNamespace, placement.Cell, cmd, resultCh)
+}
+
+// awaitReplayResult waits for the result of a sent replay and applies it.
+//
+// A cell that does not answer within replayResultTimeout holds its lane. The
+// held message keeps its place at the head of the lane, so the lane sends no
+// other command to that cell. The hold ends in one of four ways:
+//   - the result arrives, and the normal ack decision applies to it;
+//   - the target changes or the controller is not found, and the message is
+//     released by nak for redelivery;
+//   - the message passes replayGiveUpAge, and it is termed and recorded;
+//   - ctx ends, and the message is released by nak.
+//
+// While the hold lasts, and the cell is Connected, the same command (same id)
+// is sent again every replayProbeInterval. A mite that still holds the command
+// drops the copy, and a mite that posted it answers from its replay ledger.
+func (r *Reconciler) awaitReplayResult(ctx context.Context, msg *nats.Msg, env webhookEnvelope,
+	ns, name string, cmd *mitev1.ImperativeCommand, resultCh <-chan *mitev1.CommandResult) {
+	wait := time.NewTimer(r.replayResultWaitOrDefault())
+	defer wait.Stop()
+	var giveUp <-chan time.Time
+	var giveUpTimer *time.Timer
+	defer func() {
+		if giveUpTimer != nil {
+			giveUpTimer.Stop()
+		}
+	}()
+	held := false
+	for {
+		select {
+		case <-ctx.Done():
+			_ = msg.NakWithDelay(replayResultTimeout)
+			return
+		case res := <-resultCh:
+			if held {
+				r.Logger.Info("webhook replay lane resumed", "cell", ns+"/"+name, "commandId", cmd.CommandId)
+			}
+			r.applyReplayResult(msg, env, res)
+			return
+		case <-giveUp:
+			age, _ := deliveryAge(msg, env, time.Now())
+			r.giveUpReplay(msg, env, age)
+			return
+		case <-wait.C:
+		}
+		if !held {
+			held = true
+			r.Logger.Warn("no webhook replay result; holding the lane of the cell",
+				"cell", ns+"/"+name, "commandId", cmd.CommandId, "delivery", deliveryLabel(env))
+			if age, ok := deliveryAge(msg, env, time.Now()); ok {
+				giveUpTimer = time.NewTimer(max(replayGiveUpAge-age, 0))
+				giveUp = giveUpTimer.C
+			}
+		} else {
+			switch r.heldReplayCheck(ctx, env, ns, name) {
+			case holdRelease:
+				_ = msg.NakWithDelay(replayResultTimeout)
+				return
+			case holdResend:
+				r.Logger.Info("sending a held webhook replay again", "cell", ns+"/"+name,
+					"commandId", cmd.CommandId, "delivery", deliveryLabel(env))
+				if err := r.miteTransport.SendImperative(ctx, ns, name, cmd); err != nil {
+					r.Logger.Warn("resend held replay command failed", "cell", ns+"/"+name, "error", err)
+				}
+			}
+		}
+		wait.Reset(r.replayProbeEveryOrDefault())
 	}
+}
+
+// replayResultWaitOrDefault returns the result wait. Tests may shorten it.
+func (r *Reconciler) replayResultWaitOrDefault() time.Duration {
+	if r.replayResultWait > 0 {
+		return r.replayResultWait
+	}
+	return replayResultTimeout
+}
+
+// replayProbeEveryOrDefault returns the probe interval. Tests may shorten it.
+func (r *Reconciler) replayProbeEveryOrDefault() time.Duration {
+	if r.replayProbeEvery > 0 {
+		return r.replayProbeEvery
+	}
+	return replayProbeInterval
+}
+
+// heldReplayAction is what a held replay does at each probe.
+type heldReplayAction int
+
+const (
+	holdWait    heldReplayAction = iota // keep the hold; send nothing
+	holdResend                          // send the command again, same command id
+	holdRelease                         // nak; the redelivery applies the decision table
+)
+
+// heldReplayCheck decides what a held replay does at a probe. A tenant envelope
+// follows its Tenant's current placement, so a move releases the hold. The
+// target cell must be Connected before a probe is sent.
+func (r *Reconciler) heldReplayCheck(ctx context.Context, env webhookEnvelope, ns, name string) heldReplayAction {
+	if env.isTenantEnvelope() {
+		tenant, err := crdstore.Get[v1alpha1.Tenant](ctx, r.store, env.Tenant, "")
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return holdRelease
+			}
+			return holdWait
+		}
+		p := tenant.Status.Placement
+		if p == nil || p.Cell != name || p.CellNamespace != ns || tenantMoving(tenant) {
+			return holdRelease
+		}
+	}
+	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, ns)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return holdRelease
+		}
+		return holdWait
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseConnected {
+		// The gateway delivers the command again when the mite reconnects.
+		return holdWait
+	}
+	return holdResend
+}
+
+// giveUpWaitingReplay drops a held message past the replay bound. It is the
+// sweep that lanes run on their waiting messages.
+func (r *Reconciler) giveUpWaitingReplay(msg *nats.Msg) {
+	var env webhookEnvelope
+	_ = json.Unmarshal(msg.Data, &env)
+	age, _ := deliveryAge(msg, env, time.Now())
+	r.giveUpReplay(msg, env, age)
+}
+
+// giveUpReplay terms a delivery that passed replayGiveUpAge and records the drop.
+func (r *Reconciler) giveUpReplay(msg *nats.Msg, env webhookEnvelope, age time.Duration) {
+	r.Logger.Warn("dropping queued webhook past the replay bound", "cluster", env.Cluster,
+		"delivery", deliveryLabel(env), "age", age)
+	r.publishReplayRejected(env, fmt.Sprintf("delivery %s was not replayed within %s; dropped",
+		deliveryLabel(env), replayGiveUpAge))
+	_ = msg.Term()
+}
+
+// pastReplayBound reports whether msg has waited at least replayGiveUpAge. It
+// reads only the stream metadata, so the lane can call it under its lock.
+func pastReplayBound(msg *nats.Msg, now time.Time) bool {
+	md, err := msg.Metadata()
+	if err != nil || md == nil || md.Timestamp.IsZero() {
+		return false
+	}
+	return now.Sub(md.Timestamp) >= replayGiveUpAge
 }
 
 // tenantMoving reports whether tenant's Placed condition is currently False

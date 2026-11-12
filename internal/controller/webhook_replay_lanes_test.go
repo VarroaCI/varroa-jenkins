@@ -368,3 +368,176 @@ func TestRunWebhookReplayPass_UnansweredControllerHoldsOnlyItsOwnLane(t *testing
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func TestReplayLanes_RefreshExpiresWaitingMessagePastBound(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{}, 1)
+	unblock := make(chan struct{})
+	handled := &msgRecorder{}
+	lanes := newReplayLanes(ctx, func(hctx context.Context, msg *nats.Msg) {
+		handled.record(msg)
+		if string(msg.Data) == "current" {
+			started <- struct{}{}
+			select {
+			case <-unblock:
+			case <-hctx.Done():
+			}
+		}
+	})
+	lanes.release = func(*nats.Msg) {}
+	progress := &msgRecorder{}
+	lanes.progress = progress.record
+	expired := &msgRecorder{}
+	lanes.expire = expired.record
+	lanes.pastBound = func(m *nats.Msg) bool { return string(m.Data) == "old" }
+
+	lanes.add("ns1/cell-a", 1, laneMsg("current"))
+	lanes.add("ns1/cell-a", 2, laneMsg("old"))
+	lanes.add("ns1/cell-a", 3, laneMsg("young"))
+	select {
+	case <-started:
+	case <-time.After(laneTestWait):
+		t.Fatal("handler did not start")
+	}
+	lanes.refresh()
+
+	if got, want := expired.list(), []string{"old"}; !slices.Equal(got, want) {
+		t.Fatalf("expired = %v, want %v", got, want)
+	}
+	if got, want := progress.list(), []string{"current", "young"}; !slices.Equal(got, want) {
+		t.Fatalf("progress = %v, want %v", got, want)
+	}
+	// The expired sequence is free again, so a redelivery is queued.
+	if !lanes.add("ns1/cell-a", 2, laneMsg("old")) {
+		t.Fatal("add of an expired sequence = false, want true")
+	}
+	close(unblock)
+	deadline := time.Now().Add(laneTestWait)
+	for len(handled.list()) < 3 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	lanes.wait()
+
+	if got, want := handled.list(), []string{"current", "young", "old"}; !slices.Equal(got, want) {
+		t.Fatalf("handled = %v, want %v", got, want)
+	}
+}
+
+// commandRecorder records each imperative command.
+type commandRecorder struct {
+	transport.Transport
+	mu   sync.Mutex
+	cmds []*mitev1.ImperativeCommand
+}
+
+func (c *commandRecorder) SendImperative(_ context.Context, _, _ string, cmd *mitev1.ImperativeCommand) error {
+	c.mu.Lock()
+	c.cmds = append(c.cmds, cmd)
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *commandRecorder) list() []*mitev1.ImperativeCommand {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.cmds)
+}
+
+func TestRunWebhookReplayPass_HeldLaneSendsNextAfterAnswer(t *testing.T) {
+	if os.Getenv("NATS_TEST") == "" && os.Getenv("CI") == "" {
+		t.Skip("skipping NATS integration test; set NATS_TEST=1 to run")
+	}
+	opts := &server.Options{Port: -1, JetStream: true, StoreDir: t.TempDir()}
+	s, err := server.NewServer(opts)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	s.Start()
+	if !s.ReadyForConnections(5 * time.Second) {
+		t.Fatal("server not ready")
+	}
+	defer s.Shutdown()
+
+	conn, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close()
+
+	client := newTestClient()
+	crdstore.MustSeed(client.store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "slow", Namespace: "ns1"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
+	})
+	rec := newTestReconciler(client)
+	rec.replayResultWait = 100 * time.Millisecond
+	rec.replayProbeEvery = time.Hour
+	cmds := &commandRecorder{Transport: rec.miteTransport}
+	rec.miteTransport = cmds
+
+	if err := conn.EnsureStream(bus.WebhookStreamConfig(bus.WebhookStreamName, 1)); err != nil {
+		t.Fatalf("ensure stream: %v", err)
+	}
+	for i := range 2 {
+		env := webhookEnvelope{
+			Method:     "POST",
+			Path:       "github-webhook/",
+			BodyB64:    base64.StdEncoding.EncodeToString([]byte("{}")),
+			ReceivedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Cluster:    "member-b",
+			Namespace:  "ns1",
+			Controller: "slow",
+		}
+		data, err := json.Marshal(env)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if _, err := conn.PublishJetStream(bus.WebhookSubject("member-b", "ns1", "slow"), data); err != nil {
+			t.Fatalf("publish %d: %v", i, err)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- rec.runWebhookReplayPass(ctx, conn, "member-b", 1, time.Minute)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	if got := len(cmds.list()); got != 1 {
+		t.Fatalf("sends while the first replay is held = %d, want 1", got)
+	}
+	info, err := conn.ConsumerInfoContext(context.Background(), bus.WebhookStreamName, webhookReplayConsumer+"-member-b")
+	if err != nil {
+		t.Fatalf("consumer info: %v", err)
+	}
+	if info.NumAckPending != 2 {
+		t.Fatalf("NumAckPending = %d, want 2", info.NumAckPending)
+	}
+
+	first := cmds.list()[0]
+	data, err := json.Marshal(&mitev1.CommandResult{CommandId: first.CommandId, Success: true, HttpStatus: 200})
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	if err := conn.Publish(bus.WebhookResultSubject("member-b", "ns1", "slow"), data); err != nil {
+		t.Fatalf("publish result: %v", err)
+	}
+
+	deadline := time.Now().Add(laneTestWait)
+	for len(cmds.list()) < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := len(cmds.list()); got != 2 {
+		t.Fatalf("sends after the answer = %d, want 2", got)
+	}
+	if second := cmds.list()[1]; second.CommandId == first.CommandId {
+		t.Fatalf("second command id = %q, want a new id", second.CommandId)
+	}
+}
