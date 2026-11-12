@@ -624,7 +624,9 @@ func main() {
 	tenantReconciler.SetSyncAnnouncer(controller.NewNATSSyncAnnouncer(busConn))
 
 	// --- Activity publisher (mode-agnostic, publishes to activity.* subjects) ---
-	actPub := activity.NewPublisher(cluster, busConn)
+	actPub := activity.NewPublisherFromEnv(os.Getenv, cluster, busConn, activity.AckedOptions{
+		Logger: logger, Meter: meterProvider.Meter("varroa-operator"), Component: "operator"})
+	defer actPub.Close(activity.CloseTimeout)
 	reconciler.SetActivityPublisher(actPub)
 	tenantReconciler.SetActivityPublisher(actPub)
 

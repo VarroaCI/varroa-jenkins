@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -276,6 +277,76 @@ func TestJetStreamAsyncPublish(t *testing.T) {
 		// Good: ack received.
 	case err := <-future.Err():
 		t.Fatalf("async pub failed: %v", err)
+	}
+}
+
+func TestPublishJetStreamMsgID_StoresOneCopyPerID(t *testing.T) {
+	s := startTestServer(t)
+	c := connectTest(t, s)
+
+	stream := "msgidstream"
+	if err := c.EnsureStream(&nats.StreamConfig{
+		Name:     stream,
+		Subjects: []string{"msgid.>"},
+		Storage:  nats.MemoryStorage,
+	}); err != nil {
+		t.Fatalf("ensure stream: %v", err)
+	}
+	ctx := context.Background()
+
+	first, err := c.PublishJetStreamMsgID(ctx, "msgid.a", []byte("one"), "id-1")
+	if err != nil {
+		t.Fatalf("first publish: %v", err)
+	}
+	if first.Duplicate {
+		t.Fatal("first publish reported a duplicate")
+	}
+	second, err := c.PublishJetStreamMsgID(ctx, "msgid.a", []byte("one"), "id-1")
+	if err != nil {
+		t.Fatalf("second publish: %v", err)
+	}
+	if !second.Duplicate {
+		t.Fatal("second publish with the same ID was not a duplicate")
+	}
+	info, err := c.StreamInfo(stream)
+	if err != nil {
+		t.Fatalf("stream info: %v", err)
+	}
+	if info.State.Msgs != 1 {
+		t.Fatalf("stream holds %d messages after a duplicate ID, want 1", info.State.Msgs)
+	}
+
+	if _, err := c.PublishJetStreamMsgID(ctx, "msgid.a", []byte("two"), "id-2"); err != nil {
+		t.Fatalf("new ID publish: %v", err)
+	}
+	info, err = c.StreamInfo(stream)
+	if err != nil {
+		t.Fatalf("stream info: %v", err)
+	}
+	if info.State.Msgs != 2 {
+		t.Fatalf("stream holds %d messages after a new ID, want 2", info.State.Msgs)
+	}
+}
+
+func TestPublishJetStreamMsgID_ReturnsWhenContextEnds(t *testing.T) {
+	s := startTestServer(t)
+	c := connectTest(t, s)
+
+	// No stream captures this subject, so no ack arrives.
+	sub, err := c.Subscribe("nostream.here", func(*nats.Msg) {})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := c.PublishJetStreamMsgID(ctx, "nostream.here", []byte("x"), "id-x"); err == nil {
+		t.Fatal("publish with no stream returned no error")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("publish returned after %v, want about the 100ms context", elapsed)
 	}
 }
 
