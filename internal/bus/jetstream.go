@@ -112,6 +112,14 @@ func (c *Conn) PublishJetStreamAsync(subject string, data []byte) (nats.PubAckFu
 	return c.js.PublishAsync(subject, data)
 }
 
+// PublishJetStreamMsgID publishes data to a JetStream subject with msgID in the
+// Nats-Msg-Id header and waits for the stream ack until ctx ends. The stream
+// stores one copy of an ID inside its duplicate window, so a caller can send
+// the same ID again after a lost ack.
+func (c *Conn) PublishJetStreamMsgID(ctx context.Context, subject string, data []byte, msgID string) (*nats.PubAck, error) {
+	return c.js.Publish(subject, data, nats.MsgId(msgID), nats.Context(ctx))
+}
+
 // DrainConsumer fetches up to batchSize messages from a pull consumer. It
 // waits at most 100 ms for them and returns the messages that arrive in that
 // time. When no message arrives, it returns an error that wraps nats.ErrTimeout.

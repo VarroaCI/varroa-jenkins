@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel/metric/noop"
 
+	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
@@ -339,5 +341,60 @@ func TestJenkinsActivity_AntiSpoof(t *testing.T) {
 	}
 	if p.ItemPath != "other-ctrl/job" {
 		t.Errorf("ItemPath = %q, want %q (event field should be preserved)", p.ItemPath, "other-ctrl/job")
+	}
+}
+
+// TestBusHandler_OnJenkinsActivity_AckedPublisherStoresEvent checks that a
+// Jenkins event reaches the activity stream through the ack-mode publisher.
+func TestBusHandler_OnJenkinsActivity_AckedPublisherStoresEvent(t *testing.T) {
+	t.Parallel()
+
+	ns := startNATS(t)
+	busConn, err := bus.Connect(ns.ClientURL())
+	if err != nil {
+		t.Fatalf("bus connect: %v", err)
+	}
+	t.Cleanup(busConn.Close)
+
+	if err := busConn.EnsureStream(&nats.StreamConfig{
+		Name:     bus.ActivityStreamName,
+		Subjects: []string{"activity.>"},
+		Storage:  nats.MemoryStorage,
+	}); err != nil {
+		t.Fatalf("ensure activity stream: %v", err)
+	}
+	snapshotKV, err := busConn.EnsureKV(bus.KVSnapshotBucket, 0)
+	if err != nil {
+		t.Fatalf("ensure snapshot kv: %v", err)
+	}
+	presenceKV, err := busConn.EnsureKV(bus.KVPresenceBucket, 90*time.Second)
+	if err != nil {
+		t.Fatalf("ensure presence kv: %v", err)
+	}
+
+	pub := activity.NewAckedPublisher(bus.DefaultCluster, busConn, activity.AckedOptions{})
+	handler, err := NewBusHandler(noop.NewMeterProvider(), bus.DefaultCluster, busConn, snapshotKV, presenceKV, pub)
+	if err != nil {
+		t.Fatalf("NewBusHandler: %v", err)
+	}
+	t.Cleanup(handler.Close)
+
+	handler.OnJenkinsActivity("my-controller", "my-namespace", &mitev1.JenkinsActivityEvent{
+		Type:      "build.started",
+		Timestamp: "2024-06-01T12:00:00Z",
+	})
+	pub.Close(time.Second)
+
+	subj := bus.ActivitySubject(bus.DefaultCluster, "my-namespace", "my-controller")
+	msg, err := busConn.JetStream().GetLastMsg(bus.ActivityStreamName, subj)
+	if err != nil {
+		t.Fatalf("stored activity event on %s: %v", subj, err)
+	}
+	var p bus.ActivityPayload
+	if err := json.Unmarshal(msg.Data, &p); err != nil {
+		t.Fatalf("decode stored event: %v", err)
+	}
+	if p.Source != "jenkins" {
+		t.Errorf("Source = %q, want %q", p.Source, "jenkins")
 	}
 }

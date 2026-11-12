@@ -16,13 +16,18 @@ type EventSink interface {
 }
 
 // Publisher publishes activity events to the NATS bus on the hierarchical
-// activity subject family. It is mode-agnostic: it always uses core NATS
-// publish (fire-and-forget), and the JetStream stream passively captures
-// matching subjects when retention is enabled.
+// activity subject family. It has two modes. Core mode (NewPublisher) sends
+// one core NATS publish and does not wait. Ack mode (NewAckedPublisher) waits
+// for the JetStream stream ack and retries within a budget. Ack mode is only
+// for installs where the record store runs, because only then does the
+// activity stream exist.
 type Publisher struct {
 	cluster string
 	conn    *bus.Conn
-	Logger  *slog.Logger
+	// Logger is set before the first Publish.
+	Logger *slog.Logger
+	// acked is nil in core mode.
+	acked *ackedSender
 }
 
 // NewPublisher creates a new activity Publisher.
@@ -54,12 +59,36 @@ func (p *Publisher) Publish(e Event) {
 		p.log().Error("marshal activity event failed", "error", err)
 		return
 	}
+	p.send(subj, e.Type, data)
+}
+
+// PublishData sends an event that the caller already encoded, on subject.
+// label names the event type in a log line. The Publisher keeps data, so the
+// caller must not change it after the call.
+func (p *Publisher) PublishData(subject, label string, data []byte) {
+	p.send(subject, label, data)
+}
+
+func (p *Publisher) send(subject, label string, data []byte) {
+	if p.acked != nil {
+		p.acked.enqueue(subject, label, data)
+		return
+	}
 	// Do not swallow this. Cluster now affects the subject, so a NATS ACL that
 	// does not cover a remote cluster drops audit events — and an audit trail
 	// that loses records silently is worse than one that never existed.
-	if err := p.conn.Publish(subj, data); err != nil {
+	if err := p.conn.Publish(subject, data); err != nil {
 		p.log().Error("publish activity event failed",
-			"subject", subj, "type", e.Type, "cluster", e.Cluster, "error", err)
+			"subject", subject, "type", label, "error", err)
+	}
+}
+
+// Close empties the ack-mode queue, waits at most timeout, and drops what
+// remains with an Error line. Call it before the bus connection closes. It
+// does nothing in core mode.
+func (p *Publisher) Close(timeout time.Duration) {
+	if p.acked != nil {
+		p.acked.close(timeout)
 	}
 }
 

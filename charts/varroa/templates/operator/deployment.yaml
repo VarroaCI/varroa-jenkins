@@ -170,6 +170,8 @@ spec:
             - name: VARROA_CELL_ISOLATION
               value: {{ .Values.networkPolicy.cellIsolation | toJson | quote }}
 {{- if .Values.recordStore.enabled }}
+            - name: VARROA_ACTIVITY_ACK
+              value: "1"
             {{- if eq .Values.recordStore.blobs.mode "postgres" }}
             - name: VARROA_BLOBSTORE_URL
               value: "pgblob:"

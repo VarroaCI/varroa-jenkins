@@ -154,6 +154,8 @@ spec:
               value: /etc/varroa/tenant-agent-key/key
 {{- end }}
 {{- if .Values.recordStore.enabled }}
+            - name: VARROA_ACTIVITY_ACK
+              value: "1"
             - name: VARROA_ACTIVITY_RETENTION_DAYS
               value: {{ trimSuffix "d" .Values.recordStore.retention.activity | quote }}
             - name: VARROA_RETENTION_RUNS

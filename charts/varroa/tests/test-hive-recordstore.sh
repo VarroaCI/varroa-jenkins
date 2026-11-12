@@ -52,6 +52,8 @@ grep -q "VARROA_RECORDSTORE_DSN" <<< "$GW" && rc=1 || rc=0; check "gateway carri
 grep -q "value: \"$S3_URL\"" <<< "$OP"; check "operator carries VARROA_BLOBSTORE_URL" $?
 grep -A1 "name: VARROA_ARTIFACT_SECRET" <<< "$OP" | grep -q 'value: "member-artifacts"'; check "operator carries VARROA_ARTIFACT_SECRET" $?
 grep -A1 "name: VARROA_CLAIM_GATE" <<< "$OP" | grep -q 'value: "1"'; check "operator claim gate is on" $?
+grep -A1 "name: VARROA_ACTIVITY_ACK" <<< "$OP" | grep -q 'value: "1"'; check "operator acks activity events" $?
+grep -A1 "name: VARROA_ACTIVITY_ACK" <<< "$GW" | grep -q 'value: "1"'; check "gateway acks activity events" $?
 grep -q "^# Source: varroa/templates/recorder/" <<< "$R" && rc=1 || rc=0; check "no recorder template renders" $rc
 grep -q "kind: Cluster$" <<< "$R" && rc=1 || rc=0; check "no CNPG Cluster renders" $rc
 grep -q "varroa-recordstore-" <<< "$R" && rc=1 || rc=0; check "no record-store role Secret or reference renders" $rc

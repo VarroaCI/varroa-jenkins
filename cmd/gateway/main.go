@@ -187,7 +187,9 @@ func main() {
 		srv.SetConsumedTokenStore(mitesrv.NewKVConsumedStore(consumedKV, logger))
 	}
 	// --- Activity publisher (mode-agnostic, publishes to activity.* subjects) ---
-	actPub := activity.NewPublisher(cluster, busConn)
+	actPub := activity.NewPublisherFromEnv(os.Getenv, cluster, busConn, activity.AckedOptions{
+		Logger: logger, Meter: meterProvider.Meter("varroa-gateway"), Component: "gateway"})
+	defer actPub.Close(activity.CloseTimeout)
 
 	handler, err := mitesrv.NewBusHandler(meterProvider, cluster, busConn, snapshotKV, presenceKV, actPub)
 	if err != nil {

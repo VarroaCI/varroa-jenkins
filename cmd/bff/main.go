@@ -338,8 +338,9 @@ func main() {
 
 	// Construct the activity Publisher (always present; publishes to bus
 	// regardless of whether the record store is configured).
-	actPub := activity.NewPublisher(cluster, busConn)
-	actPub.Logger = logger
+	actPub := activity.NewPublisherFromEnv(os.Getenv, cluster, busConn, activity.AckedOptions{
+		Logger: logger, Meter: meterProvider.Meter("varroa-bff"), Component: "bff"})
+	defer actPub.Close(activity.CloseTimeout)
 	// Jenkins-source events are published by the gateway to the per-controller
 	// activity.<ns>.<controller> subjects (see internal/mite/bus_handler.go), so
 	// they reach the recorder's activity consumer and BusFanout's live feed

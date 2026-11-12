@@ -96,6 +96,8 @@ spec:
               value: {{ .value | quote }}
             {{- end }}
 {{- if .Values.recordStore.enabled }}
+            - name: VARROA_ACTIVITY_ACK
+              value: "1"
             {{- if eq .Values.recordStore.blobs.mode "postgres" }}
             - name: VARROA_RECORDSTORE_DSN
               valueFrom:

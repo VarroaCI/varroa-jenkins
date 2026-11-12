@@ -1130,6 +1130,10 @@ func (h *BusHandler) OnJenkinsActivity(name, ns string, evt *mitev1.JenkinsActiv
 		return
 	}
 	subj := bus.ActivitySubject(h.cluster, ns, name)
+	if h.activityPub != nil {
+		h.activityPub.PublishData(subj, evt.Type, data)
+		return
+	}
 	_ = h.conn.Publish(subj, data)
 }
 
