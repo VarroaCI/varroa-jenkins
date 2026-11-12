@@ -31,7 +31,9 @@ const (
 
 // ackedConfig holds the bounds of ack mode. The budget must not exceed the
 // stream's duplicate window, which is two minutes by server default. A retry
-// after the window could store the same event twice.
+// after the window could store the same event twice. The budget must also
+// outlast bus.DeadConnectionBound plus one reconnect. Otherwise a silent bus
+// partition drops events that a reconnect could deliver.
 type ackedConfig struct {
 	queueSize                                        int
 	attemptTimeout, budget, backoffStart, backoffMax time.Duration
