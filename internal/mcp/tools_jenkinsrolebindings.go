@@ -13,6 +13,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
+	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
 
@@ -23,9 +24,9 @@ import (
 func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listJRB := mcp.NewTool("list_jenkins_role_bindings",
 		mcp.WithDescription("List Jenkins role bindings managed by Varroa. Returns a compact "+
-			"summary per binding (name, roleRef, subjectCount, controllerScope, scopeType, scopeFolder) \u2014 enough to "+
+			"summary per binding (name, roleRef, subjectCount, controllerScope, scopeType, scopeFolder, controller) \u2014 enough to "+
 			"survey a fleet and see who is bound to which role and how broadly. A row without "+
-			"controllerScope binds on every controller. Use "+
+			"controllerScope binds on every controller. A row with controller comes from the spec.rbacSpec of that controller. Use "+
 			"get_jenkins_role_binding for the full resource. With cluster, the tool lists the bindings of that cluster only."),
 		mcp.WithBoolean("verbose", mcp.Description("Return full JenkinsRoleBinding resources instead "+
 			"of summaries. Expensive: full resources carry spec.subjects and the controllerScope "+
@@ -272,6 +273,13 @@ type jenkinsRoleBindingSummary struct {
 	ControllerScope *jenkinsControllerScopeSummary `json:"controllerScope,omitempty"`
 	ScopeType       string                         `json:"scopeType,omitempty"`
 	ScopeFolder     string                         `json:"scopeFolder,omitempty"`
+	Controller      *jenkinsRoleBindingController  `json:"controller,omitempty"`
+}
+
+// jenkinsRoleBindingController names the controller whose spec.rbacSpec writes a binding.
+type jenkinsRoleBindingController struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
 }
 
 // jenkinsControllerScopeSummary names the controllers a binding covers. It
@@ -314,6 +322,9 @@ func summarizeJenkinsRoleBinding(jrb *v1alpha1.JenkinsRoleBinding) jenkinsRoleBi
 	if jrb.Spec.JenkinsScope != nil {
 		s.ScopeType = jrb.Spec.JenkinsScope.Type
 		s.ScopeFolder = jrb.Spec.JenkinsScope.Folder
+	}
+	if ns, n, ok := controller.RBACSpecBindingOwner(jrb); ok {
+		s.Controller = &jenkinsRoleBindingController{Namespace: ns, Name: n}
 	}
 	return s
 }
@@ -398,4 +409,5 @@ var jenkinsRoleBindingListOutputSchema = listOutputSchema("Default summary proje
 	{Name: "controllerScope", Type: "object", Desc: "Controller limits: namespaces, and selector (true when a label selector is set). Absent when the binding applies to every controller."},
 	{Name: "scopeType", Type: "string", Desc: "In-Jenkins scope type: Global, Folder, or Pattern."},
 	{Name: "scopeFolder", Type: "string", Desc: "Folder path, when scopeType is Folder."},
+	{Name: "controller", Type: "object", Desc: "The controller whose spec.rbacSpec writes this binding: namespace and name. Absent for every other binding."},
 })

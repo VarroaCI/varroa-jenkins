@@ -517,6 +517,7 @@ func TestRBACBindingName_Golden(t *testing.T) {
 		{"ns", "test", "developer", "ctrl-cf4a83dbe7472025-developer"},
 		{"a-b", "c", "admin", "ctrl-4e84717d75bd540d-admin"},
 		{"a", "b-c", "admin", "ctrl-b88f83c840abe581-admin"},
+		{"prod-a", "jenkins-1", "admin", "ctrl-fbff6b43b023e716-admin"},
 	}
 	for _, tc := range cases {
 		if got := rbacBindingName(tc.ns, tc.name, tc.role); got != tc.want {
@@ -588,5 +589,35 @@ func TestSyncRBACBindings_DashSplitControllersKeepOwnBindings(t *testing.T) {
 		if got := obj.Spec.ControllerScope.ControllerSelector.MatchLabels[v1alpha1.LabelControllerName]; got != cr.Name {
 			t.Errorf("binding of %s/%s scope selector = %q", cr.Namespace, cr.Name, got)
 		}
+	}
+}
+
+func TestRBACSpecBindingOwner(t *testing.T) {
+	owned := labeledBinding(rbacBindingName("prod-a", "jenkins-1", "admin"), "prod-a", "jenkins-1")
+	renamed := labeledBinding("payments-admins", "prod-a", "jenkins-1")
+	crossed := labeledBinding(rbacBindingName("a-b", "c", "admin"), "a", "b-c")
+	local := labeledBinding(rbacBindingName("prod-a", "jenkins-1", "admin"), "prod-a", "jenkins-1")
+	local.Labels[v1alpha1.LabelManagedBy] = "local"
+	noNS := labeledBinding(rbacBindingName("prod-a", "jenkins-1", "admin"), "", "jenkins-1")
+	cases := []struct {
+		name   string
+		b      *v1alpha1.JenkinsRoleBinding
+		ns, n  string
+		wantOK bool
+	}{
+		{"owned", owned, "prod-a", "jenkins-1", true},
+		{"renamed copy keeps labels", renamed, "", "", false},
+		{"derived name of another controller", crossed, "", "", false},
+		{"managed-by is not the operator", local, "", "", false},
+		{"empty namespace label", noNS, "", "", false},
+		{"nil binding", nil, "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ns, n, ok := RBACSpecBindingOwner(tc.b)
+			if ok != tc.wantOK || ns != tc.ns || n != tc.n {
+				t.Errorf("RBACSpecBindingOwner() = (%q, %q, %v), want (%q, %q, %v)", ns, n, ok, tc.ns, tc.n, tc.wantOK)
+			}
+		})
 	}
 }

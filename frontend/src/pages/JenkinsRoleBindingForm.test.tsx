@@ -516,6 +516,68 @@ describe("JenkinsRoleBindingForm — a federated copy", () => {
   });
 });
 
+describe("JenkinsRoleBindingForm — an rbacSpec binding", () => {
+  const owned = createJenkinsRoleBinding({
+    metadata: {
+      name: "ctrl-fbff6b43b023e716-admin",
+      labels: {
+        "varroa.dev/managed-by": "varroa-operator",
+        "varroa.dev/controller-namespace": "prod-a",
+        "varroa.dev/controller-name": "jenkins-1",
+      },
+    },
+    spec: {
+      subjects: [{ kind: "Group", name: "ops" }],
+      roleRef: "jenkins-admin",
+      jenkinsScope: { type: "Global" },
+    },
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = "ctrl-fbff6b43b023e716-admin";
+    mockListJenkinsRoles.mockResolvedValue({ items: availableJenkinsRoles });
+    mockGetJenkinsRoleBinding.mockResolvedValue(owned);
+  });
+
+  it("renders an rbacSpec binding read-only with a note that links to the controller", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleBindingForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Jenkins Role Binding: ctrl-fbff6b43b023e716-admin")).toBeInTheDocument();
+    });
+    const note = screen.getByRole("note");
+    expect(note).toHaveTextContent(
+      "The operator writes this Jenkins role binding from the rbacSpec of controller prod-a/jenkins-1.",
+    );
+    expect(within(note).getByRole("link", { name: "prod-a/jenkins-1" })).toHaveAttribute(
+      "href",
+      "/controllers/core/prod-a/jenkins-1",
+    );
+    expect(getNameInput()).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(mockNavigate).toHaveBeenCalledWith("/access/jenkins-role-bindings?cluster=core");
+  });
+
+  it("keeps a renamed copy that carries the labels editable", async () => {
+    mockGetJenkinsRoleBinding.mockResolvedValue(createJenkinsRoleBinding({
+      metadata: { name: "payments-admins", labels: owned.metadata.labels },
+      spec: { subjects: [{ kind: "Group", name: "ops" }], roleRef: "jenkins-admin" },
+    }));
+    mockParams.name = "payments-admins";
+    renderWithProviders(<JenkinsRoleBindingForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Edit Jenkins Role Binding: payments-admins")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  });
+});
+
 describe("JenkinsRoleBindingForm — cluster switch", () => {
   beforeEach(() => {
     vi.clearAllMocks();

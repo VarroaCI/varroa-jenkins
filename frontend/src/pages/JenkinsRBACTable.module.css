@@ -124,3 +124,13 @@
     justify-content: flex-start;
   }
 }
+
+.controllerBadge {
+  composes: badge;
+  margin: 0 0 0 8px;
+  text-decoration: none;
+}
+
+.controllerBadge:hover {
+  text-decoration: underline;
+}

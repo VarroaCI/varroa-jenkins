@@ -220,6 +220,96 @@ describe("JenkinsRoleBindings cluster switch", () => {
   });
 });
 
+const RBAC_SPEC_LABELS = {
+  "varroa.dev/managed-by": "varroa-operator",
+  "varroa.dev/controller-namespace": "prod-a",
+  "varroa.dev/controller-name": "jenkins-1",
+};
+
+const rbacSpecBinding = createJenkinsRoleBinding({
+  metadata: { name: "ctrl-fbff6b43b023e716-admin", labels: RBAC_SPEC_LABELS },
+  spec: {
+    subjects: [{ kind: "Group", name: "ops" }],
+    roleRef: "jenkins-admin",
+    jenkinsScope: { type: "Global" },
+  },
+});
+
+describe("JenkinsRoleBindings rbacSpec controller", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListJenkinsRoleBindings.mockResolvedValue({ items: [folderScopeBinding, rbacSpecBinding] });
+  });
+
+  it("shows a Controller badge that links to the controller of an rbacSpec binding", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleBindings />);
+    await screen.findByText("ctrl-fbff6b43b023e716-admin");
+
+    const row = screen.getByText("ctrl-fbff6b43b023e716-admin").closest("tr")!;
+    const badge = within(row).getByRole("link", { name: "Controller: prod-a/jenkins-1" });
+    expect(badge).toHaveAttribute("href", "/controllers/core/prod-a/jenkins-1");
+    expect(within(row).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(row).getByRole("button", { name: "Delete" })).toBeInTheDocument();
+
+    const plainRow = screen.getByText("jenkins-binding-folder").closest("tr")!;
+    expect(within(plainRow).queryByRole("link", { name: /Controller:/ })).toBeNull();
+    expect(within(plainRow).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+
+    await user.click(within(row).getByRole("button", { name: "View" }));
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/access/jenkins-role-bindings/ctrl-fbff6b43b023e716-admin/edit?cluster=core",
+    );
+  });
+
+  it("shows no Controller badge for a renamed copy that keeps the labels", async () => {
+    const renamed = createJenkinsRoleBinding({
+      metadata: { name: "payments-admins", labels: RBAC_SPEC_LABELS },
+      spec: { subjects: [{ kind: "Group", name: "ops" }], roleRef: "jenkins-admin" },
+    });
+    mockListJenkinsRoleBindings.mockResolvedValue({ items: [renamed] });
+    renderWithProviders(<JenkinsRoleBindings />);
+    await screen.findByText("payments-admins");
+
+    const row = screen.getByText("payments-admins").closest("tr")!;
+    expect(within(row).queryByRole("link", { name: /Controller:/ })).toBeNull();
+    expect(within(row).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+  });
+
+  it("matches the controller in the filter", async () => {
+    renderWithProviders(<JenkinsRoleBindings />);
+    await screen.findByText("ctrl-fbff6b43b023e716-admin");
+
+    const filter = screen.getByPlaceholderText("Filter by name or controller...");
+    await userEvent.type(filter, "jenkins-1");
+
+    expect(screen.getByText("ctrl-fbff6b43b023e716-admin")).toBeInTheDocument();
+    expect(screen.queryByText("jenkins-binding-folder")).not.toBeInTheDocument();
+  });
+});
+
+describe("JenkinsRoleBindings rbacSpec controller on a member cluster", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockClusterList.items = [CORE_CLUSTER, MEMBER_CLUSTER];
+    mockListJenkinsRoleBindings.mockImplementation((cluster: string) =>
+      Promise.resolve({ items: cluster === "member-b" ? [rbacSpecBinding] : [] }),
+    );
+  });
+
+  afterEach(() => {
+    mockClusterList.items = [CORE_CLUSTER];
+  });
+
+  it("links the Controller badge to the selected member cluster", async () => {
+    renderWithProviders(<JenkinsRoleBindings />);
+
+    await userEvent.selectOptions(await screen.findByRole("combobox"), "member-b");
+    const badge = await screen.findByRole("link", { name: "Controller: prod-a/jenkins-1" });
+    expect(badge).toHaveAttribute("href", "/controllers/member-b/prod-a/jenkins-1");
+  });
+});
+
 describe("JenkinsRoleBindings no accessible cluster", () => {
   beforeEach(() => {
     vi.clearAllMocks();
