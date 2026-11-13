@@ -105,7 +105,6 @@ Commands use `kubectl` and `helm`. Replace values in `<angle-brackets>` before r
 - [Artifact credentials](operations/artifact-credentials.md)
 - [Notifications](operations/notifications.md)
 - [NATS upgrades](operations/nats-upgrades.md)
-- [Upgrade 0.6 to 0.7: the tenant rename](operations/upgrade-0-6-to-0-7.md)
 - [Observability](operations/observability.md)
 - [Troubleshooting](operations/troubleshooting.md)
 
