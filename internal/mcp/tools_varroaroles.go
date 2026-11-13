@@ -33,6 +33,16 @@ func registerVarroaRoleTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		withListOutput(varroaRoleListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.Authorizer == nil {
+			return mcp.NewToolResultError("authorizer not configured"), nil
+		}
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
+		if !deps.Authorizer.CanReadRoles(claims) {
+			return mcp.NewToolResultError("access denied: missing roles:read permission"), nil
+		}
 		args := getArgs(req)
 		roles, err := crdstore.List[v1alpha1.VarroaRole](ctx, deps.Store, "", "")
 		if err != nil {
@@ -53,6 +63,16 @@ func registerVarroaRoleTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		mcp.WithString("name", mcp.Required(), mcp.Description("Role name")),
 	)
 	addTool(mcpServer, kindRead, getR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.Authorizer == nil {
+			return mcp.NewToolResultError("authorizer not configured"), nil
+		}
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
+		if !deps.Authorizer.CanReadRoles(claims) {
+			return mcp.NewToolResultError("access denied: missing roles:read permission"), nil
+		}
 		name := strArg(getArgs(req), "name")
 		role, err := crdstore.Get[v1alpha1.VarroaRole](ctx, deps.Store, name, "")
 		if err != nil {

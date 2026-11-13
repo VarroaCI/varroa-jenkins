@@ -52,7 +52,7 @@ func jenkinsRoleBindingDeps(t *testing.T) *api.Dependencies {
 			},
 		},
 	)
-	return &api.Dependencies{Client: &stubClient{}, Store: store}
+	return &api.Dependencies{Client: &stubClient{}, Store: store, Authorizer: adminTestAuthorizer()}
 }
 
 // listJenkinsRoleBindingsResult calls list_jenkins_role_bindings and returns
