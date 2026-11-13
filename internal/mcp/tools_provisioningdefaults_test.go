@@ -502,38 +502,139 @@ func TestCreateJenkinsVersionProfile_PermissionTextUsesVerb(t *testing.T) {
 	}
 }
 
-// TestMCPUpdateProvisioningDefaults_StoreFallbackDoesNotStampCluster covers the
-// branch a helper-level test cannot reach: with no ConfigBrood the write goes to
-// the local store, so a caller-supplied cluster must not be stamped onto the
-// audit event.
-func TestMCPUpdateProvisioningDefaults_StoreFallbackDoesNotStampCluster(t *testing.T) {
-	sink := &recordingSink{}
-	deps := adminDeps()
-	deps.ActivityPublisher = sink
-	deps.ConfigBrood = nil // force the local-store fallback
-
-	if err := deps.Store.(*crdstore.Fake).Seed(&v1alpha1.ProvisioningDefaults{
+// seedLocalPD stores varroa-defaults with rootDomain local.example.com in store.
+func seedLocalPD(t *testing.T, store *crdstore.Fake) {
+	t.Helper()
+	crdstore.MustSeed(store, &v1alpha1.ProvisioningDefaults{
 		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
-	}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "local.example.com"},
+	})
+}
 
-	handler := NewHandler(deps)
-	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
-		"name": "update_provisioning_defaults",
-		"arguments": map[string]interface{}{
-			"name": "varroa-defaults", "cluster": "prod", "defaultCPU": "2",
-		},
-	}, mcpAdminClaims)
-	if b, _ := json.Marshal(resp.Result); strings.Contains(string(b), `"isError":true`) {
-		t.Fatalf("tool errored: %s", b)
+// readPD reads varroa-defaults from store.
+func readPD(t *testing.T, store *crdstore.Fake) *v1alpha1.ProvisioningDefaults {
+	t.Helper()
+	pd, err := crdstore.Get[v1alpha1.ProvisioningDefaults](context.Background(), store, "varroa-defaults", "")
+	if err != nil {
+		t.Fatalf("get: %v", err)
 	}
+	return pd
+}
 
-	if len(sink.events) != 1 {
-		t.Fatalf("got %d events, want 1", len(sink.events))
+// Without a config brood, the tool refuses the write on every cluster. The
+// local store does not change, and no event is emitted.
+func TestMCPUpdateProvisioningDefaults_NoConfigBroodRefusesTheWrite(t *testing.T) {
+	for _, cluster := range []string{"", "member-b"} {
+		t.Run("cluster="+cluster, func(t *testing.T) {
+			deps := adminDeps()
+			sink := &recordingSink{}
+			deps.ActivityPublisher = sink
+			local := deps.Store.(*crdstore.Fake)
+			seedLocalPD(t, local)
+			args := map[string]interface{}{"name": "varroa-defaults", "storageClass": "fast"}
+			if cluster != "" {
+				args["cluster"] = cluster
+			}
+			tr := updatePDCall(t, deps, args)
+			if !tr.IsError || toolText(tr) != "config brood not configured" {
+				t.Fatalf("result = %q, want the config brood refusal", toolText(tr))
+			}
+			if got := readPD(t, local).Spec.StorageClass; got != "" {
+				t.Errorf("storageClass = %q, want empty: the refused write changed the local store", got)
+			}
+			if len(sink.events) != 0 {
+				t.Errorf("events = %+v, want none", sink.events)
+			}
+		})
 	}
-	if got := sink.events[0].Cluster; got != "" {
-		t.Errorf("Cluster = %q, want empty: the write went to the local store, not %q", got, "prod")
+}
+
+// Without a config brood, the get tool refuses the read on every cluster.
+func TestMCPGetProvisioningDefaults_NoConfigBroodRefusesTheRead(t *testing.T) {
+	for _, cluster := range []string{"", "member-b"} {
+		t.Run("cluster="+cluster, func(t *testing.T) {
+			deps := adminDeps()
+			seedLocalPD(t, deps.Store.(*crdstore.Fake))
+			args := map[string]interface{}{"name": "varroa-defaults"}
+			if cluster != "" {
+				args["cluster"] = cluster
+			}
+			resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+				"name":      "get_provisioning_defaults",
+				"arguments": args,
+			}, mcpAdminClaims)
+			tr := parseToolResult(t, resp.Result)
+			if !tr.IsError || toolText(tr) != "config brood not configured" {
+				t.Fatalf("result = %q, want the config brood refusal", toolText(tr))
+			}
+		})
+	}
+}
+
+// A write without cluster goes through the local operator. It reaches no
+// member, changes the local store, and emits one event that names core.
+func TestMCPUpdateProvisioningDefaults_LocalWriteGoesThroughTheLocalOperator(t *testing.T) {
+	deps, local, member, sink := memberDeps(t)
+	seedLocalPD(t, local)
+
+	tr := updatePDCall(t, deps, map[string]interface{}{"name": "varroa-defaults", "storageClass": "fast"})
+	if tr.IsError {
+		t.Fatalf("tool errored: %s", toolText(tr))
+	}
+	if len(member.localWrites) != 1 || len(member.updates) != 0 {
+		t.Errorf("local writes = %v, member writes = %v, want one local write only", member.localWrites, member.updates)
+	}
+	got := readPD(t, local)
+	if got.Spec.StorageClass != "fast" || got.Spec.RootDomain != "local.example.com" {
+		t.Errorf("local spec = %+v, want storageClass fast and the stored rootDomain", got.Spec)
+	}
+	if len(sink.events) != 1 || sink.events[0].Cluster != "core" {
+		t.Errorf("events = %+v, want one event on core", sink.events)
+	}
+}
+
+// A write with a member cluster goes through that member's operator only. The
+// local store does not change, and the event names the member.
+func TestMCPUpdateProvisioningDefaults_MemberWriteLeavesTheLocalStore(t *testing.T) {
+	deps, local, member, sink := memberDeps(t)
+	seedLocalPD(t, local)
+
+	tr := updatePDCall(t, deps, map[string]interface{}{
+		"name": "varroa-defaults", "cluster": "member-b", "storageClass": "fast",
+	})
+	if tr.IsError {
+		t.Fatalf("tool errored: %s", toolText(tr))
+	}
+	if len(member.updates) != 1 || len(member.localWrites) != 0 {
+		t.Errorf("member writes = %v, local writes = %v, want one member write only", member.updates, member.localWrites)
+	}
+	if got := readPD(t, local).Spec.StorageClass; got != "" {
+		t.Errorf("local storageClass = %q, want empty: a member write changed the local store", got)
+	}
+	if got := readPD(t, member.store).Spec.StorageClass; got != "fast" {
+		t.Errorf("member storageClass = %q, want fast", got)
+	}
+	if len(sink.events) != 1 || sink.events[0].Cluster != "member-b" {
+		t.Errorf("events = %+v, want one event on member-b", sink.events)
+	}
+}
+
+// A write without cluster fails when the local operator does not answer. The
+// local store does not change, and no event is emitted.
+func TestMCPUpdateProvisioningDefaults_LocalOperatorDownChangesNothing(t *testing.T) {
+	deps, local, member, sink := memberDeps(t)
+	seedLocalPD(t, local)
+	member.localDown = true
+
+	tr := updatePDCall(t, deps, map[string]interface{}{"name": "varroa-defaults", "storageClass": "fast"})
+	if !tr.IsError || !strings.Contains(toolText(tr), "cluster core unreachable") {
+		t.Fatalf("result = %q, want a failure that names core", toolText(tr))
+	}
+	if got := readPD(t, local).Spec.StorageClass; got != "" {
+		t.Errorf("storageClass = %q, want empty", got)
+	}
+	if len(sink.events) != 0 {
+		t.Errorf("events = %+v, want none", sink.events)
 	}
 }
 
@@ -718,12 +819,11 @@ func TestMCPUpdateProvisioningDefaults_CreateConflictReadsAndMergesAgain(t *test
 	}
 }
 
-// The local-store path has the same race. The first read misses although the
-// object exists, so the create conflicts and the second round merges onto it.
-func TestMCPUpdateProvisioningDefaults_StoreFallbackCreateRaceReadsAndMergesAgain(t *testing.T) {
-	deps := adminDeps()
-	deps.ConfigBrood = nil
-	fake := deps.Store.(*crdstore.Fake)
+// The local cluster has the same race. The first read misses although the
+// object exists, so the create through the local operator conflicts and the
+// second round merges onto the object.
+func TestMCPUpdateProvisioningDefaults_LocalCreateRaceReadsAndMergesAgain(t *testing.T) {
+	deps, fake, member, _ := memberDeps(t)
 	if err := fake.Seed(&v1alpha1.ProvisioningDefaults{
 		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
 		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "raced.example.com"},
@@ -751,6 +851,9 @@ func TestMCPUpdateProvisioningDefaults_StoreFallbackCreateRaceReadsAndMergesAgai
 	}
 	if got.Spec.StorageClass != "fast" {
 		t.Errorf("storageClass = %q, want fast", got.Spec.StorageClass)
+	}
+	if len(member.localWrites) != 2 || len(member.updates) != 0 {
+		t.Errorf("local writes = %v, member writes = %v, want two local writes only", member.localWrites, member.updates)
 	}
 }
 
@@ -849,17 +952,11 @@ func TestMCPUpdateProvisioningDefaults_ConflictOnEveryAttemptAsksForARetry(t *te
 	}
 }
 
-// Without a config brood the tool writes through the local store, and a conflict
-// from the store is retried in the same way.
-func TestMCPUpdateProvisioningDefaults_StoreFallbackRetriesAConflict(t *testing.T) {
-	deps := adminDeps()
-	fake := deps.Store.(*crdstore.Fake)
-	if err := fake.Seed(&v1alpha1.ProvisioningDefaults{
-		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
-		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "local.example.com"},
-	}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+// A conflict from the local operator starts a new round in the same way as a
+// member conflict.
+func TestMCPUpdateProvisioningDefaults_LocalConflictReadsAndMergesAgain(t *testing.T) {
+	deps, fake, member, _ := memberDeps(t)
+	seedLocalPD(t, fake)
 	gvr, err := crdstore.GVRFor[v1alpha1.ProvisioningDefaults]()
 	if err != nil {
 		t.Fatalf("GVRFor: %v", err)
@@ -881,6 +978,9 @@ func TestMCPUpdateProvisioningDefaults_StoreFallbackRetriesAConflict(t *testing.
 	}
 	if got.Spec.RootDomain != "local.example.com" {
 		t.Errorf("rootDomain = %q, want the stored value kept", got.Spec.RootDomain)
+	}
+	if len(member.localWrites) != 2 || len(member.updates) != 0 {
+		t.Errorf("local writes = %v, member writes = %v, want two local writes only", member.localWrites, member.updates)
 	}
 }
 

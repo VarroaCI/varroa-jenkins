@@ -19,7 +19,6 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
-	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // =============================================================================
@@ -43,17 +42,12 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 		mcp.WithString("cluster", mcp.Description("Target cluster (default: local cluster)")),
 	)
 	addTool(mcpServer, kindRead, getPD, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.ConfigBrood == nil {
+			return mcp.NewToolResultError("config brood not configured"), nil
+		}
 		args := getArgs(req)
 		name, cluster := strArg(args, "name"), clusterOrDefault(args)
-		var raw json.RawMessage
-		var err error
-		if deps.ConfigBrood != nil {
-			raw, err = deps.ConfigBrood.GetProvisioningDefaults(ctx, cluster, name)
-		} else {
-			pd, getErr := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, deps.Store, name, "")
-			err = getErr
-			raw, _ = json.Marshal(pd)
-		}
+		raw, err := deps.ConfigBrood.GetProvisioningDefaults(ctx, cluster, name)
 		if err != nil {
 			return mcp.NewToolResultError("provisioning defaults not found: " + err.Error()), nil
 		}
@@ -72,6 +66,9 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 		mcp.WithString("cluster", mcp.Description("Target cluster (default: local cluster)")),
 	)
 	addTool(mcpServer, kindUpdate, updatePD, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.ConfigBrood == nil {
+			return mcp.NewToolResultError("config brood not configured"), nil
+		}
 		if deps.Authorizer == nil {
 			return mcp.NewToolResultError("authorizer not configured"), nil
 		}
@@ -103,20 +100,10 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 				return mcp.NewToolResultError(fmt.Sprintf("provisioning defaults %s on cluster %s changed during each of %d attempts: call update_provisioning_defaults again", name, cluster, updateWriteAttempts)), nil
 			}
 		}
-		// routed records whether the write actually reached the named cluster.
-		// The else branch writes to the local store whatever cluster the caller
-		// asked for, so stamping it would invent a mutation on a cluster that
-		// was never touched.
-		routed := deps.ConfigBrood != nil
-		ev := activity.Event{
+		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:    "provisioningdefaults.updated",
 			Message: "ProvisioningDefaults " + name + " updated",
-		}
-		if routed {
-			emitActivityForCluster(ctx, deps, claims, cluster, ev)
-		} else {
-			emitActivity(ctx, deps, claims, ev)
-		}
+		})
 		return resultJSON(out)
 	})
 
@@ -360,20 +347,14 @@ func mergeProvisioningDefaultsArgs(spec *v1alpha1.ProvisioningDefaultsSpec, args
 	}
 }
 
-// writeProvisioningDefaults writes pd to the target cluster, or to the local
-// store when no config brood is wired. The write carries pd's resourceVersion.
+// writeProvisioningDefaults sends pd to the operator of the target cluster,
+// also on the local cluster. The write carries pd's resourceVersion.
 func writeProvisioningDefaults(ctx context.Context, deps *api.Dependencies, cluster, name string, pd *v1alpha1.ProvisioningDefaults) (json.RawMessage, error) {
-	if deps.ConfigBrood != nil {
-		raw, err := json.Marshal(pd)
-		if err != nil {
-			return nil, err
-		}
-		return deps.ConfigBrood.UpdateProvisioningDefaults(ctx, cluster, name, raw)
-	}
-	if err := crdstore.ApplyAt[v1alpha1.ProvisioningDefaults](ctx, deps.Store, pd); err != nil {
+	raw, err := json.Marshal(pd)
+	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(pd)
+	return deps.ConfigBrood.UpdateProvisioningDefaults(ctx, cluster, name, raw)
 }
 
 // readProvisioningDefaultsBase returns the stored spec that a patch merges onto.
@@ -384,13 +365,6 @@ func writeProvisioningDefaults(ctx context.Context, deps *api.Dependencies, clus
 // object. A create by another writer answers conflict, and the caller reads again.
 func readProvisioningDefaultsBase(ctx context.Context, deps *api.Dependencies, cluster, name string) (*v1alpha1.ProvisioningDefaults, error) {
 	empty := &v1alpha1.ProvisioningDefaults{ObjectMeta: metav1.ObjectMeta{Name: name}}
-	if deps.ConfigBrood == nil {
-		pd, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, deps.Store, name, "")
-		if isNotFoundErr(err) {
-			return empty, nil
-		}
-		return pd, err
-	}
 	raw, err := deps.ConfigBrood.GetProvisioningDefaults(ctx, cluster, name)
 	if isNotFoundErr(err) {
 		return empty, nil
