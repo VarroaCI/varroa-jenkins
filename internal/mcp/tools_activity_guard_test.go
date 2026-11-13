@@ -150,6 +150,49 @@ type guardConfigBrood struct{ api.ConfigBrood }
 
 func (g *guardConfigBrood) SyncCatalogSource(_ context.Context, _, _, _ string) error { return nil }
 
+// The config write tools of the four writable kinds send every write, the local
+// cluster too, through these methods. Each one accepts the write.
+
+func (g *guardConfigBrood) CreateComposedBundle(_ context.Context, _, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	return obj, nil
+}
+
+func (g *guardConfigBrood) UpdateComposedBundle(_ context.Context, _, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	return obj, nil
+}
+
+func (g *guardConfigBrood) DeleteComposedBundle(_ context.Context, _, _, _ string) error { return nil }
+
+func (g *guardConfigBrood) CreateCatalogSource(_ context.Context, _, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	return obj, nil
+}
+
+func (g *guardConfigBrood) UpdateCatalogSource(_ context.Context, _, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	return obj, nil
+}
+
+func (g *guardConfigBrood) DeleteCatalogSource(_ context.Context, _, _, _ string) error { return nil }
+
+func (g *guardConfigBrood) CreateJenkinsRole(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	return obj, nil
+}
+
+func (g *guardConfigBrood) UpdateJenkinsRole(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	return obj, nil
+}
+
+func (g *guardConfigBrood) DeleteJenkinsRole(_ context.Context, _, _ string) error { return nil }
+
+func (g *guardConfigBrood) CreateJenkinsRoleBinding(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	return obj, nil
+}
+
+func (g *guardConfigBrood) UpdateJenkinsRoleBinding(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	return obj, nil
+}
+
+func (g *guardConfigBrood) DeleteJenkinsRoleBinding(_ context.Context, _, _ string) error { return nil }
+
 func (g *guardConfigBrood) CreateVersionProfile(_ context.Context, _, _ string, obj json.RawMessage) (json.RawMessage, error) {
 	return obj, nil
 }

@@ -329,6 +329,7 @@ func writeJRBArgs(name string, extra map[string]interface{}) map[string]interfac
 func seededJRBStore(t *testing.T, binding *v1alpha1.JenkinsRoleBinding) *api.Dependencies {
 	t.Helper()
 	deps := adminDeps()
+	withLocalOperator(deps)
 	crdstore.MustSeed(deps.Store.(*crdstore.Fake), binding)
 	return deps
 }
@@ -369,6 +370,7 @@ var jrbExpressions = []interface{}{
 
 func TestCreateJenkinsRoleBinding_StoresBothScopes(t *testing.T) {
 	deps := adminDeps()
+	withLocalOperator(deps)
 	tr := callToolAs(t, deps, mcpAdminClaims, "create_jenkins_role_binding", writeJRBArgs("jrb-both", map[string]interface{}{
 		"controllerScope": map[string]interface{}{
 			"namespaces": []interface{}{"team-a"},
@@ -414,6 +416,7 @@ func TestCreateJenkinsRoleBinding_JenkinsScopeShapesAccepted(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			deps := adminDeps()
+			withLocalOperator(deps)
 			tr := callToolAs(t, deps, mcpAdminClaims, "create_jenkins_role_binding", writeJRBArgs("jrb-shape", map[string]interface{}{"jenkinsScope": c.js}))
 			if tr.IsError {
 				t.Fatalf("create returned error: %s", toolText(tr))
@@ -428,6 +431,7 @@ func TestCreateJenkinsRoleBinding_JenkinsScopeShapesAccepted(t *testing.T) {
 
 func TestCreateJenkinsRoleBinding_OmittedScopesStayNil(t *testing.T) {
 	deps := adminDeps()
+	withLocalOperator(deps)
 	tr := callToolAs(t, deps, mcpAdminClaims, "create_jenkins_role_binding", writeJRBArgs("jrb-bare", nil))
 	if tr.IsError {
 		t.Fatalf("create returned error: %s", toolText(tr))
@@ -460,6 +464,7 @@ func TestCreateJenkinsRoleBinding_InvalidControllerScopeRejected(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			deps := adminDeps()
+			withLocalOperator(deps)
 			tr := callToolAs(t, deps, mcpAdminClaims, "create_jenkins_role_binding", writeJRBArgs("jrb-bad-cs", map[string]interface{}{"controllerScope": c.scope}))
 			if !tr.IsError {
 				t.Fatalf("create accepted controllerScope %v", c.scope)
@@ -499,6 +504,7 @@ func TestCreateJenkinsRoleBinding_InvalidJenkinsScopeRejected(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			deps := adminDeps()
+			withLocalOperator(deps)
 			tr := callToolAs(t, deps, mcpAdminClaims, "create_jenkins_role_binding", writeJRBArgs("jrb-bad-js", map[string]interface{}{"jenkinsScope": c.js}))
 			if !tr.IsError {
 				t.Fatalf("create accepted jenkinsScope %v", c.js)
@@ -517,6 +523,7 @@ func TestCreateJenkinsRoleBinding_NonObjectScopeArgsRejected(t *testing.T) {
 	for _, arg := range []string{"controllerScope", "jenkinsScope"} {
 		for _, v := range []interface{}{`{"type":"Global"}`, nil} {
 			deps := adminDeps()
+			withLocalOperator(deps)
 			tr := callToolAs(t, deps, mcpAdminClaims, "create_jenkins_role_binding", writeJRBArgs("jrb-str", map[string]interface{}{arg: v}))
 			if !tr.IsError {
 				t.Errorf("%s = %v was accepted", arg, v)

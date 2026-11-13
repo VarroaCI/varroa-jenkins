@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
@@ -43,8 +42,8 @@ func (c configCluster) operatorNamespace(ctx context.Context, deps *api.Dependen
 }
 
 // resolveConfigCluster maps the cluster argument onto one cluster. An empty
-// argument or the local name selects the local cluster, which the tool reads and
-// writes on deps.Store. Any other name must be a member that deps.Brood knows.
+// argument or the local name selects the local cluster, which a read tool reads
+// on deps.Store. Any other name must be a member that deps.Brood knows.
 // Without a brood, only the local cluster is known.
 func resolveConfigCluster(ctx context.Context, deps *api.Dependencies, args map[string]any) (configCluster, *mcp.CallToolResult) {
 	local := localCluster(deps)
@@ -61,6 +60,20 @@ func resolveConfigCluster(ctx context.Context, deps *api.Dependencies, args map[
 	return configCluster{name: name}, nil
 }
 
+// resolveConfigWriteCluster is resolveConfigCluster for a create, an update, or
+// a delete. The operator of the target cluster runs every write, also on the
+// local cluster, so a server without deps.ConfigBrood refuses the call.
+func resolveConfigWriteCluster(ctx context.Context, deps *api.Dependencies, args map[string]any) (configCluster, *mcp.CallToolResult) {
+	c, res := resolveConfigCluster(ctx, deps, args)
+	if res != nil {
+		return configCluster{}, res
+	}
+	if deps.ConfigBrood == nil {
+		return configCluster{}, mcp.NewToolResultError("config brood not configured")
+	}
+	return c, nil
+}
+
 // emitConfigActivity stamps a member cluster on e. A local write keeps the publisher's own cluster.
 func emitConfigActivity(ctx context.Context, deps *api.Dependencies, claims *auth.Claims, c configCluster, e activity.Event) {
 	if c.local {
@@ -72,61 +85,65 @@ func emitConfigActivity(ctx context.Context, deps *api.Dependencies, claims *aut
 
 // composedBundleObject addresses one ComposedBundle on the cluster c.
 func composedBundleObject(deps *api.Dependencies, c configCluster, namespace, name string) configObject[v1alpha1.ComposedBundle] {
+	update := func(ctx context.Context, obj json.RawMessage) (json.RawMessage, error) {
+		return deps.ConfigBrood.UpdateComposedBundle(ctx, c.name, namespace, name, obj)
+	}
 	if c.local {
-		return storeObject[v1alpha1.ComposedBundle](deps.Store, name, namespace)
+		return localObject[v1alpha1.ComposedBundle](deps.Store, name, namespace, update)
 	}
 	return broodObject[v1alpha1.ComposedBundle](
 		func(ctx context.Context) (json.RawMessage, error) {
 			return deps.ConfigBrood.GetComposedBundle(ctx, c.name, namespace, name)
 		},
-		func(ctx context.Context, obj json.RawMessage) (json.RawMessage, error) {
-			return deps.ConfigBrood.UpdateComposedBundle(ctx, c.name, namespace, name, obj)
-		},
+		update,
 	)
 }
 
 // catalogSourceObject addresses one CatalogSource on the cluster c.
 func catalogSourceObject(deps *api.Dependencies, c configCluster, namespace, name string) configObject[v1alpha1.CatalogSource] {
+	update := func(ctx context.Context, obj json.RawMessage) (json.RawMessage, error) {
+		return deps.ConfigBrood.UpdateCatalogSource(ctx, c.name, namespace, name, obj)
+	}
 	if c.local {
-		return storeObject[v1alpha1.CatalogSource](deps.Store, name, namespace)
+		return localObject[v1alpha1.CatalogSource](deps.Store, name, namespace, update)
 	}
 	return broodObject[v1alpha1.CatalogSource](
 		func(ctx context.Context) (json.RawMessage, error) {
 			return deps.ConfigBrood.GetCatalogSource(ctx, c.name, namespace, name)
 		},
-		func(ctx context.Context, obj json.RawMessage) (json.RawMessage, error) {
-			return deps.ConfigBrood.UpdateCatalogSource(ctx, c.name, namespace, name, obj)
-		},
+		update,
 	)
 }
 
 // jenkinsRoleObject addresses one cluster-scoped JenkinsRole on the cluster c.
 func jenkinsRoleObject(deps *api.Dependencies, c configCluster, name string) configObject[v1alpha1.JenkinsRole] {
+	update := func(ctx context.Context, obj json.RawMessage) (json.RawMessage, error) {
+		return deps.ConfigBrood.UpdateJenkinsRole(ctx, c.name, name, obj)
+	}
 	if c.local {
-		return storeObject[v1alpha1.JenkinsRole](deps.Store, name, "")
+		return localObject[v1alpha1.JenkinsRole](deps.Store, name, "", update)
 	}
 	return broodObject[v1alpha1.JenkinsRole](
 		func(ctx context.Context) (json.RawMessage, error) {
 			return deps.ConfigBrood.GetJenkinsRole(ctx, c.name, name)
 		},
-		func(ctx context.Context, obj json.RawMessage) (json.RawMessage, error) {
-			return deps.ConfigBrood.UpdateJenkinsRole(ctx, c.name, name, obj)
-		},
+		update,
 	)
 }
 
 // jenkinsRoleBindingObject addresses one cluster-scoped JenkinsRoleBinding on the cluster c.
 func jenkinsRoleBindingObject(deps *api.Dependencies, c configCluster, name string) configObject[v1alpha1.JenkinsRoleBinding] {
+	update := func(ctx context.Context, obj json.RawMessage) (json.RawMessage, error) {
+		return deps.ConfigBrood.UpdateJenkinsRoleBinding(ctx, c.name, name, obj)
+	}
 	if c.local {
-		return storeObject[v1alpha1.JenkinsRoleBinding](deps.Store, name, "")
+		return localObject[v1alpha1.JenkinsRoleBinding](deps.Store, name, "", update)
 	}
 	return broodObject[v1alpha1.JenkinsRoleBinding](
 		func(ctx context.Context) (json.RawMessage, error) {
 			return deps.ConfigBrood.GetJenkinsRoleBinding(ctx, c.name, name)
 		},
-		func(ctx context.Context, obj json.RawMessage) (json.RawMessage, error) {
-			return deps.ConfigBrood.UpdateJenkinsRoleBinding(ctx, c.name, name, obj)
-		},
+		update,
 	)
 }
 
@@ -153,16 +170,12 @@ func listOnCluster[T any](ctx context.Context, deps *api.Dependencies, c configC
 	return out, nil
 }
 
-// createOnCluster creates obj on the cluster c and returns the stored object.
-// A member refusal of an existing name is a conflict answer.
-func createOnCluster[T any](ctx context.Context, deps *api.Dependencies, c configCluster, obj *T,
+// createOnCluster sends obj through create, the ConfigBrood create method of
+// its kind, and returns the stored object. The operator of the target cluster
+// runs the create, also on the local cluster. A refusal of an existing name is
+// a conflict answer.
+func createOnCluster[T any](ctx context.Context, obj *T,
 	create func(ctx context.Context, body json.RawMessage) (json.RawMessage, error)) (*T, error) {
-	if c.local {
-		if err := crdstore.Create[T](ctx, deps.Store, obj); err != nil {
-			return nil, err
-		}
-		return obj, nil
-	}
 	body, err := json.Marshal(obj)
 	if err != nil {
 		return nil, fmt.Errorf("encode the object: %w", err)
@@ -178,21 +191,11 @@ func createOnCluster[T any](ctx context.Context, deps *api.Dependencies, c confi
 	return &created, nil
 }
 
-// deleteOnCluster deletes one object on the cluster c. The local cluster deletes
-// from deps.Store. A member runs remove.
-func deleteOnCluster[T any](ctx context.Context, deps *api.Dependencies, c configCluster, name, namespace string,
-	remove func(ctx context.Context) error) error {
-	if c.local {
-		return crdstore.Delete[T](ctx, deps.Store, name, namespace)
-	}
-	return remove(ctx)
-}
-
-// isAlreadyExistsErr reports a create refusal for an existing name, from the
-// local store or from a member operator, which answers conflict.
+// isAlreadyExistsErr reports a create refusal for an existing name. The
+// operator of the target cluster answers it as conflict.
 func isAlreadyExistsErr(err error) bool {
 	var be *api.BroodError
-	return apierrors.IsAlreadyExists(err) || (errors.As(err, &be) && be.Code == bus.CodeConflict)
+	return errors.As(err, &be) && be.Code == bus.CodeConflict
 }
 
 // alreadyExistsText words a create refusal. On a member, the text names the

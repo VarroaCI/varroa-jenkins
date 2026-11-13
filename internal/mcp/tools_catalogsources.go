@@ -132,7 +132,7 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if !deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "create", ns) {
 			return mcp.NewToolResultError("access denied: missing catalogsources:create permission"), nil
 		}
-		cl, res := resolveConfigCluster(ctx, deps, args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
 		if res != nil {
 			return res, nil
 		}
@@ -171,7 +171,7 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		}
 		source.Namespace = ns
 		name := strArg(args, "name")
-		created, err := createOnCluster(ctx, deps, cl, source, func(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
+		created, err := createOnCluster(ctx, source, func(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
 			return deps.ConfigBrood.CreateCatalogSource(ctx, cl.name, ns, name, body)
 		})
 		if err != nil {
@@ -217,7 +217,7 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if err := v1alpha1.CheckCatalogSourceWritable(name); err != nil {
 			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
 		}
-		cl, res := resolveConfigCluster(ctx, deps, args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
 		if res != nil {
 			return res, nil
 		}
@@ -309,13 +309,11 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if err := v1alpha1.CheckCatalogSourceWritable(name); err != nil {
 			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
 		}
-		cl, res := resolveConfigCluster(ctx, deps, args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
 		if res != nil {
 			return res, nil
 		}
-		if err := deleteOnCluster[v1alpha1.CatalogSource](ctx, deps, cl, name, ns, func(ctx context.Context) error {
-			return deps.ConfigBrood.DeleteCatalogSource(ctx, cl.name, ns, name)
-		}); err != nil {
+		if err := deps.ConfigBrood.DeleteCatalogSource(ctx, cl.name, ns, name); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete catalog source%s: %v", cl.onCluster(), err)), nil
 		}
 		emitConfigActivity(ctx, deps, claims, cl, activity.Event{
