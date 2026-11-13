@@ -162,3 +162,9 @@ func TestUpdateAssistantConfigToolAnswersTheObject(t *testing.T) {
 		"object": `{"spec":{"budgets":{"session":300000}}}`,
 	}))
 }
+
+func (*fakeMCPAssistantOperator) SetAssistantKey(context.Context, string, string, []byte) error {
+	return nil
+}
+
+func (*fakeMCPAssistantOperator) ClearAssistantKey(context.Context, string, string) error { return nil }

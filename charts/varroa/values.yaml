@@ -308,12 +308,6 @@ networkPolicy:
     enabled: false
     cidrs: []
     ports: [443]
-  # Assistant model-provider egress: the BFF calls each configured provider
-  # base URL. Renders only when assistant.enabled is true and cidrs is set.
-  # The guard fails the render when the assistant is on and cidrs is empty.
-  assistantEgress:
-    cidrs: []
-    ports: [443]
   # Per-cell NetworkPolicy, one per Controller with spec.cell.enabled.
   # Opt-in: honoured only when networkPolicy.enabled is also true.
   cellIsolation:

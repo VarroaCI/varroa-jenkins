@@ -12,7 +12,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 COMMON="--set auth.oidc.clientSecret=test --set auth.dashboardUrl=https://varroa.example.test"
-ON="$COMMON --set networkPolicy.enabled=true --set recordStore.enabled=true --set assistant.enabled=true --set networkPolicy.assistantEgress.cidrs[0]=192.168.1.99/32 --set networkPolicy.assistantEgress.ports[0]=8082"
+ON="$COMMON --set networkPolicy.enabled=true --set recordStore.enabled=true --set assistant.enabled=true"
 
 failures=0
 
@@ -62,10 +62,10 @@ rc=0; grep -q 'VARROA_ASSISTANT_CONFIG' <<< "$RENDER_ON" && rc=1 || true
 check "no VARROA_ASSISTANT_CONFIG in the enabled render" "$rc"
 rc=0; grep -q 'agentsessions' <<< "$RENDER_ON" || rc=1
 check "the bff NATS user holds the agentsessions grant" "$rc"
-rc=0; grep -q 'cidr: 192.168.1.99/32' <<< "$(np_bff "$RENDER_ON")" || rc=1
-check "np-bff carries the assistant egress CIDR" "$rc"
-rc=0; grep -q 'port: 8082' <<< "$(np_bff "$RENDER_ON")" || rc=1
-check "np-bff carries the assistant egress port" "$rc"
+rc=0; grep -q 'cidr: 192.168.1.99/32' <<< "$(np_bff "$RENDER_ON")" && rc=1 || true
+check "np-bff carries no assistant egress CIDR (the operator renders it)" "$rc"
+rc=0; grep -q 'varroa-assistant-egress' <<< "$RENDER_ON" && rc=1 || true
+check "the chart renders no varroa-assistant-egress policy" "$rc"
 rc=0; grep -q 'secretName: varroa-assistant-keys' <<< "$RENDER_ON" || rc=1
 check "the key Secret is a volume source" "$rc"
 rc=0; grep -q 'optional: true' <<< "$RENDER_ON" || rc=1
@@ -75,13 +75,12 @@ check "the key volume mounts at /etc/varroa/assistant" "$rc"
 rc=0; grep -A3 'name: assistant-keys' <<< "$RENDER_ON" | grep -q 'subPath' && rc=1 || true
 check "the key mount has no subPath" "$rc"
 
-# (d) Enabled with networkPolicy on and no CIDRs fails the render.
+# (d) The retired networkPolicy.assistantEgress values fail the render.
 echo ""
-echo "--- (d) Enabled with empty assistantEgress.cidrs ---"
+echo "--- (d) Retired networkPolicy.assistantEgress ---"
 rc=0
-helm template "$ROOT" $COMMON --set networkPolicy.enabled=true --set recordStore.enabled=true \
-  --set assistant.enabled=true >/dev/null 2>&1 && rc=1 || true
-check "empty assistantEgress.cidrs fails when the assistant is on" "$rc"
+helm template "$ROOT" $ON --set networkPolicy.assistantEgress.ports[0]=443 >/dev/null 2>&1 && rc=1 || true
+check "networkPolicy.assistantEgress fails the render" "$rc"
 
 # (e) The retired values fail the render and name the object.
 echo ""

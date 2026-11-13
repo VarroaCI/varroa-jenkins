@@ -807,6 +807,41 @@ func main() {
 	if miteTokenSigner != nil {
 		configCrud.Linter = &controller.JenkinsCellLinter{Signer: miteTokenSigner, ServiceURL: runners.CellServiceURL}
 	}
+	// assistantWake runs one assistant reconcile at once after a config or key
+	// write. The 30s ticker stays as the backstop.
+	assistantWake := make(chan struct{}, 1)
+	configCrud.OnAssistantConfigChange = func() { notifyWake(assistantWake) }
+	assistantKeys := &controller.AssistantKeys{
+		Store:     clientsetClient,
+		Secrets:   clientsetClient,
+		Namespace: operatorNamespace,
+		OnChange:  func() { notifyWake(assistantWake) },
+		Logger:    logger.With("component", "assistant_keys"),
+	}
+	if *assistantConfig {
+		assistantReconciler := &controller.AssistantReconciler{
+			Store:                clientsetClient,
+			Secrets:              clientsetClient,
+			Namespace:            operatorNamespace,
+			NetworkPolicyEnabled: envBool("VARROA_NETWORKPOLICY_ENABLED", false),
+			Logger:               logger.With("component", "assistant_reconciler"),
+		}
+		if err := mgr.Add(&tickerRunnable{
+			name:      "assistant",
+			interval:  30 * time.Second,
+			immediate: true,
+			tick: func(ctx context.Context) {
+				if err := assistantReconciler.Tick(ctx); err != nil {
+					logger.Warn("assistant reconciler tick", "error", err)
+				}
+			},
+			wake:   (<-chan struct{})(assistantWake),
+			logger: logger,
+		}); err != nil {
+			logger.Error("failed to add assistant reconciler runnable", "error", err)
+			os.Exit(1)
+		}
+	}
 	forgeAnswerer := forgeops.New(clientsetClient, clientsetClient, forge.NewHTTPClient(), logger.With("component", "forgeops"))
 	reconciler.SetRepoGoneProber(forgeAnswerer)
 	if err := mgr.Add(&operatorCommandRunner{
@@ -816,6 +851,7 @@ func main() {
 		ledgerMetrics:  ledgerMetrics,
 		crud:           crud,
 		configCrud:     configCrud,
+		assistantKeys:  assistantKeys,
 		broodOps:       broodOps,
 		broodSchedules: broodSchedules,
 		lifecycle:      lifecycleStore,
@@ -1401,9 +1437,10 @@ type operatorCommandRunner struct {
 	beatNow        func()
 	// forge ends the pending commit statuses of a build the recorder ended.
 	forge commitStatusEnder
-	// assistant serves the AssistantConfig write route. Set by -assistant.
-	assistant bool
-	logger    *slog.Logger
+	// assistant serves the AssistantConfig write route and the key subjects. Set by -assistant.
+	assistant     bool
+	assistantKeys *controller.AssistantKeys
+	logger        *slog.Logger
 }
 
 func (r *operatorCommandRunner) NeedLeaderElection() bool { return true }
@@ -2000,6 +2037,10 @@ func (r *operatorCommandRunner) commandResponders(ctx context.Context) []command
 	// The assistant config subject is served only on a core with -assistant.
 	if r.assistant {
 		responders = append(responders, commandResponder{"assistantconfig.update", bus.OperatorAssistantConfigSubject(r.cluster, "update"), r.configCrud.HandleAssistantConfigUpdate, serialResponder})
+		responders = append(responders,
+			commandResponder{"assistantkeys.set", bus.OperatorAssistantKeysSubject(r.cluster, "set"), r.assistantKeys.HandleSet, serialResponder},
+			commandResponder{"assistantkeys.clear", bus.OperatorAssistantKeysSubject(r.cluster, "clear"), r.assistantKeys.HandleClear, serialResponder},
+		)
 	}
 	return responders
 }

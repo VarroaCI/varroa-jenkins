@@ -124,6 +124,8 @@ paths:
     $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1settings'
   /api/v1/assistant/config:
     $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1config'
+  /api/v1/assistant/providers/{name}/key:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1providers~1{name}~1key'
   /api/v1/assistant/providers:
     $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1providers'
   /api/v1/me/assistant:

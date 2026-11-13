@@ -1,3 +1,6 @@
+{{- if hasKey .Values.networkPolicy "assistantEgress" }}
+{{- fail "networkPolicy.assistantEgress is retired. Set cidrs and port on each provider in the AssistantConfig object varroa-assistant." }}
+{{- end }}
 {{- range $k := list "providers" "budgets" "approvalExpiry" "externalDataSharing" }}
 {{- if hasKey $.Values.assistant $k }}
 {{- fail (printf "assistant.%s is retired. Set it in the AssistantConfig object varroa-assistant." $k) }}
@@ -6,11 +9,5 @@
 {{- if .Values.assistant.enabled }}
 {{- if not .Values.recordStore.enabled }}
 {{- fail "assistant.enabled needs recordStore.enabled. The assistant session store lives in the record store database." }}
-{{- end }}
-{{- if and .Values.networkPolicy.enabled (empty (default list .Values.networkPolicy.assistantEgress.cidrs)) }}
-{{- fail "networkPolicy.assistantEgress.cidrs must name the model provider address when assistant.enabled is true. Set [\"0.0.0.0/0\"] to allow every address." }}
-{{- end }}
-{{- if and .Values.networkPolicy.enabled (empty (default list .Values.networkPolicy.assistantEgress.ports)) }}
-{{- fail "networkPolicy.assistantEgress.ports must not be empty when assistant.enabled is true, because an empty list allows every port." }}
 {{- end }}
 {{- end }}

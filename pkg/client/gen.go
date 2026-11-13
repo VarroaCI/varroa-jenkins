@@ -1247,6 +1247,12 @@ type ComponentsSchemasAssistantProviderKind string
 // ComponentsSchemasAssistantProviderTrust defines model for ComponentsSchemasAssistantProvider.Trust.
 type ComponentsSchemasAssistantProviderTrust string
 
+// ComponentsSchemasAssistantProviderKeyRequest defines model for components_schemas_AssistantProviderKeyRequest.
+type ComponentsSchemasAssistantProviderKeyRequest struct {
+	// ApiKey The provider key. The server never returns it.
+	ApiKey *string `json:"apiKey,omitempty"`
+}
+
 // ComponentsSchemasAssistantProviderList defines model for components_schemas_AssistantProviderList.
 type ComponentsSchemasAssistantProviderList struct {
 	Items []ComponentsSchemasAssistantProvider `json:"items"`
@@ -6747,6 +6753,9 @@ type DenyAssistantApprovalJSONRequestBody = ComponentsSchemasAssistantDenyReques
 // PutAssistantConfigJSONRequestBody defines body for PutAssistantConfig for application/json ContentType.
 type PutAssistantConfigJSONRequestBody = ComponentsSchemasAssistantConfig
 
+// PutAssistantProviderKeyJSONRequestBody defines body for PutAssistantProviderKey for application/json ContentType.
+type PutAssistantProviderKeyJSONRequestBody = ComponentsSchemasAssistantProviderKeyRequest
+
 // CreateAssistantSessionJSONRequestBody defines body for CreateAssistantSession for application/json ContentType.
 type CreateAssistantSessionJSONRequestBody = ComponentsSchemasAssistantSessionCreateRequest
 
@@ -7474,6 +7483,14 @@ type ClientInterface interface {
 
 	// ListAssistantProviders request
 	ListAssistantProviders(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteAssistantProviderKey request
+	DeleteAssistantProviderKey(ctx context.Context, name string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutAssistantProviderKeyWithBody request with any body
+	PutAssistantProviderKeyWithBody(ctx context.Context, name string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PutAssistantProviderKey(ctx context.Context, name string, body PutAssistantProviderKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListAssistantSessions request
 	ListAssistantSessions(ctx context.Context, params *ListAssistantSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -8312,6 +8329,42 @@ func (c *Client) PutAssistantConfig(ctx context.Context, body PutAssistantConfig
 
 func (c *Client) ListAssistantProviders(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListAssistantProvidersRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteAssistantProviderKey(ctx context.Context, name string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteAssistantProviderKeyRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutAssistantProviderKeyWithBody(ctx context.Context, name string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutAssistantProviderKeyRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutAssistantProviderKey(ctx context.Context, name string, body PutAssistantProviderKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutAssistantProviderKeyRequest(c.Server, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -12004,6 +12057,87 @@ func NewListAssistantProvidersRequest(server string) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewDeleteAssistantProviderKeyRequest generates requests for DeleteAssistantProviderKey
+func NewDeleteAssistantProviderKeyRequest(server string, name string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/providers/%s/key", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPutAssistantProviderKeyRequest calls the generic PutAssistantProviderKey builder with application/json body
+func NewPutAssistantProviderKeyRequest(server string, name string, body PutAssistantProviderKeyJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPutAssistantProviderKeyRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewPutAssistantProviderKeyRequestWithBody generates requests for PutAssistantProviderKey with any type of body
+func NewPutAssistantProviderKeyRequestWithBody(server string, name string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/providers/%s/key", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -21075,6 +21209,14 @@ type ClientWithResponsesInterface interface {
 	// ListAssistantProvidersWithResponse request
 	ListAssistantProvidersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAssistantProvidersResponse, error)
 
+	// DeleteAssistantProviderKeyWithResponse request
+	DeleteAssistantProviderKeyWithResponse(ctx context.Context, name string, reqEditors ...RequestEditorFn) (*DeleteAssistantProviderKeyResponse, error)
+
+	// PutAssistantProviderKeyWithBodyWithResponse request with any body
+	PutAssistantProviderKeyWithBodyWithResponse(ctx context.Context, name string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutAssistantProviderKeyResponse, error)
+
+	PutAssistantProviderKeyWithResponse(ctx context.Context, name string, body PutAssistantProviderKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*PutAssistantProviderKeyResponse, error)
+
 	// ListAssistantSessionsWithResponse request
 	ListAssistantSessionsWithResponse(ctx context.Context, params *ListAssistantSessionsParams, reqEditors ...RequestEditorFn) (*ListAssistantSessionsResponse, error)
 
@@ -22014,6 +22156,57 @@ func (r ListAssistantProvidersResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ListAssistantProvidersResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteAssistantProviderKeyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *ComponentsSchemasAssistantError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteAssistantProviderKeyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteAssistantProviderKeyResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PutAssistantProviderKeyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *ComponentsSchemasAssistantError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON413      *ComponentsResponsesPayloadTooLarge
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r PutAssistantProviderKeyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutAssistantProviderKeyResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -27119,6 +27312,32 @@ func (c *ClientWithResponses) ListAssistantProvidersWithResponse(ctx context.Con
 	return ParseListAssistantProvidersResponse(rsp)
 }
 
+// DeleteAssistantProviderKeyWithResponse request returning *DeleteAssistantProviderKeyResponse
+func (c *ClientWithResponses) DeleteAssistantProviderKeyWithResponse(ctx context.Context, name string, reqEditors ...RequestEditorFn) (*DeleteAssistantProviderKeyResponse, error) {
+	rsp, err := c.DeleteAssistantProviderKey(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteAssistantProviderKeyResponse(rsp)
+}
+
+// PutAssistantProviderKeyWithBodyWithResponse request with arbitrary body returning *PutAssistantProviderKeyResponse
+func (c *ClientWithResponses) PutAssistantProviderKeyWithBodyWithResponse(ctx context.Context, name string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutAssistantProviderKeyResponse, error) {
+	rsp, err := c.PutAssistantProviderKeyWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutAssistantProviderKeyResponse(rsp)
+}
+
+func (c *ClientWithResponses) PutAssistantProviderKeyWithResponse(ctx context.Context, name string, body PutAssistantProviderKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*PutAssistantProviderKeyResponse, error) {
+	rsp, err := c.PutAssistantProviderKey(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutAssistantProviderKeyResponse(rsp)
+}
+
 // ListAssistantSessionsWithResponse request returning *ListAssistantSessionsResponse
 func (c *ClientWithResponses) ListAssistantSessionsWithResponse(ctx context.Context, params *ListAssistantSessionsParams, reqEditors ...RequestEditorFn) (*ListAssistantSessionsResponse, error) {
 	rsp, err := c.ListAssistantSessions(ctx, params, reqEditors...)
@@ -29837,6 +30056,107 @@ func ParseListAssistantProvidersResponse(rsp *http.Response) (*ListAssistantProv
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteAssistantProviderKeyResponse parses an HTTP response from a DeleteAssistantProviderKeyWithResponse call
+func ParseDeleteAssistantProviderKeyResponse(rsp *http.Response) (*DeleteAssistantProviderKeyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteAssistantProviderKeyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePutAssistantProviderKeyResponse parses an HTTP response from a PutAssistantProviderKeyWithResponse call
+func ParsePutAssistantProviderKeyResponse(rsp *http.Response) (*PutAssistantProviderKeyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutAssistantProviderKeyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest ComponentsResponsesPayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest ComponentsSchemasAssistantError

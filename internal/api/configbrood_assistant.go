@@ -54,3 +54,34 @@ func (f *busConfigBrood) UpdateAssistantConfig(ctx context.Context, cluster stri
 	}
 	return &out, nil
 }
+
+// SetAssistantKey sends a provider key as a core NATS request. The operator
+// writes it into the key Secret. The reply carries no key.
+func (f *busConfigBrood) SetAssistantKey(ctx context.Context, cluster, provider string, key []byte) error {
+	return f.assistantKeyRequest(cluster, "set", bus.AssistantKeyRequest{Provider: provider, APIKey: key})
+}
+
+// ClearAssistantKey removes a provider key through the operator of cluster.
+func (f *busConfigBrood) ClearAssistantKey(ctx context.Context, cluster, provider string) error {
+	return f.assistantKeyRequest(cluster, "clear", bus.AssistantKeyRequest{Provider: provider})
+}
+
+// assistantKeyRequest sends one key request to the operator of cluster and maps
+// a refusal to an error. The error text never holds the key.
+func (f *busConfigBrood) assistantKeyRequest(cluster, verb string, req bus.AssistantKeyRequest) error {
+	if !f.isLocal(cluster) {
+		return fmt.Errorf("assistant keys are served only by the local cluster %q", f.localCluster)
+	}
+	respData, err := f.requestTo(bus.OperatorAssistantKeysSubject(cluster, verb), req, configCreateUpdateTimeout)
+	if err != nil {
+		return err
+	}
+	var resp bus.AssistantKeyResponse
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		return errors.New("assistant key " + verb + ": decode reply")
+	}
+	if resp.Code != "" {
+		return f.codeToErr(resp.Code, resp.Error)
+	}
+	return nil
+}

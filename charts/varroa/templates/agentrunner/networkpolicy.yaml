@@ -44,5 +44,4 @@ spec:
           port: 8080
 {{ include "varroa.np.telemetryEgress" . | nindent 4 }}
 {{ include "varroa.np.recordStorePostgresEgress" . | nindent 4 }}
-{{ include "varroa.np.assistantEgress" . | nindent 4 }}
 {{- end }}

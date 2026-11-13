@@ -350,25 +350,3 @@ imagePullSecrets:
 {{- end }}
 {{- end }}
 {{- end -}}
-
-{{/*
-Assistant model-provider egress rule. Renders nothing unless the assistant is
-enabled and assistantEgress.cidrs is non-empty. The guard fails the render
-for an enabled assistant with an empty list.
-Usage: {{ include "varroa.np.assistantEgress" $ | nindent 4 }}
-*/}}
-{{- define "varroa.np.assistantEgress" -}}
-{{- $toggle := .Values.networkPolicy.assistantEgress -}}
-{{- if and .Values.assistant.enabled $toggle.cidrs -}}
-- to:
-{{- range $toggle.cidrs }}
-  - ipBlock:
-      cidr: {{ . }}
-{{- end }}
-  ports:
-{{- range $toggle.ports }}
-  - protocol: TCP
-    port: {{ . }}
-{{- end }}
-{{- end -}}
-{{- end -}}

@@ -61,6 +61,31 @@ describe("AssistantAdmin", () => {
     expect(screen.getByText("Edit the AssistantConfig object varroa-assistant to change this list.")).toBeTruthy();
   });
 
+  it("shows the egress condition, each provider's rule, and the key state", async () => {
+    const base = createAssistantConfig();
+    vi.mocked(client.getAssistantConfig).mockResolvedValue(createAssistantConfig({
+      spec: { ...base.spec, providers: [{ ...base.spec.providers[0], auth: "apiKey" }] },
+      status: {
+        providers: [{ name: "smoke", keySet: true }],
+        conditions: [{ type: "EgressReady", status: "True", reason: "EgressRendered", message: "every provider has an egress rule" }],
+      },
+    }));
+    renderAdmin();
+    expect(await screen.findByText("smoke: 192.168.1.99/32, port 8082")).toBeTruthy();
+    expect(screen.getByText("every provider has an egress rule")).toBeTruthy();
+    expect(screen.getByText("set")).toBeTruthy();
+  });
+
+  it("names the provider that has no egress rule", async () => {
+    vi.mocked(client.getAssistantConfig).mockResolvedValue(createAssistantConfig({
+      status: {
+        conditions: [{ type: "EgressReady", status: "False", reason: "ProviderEgressMissing", message: "no CIDRs for provider(s): smoke" }],
+      },
+    }));
+    renderAdmin();
+    expect(await screen.findByText(/Some providers have no egress rule/)).toBeTruthy();
+  });
+
   it("sets and removes a tenant level", async () => {
     vi.mocked(client.getAssistantSettings).mockResolvedValue(createAssistantSettings({ tenantDataSharing: { payments: "metadata" } }));
     renderAdmin();
