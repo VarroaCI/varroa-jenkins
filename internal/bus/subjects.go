@@ -156,10 +156,11 @@ func MiteOutSubject(cluster, ns, name string) string {
 }
 
 // MiteDesiredSubject returns the subject for the desired-state request
-// (core NATS, not JetStream). The operator sends the command as a request,
-// and the gateway that holds the mite stream answers after it forwards the
-// command. No stream may capture this subject: the command carries
-// credential values, and NATS must keep no copy of them.
+// (core NATS, not JetStream). The operator sends the desired-state command
+// and the token grant as requests on it, and the gateway that holds the mite
+// stream answers after it forwards the message. No stream may capture this
+// subject: both messages carry credential values, and NATS must keep no copy
+// of them.
 // Format: mite.<cluster>.<ns>.<name>.desired
 func MiteDesiredSubject(cluster, ns, name string) string {
 	return fmt.Sprintf("mite.%s.%s.%s.desired", cluster, ns, name)

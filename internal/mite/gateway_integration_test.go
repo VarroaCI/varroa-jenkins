@@ -396,11 +396,33 @@ func TestGatewayIntegration_DesiredStateIsRequestOnly(t *testing.T) {
 	}
 }
 
-// TestGatewayIntegration_TokenGrantForwarded proves that a TokenGrant published
-// by the operator to the mite's out subject (the same JetStream subject used for
-// imperative commands) is forwarded to the mite's gRPC stream: watchImperative
-// must not ack-and-drop a non-imperative message, which would silently
-// swallow token grants and cause "token refresh grant timeout".
+// requestTokenGrant sends a TokenGrant the way the operator does: a core NATS
+// request on the desired-state subject. It retries while no gateway answers,
+// because the gateway opens its subscription asynchronously in OnConnect.
+func requestTokenGrant(t *testing.T, conn *bus.Conn, ns, name string, grant *mitev1.TokenGrant) {
+	t.Helper()
+	data, err := json.Marshal(&mitev1.OperatorMessage{
+		Message: &mitev1.OperatorMessage_TokenGrant{TokenGrant: grant},
+	})
+	if err != nil {
+		t.Fatalf("marshal token grant: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, err := conn.Request(bus.MiteDesiredSubject(bus.DefaultCluster, ns, name), data, 2*time.Second)
+		if err == nil {
+			return
+		}
+		if !bus.IsNoReply(err) || time.Now().After(deadline) {
+			t.Fatalf("request token grant: %v", err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestGatewayIntegration_TokenGrantForwarded proves that a TokenGrant sent by
+// the operator as a request on the desired-state subject reaches the mite's
+// gRPC stream, and that no copy enters a stream.
 func TestGatewayIntegration_TokenGrantForwarded(t *testing.T) {
 	natsSrv := startNATS(t)
 	busConn, lis, certAuth := startGatewayWithCA(t, natsSrv.ClientURL())
@@ -414,7 +436,7 @@ func TestGatewayIntegration_TokenGrantForwarded(t *testing.T) {
 		t.Fatalf("command stream: %v", err)
 	}
 
-	// Hello triggers OnConnect, which starts watchImperative on the out subject.
+	// Hello triggers OnConnect, which opens the desired-state subscription.
 	if err := stream.Send(&mitev1.MiteMessage{
 		Message: &mitev1.MiteMessage_Hello{
 			Hello: &mitev1.Hello{ControllerName: name, Namespace: ns, Version: "test-v1"},
@@ -437,26 +459,10 @@ func TestGatewayIntegration_TokenGrantForwarded(t *testing.T) {
 		}
 	}()
 
-	// Mirror the operator's handleTokenRefresh publish path.
-	grantData, _ := json.Marshal(&mitev1.OperatorMessage{
-		Message: &mitev1.OperatorMessage_TokenGrant{
-			TokenGrant: &mitev1.TokenGrant{
-				MiteJenkinsToken:    "fresh-token",
-				MiteJenkinsTokenExp: 1234567890,
-			},
-		},
+	requestTokenGrant(t, busConn, ns, name, &mitev1.TokenGrant{
+		MiteJenkinsToken:    "fresh-token",
+		MiteJenkinsTokenExp: 1234567890,
 	})
-	// Retry the publish until the gateway's durable consumer exists (it is
-	// created asynchronously in watchImperative after OnConnect).
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if _, err := busConn.PublishJetStream(bus.MiteOutSubject(bus.DefaultCluster, ns, name), grantData); err == nil {
-			break
-		} else if time.Now().After(deadline) {
-			t.Fatalf("publish token grant: %v", err)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
 
 	select {
 	case g := <-grants:
@@ -465,6 +471,10 @@ func TestGatewayIntegration_TokenGrantForwarded(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for token grant on mite stream")
+	}
+
+	if _, err := busConn.JetStream().StreamNameBySubject(bus.MiteDesiredSubject(bus.DefaultCluster, ns, name)); err == nil {
+		t.Error("the desired-state subject is captured by a stream")
 	}
 }
 
@@ -530,10 +540,6 @@ func TestGatewayIntegration_FullTokenRefreshGrant(t *testing.T) {
 	natsSrv := startNATS(t)
 	busConn, lis, certAuth := startGatewayWithCA(t, natsSrv.ClientURL())
 
-	if err := busConn.EnsureStream(bus.StreamConfig("varroa")); err != nil {
-		t.Fatalf("ensure stream: %v", err)
-	}
-
 	ns, name := "refns", "refctl"
 	gconn := dialWithMiteCert(t, lis.Addr().String(), certAuth, name, ns)
 	client := mitev1.NewMiteClient(gconn)
@@ -583,7 +589,7 @@ func TestGatewayIntegration_FullTokenRefreshGrant(t *testing.T) {
 					},
 				},
 			})
-			busConn.PublishJetStream(bus.MiteOutSubject(bus.DefaultCluster, ns, name), grantData)
+			_, _ = busConn.Request(bus.MiteDesiredSubject(bus.DefaultCluster, ns, name), grantData, 5*time.Second)
 		}
 	})
 	if err != nil {
@@ -630,10 +636,6 @@ func TestGatewayIntegration_StaleGrantDoesNotAdvanceCachedToken(t *testing.T) {
 	natsSrv := startNATS(t)
 	busConn, lis, certAuth := startGatewayWithCA(t, natsSrv.ClientURL())
 
-	if err := busConn.EnsureStream(bus.StreamConfig("varroa")); err != nil {
-		t.Fatalf("ensure stream: %v", err)
-	}
-
 	ns, name := "stns", "stctl"
 	gconn := dialWithMiteCert(t, lis.Addr().String(), certAuth, name, ns)
 	client := mitev1.NewMiteClient(gconn)
@@ -651,30 +653,6 @@ func TestGatewayIntegration_StaleGrantDoesNotAdvanceCachedToken(t *testing.T) {
 		t.Fatalf("send hello: %v", err)
 	}
 
-	// Wait for the gateway's pull consumer to be created.
-	time.Sleep(200 * time.Millisecond)
-
-	fixedExp := time.Now().Add(60 * time.Minute).Unix()
-	fresherExp := time.Now().Add(90 * time.Minute).Unix()
-
-	grantData, _ := json.Marshal(&mitev1.OperatorMessage{
-		Message: &mitev1.OperatorMessage_TokenGrant{
-			TokenGrant: &mitev1.TokenGrant{
-				MiteJenkinsToken:    "initial-token",
-				MiteJenkinsTokenExp: fixedExp,
-			},
-		},
-	})
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if _, err := busConn.PublishJetStream(bus.MiteOutSubject(bus.DefaultCluster, ns, name), grantData); err == nil {
-			break
-		} else if time.Now().After(deadline) {
-			t.Fatalf("publish initial grant: %v", err)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
 	grants := make(chan *mitev1.TokenGrant, 8)
 	go func() {
 		for {
@@ -688,6 +666,14 @@ func TestGatewayIntegration_StaleGrantDoesNotAdvanceCachedToken(t *testing.T) {
 		}
 	}()
 
+	fixedExp := time.Now().Add(60 * time.Minute).Unix()
+	fresherExp := time.Now().Add(90 * time.Minute).Unix()
+
+	requestTokenGrant(t, busConn, ns, name, &mitev1.TokenGrant{
+		MiteJenkinsToken:    "initial-token",
+		MiteJenkinsTokenExp: fixedExp,
+	})
+
 	var firstGrant *mitev1.TokenGrant
 	select {
 	case g := <-grants:
@@ -699,29 +685,14 @@ func TestGatewayIntegration_StaleGrantDoesNotAdvanceCachedToken(t *testing.T) {
 		t.Fatalf("unexpected first grant: tok=%q exp=%d", firstGrant.MiteJenkinsToken, firstGrant.MiteJenkinsTokenExp)
 	}
 
-	grantData2, _ := json.Marshal(&mitev1.OperatorMessage{
-		Message: &mitev1.OperatorMessage_TokenGrant{
-			TokenGrant: &mitev1.TokenGrant{
-				MiteJenkinsToken:    "same-expiry-token",
-				MiteJenkinsTokenExp: fixedExp,
-			},
-		},
+	requestTokenGrant(t, busConn, ns, name, &mitev1.TokenGrant{
+		MiteJenkinsToken:    "same-expiry-token",
+		MiteJenkinsTokenExp: fixedExp,
 	})
-	if _, err := busConn.PublishJetStream(bus.MiteOutSubject(bus.DefaultCluster, ns, name), grantData2); err != nil {
-		t.Fatalf("publish stale grant: %v", err)
-	}
-
-	grantData3, _ := json.Marshal(&mitev1.OperatorMessage{
-		Message: &mitev1.OperatorMessage_TokenGrant{
-			TokenGrant: &mitev1.TokenGrant{
-				MiteJenkinsToken:    "fresher-token",
-				MiteJenkinsTokenExp: fresherExp,
-			},
-		},
+	requestTokenGrant(t, busConn, ns, name, &mitev1.TokenGrant{
+		MiteJenkinsToken:    "fresher-token",
+		MiteJenkinsTokenExp: fresherExp,
 	})
-	if _, err := busConn.PublishJetStream(bus.MiteOutSubject(bus.DefaultCluster, ns, name), grantData3); err != nil {
-		t.Fatalf("publish fresher grant: %v", err)
-	}
 
 	hasStale := false
 	hasFresher := false

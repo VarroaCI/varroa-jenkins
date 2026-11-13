@@ -9,8 +9,9 @@ import (
 )
 
 // The command stream carries only imperative one-shot commands. The
-// desired-state command does not use JetStream: it travels as a core NATS
-// request on MiteDesiredSubject, so no stream stores its credential values.
+// desired-state command and the token grant do not use JetStream: they
+// travel as core NATS requests on MiteDesiredSubject, so no stream stores
+// their credential values.
 
 // replicaArg resolves the effective replica count from an optional variadic
 // argument. When omitted it defaults to 1; any value < 1 is clamped to 1.

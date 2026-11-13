@@ -55,6 +55,8 @@ type pendingImperative struct {
 // Desired-state delivery (operator→mite) is a core NATS request on
 // bus.MiteDesiredSubject: the gateway that holds the stream forwards each
 // request to the mite and answers the operator after the send succeeds.
+// The token grant that answers a refresh request of the mite takes the same
+// path, so the imperative backlog never holds it.
 // NATS stores no copy, so a reconnecting mite receives nothing until the
 // operator pushes again on the new connection epoch.
 type BusHandler struct {
@@ -1060,8 +1062,9 @@ func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResu
 	_ = h.conn.Publish(bus.MiteInSubject(h.cluster, ns, name), data)
 }
 
-// OnTokenRefreshRequest publishes the request to the mite inbound subject
-// so the operator can respond with a TokenGrant through the bus.
+// OnTokenRefreshRequest publishes the request to the mite inbound subject.
+// The operator answers with a TokenGrant as a request on the desired-state
+// subject.
 func (h *BusHandler) OnTokenRefreshRequest(name, ns string, req *mitev1.TokenRefreshRequest) {
 	data, err := json.Marshal(&mitev1.MiteMessage{
 		Message: &mitev1.MiteMessage_TokenRefreshRequest{TokenRefreshRequest: req},
@@ -1635,20 +1638,11 @@ func (h *BusHandler) forwardImperative(ctx context.Context, m *nats.Msg, ns, nam
 	}
 	imp := op.GetImperative()
 	if imp == nil {
-		// Non-imperative one-shots also flow on the out subject
-		// (e.g. a TokenGrant answering a mite's refresh request).
-		// They carry no CommandResult correlation, so forward to
-		// the mite and ack immediately — delivery is idempotent
-		// (the mite caches the newest token). Nak on send failure
-		// so a disconnected mite gets the grant on reconnect.
-		if op.GetTokenGrant() != nil {
-			if err := send(&op); err != nil {
-				h.log().Error("send token grant to mite failed", "controller", ns+"/"+name, "error", err)
-				_ = m.Nak()
-				return
-			}
-		}
-		_ = m.Ack() // not an imperative; ack and skip
+		// Only imperatives ride this subject. A token grant travels on the
+		// desired-state request, because no stream may store a credential.
+		// The ack removes the message from the work queue.
+		h.log().Warn("non-imperative message on the imperative subject, dropping it", "controller", ns+"/"+name)
+		_ = m.Ack()
 		return
 	}
 	// Track pending ack (scoped to this controller) — OnCommandResult

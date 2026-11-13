@@ -33,7 +33,8 @@ type BusTransport struct {
 
 	// TokenGrantFunc mints a fresh Jenkins token for a mite. When set, a
 	// TokenRefreshRequest received from a mite is answered with a TokenGrant
-	// published to the mite's outbound subject. Nil disables the grant path.
+	// sent as a core NATS request on the desired-state subject. Nil disables
+	// the grant path.
 	TokenGrantFunc func(ns, name string) (token string, exp int64, err error)
 
 	// OnCommandResult runs after a result is in the buffer. It must not
@@ -241,20 +242,29 @@ func (b *BusTransport) forgetLocked(key string) {
 	delete(b.reports, key)
 }
 
-// handleTokenRefresh mints a fresh Jenkins token and publishes a TokenGrant to
-// the mite's outbound subject (forwarded to the mite's gRPC stream by the
-// gateway), mirroring SendImperative. No-op if no grant function is configured.
+// tokenGrantRequestTimeout bounds how long handleTokenRefresh waits for the
+// gateway to confirm the send of a grant. handleTokenRefresh runs in the
+// inbound subscription callback of the mite, so the command results of that
+// mite wait for at most this long.
+const tokenGrantRequestTimeout = 5 * time.Second
+
+// handleTokenRefresh mints a fresh Jenkins token and sends a TokenGrant to the
+// gateway that holds the mite stream, as a core NATS request on the
+// desired-state subject. The token is a credential, so no stream may store
+// it, and the imperative backlog of the mite must not hold it. The operator
+// does not send again a grant that no gateway confirms: the mite asks again
+// on its next refresh check.
 func (b *BusTransport) handleTokenRefresh(ns, name string) {
+	key := ns + "/" + name
 	if b.TokenGrantFunc == nil {
-		b.log().Warn("token refresh request received but no grant function configured", "controller", ns+"/"+name)
+		b.log().Warn("token refresh request received but no grant function configured", "controller", key)
 		return
 	}
 	token, exp, err := b.TokenGrantFunc(ns, name)
 	if err != nil {
-		b.log().Error("token grant mint failed", "controller", ns+"/"+name, "error", err)
+		b.log().Error("token grant mint failed", "controller", key, "error", err)
 		return
 	}
-	b.log().Debug("token grant minted, publishing", "controller", ns+"/"+name, "exp", exp)
 	data, err := json.Marshal(&mitev1.OperatorMessage{
 		Message: &mitev1.OperatorMessage_TokenGrant{
 			TokenGrant: &mitev1.TokenGrant{
@@ -264,12 +274,18 @@ func (b *BusTransport) handleTokenRefresh(ns, name string) {
 		},
 	})
 	if err != nil {
-		b.log().Error("marshal token grant failed", "controller", ns+"/"+name, "error", err)
+		b.log().Error("marshal token grant failed", "controller", key, "error", err)
 		return
 	}
-	if _, err := b.conn.PublishJetStream(bus.MiteOutSubject(b.cluster, ns, name), data); err != nil {
-		b.log().Error("publish token grant failed", "controller", ns+"/"+name, "error", err)
+	if _, err := b.conn.Request(bus.MiteDesiredSubject(b.cluster, ns, name), data, tokenGrantRequestTimeout); err != nil {
+		if bus.IsNoReply(err) {
+			b.log().Warn("token grant not delivered: no gateway confirmed the send", "controller", key, "error", err)
+			return
+		}
+		b.log().Error("token grant request failed", "controller", key, "error", err)
+		return
 	}
+	b.log().Debug("token grant delivered", "controller", key, "exp", exp)
 }
 
 // desiredRequestTimeout bounds how long Send waits for the gateway to
