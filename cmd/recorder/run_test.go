@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
@@ -215,5 +216,24 @@ func TestDashboardURLFromEnv(t *testing.T) {
 	t.Setenv("VARROA_DASHBOARD_URL", "")
 	if got := dashboardURLFromEnv(); got != "" {
 		t.Fatalf("empty variable: dashboardURLFromEnv() = %q, want empty", got)
+	}
+}
+
+// TestWireActivityPublisherWiresIngestAndBackstop guards the recorder's
+// activity wiring. A missed call would leave the ingest path or the backstop
+// round with no publisher, and they would then publish no activity at all.
+func TestWireActivityPublisherWiresIngestAndBackstop(t *testing.T) {
+	t.Parallel()
+
+	pub := activity.NewPublisher("core", nil)
+	ingester := recordstore.NewIngester(nil, nil, nil)
+	var cfg recordstore.BackstopConfig
+	wireActivityPublisher(ingester, &cfg, pub)
+
+	if ingester.ActivityPublisher() != pub {
+		t.Fatal("the ingester did not receive the activity publisher")
+	}
+	if cfg.ActivityPublisher != pub {
+		t.Fatal("the backstop config did not receive the activity publisher")
 	}
 }

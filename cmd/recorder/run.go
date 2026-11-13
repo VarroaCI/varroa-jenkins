@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 
+	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/pgdial"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
@@ -74,6 +75,13 @@ func (cfg Config) confirmedGoneGrace() time.Duration {
 // its only caller, and a Ledger without it holds no repeat claim.
 func wireGrantHold(ledger *recordstore.Ledger, busConn *bus.Conn, cfg Config) {
 	ledger.SetGrantHold(busConn, cfg.confirmedGoneGrace(), cfg.SweepMaxPending)
+}
+
+// wireActivityPublisher gives the ingest path and the backstop round the
+// recorder's activity publisher. Without it, both write activity rows and publish nothing.
+func wireActivityPublisher(ingester *recordstore.Ingester, backstop *recordstore.BackstopConfig, p *activity.Publisher) {
+	ingester.SetActivityPublisher(p)
+	backstop.ActivityPublisher = p
 }
 
 // run wires the recorder's dependencies in the order design D6 states:
@@ -144,6 +152,11 @@ func run(ctx context.Context, cfg Config) error {
 	if err := recordstore.EnsureActivityStream(busConn, cfg.JetStreamReplicas); err != nil {
 		return fmt.Errorf("ensure activity stream: %w", err)
 	}
+	// The recorder creates varroa_activity, so ack mode always applies.
+	activityPub := activity.NewAckedPublisher(cfg.ClusterName, busConn, activity.AckedOptions{
+		Logger: logger, Meter: otel.GetMeterProvider().Meter("varroa-recorder"), Component: "recorder"})
+	// This Close runs before the deferred bus Close, so queued events still reach the stream.
+	defer activityPub.Close(activity.CloseTimeout)
 
 	fenceMetrics, err := recordstore.NewFenceMetrics(mp)
 	if err != nil {
@@ -218,6 +231,7 @@ func run(ctx context.Context, cfg Config) error {
 	ingester.SetSweepMetrics(sweepMetrics)
 	ingester.SetStateDeleter(store)
 	ingester.SetRunNotifier(runNotifier)
+	wireActivityPublisher(ingester, &backstopCfg, activityPub)
 
 	webhookMetrics, err := recordstore.NewWebhookMetrics(mp)
 	if err != nil {
@@ -273,7 +287,7 @@ func run(ctx context.Context, cfg Config) error {
 		return sub.Unsubscribe()
 	}
 	tenantSyncResponderFn := func(ctx context.Context) error {
-		sub, err := recordstore.RegisterTenantSyncResponder(mp, busConn, pool, confirmedGoneGrace, store, store, runNotifier,
+		sub, err := recordstore.RegisterTenantSyncResponder(mp, busConn, activityPub, pool, confirmedGoneGrace, store, store, runNotifier,
 			cfg.DashboardURL, logger)
 		if err != nil {
 			return err

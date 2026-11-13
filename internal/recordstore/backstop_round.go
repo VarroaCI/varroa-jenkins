@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
@@ -46,6 +47,10 @@ type BackstopConfig struct {
 	// claim-expiry sweep marks, and of each fleet lock the release check
 	// deletes. A nil RunNotifier publishes nothing.
 	RunNotifier *RunNotifier
+	// ActivityPublisher sends each activity row that the round writes, after
+	// its commit. A nil ActivityPublisher writes the rows and publishes
+	// nothing. cmd/recorder passes its ack-mode publisher.
+	ActivityPublisher *activity.Publisher
 	// StateDeleter removes a marked run's replicated state. A nil
 	// StateDeleter skips the delete, the same rule MaintenanceConfig's
 	// LogStore follows. cmd/recorder passes a blob.Store value.
@@ -122,16 +127,16 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 	// A marked run whose start event was lost can hold a QUEUED row that
 	// records no build. This end runs before the sweep, so the sweep never
 	// marks that row as a queued run.
-	if _, err := EndMarkedLostIntents(ctx, pool, conn, cfg.RunNotifier, cfg.SweepMetrics, cfg.ActionMetrics,
+	if _, err := EndMarkedLostIntents(ctx, pool, conn, cfg.ActivityPublisher, cfg.RunNotifier, cfg.SweepMetrics, cfg.ActionMetrics,
 		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, cfg.DashboardURL, logger); err != nil {
 		logger.Warn("marked lost intent round failed", "error", err)
 	}
 
-	if _, err := publishLockWaitsExceeded(ctx, pool, conn, now, logger); err != nil {
+	if _, err := publishLockWaitsExceeded(ctx, pool, cfg.ActivityPublisher, now, logger); err != nil {
 		logger.Warn("lock wait exceeded round failed", "error", err)
 	}
 
-	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics,
+	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.ActivityPublisher, cfg.SweepMetrics, cfg.ActionMetrics,
 		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, cfg.DashboardURL, logger); err != nil {
 		logger.Warn("interrupted sweep failed", "error", err)
 	}
@@ -286,7 +291,7 @@ func runBackstopSchedule(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn
 	fireCandidates = mergeBackstopRetries(fireCandidates, retries)
 
 	for _, c := range selectReadyFires(fireCandidates, now) {
-		fireOne(ctx, pool, conn, cfg.BackstopMetrics, cfg.ActionMetrics, c, now, logger)
+		fireOne(ctx, pool, conn, cfg.ActivityPublisher, cfg.BackstopMetrics, cfg.ActionMetrics, c, now, logger)
 	}
 	return nil
 }

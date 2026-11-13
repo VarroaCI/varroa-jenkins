@@ -63,21 +63,25 @@ func insertActivityForPublish(ctx context.Context, db activityExecer, e activity
 	return nil
 }
 
-// publishActivityAfterCommit publishes each queued event on its activity
-// subject, then empties the outbox. A nil connection publishes nothing and
-// still empties the outbox.
-func publishActivityAfterCommit(conn *bus.Conn, out *activityOutbox) {
+// publishActivityAfterCommit gives each queued event to activityPub, then
+// empties the outbox. A nil activityPub publishes nothing and still empties
+// the outbox. The data must be the bytes that the row was written from. The
+// activity-recorder consumer then finds that row and writes no second row.
+// Publish can set the cluster and the timestamp, so this path uses PublishData.
+func publishActivityAfterCommit(activityPub *activity.Publisher, out *activityOutbox) {
 	if out == nil {
 		return
 	}
 	events := out.events
 	out.events = nil
-	if conn == nil {
+	if activityPub == nil {
 		return
 	}
 	for _, e := range events {
 		subject := bus.ActivityGlobal(e.Cluster)
-		if e.Controller != "" {
+		// A controller without a namespace has no valid subject. It routes to
+		// _global, as Publisher.routeSubject does, so ack mode does not retry it.
+		if e.Controller != "" && e.Namespace != "" {
 			subject = bus.ActivitySubject(e.Cluster, e.Namespace, e.Controller)
 		}
 		data, err := json.Marshal(e)
@@ -85,8 +89,6 @@ func publishActivityAfterCommit(conn *bus.Conn, out *activityOutbox) {
 			slog.Default().Warn("marshal activity publish", "type", e.Type, "error", err)
 			continue
 		}
-		if err := conn.Publish(subject, data); err != nil {
-			slog.Default().Warn("publish activity event", "type", e.Type, "subject", subject, "error", err)
-		}
+		activityPub.PublishData(subject, e.Type, data)
 	}
 }

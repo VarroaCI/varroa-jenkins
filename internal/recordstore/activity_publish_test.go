@@ -1,11 +1,17 @@
 package recordstore
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"log/slog"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
 // TestPublishAfterCommit_ReingestWritesNoSecondRow writes one event through
@@ -88,5 +94,159 @@ func TestPublishAfterCommit_RollbackPublishesNothing(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("activity rows after rollback = %d, want 0", n)
+	}
+}
+
+// activityLogBuffer is a log sink that a publisher goroutine and the test can
+// share.
+type activityLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *activityLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *activityLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestPublishAfterCommit_StoresTheEventOnceTheStreamAnswers publishes one
+// event before the activity stream exists. The ack-mode publisher must keep
+// retrying until the stream answers, then store the event once.
+func TestPublishAfterCommit_StoresTheEventOnceTheStreamAnswers(t *testing.T) {
+	t.Parallel()
+
+	s := startIngestTestServer(t)
+	conn, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(conn.Close)
+
+	e := activity.Event{
+		Cluster: "core", Namespace: "jenkins", Controller: "cell-x", Source: "recorder",
+		Type: "build.failed", Severity: "error", Message: "publish before the stream",
+		Timestamp: time.Now().UTC().Truncate(time.Microsecond),
+	}
+	out := activityOutbox{events: []activity.Event{e}}
+
+	buf := &activityLogBuffer{}
+	pub := activity.NewAckedPublisher("core", conn, activity.AckedOptions{
+		Logger: slog.New(slog.NewTextHandler(buf, nil)),
+	})
+	publishActivityAfterCommit(pub, &out)
+	if out.events != nil {
+		t.Fatal("publishActivityAfterCommit did not empty the outbox")
+	}
+
+	waitForRow(t, func() bool {
+		return strings.Contains(buf.String(), "did not acknowledge an event; retrying")
+	})
+
+	if err := EnsureActivityStream(conn, 1); err != nil {
+		t.Fatalf("ensure activity stream: %v", err)
+	}
+	pub.Close(15 * time.Second)
+
+	info, err := conn.StreamInfo(bus.ActivityStreamName)
+	if err != nil {
+		t.Fatalf("stream info: %v", err)
+	}
+	if info.State.Msgs != 1 {
+		t.Fatalf("stream holds %d messages, want 1", info.State.Msgs)
+	}
+
+	if err := conn.EnsureConsumer(bus.ActivityStreamName, ActivityRecorderConsumerName, activityRecorderConsumerConfig()); err != nil {
+		t.Fatalf("ensure consumer: %v", err)
+	}
+	subject := bus.ActivitySubject("core", "jenkins", "cell-x")
+	sub, err := conn.PullSubscribe(subject, bus.ActivityStreamName, ActivityRecorderConsumerName)
+	if err != nil {
+		t.Fatalf("pull subscribe: %v", err)
+	}
+	msgs, err := conn.DrainConsumer(sub, 1)
+	if err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("drained %d messages, want 1", len(msgs))
+	}
+	if msgs[0].Subject != subject {
+		t.Fatalf("subject = %q, want %q", msgs[0].Subject, subject)
+	}
+	want, err := json.Marshal(e)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Equal(msgs[0].Data, want) {
+		t.Fatalf("stored bytes differ from the row bytes:\n got %s\nwant %s", msgs[0].Data, want)
+	}
+}
+
+// TestPublishAfterCommit_AckModeCopyWritesNoSecondRow writes one row, publishes
+// its event through an ack-mode publisher, and runs the activity consumer. The
+// consumer must find the row already present and write no second row.
+func TestPublishAfterCommit_AckModeCopyWritesNoSecondRow(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	mp, reader := newTestMeterProvider(t)
+	ctx := context.Background()
+	s := startIngestTestServer(t)
+	conn, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(conn.Close)
+	if err := EnsureActivityStream(conn, 1); err != nil {
+		t.Fatalf("ensure activity stream: %v", err)
+	}
+
+	e := activity.Event{
+		Cluster: "core", Namespace: "jenkins", Controller: "cell-z", Source: "recorder",
+		Type: "build.failed", Severity: "error", Message: "ack-mode copy writes no second row",
+		Timestamp: time.Now().UTC(),
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	var out activityOutbox
+	if err := insertActivityForPublish(ctx, tx, e, &out); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	pub := activity.NewAckedPublisher("core", conn, activity.AckedOptions{})
+	publishActivityAfterCommit(pub, &out)
+	pub.Close(15 * time.Second)
+
+	metrics, err := NewActivityMetrics(mp, conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
+	if err != nil {
+		t.Fatalf("new activity metrics: %v", err)
+	}
+	consumerCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() {
+		_ = RunActivityIngestConsumer(consumerCtx, conn, NewActivityIngester(pool), metrics, 30*24*time.Hour, nil)
+	}()
+
+	waitForRow(t, func() bool {
+		return metricValue(t, reader, "recorder_activity_duplicate_total") >= 1
+	})
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.activity WHERE message = $1`, e.Message).Scan(&n); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("activity rows = %d, want 1", n)
 	}
 }

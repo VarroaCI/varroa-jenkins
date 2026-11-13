@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
-	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
 // lockWaitExceededAfter is the wait that makes a waiter an event.
@@ -24,7 +23,7 @@ const lockWaitWindow = 2 * time.Minute
 // publishLockWaitsExceeded writes one fleetlock.wait_exceeded row for each
 // waiter that has waited for the threshold. It publishes the rows after their
 // commit. It returns the number of rows the round wrote.
-func publishLockWaitsExceeded(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, now time.Time, logger *slog.Logger) (int, error) {
+func publishLockWaitsExceeded(ctx context.Context, pool *pgxpool.Pool, activityPub *activity.Publisher, now time.Time, logger *slog.Logger) (int, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT fl.name, fl.cluster, fl.job_path, fl.waiting_since,
 		       ri.build_number, ri.cell, ri.namespace
@@ -94,7 +93,7 @@ func publishLockWaitsExceeded(ctx context.Context, pool *pgxpool.Pool, conn *bus
 		return 0, fmt.Errorf("commit lock wait round: %w", err)
 	}
 	written := len(out.events)
-	publishActivityAfterCommit(conn, &out)
+	publishActivityAfterCommit(activityPub, &out)
 	if written > 0 && logger != nil {
 		logger.Info("fleet lock waits exceeded", "events", written)
 	}
