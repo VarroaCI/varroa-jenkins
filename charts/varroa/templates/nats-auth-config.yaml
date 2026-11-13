@@ -273,6 +273,8 @@ stringData:
               "operator.*.forge.read"
               "operator.*.forge.issue"
               "varroa.recordstore.notes.post"
+              // The bus health probe: the JetStream account status.
+              "$JS.API.INFO"
               // The activity consumer: create, read, fetch, and ack its own
               // durable consumer on varroa_activity. It holds no stream write.
               "$JS.API.STREAM.INFO.varroa_activity"
@@ -313,6 +315,8 @@ stringData:
               // Tenant agent triggers: the recorder's audit producers publish
               // on activity.>. The varroa-agent consumer reads them.
               "activity.>"
+              // The bus health probe: the JetStream account status.
+              "$JS.API.INFO"
               "$JS.API.STREAM.CREATE.varroa_builds"
               "$JS.API.STREAM.UPDATE.varroa_builds"
               "$JS.API.STREAM.INFO.varroa_builds"

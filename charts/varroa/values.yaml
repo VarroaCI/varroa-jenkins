@@ -811,6 +811,15 @@ nats:
             name: varroa-nats-js-key
             key: key
     merge:
+      # The pod is ready only while it is in contact with the JetStream meta
+      # leader. A pod cut off from its peers loses that contact within
+      # seconds. The client Service and the external Service then send it no
+      # new connection. The subchart default (js-server-only) checks only the
+      # listeners. The headless Service still publishes the pod, so the routes
+      # reach it and it rejoins.
+      readinessProbe:
+        httpGet:
+          path: "/healthz?js-meta-only=true"
       resources:
         requests:
           cpu: 100m

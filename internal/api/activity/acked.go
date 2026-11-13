@@ -33,7 +33,9 @@ const (
 // stream's duplicate window, which is two minutes by server default. A retry
 // after the window could store the same event twice. The budget must also
 // outlast bus.DeadConnectionBound plus one reconnect. Otherwise a silent bus
-// partition drops events that a reconnect could deliver.
+// partition drops events that a reconnect could deliver. It must also outlast
+// bus.JSMoveBound plus one reconnect: the move off a server cut off from its
+// cluster.
 type ackedConfig struct {
 	queueSize                                        int
 	attemptTimeout, budget, backoffStart, backoffMax time.Duration
