@@ -16,10 +16,12 @@ import (
 func NewServer(deps *api.Dependencies) *server.MCPServer {
 	mcpServer := server.NewMCPServer("varroa", "0.0.0-dev",
 		server.WithToolCapabilities(false),
-		// Validation checks types and required arguments. addTool refuses an
-		// undeclared argument; WithStrictInputSchemaDefault stays off, because mcp-go
-		// renders its refusal as a Go struct that does not say the argument is not allowed.
+		// Validation checks each call against the tool schema before the
+		// handler runs. The strict default sets additionalProperties to false
+		// on each schema, so a call with an undeclared argument fails and
+		// changes nothing.
 		server.WithInputSchemaValidation(),
+		server.WithStrictInputSchemaDefault(),
 		server.WithInstructions(guide.Text),
 	)
 

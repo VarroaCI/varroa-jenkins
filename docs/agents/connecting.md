@@ -128,6 +128,16 @@ Content-Type: application/json
 Inject the key from a secret store. Do not save it in a shared client
 configuration file.
 
+## Protocol versions
+
+The endpoint serves MCP protocol versions `2024-11-05` through `2026-07-28`. A
+client that uses `2026-07-28` sends no `initialize` request. It reads the server
+with `server/discover` and puts the version in each request. A client that uses
+an earlier version starts with `initialize`. The stdio bridge adds the
+`Mcp-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` headers that a
+`2026-07-28` request needs. The endpoint refuses a request body larger than
+4 MiB with HTTP 413.
+
 ## Verify access
 
 Call `get_me` to confirm the resolved identity, then call
@@ -154,7 +164,7 @@ Claude Desktop and claude.ai render the views. Claude Code shows the text result
 
 ## Operator guide
 
-The server sends the [operator guide](guide.md) in its `initialize` instructions. It also serves the guide as the resource `varroa://guide`.
+The server sends the [operator guide](guide.md) as the instructions of its `initialize` and `server/discover` results. It also serves the guide as the resource `varroa://guide`.
 
 ## Related pages
 

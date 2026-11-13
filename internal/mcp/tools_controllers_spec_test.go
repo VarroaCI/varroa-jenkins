@@ -248,7 +248,7 @@ func TestUpdateControllerRejectsUnrecognizedArguments(t *testing.T) {
 				t.Fatal("expected an error result for an unrecognized argument")
 			}
 			msg := toolText(tr)
-			for _, want := range []string{"endpoint", "resources", "spec"} {
+			for _, want := range []string{quotedArg("endpoint"), quotedArg("resources"), "not allowed"} {
 				if !strings.Contains(msg, want) {
 					t.Errorf("error message does not mention %q: %s", want, msg)
 				}
@@ -257,8 +257,8 @@ func TestUpdateControllerRejectsUnrecognizedArguments(t *testing.T) {
 	}
 }
 
-// create_controller refuses an argument that its schema does not declare, and
-// names the spec field to use instead.
+// create_controller refuses an argument that its schema does not declare and
+// names it.
 func TestCreateControllerRejectsUnrecognizedArguments(t *testing.T) {
 	cases := []struct {
 		name string
@@ -286,7 +286,7 @@ func TestCreateControllerRejectsUnrecognizedArguments(t *testing.T) {
 				t.Fatal("expected an error result for an unrecognized argument")
 			}
 			msg := toolText(tr)
-			for _, want := range []string{`"` + tc.arg + `"`, "spec"} {
+			for _, want := range []string{notAllowedText(tc.arg)} {
 				if !strings.Contains(msg, want) {
 					t.Errorf("error message does not mention %q: %s", want, msg)
 				}

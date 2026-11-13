@@ -3,10 +3,12 @@
 Inspect each tool's schema and annotations before calling it. Tool discovery is
 the authoritative reference for available names and arguments.
 
-A tool refuses a call that passes an argument that its schema does not declare.
-The error names each such argument and lists the arguments that the tool takes.
-A refused call changes nothing. The check runs after the required-argument check,
-so a call that omits a required argument gets a validation error first.
+Each tool schema sets `additionalProperties` to `false`. The server checks each
+call against the schema before the tool runs. A refused call changes nothing.
+The error names each argument that caused it:
+
+- `input schema validation failed: <root>: additional properties 'scope' not allowed` names an argument that the schema does not declare.
+- `input schema validation failed: <root>: missing property 'name'` names a required argument that the call does not send.
 
 ## Interpret annotations
 

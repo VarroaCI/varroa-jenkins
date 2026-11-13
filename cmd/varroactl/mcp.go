@@ -17,6 +17,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/spf13/cobra"
 
 	"github.com/varroaci/varroa-jenkins/pkg/client/stream"
@@ -138,6 +139,9 @@ func runMCP(cmd *cobra.Command, args []string) error {
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Accept", "application/json, text/event-stream")
 			req.Header.Set("User-Agent", "varroactl/"+version)
+			for k, v := range mcpProtocolHeaders(msg) {
+				req.Header.Set(k, v)
+			}
 
 			resp, err := httpc.Do(req)
 			if err != nil {
@@ -167,6 +171,33 @@ func runMCP(cmd *cobra.Command, args []string) error {
 			}
 		}(msg)
 	}
+}
+
+// mcpProtocolHeaders returns the HTTP headers that a message of protocol
+// version 2026-07-28 or later needs over Streamable HTTP. The endpoint refuses
+// such a message without them. The version comes from params._meta. A message
+// of an earlier version needs no header and gets none.
+func mcpProtocolHeaders(msg []byte) map[string]string {
+	var probe struct {
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	if json.Unmarshal(msg, &probe) != nil || probe.Method == "" {
+		return nil
+	}
+	var params struct {
+		Meta *mcp.Meta `json:"_meta"`
+	}
+	if len(probe.Params) > 0 && json.Unmarshal(probe.Params, &params) != nil {
+		return nil
+	}
+	version := params.Meta.ProtocolVersion()
+	if !mcp.IsModernProtocol(version) {
+		return nil
+	}
+	headers := mcp.StandardHeaders(version, mcp.MCPMethod(probe.Method), probe.Params)
+	headers[mcp.HeaderProtocolVersion] = version
+	return headers
 }
 
 // rpcError constructs a JSON-RPC error response from the original message.

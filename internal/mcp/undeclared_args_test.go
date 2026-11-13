@@ -1,11 +1,13 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -16,46 +18,59 @@ import (
 // undeclaredArg is an argument no tool declares.
 const undeclaredArg = "notAnArgument"
 
-func TestUndeclaredArgsText(t *testing.T) {
-	cases := []struct {
-		name     string
-		unknown  []string
-		declared []string
-		hint     string
-		want     string
-	}{
-		{
-			name:     "one unknown",
-			unknown:  []string{"scope"},
-			declared: []string{"run"},
-			want:     `get_run does not take the argument "scope". It takes only these arguments: run. The call changed nothing.`,
-		},
-		{
-			name:     "two unknowns",
-			unknown:  []string{"a", "b"},
-			declared: []string{"run"},
-			want:     `get_run does not take the arguments "a", "b". It takes only these arguments: run. The call changed nothing.`,
-		},
-		{
-			name:    "no declared arguments",
-			unknown: []string{"a"},
-			want:    `get_run does not take the argument "a". It takes no arguments. The call changed nothing.`,
-		},
-		{
-			name:     "with hint",
-			unknown:  []string{"a"},
-			declared: []string{"spec"},
-			hint:     controllerSpecFieldsHint,
-			want:     `get_run does not take the argument "a". It takes only these arguments: spec. The call changed nothing. ` + controllerSpecFieldsHint,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := undeclaredArgsText("get_run", tc.unknown, tc.declared, tc.hint)
-			if got != tc.want {
-				t.Errorf("text = %q\nwant   %q", got, tc.want)
+// quotedArg is the form in which the schema validator names an argument.
+func quotedArg(name string) string { return "'" + name + "'" }
+
+// notAllowedText is the validator text for one undeclared argument.
+func notAllowedText(name string) string {
+	return "additional properties " + quotedArg(name) + " not allowed"
+}
+
+// TestEveryToolSchemaIsStrict pins that each tool publishes a root schema with
+// additionalProperties false, and that the schema compiles. The validator skips
+// a schema that does not compile, so such a tool would accept any argument.
+func TestEveryToolSchemaIsStrict(t *testing.T) {
+	for _, tool := range liveTools(t) {
+		t.Run(tool.Name, func(t *testing.T) {
+			var root struct {
+				AdditionalProperties *bool `json:"additionalProperties"`
+			}
+			if err := json.Unmarshal(tool.InputSchema, &root); err != nil {
+				t.Fatalf("decode input schema: %v", err)
+			}
+			if root.AdditionalProperties == nil || *root.AdditionalProperties {
+				t.Fatalf("additionalProperties = %v, want false", root.AdditionalProperties)
+			}
+			doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(tool.InputSchema))
+			if err != nil {
+				t.Fatalf("parse input schema: %v", err)
+			}
+			c := jsonschema.NewCompiler()
+			url := "mem:///" + tool.Name + ".json"
+			if err := c.AddResource(url, doc); err != nil {
+				t.Fatalf("add input schema: %v", err)
+			}
+			if _, err := c.Compile(url); err != nil {
+				t.Fatalf("compile input schema: %v", err)
 			}
 		})
+	}
+}
+
+// TestMissingRequiredArgumentIsNamed pins that the refusal of a call without a
+// required argument names the argument and differs from the refusal of an
+// undeclared argument.
+func TestMissingRequiredArgumentIsNamed(t *testing.T) {
+	tr := callToolAs(t, adminDeps(), mcpAdminClaims, "get_run", map[string]interface{}{})
+	if !tr.IsError {
+		t.Fatalf("get_run accepted a call without run: %v", tr.Content)
+	}
+	text := toolText(tr)
+	if !strings.Contains(text, "input schema validation failed: <root>: missing property "+quotedArg("run")) {
+		t.Errorf("text = %q, want the documented refusal naming the missing argument run", text)
+	}
+	if strings.Contains(text, "not allowed") {
+		t.Errorf("text = %q, want no undeclared-argument refusal", text)
 	}
 }
 
@@ -109,7 +124,7 @@ func TestEveryToolRefusesUndeclaredArgument(t *testing.T) {
 			if !tr.IsError {
 				t.Fatalf("%s accepted the undeclared argument: %v", tool.Name, tr.Content)
 			}
-			want := tool.Name + " does not take the argument \"" + undeclaredArg + "\""
+			want := "input schema validation failed: <root>: " + notAllowedText(undeclaredArg)
 			if !strings.Contains(toolText(tr), want) {
 				t.Errorf("text = %q, want it to contain %q", toolText(tr), want)
 			}
@@ -134,7 +149,7 @@ func TestEveryMutatingToolRefusesUndeclaredArgument(t *testing.T) {
 			if !tr.IsError {
 				t.Fatalf("%s accepted the undeclared argument: %v", name, tr.Content)
 			}
-			if !strings.Contains(toolText(tr), `"`+undeclaredArg+`"`) {
+			if !strings.Contains(toolText(tr), quotedArg(undeclaredArg)) {
 				t.Errorf("text = %q, want it to name %q", toolText(tr), undeclaredArg)
 			}
 			if len(sink.events) != 0 {
@@ -161,7 +176,7 @@ func TestCreateJenkinsRoleBindingRefusesScopeArgument(t *testing.T) {
 	if !tr.IsError {
 		t.Fatalf("create_jenkins_role_binding accepted scope: %v", tr.Content)
 	}
-	if !strings.Contains(toolText(tr), `"scope"`) {
+	if !strings.Contains(toolText(tr), notAllowedText("scope")) {
 		t.Errorf("text = %q, want it to name scope", toolText(tr))
 	}
 	if _, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](context.Background(), deps.Store, "b1", ""); err == nil {
@@ -182,7 +197,7 @@ func TestInProcessHostRefusesUndeclaredArgument(t *testing.T) {
 	if !res.IsError {
 		t.Fatalf("Call accepted scope: %q", res.Content)
 	}
-	if !strings.Contains(res.Content, `"scope"`) {
+	if !strings.Contains(res.Content, notAllowedText("scope")) {
 		t.Errorf("content = %q, want it to name scope", res.Content)
 	}
 	if _, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](context.Background(), deps.Store, "b2", ""); err == nil {
@@ -202,7 +217,7 @@ func TestJenkinsRBACTools_RefuseMetadataArgs(t *testing.T) {
 		tr := callToolAs(t, deps, mcpAdminClaims, "create_jenkins_role", map[string]interface{}{
 			"name": "r9", "permissions": []interface{}{"Overall/Read"}, "labels": labels,
 		})
-		if !tr.IsError || !strings.Contains(toolText(tr), `"labels"`) {
+		if !tr.IsError || !strings.Contains(toolText(tr), notAllowedText("labels")) {
 			t.Fatalf("want a refusal naming labels, got %v", tr.Content)
 		}
 		if _, err := crdstore.Get[v1alpha1.JenkinsRole](context.Background(), deps.Store, "r9", ""); err == nil {
@@ -215,7 +230,7 @@ func TestJenkinsRBACTools_RefuseMetadataArgs(t *testing.T) {
 		tr := callToolAs(t, deps, mcpAdminClaims, "create_jenkins_role_binding", map[string]interface{}{
 			"name": "b9", "roleRef": "viewer", "subjects": subjects, "labels": labels,
 		})
-		if !tr.IsError || !strings.Contains(toolText(tr), `"labels"`) {
+		if !tr.IsError || !strings.Contains(toolText(tr), notAllowedText("labels")) {
 			t.Fatalf("want a refusal naming labels, got %v", tr.Content)
 		}
 		if _, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](context.Background(), deps.Store, "b9", ""); err == nil {
@@ -231,7 +246,7 @@ func TestJenkinsRBACTools_RefuseMetadataArgs(t *testing.T) {
 		tr := callToolAs(t, deps, mcpAdminClaims, "update_jenkins_role", map[string]interface{}{
 			"name": "r1", "description": "new", "labels": labels,
 		})
-		if !tr.IsError || !strings.Contains(toolText(tr), `"labels"`) {
+		if !tr.IsError || !strings.Contains(toolText(tr), notAllowedText("labels")) {
 			t.Fatalf("want a refusal naming labels, got %v", tr.Content)
 		}
 		got, err := crdstore.Get[v1alpha1.JenkinsRole](context.Background(), store, "r1", "")
@@ -251,7 +266,7 @@ func TestJenkinsRBACTools_RefuseMetadataArgs(t *testing.T) {
 		tr := callToolAs(t, deps, mcpAdminClaims, "update_jenkins_role_binding", map[string]interface{}{
 			"name": "b1", "roleRef": "admin", "labels": labels,
 		})
-		if !tr.IsError || !strings.Contains(toolText(tr), `"labels"`) {
+		if !tr.IsError || !strings.Contains(toolText(tr), notAllowedText("labels")) {
 			t.Fatalf("want a refusal naming labels, got %v", tr.Content)
 		}
 		got, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](context.Background(), store, "b1", "")
