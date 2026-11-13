@@ -93,6 +93,7 @@ check "agentrunner may read the activity consumer only" "$(has "$RENDER" '"\$JS.
 AGENT_USER=$(sed -n "/user: \"agentrunner\"/,/user: \"recorder\"/p" <<< "$RENDER")
 rc=0; grep -q "STREAM.CREATE.varroa_activity" <<< "$AGENT_USER" && rc=1 || true
 check "agentrunner holds no activity stream write" "$rc"
+check "agentrunner publishes the bus health probe" "$(has "$AGENT_USER" '"\$JS.API.INFO"')"
 check "bff may publish the webhook enqueue subject" "$(has "$RENDER" 'varroa.recordstore.webhook.enqueue')"
 check "operator may reply into the runner inbox" "$(has "$RENDER" '_INBOX_agentrunner')"
 check "recorder publishes activity.>" "$(has "$RENDER" '"activity.>"')"

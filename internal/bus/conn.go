@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -64,6 +65,14 @@ type Config struct {
 	// pingInterval replaces PingInterval when it is above zero. Only tests of
 	// this package set it, to see a dead connection in milliseconds.
 	pingInterval time.Duration
+
+	// jsProbeInterval replaces JSProbeInterval when it is above zero. Only
+	// tests of this package set it.
+	jsProbeInterval time.Duration
+
+	// extraOptions go to the main connection after all other options. Only
+	// tests of this package set them, for example nats.DontRandomize.
+	extraOptions []nats.Option
 }
 
 // IsZero returns true when no options are set (empty config).
@@ -121,6 +130,16 @@ type Conn struct {
 	// reports a denial only to the error handler, so the handler fans it
 	// out to the holder of the subscription.
 	denied deniedWatchers
+
+	// dialProbe opens a second connection to the bus URL with the identity of
+	// this Conn: TLS, credentials, and inbox prefix. The JetStream health loop
+	// uses it. Connect sets it before the loop starts.
+	dialProbe func() (*nats.Conn, error)
+
+	// jsCancel stops the JetStream health loop. jsDone closes when the loop
+	// returns. Both are nil on a Conn that Connect did not build.
+	jsCancel context.CancelFunc
+	jsDone   chan struct{}
 }
 
 // clampReplicas clamps a JetStream replica count to a sane floor of 1.
@@ -157,6 +176,8 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 	// Logger is still worth honouring.
 	startupTimeout := DefaultStartupTimeout
 	pingInterval := PingInterval
+	jsInterval := JSProbeInterval
+	var extra []nats.Option
 	if len(cfg) > 0 {
 		c.logger = cfg[0].Logger
 		if cfg[0].StartupTimeout > 0 {
@@ -165,6 +186,10 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 		if cfg[0].pingInterval > 0 {
 			pingInterval = cfg[0].pingInterval
 		}
+		if cfg[0].jsProbeInterval > 0 {
+			jsInterval = cfg[0].jsProbeInterval
+		}
+		extra = cfg[0].extraOptions
 	}
 	opts := []nats.Option{
 		nats.Name("varroa"),
@@ -236,6 +261,10 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 		}),
 	}
 
+	// ident holds the TLS, credential, and inbox options. The main connection
+	// and the JetStream health probe connection both use them.
+	var ident []nats.Option
+
 	// Apply optional Config if provided (at most one).
 	if len(cfg) > 0 && !cfg[0].IsZero() {
 		conf := cfg[0]
@@ -247,12 +276,12 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 			if !pool.AppendCertsFromPEM(conf.CABytes) {
 				return nil, fmt.Errorf("nats connect: no CA certs parsed from CABytes")
 			}
-			opts = append(opts, nats.Secure(&tls.Config{
+			ident = append(ident, nats.Secure(&tls.Config{
 				RootCAs:    pool,
 				MinVersion: tls.VersionTLS12,
 			}))
 		case conf.CAFile != "":
-			opts = append(opts, nats.RootCAs(conf.CAFile))
+			ident = append(ident, nats.RootCAs(conf.CAFile))
 		}
 
 		// Credentials. A password file wins over a static password: the
@@ -274,7 +303,7 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 			if _, err := readPasswordFile(file); err != nil {
 				return nil, fmt.Errorf("nats connect: %w", err)
 			}
-			opts = append(opts, nats.UserInfoHandler(func() (string, string) {
+			ident = append(ident, nats.UserInfoHandler(func() (string, string) {
 				pass, err := readPasswordFile(file)
 				if err != nil && c.logger != nil {
 					c.logger.Warn("nats password file unreadable; retrying with empty password", "path", file, "error", err)
@@ -282,16 +311,31 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 				return user, pass
 			}))
 		case conf.Username != "":
-			opts = append(opts, nats.UserInfo(conf.Username, conf.Password))
+			ident = append(ident, nats.UserInfo(conf.Username, conf.Password))
 		}
 
 		// Custom inbox prefix.
 		if conf.InboxPrefix != "" {
-			opts = append(opts, nats.CustomInboxPrefix(conf.InboxPrefix))
+			ident = append(ident, nats.CustomInboxPrefix(conf.InboxPrefix))
 		}
 	}
 
-	nc, err := nats.Connect(url, opts...)
+	connOpts := slices.Concat(opts, ident, extra)
+	c.dialProbe = func() (*nats.Conn, error) {
+		probeOpts := make([]nats.Option, 0, len(ident)+5)
+		probeOpts = append(probeOpts, ident...)
+		probeOpts = append(probeOpts,
+			nats.Name("varroa-jsprobe"),
+			nats.NoReconnect(),
+			nats.Timeout(JSProbeTimeout),
+			nats.NoCallbacksAfterClientClose(),
+			// The default handler writes to stderr. The health loop reports a probe error.
+			nats.ErrorHandler(func(*nats.Conn, *nats.Subscription, error) {}),
+		)
+		return nats.Connect(url, probeOpts...)
+	}
+
+	nc, err := nats.Connect(url, connOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("nats connect: %w", err)
 	}
@@ -312,6 +356,7 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 		return nil, fmt.Errorf("nats jetstream: %w", err)
 	}
 	c.js = js
+	c.startJSHealth(jsInterval)
 
 	return c, nil
 }
@@ -536,5 +581,6 @@ func (c *Conn) Close() {
 	if c.logger != nil {
 		c.logger.Info("connection closed")
 	}
+	c.stopJSHealth()
 	c.nc.Close()
 }

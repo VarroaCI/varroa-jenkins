@@ -21,6 +21,8 @@ With `nats.external.externalTrafficPolicy: Local`, each node sends NATS traffic 
 
 Each member operator and gateway sends a NATS ping every 20 seconds. The pings add less than 1 MB a day for each connection. The member reconnects when two pings in a row get no answer. A NATS write that waits more than 10 seconds fails, and the blocked ping does not reach the server.
 
+Each member operator and gateway also checks JetStream every 10 seconds. After two failed checks in a row, it reconnects when another core NATS server answers. A core NATS pod without contact to the JetStream meta leader is not ready. A load balancer with `externalTrafficPolicy: Local` then skips its node.
+
 The core NATS server sends a ping on a connection that sends nothing for 20 seconds. When two pings in a row get no answer, the server closes the connection and removes its subscriptions. A stopped member link thus loses its core connection within 80 seconds. This bound holds only with the chart default values of `nats.config.merge.ping_interval` and `ping_max`. The member leaves a stopped link in the same time, so a healthy link gets no additional reconnects. The member pings every 20 seconds, so the server seldom sends its own ping.
 
 ## Install the member

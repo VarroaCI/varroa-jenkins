@@ -160,6 +160,8 @@ The operator, the gateway, the BFF, and the recorder wait for the stream to ackn
 
 Each component sends a NATS ping every 20 seconds. When two pings in a row get no answer, it reconnects. A NATS write that waits more than 10 seconds fails. A component thus leaves a silently broken connection within 80 seconds, inside the two-minute budget.
 
+A NATS server cut off from its cluster peers still answers pings. Each component thus asks JetStream for its account status every 10 seconds. After two failed checks in a row, it opens a second connection. When another server answers there, the component reconnects. It leaves a cut-off server within about 50 seconds, inside the two-minute budget.
+
 ```yaml
 recordStore:
   retention:

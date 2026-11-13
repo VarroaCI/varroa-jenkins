@@ -228,6 +228,7 @@ recorder_block=$(awk 'index($0, "user: \"recorder\""){capture=1} capture{print} 
 for subj in \
   '"varroa.ledger.actions.>"' \
   '_INBOX_gateway.>' \
+  '\$JS.API.INFO' \
   '\$JS.API.STREAM.CREATE.varroa_builds' \
   '\$JS.API.STREAM.UPDATE.varroa_builds' \
   '\$JS.API.STREAM.INFO.varroa_builds' \
@@ -507,6 +508,15 @@ if grep -q 'varroa.recordstore.notes.post' <<<"$bff_block$operator_rs_block$gate
 else
   check "no identity outside the BFF and the recorder holds varroa.recordstore.notes.post" 0
 fi
+
+# 20. Bus health probe: every identity that opens a bus Conn publishes the
+# JetStream account status request. A missing grant shows as a permission
+# violation on every probe tick.
+for u in operator gateway bff recorder; do
+  block=$(awk -v u="user: \"$u\"" 'index($0, u){capture=1} capture{print} capture && $0 == "        }"{exit}' <<<"$RS_RENDER")
+  grep -q '"\$JS.API.INFO"' <<<"$block"
+  check "$u publishes the bus health probe \$JS.API.INFO" $?
+done
 
 echo ""
 if [[ "$failures" -eq 0 ]]; then

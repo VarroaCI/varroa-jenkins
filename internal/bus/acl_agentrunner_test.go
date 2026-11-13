@@ -39,6 +39,7 @@ func startAgentRunnerACLServer(t *testing.T) *server.Server {
 						"operator.*.forge.read",
 						"operator.*.forge.issue",
 						"varroa.recordstore.notes.post",
+						"$JS.API.INFO",
 						"$JS.API.STREAM.INFO.varroa_activity",
 						"$JS.API.CONSUMER.CREATE.varroa_activity.>",
 						"$JS.API.CONSUMER.DURABLE.CREATE.varroa_activity.>",
@@ -140,6 +141,11 @@ func TestACL_AgentRunner(t *testing.T) {
 	}
 
 	ar := connectAgentACL(t, url, "agentrunner", "ar_pass", "_INBOX_agentrunner")
+	t.Run("bus health probe", func(t *testing.T) {
+		if _, err := ar.JetStream().AccountInfo(); err != nil {
+			t.Fatalf("AccountInfo: %v", err)
+		}
+	})
 	t.Run("consumer create, fetch, and ack", func(t *testing.T) {
 		if err := ar.EnsureConsumer("varroa_activity", agentTriggersConsumer, agentTriggersConfig()); err != nil {
 			t.Fatalf("EnsureConsumer: %v", err)
