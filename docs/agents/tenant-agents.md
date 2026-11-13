@@ -181,14 +181,14 @@ answers `nothing_to_grant`.
 
 Two limits apply to every session:
 
-- The session limit is the lower of the chart value `assistant.budgets.session`
+- The session limit is the lower of the `AssistantConfig` value `budgets.session`
   and `spec.budgets.session`.
-- The day limit is the lower of the chart value `assistant.budgets.tenantDay` and
+- The day limit is the lower of the `AssistantConfig` value `budgets.tenantDay` and
   `spec.budgets.day`. The day total sums every Tenant agent session of the Tenant
   for the current UTC day.
 
 When the day total reaches the day limit, new sessions end as `skipped` with the
-reason `budget_day`. The step limit is the chart value `assistant.budgets.steps`.
+reason `budget_day`. The step limit is the `AssistantConfig` value `budgets.steps`.
 
 ## Pages
 

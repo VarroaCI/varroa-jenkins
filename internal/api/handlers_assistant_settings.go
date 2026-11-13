@@ -9,35 +9,14 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/internal/agent"
 	"github.com/varroaci/varroa-jenkins/internal/agent/datashare"
-	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
 	"github.com/varroaci/varroa-jenkins/internal/agent/store"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 )
 
-// assistantLimits is the admin view of the configured limits.
-type assistantLimits struct {
-	Budgets             provider.Budgets `json:"budgets"`
-	ExternalDataSharing string           `json:"externalDataSharing"`
-	ApprovalExpiry      string           `json:"approvalExpiry"`
-	Egress              map[string]any   `json:"egress"`
-}
-
-func (rt *AssistantRuntime) limits() assistantLimits {
-	return assistantLimits{
-		Budgets:             rt.Config.Budgets,
-		ExternalDataSharing: string(rt.Config.ExternalDataSharing),
-		ApprovalExpiry:      rt.Config.ApprovalExpiryText,
-		Egress: map[string]any{
-			"networkPolicy": rt.Config.Egress.NetworkPolicy,
-			"cidrs":         rt.Config.Egress.CIDRs,
-			"ports":         rt.Config.Egress.Ports,
-		},
-	}
-}
-
 // handleGetAssistantSettings serves GET /assistant/settings. Every user sees
-// the kill switch. An admin also sees the defaults, the tenant levels, and the
-// configured limits.
+// the kill switch. An admin also sees the tenant levels. The provider list,
+// the defaults and the limits are served by GET /assistant/config.
 func (s *Server) handleGetAssistantSettings(w http.ResponseWriter, r *http.Request) {
 	rt, ok := s.assistantOrDisabled(w)
 	if !ok {
@@ -55,12 +34,9 @@ func (s *Server) handleGetAssistantSettings(w http.ResponseWriter, r *http.Reque
 	}
 	out := map[string]any{"paused": g.Paused, "pausedBy": g.PausedBy, "pausedAt": g.PausedAt}
 	if s.assistantIsAdmin(claims) {
-		out["defaultProvider"] = g.DefaultProvider
-		out["defaultModel"] = g.DefaultModel
 		out["tenantDataSharing"] = g.TenantDataSharing
 		out["updatedAt"] = g.UpdatedAt
 		out["updatedBy"] = g.UpdatedBy
-		out["limits"] = rt.limits()
 	}
 	s.writeJSON(w, http.StatusOK, out)
 }
@@ -68,9 +44,7 @@ func (s *Server) handleGetAssistantSettings(w http.ResponseWriter, r *http.Reque
 // assistantSettingsUpdate is the body of PUT /assistant/settings. A nil field
 // is unchanged.
 type assistantSettingsUpdate struct {
-	Paused            *bool   `json:"paused"`
-	DefaultProvider   *string `json:"defaultProvider"`
-	DefaultModel      *string `json:"defaultModel"`
+	Paused            *bool `json:"paused"`
 	TenantDataSharing *struct {
 		Set *struct {
 			Tenant string `json:"tenant"`
@@ -81,7 +55,7 @@ type assistantSettingsUpdate struct {
 }
 
 // handlePutAssistantSettings serves PUT /assistant/settings. Only an admin may
-// change the kill switch, the defaults, or a tenant level.
+// change the kill switch or a tenant level.
 func (s *Server) handlePutAssistantSettings(w http.ResponseWriter, r *http.Request) {
 	rt, ok := s.assistantOrDisabled(w)
 	if !ok {
@@ -97,18 +71,7 @@ func (s *Server) handlePutAssistantSettings(w http.ResponseWriter, r *http.Reque
 		s.writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	patch := store.SettingsPatch{Paused: in.Paused, DefaultProvider: in.DefaultProvider, DefaultModel: in.DefaultModel}
-	if in.DefaultProvider != nil && *in.DefaultProvider != "" {
-		if _, ok := rt.Registry.Get(*in.DefaultProvider); !ok {
-			s.writeJSONError(w, http.StatusBadRequest, "unknown default provider")
-			return
-		}
-	}
-	if in.DefaultProvider != nil || in.DefaultModel != nil {
-		patch.Check = func(after agent.Settings) error {
-			return rt.pairRefusal(after.DefaultProvider, after.DefaultModel, "a default model needs a default provider")
-		}
-	}
+	patch := store.SettingsPatch{Paused: in.Paused}
 	if in.TenantDataSharing != nil {
 		if set := in.TenantDataSharing.Set; set != nil {
 			level := agent.DataSharing(set.Level)
@@ -130,9 +93,8 @@ func (s *Server) handlePutAssistantSettings(w http.ResponseWriter, r *http.Reque
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"paused": g.Paused, "pausedBy": g.PausedBy, "pausedAt": g.PausedAt,
-		"defaultProvider": g.DefaultProvider, "defaultModel": g.DefaultModel,
 		"tenantDataSharing": g.TenantDataSharing, "updatedAt": g.UpdatedAt,
-		"updatedBy": g.UpdatedBy, "limits": rt.limits(),
+		"updatedBy": g.UpdatedBy,
 	})
 }
 
@@ -152,23 +114,23 @@ func (s *Server) writeSettingsError(w http.ResponseWriter, err error) {
 	s.assistantStoreError(w, err)
 }
 
-// pairRefusal checks a provider and model pair. An empty model passes.
-// noProvider is the text for a model with no provider.
-func (rt *AssistantRuntime) pairRefusal(p, m, noProvider string) error {
+// pairRefusal checks a provider and model pair of a user. An empty model
+// passes. noProvider is the text for a model with no provider.
+func pairRefusal(snap *assistantconfig.Snapshot, p, m, noProvider string) error {
 	switch {
 	case m == "":
 		return nil
 	case p == "":
 		return assistantRefusal(noProvider)
-	case !rt.modelKnown(p, m):
+	case !modelKnown(snap, p, m):
 		return assistantRefusal(fmt.Sprintf("the provider %s does not list the model %s", p, m))
 	}
 	return nil
 }
 
 // modelKnown reports whether the model is listed for the provider.
-func (rt *AssistantRuntime) modelKnown(name, model string) bool {
-	for _, e := range rt.Config.Providers {
+func modelKnown(snap *assistantconfig.Snapshot, name, model string) bool {
+	for _, e := range snap.Config.Providers {
 		if e.Name != name {
 			continue
 		}
@@ -202,12 +164,13 @@ func (s *Server) handleListAssistantProviders(w http.ResponseWriter, r *http.Req
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	snap := rt.snap()
 	admin := s.assistantIsAdmin(claims)
-	items := make([]assistantProviderJSON, 0, len(rt.Config.Providers))
-	for _, e := range rt.Config.Providers {
+	items := make([]assistantProviderJSON, 0, len(snap.Config.Providers))
+	for _, e := range snap.Config.Providers {
 		item := assistantProviderJSON{
 			Name: e.Name, Kind: string(e.Kind), Models: e.Models, Trust: string(e.Trust),
-			Default: e.Default, Available: rt.Registry.Available(e.Name),
+			Default: e.Default, Available: snap.Registry.Available(e.Name),
 		}
 		if admin {
 			item.BaseURL = e.BaseURL
@@ -230,7 +193,8 @@ func (s *Server) handleGetMyAssistant(w http.ResponseWriter, r *http.Request) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
-	body, err := s.myAssistantJSON(r, rt, claims)
+	snap := rt.snap()
+	body, err := s.myAssistantJSON(r, rt, snap, claims)
 	if err != nil {
 		s.assistantStoreError(w, err)
 		return
@@ -241,7 +205,7 @@ func (s *Server) handleGetMyAssistant(w http.ResponseWriter, r *http.Request) {
 // myAssistantJSON builds the caller's assistant view: the settings, the key
 // state, the level per provider, and the day spend. A failed store read
 // returns its error. The view never holds the defaults of a read that failed.
-func (s *Server) myAssistantJSON(r *http.Request, rt *AssistantRuntime, claims *auth.Claims) (map[string]any, error) {
+func (s *Server) myAssistantJSON(r *http.Request, rt *AssistantRuntime, snap *assistantconfig.Snapshot, claims *auth.Claims) (map[string]any, error) {
 	ctx := r.Context()
 	user, err := rt.Store.GetSettings(ctx, agent.UserScope(claims.Subject))
 	if err != nil {
@@ -257,10 +221,10 @@ func (s *Server) myAssistantJSON(r *http.Request, rt *AssistantRuntime, claims *
 	}
 
 	levels := map[string]string{}
-	for _, e := range rt.Config.Providers {
+	for _, e := range snap.Config.Providers {
 		level := datashare.Effective(datashare.Inputs{
 			User: effectiveUserLevel(user), TenantLevels: global.TenantDataSharing,
-			Trust: e.Trust, ExternalCeiling: rt.Config.ExternalDataSharing,
+			Trust: e.Trust, ExternalCeiling: snap.Config.ExternalDataSharing,
 		})
 		levels[e.Name] = string(level)
 	}
@@ -273,7 +237,7 @@ func (s *Server) myAssistantJSON(r *http.Request, rt *AssistantRuntime, claims *
 	}
 
 	return map[string]any{
-		"available":       len(rt.Config.Providers) > 0,
+		"available":       len(snap.Config.Providers) > 0,
 		"enabled":         user.Enabled,
 		"provider":        user.Provider,
 		"model":           user.Model,
@@ -281,7 +245,7 @@ func (s *Server) myAssistantJSON(r *http.Request, rt *AssistantRuntime, claims *
 		"sessionKey":      keyState,
 		"effectiveLevels": levels,
 		"dayTokens":       day,
-		"dayBudget":       rt.Config.Budgets.UserDay,
+		"dayBudget":       snap.Config.Budgets.UserDay,
 	}, nil
 }
 
@@ -317,16 +281,17 @@ func (s *Server) handlePutMyAssistant(w http.ResponseWriter, r *http.Request) {
 		s.writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	snap := rt.snap()
 	patch := store.SettingsPatch{Enabled: in.Enabled, Provider: in.Provider, Model: in.Model}
 	if in.Provider != nil && *in.Provider != "" {
-		if _, ok := rt.Registry.Get(*in.Provider); !ok {
+		if _, ok := snap.Registry.Get(*in.Provider); !ok {
 			s.writeJSONError(w, http.StatusBadRequest, "unknown provider")
 			return
 		}
 	}
 	if in.Provider != nil || in.Model != nil {
 		patch.Check = func(after agent.Settings) error {
-			return rt.pairRefusal(after.Provider, after.Model, "a model needs a provider")
+			return pairRefusal(snap, after.Provider, after.Model, "a model needs a provider")
 		}
 	}
 	if in.DataSharing != nil {
@@ -337,13 +302,11 @@ func (s *Server) handlePutMyAssistant(w http.ResponseWriter, r *http.Request) {
 		}
 		patch.DataSharing = &level
 	}
-	user, err := rt.Store.PutSettings(r.Context(), agent.UserScope(claims.Subject), patch, claims.Subject)
-	if err != nil {
+	if _, err := rt.Store.PutSettings(r.Context(), agent.UserScope(claims.Subject), patch, claims.Subject); err != nil {
 		s.writeSettingsError(w, err)
 		return
 	}
-	_ = user
-	body, err := s.myAssistantJSON(r, rt, claims)
+	body, err := s.myAssistantJSON(r, rt, snap, claims)
 	if err != nil {
 		s.assistantStoreError(w, err)
 		return
@@ -383,7 +346,7 @@ func (s *Server) handlePutAssistantKey(w http.ResponseWriter, r *http.Request) {
 		s.writeJSONError(w, http.StatusBadRequest, "provider and apiKey are required")
 		return
 	}
-	if _, ok := rt.Registry.Get(in.Provider); !ok {
+	if _, ok := rt.snap().Registry.Get(in.Provider); !ok {
 		s.writeJSONError(w, http.StatusBadRequest, "unknown provider")
 		return
 	}

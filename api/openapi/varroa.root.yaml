@@ -468,8 +468,6 @@ components:
       $ref: './components/schemas.yaml#/AssistantDenyRequest'
     AssistantApprovalOutcome:
       $ref: './components/schemas.yaml#/AssistantApprovalOutcome'
-    AssistantLimits:
-      $ref: './components/schemas.yaml#/AssistantLimits'
     AssistantSettings:
       $ref: './components/schemas.yaml#/AssistantSettings'
     AssistantSettingsUpdate:

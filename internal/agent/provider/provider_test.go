@@ -57,60 +57,6 @@ func TestKeyRedactedEverywhere(t *testing.T) {
 	}
 }
 
-// validConfig returns a config document that passes every rule.
-func validConfig() string {
-	return `{
-	  "providers": [
-	    {"name":"smoke","kind":"openai-compatible","baseURL":"http://127.0.0.1:8082/v1",
-	     "models":["varroa-smoke"],"trust":"internal","default":true,"hasSecret":false}
-	  ],
-	  "externalDataSharing":"metadata",
-	  "budgets":{"session":100000,"userDay":500000,"tenantDay":2000000,"steps":32},
-	  "approvalExpiry":"30m",
-	  "egress":{"networkPolicy":true,"cidrs":[],"ports":[443]}
-	}`
-}
-
-// TestDecodeRules checks each rule of the configuration decoder with one bad
-// document, and accepts the valid one.
-func TestDecodeRules(t *testing.T) {
-	t.Parallel()
-	if _, err := Decode([]byte(validConfig())); err != nil {
-		t.Fatalf("valid config refused: %v", err)
-	}
-	bad := map[string]string{
-		"not json":     `{`,
-		"bad name":     strings.Replace(validConfig(), `"name":"smoke"`, `"name":"Smoke!"`, 1),
-		"bad kind":     strings.Replace(validConfig(), `"kind":"openai-compatible"`, `"kind":"other"`, 1),
-		"bad trust":    strings.Replace(validConfig(), `"trust":"internal"`, `"trust":"maybe"`, 1),
-		"no base url":  strings.Replace(validConfig(), `"baseURL":"http://127.0.0.1:8082/v1",`, ``, 1),
-		"bad base url": strings.Replace(validConfig(), `http://127.0.0.1:8082/v1`, `ftp://x`, 1),
-		"no models":    strings.Replace(validConfig(), `["varroa-smoke"]`, `[]`, 1),
-		"no default":   strings.Replace(validConfig(), `"default":true`, `"default":false`, 1),
-		"bad external": strings.Replace(validConfig(), `"externalDataSharing":"metadata"`, `"externalDataSharing":"all"`, 1),
-		"zero budget":  strings.Replace(validConfig(), `"session":100000`, `"session":0`, 1),
-		"bad expiry":   strings.Replace(validConfig(), `"approvalExpiry":"30m"`, `"approvalExpiry":"30s"`, 1),
-		"zero steps":   strings.Replace(validConfig(), `"steps":32`, `"steps":0`, 1),
-	}
-	for name, doc := range bad {
-		if _, err := Decode([]byte(doc)); err == nil {
-			t.Fatalf("%s: Decode accepted the document", name)
-		}
-	}
-
-	empty := `{"providers":[],"externalDataSharing":"none","budgets":{"session":1,"userDay":1,"tenantDay":1,"steps":1},"approvalExpiry":"2h"}`
-	c, err := Decode([]byte(empty))
-	if err != nil {
-		t.Fatalf("empty provider list refused: %v", err)
-	}
-	if c.ApprovalExpiry.Hours() != 2 {
-		t.Fatalf("approval expiry = %s, want 2h", c.ApprovalExpiry)
-	}
-	if _, err := Decode([]byte(strings.Replace(validConfig(), `"egress"`, `"futureKey":1,"egress"`, 1))); err != nil {
-		t.Fatalf("unknown key refused: %v", err)
-	}
-}
-
 // fakeProvider is a Provider that does nothing; the registry tests need only the value.
 type fakeProvider struct{}
 
@@ -120,11 +66,11 @@ func (fakeProvider) Stream(_ context.Context, _ Key, _ Request) (<-chan Delta, e
 
 // TestLoadKeyReadsFileEachCall asserts that LoadKey reads the file again on
 // every call, so a rotated key takes effect without a restart.
-func TestLoadKeyReadsFileEachCall(t *testing.T) {
+func TestLoadKeyReadsFileNamedForProvider(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	cfg := Config{Providers: []Endpoint{{Name: "smoke", Kind: agent.ProviderOpenAICompatible, BaseURL: "http://x",
-		Models: []string{"m"}, Trust: agent.TrustExternal, Default: true, HasSecret: true}}}
+		Models: []string{"m"}, Trust: agent.TrustExternal, Default: true, KeyRequired: true}}}
 	r, err := NewRegistry(cfg, map[agent.ProviderKind]Factory{
 		agent.ProviderOpenAICompatible: func(Endpoint) (Provider, error) { return fakeProvider{}, nil },
 	}, dir)
@@ -159,11 +105,10 @@ func mustBytes(t *testing.T, k Key) string {
 
 func writeKey(t *testing.T, dir, name, value string) {
 	t.Helper()
-	sub := filepath.Join(dir, name)
-	if err := os.MkdirAll(sub, 0o700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sub, "apiKey"), []byte(value), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -174,7 +119,7 @@ func TestAvailable(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	cfg := Config{Providers: []Endpoint{
-		{Name: "keyed", Kind: agent.ProviderAnthropic, Models: []string{"m"}, Trust: agent.TrustExternal, Default: true, HasSecret: true},
+		{Name: "keyed", Kind: agent.ProviderAnthropic, Models: []string{"m"}, Trust: agent.TrustExternal, Default: true, KeyRequired: true},
 		{Name: "open", Kind: agent.ProviderOpenAICompatible, BaseURL: "http://x", Models: []string{"m"}, Trust: agent.TrustInternal},
 	}}
 	r, err := NewRegistry(cfg, map[agent.ProviderKind]Factory{

@@ -17,6 +17,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
 	"github.com/varroaci/varroa-jenkins/internal/agent/sealedkey"
 	"github.com/varroaci/varroa-jenkins/internal/agent/store"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/pgdial"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
@@ -40,14 +41,17 @@ const (
 	// assistantErrTenantAgent answers a message to a Tenant agent session. Its
 	// turns come from the runner, so a person cannot add one.
 	assistantErrTenantAgent = "tenant_agent_session"
+	// assistantErrDataLevel refuses a continuation whose data level dropped since the session started.
+	assistantErrDataLevel = "data_level_lowered"
 )
 
 // AssistantRuntime holds the parts of the assistant that the BFF wires at
 // start. A nil *AssistantRuntime on Dependencies turns every assistant route
 // off.
 type AssistantRuntime struct {
-	Config   provider.Config
-	Registry *provider.Registry
+	// Live holds the AssistantConfig snapshot. A handler reads one snapshot
+	// with snap and uses it for the whole request.
+	Live *assistantconfig.Live
 	// Operator reads and writes the AssistantConfig object. Nil turns the
 	// config routes off.
 	Operator AssistantOperator
@@ -88,25 +92,35 @@ func (rt *AssistantRuntime) logger() *slog.Logger {
 // Wait blocks until every started run returns. Tests use it.
 func (rt *AssistantRuntime) Wait() { rt.wg.Wait() }
 
+// snap returns the AssistantConfig snapshot of the current request or run.
+// A runtime without a Live value reads the absent-object defaults.
+func (rt *AssistantRuntime) snap() *assistantconfig.Snapshot {
+	if rt.Live == nil {
+		return assistantconfig.Build(nil, nil, "")
+	}
+	return rt.Live.Load()
+}
+
 // RunConfig is the only builder of a loop.RunConfig. The approval and
-// message handlers use it too, so every run reads the same settings.
-func (rt *AssistantRuntime) RunConfig(claims *auth.Claims, s agent.Session, key provider.Key, tenants datashare.TenantResolver) loop.RunConfig {
+// message handlers use it too, so every run reads the same settings. snap is
+// the snapshot the caller read for its request.
+func (rt *AssistantRuntime) RunConfig(snap *assistantconfig.Snapshot, claims *auth.Claims, s agent.Session, key provider.Key, tenants datashare.TenantResolver) loop.RunConfig {
 	return loop.RunConfig{
 		Host:        rt.HostFor(claims),
 		DecideWrite: loop.AlwaysApprove,
 		DaySpend: func(ctx context.Context) (int64, int64, error) {
 			total, err := rt.Store.DaySpend(ctx, s.Principal)
-			return total, rt.Config.Budgets.UserDay, err
+			return total, snap.Config.Budgets.UserDay, err
 		},
-		Provider:       rt.providerFor(s.Provider),
+		Provider:       providerFor(snap, s.Provider),
 		Key:            key,
 		Model:          s.Model,
 		Store:          rt.Store,
 		SessionID:      s.ID,
 		Owner:          rt.Owner,
-		SessionBudget:  rt.Config.Budgets.Session,
-		StepBudget:     rt.Config.Budgets.Steps,
-		ApprovalExpiry: rt.Config.ApprovalExpiry,
+		SessionBudget:  snap.Config.Budgets.Session,
+		StepBudget:     snap.Config.Budgets.Steps,
+		ApprovalExpiry: snap.Config.ApprovalExpiry,
 		Tenants:        tenants,
 		TenantLevels: func(ctx context.Context) (map[string]agent.DataSharing, error) {
 			g, err := rt.Store.GetSettings(ctx, agent.ScopeGlobal)
@@ -122,11 +136,8 @@ func (rt *AssistantRuntime) RunConfig(claims *auth.Claims, s agent.Session, key 
 
 // providerFor returns the adapter of a provider name, or nil. A nil adapter
 // makes the provider call fail, which ends the session as a provider error.
-func (rt *AssistantRuntime) providerFor(name string) provider.Provider {
-	if rt.Registry == nil {
-		return nil
-	}
-	e, ok := rt.Registry.Get(name)
+func providerFor(snap *assistantconfig.Snapshot, name string) provider.Provider {
+	e, ok := snap.Registry.Get(name)
 	if !ok {
 		return nil
 	}

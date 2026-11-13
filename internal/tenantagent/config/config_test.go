@@ -8,8 +8,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
-	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider/factories"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 )
 
 func envOf(m map[string]string) func(string) string {
@@ -44,35 +44,38 @@ func TestFromEnv(t *testing.T) {
 			t.Errorf("FromEnv without %s returned no error", drop)
 		}
 	}
-	bad := map[string]string{}
-	for k, v := range base {
-		bad[k] = v
+}
+
+// snapOf builds the snapshot of an AssistantConfig spec. The key files live in dir.
+func snapOf(t *testing.T, dir string, spec v1alpha1.AssistantConfigSpec) *assistantconfig.Snapshot {
+	t.Helper()
+	snap := assistantconfig.Build(&v1alpha1.AssistantConfig{Spec: spec}, factories.DefaultFactories(), dir)
+	if snap.Err != nil {
+		t.Fatalf("Build: %v", snap.Err)
 	}
-	bad[provider.ConfigEnv] = "{not json"
-	cfg, err = FromEnv(envOf(bad))
-	if err != nil {
-		t.Fatalf("FromEnv with a bad assistant config: %v", err)
-	}
-	if cfg.AssistantErr == nil {
-		t.Error("a malformed assistant config was not kept in AssistantErr")
+	return snap
+}
+
+func localSpec(auth string) v1alpha1.AssistantConfigSpec {
+	return v1alpha1.AssistantConfigSpec{
+		Providers: []v1alpha1.AssistantProvider{{
+			Name: "local", Kind: v1alpha1.AssistantProviderKindOpenAICompatible, BaseURL: "http://127.0.0.1:1/v1",
+			Models: []string{"m1"}, Trust: v1alpha1.AssistantTrustInternal, Auth: auth,
+		}},
+		DefaultProvider: "local",
+		DefaultModel:    "m1",
 	}
 }
 
 func TestProviderReady(t *testing.T) {
 	dir := t.TempDir()
-	raw := []byte(`{"providers":[{"name":"local","kind":"openai-compatible","baseURL":"http://127.0.0.1:1/v1",` +
-		`"models":["m1"],"trust":"internal","default":true,"hasSecret":false}],` +
-		`"externalDataSharing":"metadata","budgets":{"session":1,"userDay":1,"tenantDay":1,"steps":1},` +
-		`"approvalExpiry":"24h"}`)
-	pc, err := provider.Decode(raw)
-	if err != nil {
-		t.Fatalf("Decode: %v", err)
+	snap := snapOf(t, dir, localSpec(v1alpha1.AssistantAuthNone))
+	bad := localSpec(v1alpha1.AssistantAuthNone)
+	bad.ApprovalExpiry = "soon"
+	broken := assistantconfig.Build(&v1alpha1.AssistantConfig{Spec: bad}, factories.DefaultFactories(), dir)
+	if broken.Err == nil {
+		t.Fatal("a bad approval expiry built without an error")
 	}
-	reg, err := provider.NewRegistry(pc, factories.DefaultFactories(), dir)
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
-	cfg := Config{Assistant: pc}
 
 	ta := func(p, m string) *v1alpha1.TenantAgent {
 		out := &v1alpha1.TenantAgent{}
@@ -82,21 +85,19 @@ func TestProviderReady(t *testing.T) {
 	}
 	cases := []struct {
 		name   string
-		cfg    Config
-		reg    *provider.Registry
+		snap   *assistantconfig.Snapshot
 		ta     *v1alpha1.TenantAgent
 		status metav1.ConditionStatus
 		reason string
 	}{
-		{"default provider and model", cfg, reg, ta("", ""), metav1.ConditionTrue, v1alpha1.TenantAgentReasonReady},
-		{"unknown provider", cfg, reg, ta("nope", ""), metav1.ConditionFalse, v1alpha1.TenantAgentReasonUnknownProvider},
-		{"unknown model", cfg, reg, ta("local", "missing"), metav1.ConditionFalse, v1alpha1.TenantAgentReasonUnknownModel},
-		{"decode error", Config{AssistantErr: os.ErrInvalid}, reg, ta("", ""), metav1.ConditionFalse, v1alpha1.TenantAgentReasonAssistantDisabled},
-		{"no registry", cfg, nil, ta("", ""), metav1.ConditionFalse, v1alpha1.TenantAgentReasonAssistantDisabled},
+		{"default provider and model", snap, ta("", ""), metav1.ConditionTrue, v1alpha1.TenantAgentReasonReady},
+		{"unknown provider", snap, ta("nope", ""), metav1.ConditionFalse, v1alpha1.TenantAgentReasonUnknownProvider},
+		{"unknown model", snap, ta("local", "missing"), metav1.ConditionFalse, v1alpha1.TenantAgentReasonUnknownModel},
+		{"snapshot error", broken, ta("", ""), metav1.ConditionFalse, v1alpha1.TenantAgentReasonAssistantDisabled},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			status, reason, _ := ProviderReady(c.cfg, c.reg, c.ta)
+			status, reason, _ := ProviderReady(c.snap, c.ta)
 			if status != c.status || reason != c.reason {
 				t.Fatalf("ProviderReady = %v %s, want %v %s", status, reason, c.status, c.reason)
 			}
@@ -104,32 +105,30 @@ func TestProviderReady(t *testing.T) {
 	}
 }
 
+// TestProviderReadyReportsSnapshotError proves that a snapshot that did not
+// build reports AssistantDisabled on a TenantAgent, whatever it names.
+func TestProviderReadyReportsSnapshotError(t *testing.T) {
+	bad := localSpec(v1alpha1.AssistantAuthNone)
+	bad.ApprovalExpiry = "soon"
+	snap := assistantconfig.Build(&v1alpha1.AssistantConfig{Spec: bad}, factories.DefaultFactories(), t.TempDir())
+	status, reason, _ := ProviderReady(snap, &v1alpha1.TenantAgent{})
+	if status != metav1.ConditionFalse || reason != v1alpha1.TenantAgentReasonAssistantDisabled {
+		t.Fatalf("ProviderReady = %v %s, want False AssistantDisabled", status, reason)
+	}
+}
+
 func TestProviderReady_MissingKey(t *testing.T) {
 	dir := t.TempDir()
-	raw := []byte(`{"providers":[{"name":"keyed","kind":"openai-compatible","baseURL":"http://127.0.0.1:1/v1",` +
-		`"models":["m1"],"trust":"internal","default":true,"hasSecret":true}],` +
-		`"externalDataSharing":"metadata","budgets":{"session":1,"userDay":1,"tenantDay":1,"steps":1},` +
-		`"approvalExpiry":"24h"}`)
-	pc, err := provider.Decode(raw)
-	if err != nil {
-		t.Fatalf("Decode: %v", err)
-	}
-	reg, err := provider.NewRegistry(pc, factories.DefaultFactories(), dir)
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
+	snap := snapOf(t, dir, localSpec(v1alpha1.AssistantAuthAPIKey))
 	out := &v1alpha1.TenantAgent{}
-	status, reason, _ := ProviderReady(Config{Assistant: pc}, reg, out)
+	status, reason, _ := ProviderReady(snap, out)
 	if status != metav1.ConditionFalse || reason != v1alpha1.TenantAgentReasonKeyMissing {
 		t.Fatalf("no key file: %v %s", status, reason)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "keyed"), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "local"), []byte("k"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "keyed", "apiKey"), []byte("k"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	status, reason, _ = ProviderReady(Config{Assistant: pc}, reg, out)
+	status, reason, _ = ProviderReady(snap, out)
 	if status != metav1.ConditionTrue {
 		t.Fatalf("with a key file: %v %s", status, reason)
 	}

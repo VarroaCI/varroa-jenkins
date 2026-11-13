@@ -34,8 +34,9 @@ type Resumer struct {
 	Release func()
 	// Start runs a taken-over session with the resume trigger.
 	Start func(ctx context.Context, sess agent.Session, trigger loop.Trigger)
-	// Window bounds how far back the scan looks: the approval expiry plus an hour.
-	Window time.Duration
+	// Window returns how far back the scan looks: the approval expiry plus an
+	// hour. It is read on each scan, so a change of the expiry applies then.
+	Window func() time.Duration
 	Now    func() time.Time
 }
 
@@ -46,7 +47,7 @@ func (r *Resumer) Scan(ctx context.Context) (int, error) {
 	if len(tenants) == 0 {
 		return 0, nil
 	}
-	ids, err := r.Tenants.ResumeCandidates(ctx, tenants, now.Add(-r.Window))
+	ids, err := r.Tenants.ResumeCandidates(ctx, tenants, now.Add(-r.Window()))
 	if err != nil {
 		return 0, err
 	}

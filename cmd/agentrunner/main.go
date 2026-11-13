@@ -38,6 +38,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider/factories"
 	agentstore "github.com/varroaci/varroa-jenkins/internal/agent/store"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/forgerelay"
 	"github.com/varroaci/varroa-jenkins/internal/pgdial"
@@ -139,24 +140,8 @@ func run(logger *slog.Logger, busURL, caFile, passFile string, port int) error {
 		return fmt.Errorf("read signing key: %w", err)
 	}
 
-	var reg *provider.Registry
-	if cfg.AssistantErr == nil {
-		reg, err = provider.NewRegistry(cfg.Assistant, factories.DefaultFactories(), provider.DefaultKeyDir)
-		if err != nil {
-			return fmt.Errorf("provider registry: %w", err)
-		}
-	}
-
-	var ready atomic.Bool
-	var consumerReady atomic.Bool
-	deps := &runnerDeps{
-		cfg: cfg, st: st, reg: reg, objs: objs, key: key, conn: conn, logger: logger,
-		tenants: tenantstore.New(pool, nil),
-		relay:   forgerelay.Relay{Conn: conn},
-	}
-	go serveHTTP(ctx, port, pool, conn, objs, &ready, &consumerReady, logger)
-
-	deps.startConsumer(ctx, &consumerReady)
+	// The runtime follows the AssistantConfig object. A change wakes the status
+	// ticker and reaches the next run with no restart.
 	changed := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -164,6 +149,31 @@ func run(logger *slog.Logger, busURL, caFile, passFile string, port int) error {
 		default:
 		}
 	}
+	live := assistantconfig.NewLive()
+	live.OnChange(wake)
+	go func() {
+		if err := assistantconfig.Watch(ctx, dyn, live, factories.DefaultFactories(), provider.DefaultKeyDir, logger); err != nil {
+			logger.Error("assistant config watch stopped", "error", err.Error())
+		}
+	}()
+	select {
+	case <-live.Synced():
+	case <-time.After(assistantSyncTimeout):
+		logger.Warn("assistant config did not sync in time; the runner follows it when it syncs")
+	case <-ctx.Done():
+		return nil
+	}
+
+	var ready atomic.Bool
+	var consumerReady atomic.Bool
+	deps := &runnerDeps{
+		cfg: cfg, st: st, live: live, objs: objs, key: key, conn: conn, logger: logger,
+		tenants: tenantstore.New(pool, nil),
+		relay:   forgerelay.Relay{Conn: conn},
+	}
+	go serveHTTP(ctx, port, pool, conn, objs, &ready, &consumerReady, logger)
+
+	deps.startConsumer(ctx, &consumerReady)
 	objs.OnChange(wake)
 	// Every replica hears the kill switch. The settings are read per call, so
 	// the signal wakes the status ticker, which shows the new state at once.
@@ -180,8 +190,7 @@ func run(logger *slog.Logger, busURL, caFile, passFile string, port int) error {
 		Rollover:  &spend.Rollover{Store: deps.tenants},
 		Settings:  func(c context.Context) (agent.Settings, error) { return st.GetSettings(c, agent.ScopeGlobal) },
 		Placement: deps.placement,
-		Registry:  reg,
-		Cfg:       cfg,
+		Live:      live,
 		Relay:     forgerelay.Relay{Conn: conn},
 		Cluster:   cfg.Cluster,
 		Now:       time.Now,
@@ -216,10 +225,14 @@ func waitForSchema(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger)
 }
 
 // runnerDeps holds what the trigger path and the session runner share.
+// assistantSyncTimeout bounds the wait for the first list of the
+// AssistantConfig object at start.
+const assistantSyncTimeout = 10 * time.Second
+
 type runnerDeps struct {
 	cfg     config.Config
 	st      *agentstore.Postgres
-	reg     *provider.Registry
+	live    *assistantconfig.Live
 	objs    *cache.Cache
 	key     []byte
 	conn    *bus.Conn
@@ -241,10 +254,9 @@ func (d *runnerDeps) startConsumer(ctx context.Context, consumerReady *atomic.Bo
 		Placement: d.placement,
 	}
 	creator := &triggers.Creator{
-		Store:    d.st,
-		Tenants:  d.tenants,
-		Cfg:      d.cfg,
-		Registry: d.reg,
+		Store:   d.st,
+		Tenants: d.tenants,
+		Live:    d.live,
 		Settings: func(c context.Context) (agent.Settings, error) {
 			return d.st.GetSettings(c, agent.ScopeGlobal)
 		},
@@ -278,7 +290,7 @@ func (d *runnerDeps) startConsumer(ctx context.Context, consumerReady *atomic.Bo
 		Start: func(_ context.Context, sess agent.Session, trigger loop.Trigger) {
 			pool.Start(sess, trigger)
 		},
-		Window: d.cfg.Assistant.ApprovalExpiry + time.Hour,
+		Window: func() time.Duration { return d.live.Load().Config.ApprovalExpiry + time.Hour },
 		Now:    time.Now,
 	}
 	go func() {
@@ -409,17 +421,26 @@ func (d *runnerDeps) runSession(ctx context.Context, writer agentstore.Store, se
 		endFailed(ctx, writer, sess)
 		return
 	}
-	if d.reg == nil {
+	snap := d.live.Load()
+	if snap.Err != nil {
 		// The assistant configuration did not load, so no session can run.
 		endFailed(ctx, writer, sess)
 		return
 	}
-	entry, ok := d.reg.Get(sess.Provider)
+	entry, ok := snap.Registry.Get(sess.Provider)
 	if !ok {
 		endFailed(ctx, writer, sess)
 		return
 	}
-	pkey, err := d.reg.LoadKey(sess.Provider)
+	// A resumed session keeps the level it started with. A level that dropped
+	// since then, or a level that cannot be read, ends the session before any
+	// provider call.
+	if !sessions.GateResumeLevel(ctx, writer, d.st, snap.Config.ExternalDataSharing,
+		agent.DataSharing(ta.Spec.DataSharing), entry.Endpoint.Trust, sess) {
+		d.logger.Warn("tenant agent resume refused by the data level", "session", sess.ID.String())
+		return
+	}
+	pkey, err := snap.Registry.LoadKey(sess.Provider)
 	if err != nil {
 		d.logger.Warn("provider key", "provider", sess.Provider, "error", err.Error())
 	}
@@ -435,7 +456,7 @@ func (d *runnerDeps) runSession(ctx context.Context, writer agentstore.Store, se
 	outputs := stringsOf(sess.Context["outputs"])
 	host := sessions.NewHTTPHost(d.cfg.BFFURL, d.key, sess.Principal, ta.UID, sess.ID, outputs, time.Now)
 	unattended := stringsOf(sess.Context["unattended"])
-	sessionBudget, dayBudget := d.budgetsOf(ta)
+	sessionBudget, dayBudget := budgetsOf(snap, ta)
 	rc := loop.RunConfig{
 		Host:           host,
 		DecideWrite:    sessions.NewDecision(unattended, outputs),
@@ -448,8 +469,8 @@ func (d *runnerDeps) runSession(ctx context.Context, writer agentstore.Store, se
 		Owner:          sess.LeaseOwner,
 		SessionBudget:  sessionBudget,
 		SystemBase:     sessions.SystemBase(ta),
-		StepBudget:     d.cfg.Assistant.Budgets.Steps,
-		ApprovalExpiry: d.cfg.Assistant.ApprovalExpiry,
+		StepBudget:     snap.Config.Budgets.Steps,
+		ApprovalExpiry: snap.Config.ApprovalExpiry,
 		Tenants:        tenantLookup{d.tenants},
 		// Read per call, so a tenant restriction applies to the next read.
 		TenantLevels: func(c context.Context) (map[string]agent.DataSharing, error) {
@@ -468,12 +489,24 @@ func (d *runnerDeps) runSession(ctx context.Context, writer agentstore.Store, se
 
 // endFailed ends a session that cannot run, under its lease owner.
 func endFailed(ctx context.Context, writer agentstore.Store, sess agent.Session) {
+	endFailedWith(ctx, writer, sess, "", "")
+}
+
+// endFailedWith ends a running session as failed. A code and message write an
+// error event before the done event. An empty code writes the done event only.
+func endFailedWith(ctx context.Context, writer agentstore.Store, sess agent.Session, code agent.ErrorCode, message string) {
+	var events []agent.EventInput
+	if code != "" {
+		errEv, _ := agent.NewEvent(agent.EventError, agent.ErrorPayload{Code: code, Message: message})
+		events = append(events, errEv)
+	}
 	done, _ := agent.NewEvent(agent.EventDone, agent.DonePayload{State: agent.StateFailed, Stop: "error"})
+	events = append(events, done)
 	_, _ = writer.EndSession(ctx, sess.ID, agentstore.EndInput{
 		From:       []agent.SessionState{agent.StateRunning},
 		LeaseOwner: sess.LeaseOwner,
 		State:      agent.StateFailed,
-		Events:     []agent.EventInput{done},
+		Events:     events,
 	})
 }
 
@@ -497,9 +530,9 @@ func stringsOf(v any) []string {
 
 // budgetsOf returns the session and day budgets of one TenantAgent. A TenantAgent
 // may lower the chart values; it never raises them.
-func (d *runnerDeps) budgetsOf(ta *v1alpha1.TenantAgent) (int64, int64) {
-	session := d.cfg.Assistant.Budgets.Session
-	day := d.cfg.Assistant.Budgets.TenantDay
+func budgetsOf(snap *assistantconfig.Snapshot, ta *v1alpha1.TenantAgent) (int64, int64) {
+	session := snap.Config.Budgets.Session
+	day := snap.Config.Budgets.TenantDay
 	if ta.Spec.Budgets != nil {
 		if b := ta.Spec.Budgets.Session; b != nil && *b < session {
 			session = *b

@@ -207,6 +207,15 @@ func (s *Server) resolveAssistantApproval(w http.ResponseWriter, r *http.Request
 // resumeIfComplete starts the session again when every approval of it has
 // its result. A sibling approver may race on the same check, so TakeLease
 // lets only one of them resume the session.
+// levelCheckAttempts, levelCheckWait, and levelCheckDeadline bound the retry of
+// the data level read before a resume. The whole retry, store calls included,
+// ends within levelCheckDeadline, so the approval response is not held long.
+const (
+	levelCheckAttempts = 3
+	levelCheckWait     = time.Second
+	levelCheckDeadline = 5 * time.Second
+)
+
 func (s *Server) resumeIfComplete(r *http.Request, rt *AssistantRuntime, claims *auth.Claims, sess agent.Session) {
 	// The resume runs after the response path may have ended, so it is detached.
 	ctx := context.WithoutCancel(r.Context())
@@ -226,7 +235,48 @@ func (s *Server) resumeIfComplete(r *http.Request, rt *AssistantRuntime, claims 
 			return
 		}
 	}
-	key, err := s.sessionKey(r, rt, sess)
+	snap := rt.snap()
+	// A level that cannot be checked does not resume the run, so no provider
+	// call runs on an unchecked level. The check retries briefly first, because
+	// the approval is already committed and no later pass resumes this session.
+	var lowered bool
+	var lerr error
+	checkCtx, cancelCheck := context.WithTimeout(ctx, levelCheckDeadline)
+	for attempt := 0; attempt < levelCheckAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-checkCtx.Done():
+			case <-time.After(levelCheckWait):
+			}
+		}
+		if checkCtx.Err() != nil {
+			break
+		}
+		lowered, lerr = rt.levelLowered(checkCtx, snap, sess)
+		if lerr == nil {
+			break
+		}
+	}
+	cancelCheck()
+	if lerr != nil {
+		endEv, _ := agent.NewEvent(agent.EventError, agent.ErrorPayload{Code: agent.CodeDataLevelUnchecked, Message: "the data level could not be checked. Start a new conversation."})
+		doneEv, _ := agent.NewEvent(agent.EventDone, agent.DonePayload{State: agent.StateFailed})
+		_, _ = rt.Store.EndSession(ctx, sess.ID, store.EndInput{
+			From: []agent.SessionState{agent.StateWaitingApproval}, State: agent.StateFailed,
+			Events: []agent.EventInput{endEv, doneEv},
+		})
+		return
+	}
+	if lowered {
+		endEv, _ := agent.NewEvent(agent.EventError, agent.ErrorPayload{Code: agent.CodeDataLevelLowered, Message: "the data level of this session is lower now"})
+		doneEv, _ := agent.NewEvent(agent.EventDone, agent.DonePayload{State: agent.StateFailed})
+		_, _ = rt.Store.EndSession(ctx, sess.ID, store.EndInput{
+			From: []agent.SessionState{agent.StateWaitingApproval}, State: agent.StateFailed,
+			Events: []agent.EventInput{endEv, doneEv},
+		})
+		return
+	}
+	key, err := s.sessionKey(r, rt, snap, sess)
 	if err != nil {
 		endEv, _ := agent.NewEvent(agent.EventError, agent.ErrorPayload{Code: agent.CodeSessionKeyMissing, Message: "the provider key is not available"})
 		doneEv, _ := agent.NewEvent(agent.EventDone, agent.DonePayload{State: agent.StateFailed})
@@ -240,5 +290,5 @@ func (s *Server) resumeIfComplete(r *http.Request, rt *AssistantRuntime, claims 
 	if err != nil {
 		return
 	}
-	rt.startRun(rt.RunConfig(claims, taken, key, assistantTenantLookup{s: s, claims: claims}), loop.TriggerResume)
+	rt.startRun(rt.RunConfig(snap, claims, taken, key, assistantTenantLookup{s: s, claims: claims}), loop.TriggerResume)
 }

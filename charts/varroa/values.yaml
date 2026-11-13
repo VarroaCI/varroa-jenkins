@@ -1173,24 +1173,12 @@ recorder:
   extraVolumes: []
 
 # -- Agent assistant. Off by default. The session store lives in the record
-# store database, so assistant.enabled needs recordStore.enabled.
+# store database, so assistant.enabled needs recordStore.enabled. The
+# providers, the defaults, and the limits live in the AssistantConfig object
+# varroa-assistant. The provider keys live in the Secret varroa-assistant-keys.
 assistant:
   # -- Enable the assistant runtime in the BFF.
   enabled: false
-  # -- Model providers. kind names the wire protocol: anthropic or
-  # openai-compatible. secretRef names a Secret that holds the chart-level
-  # key under the apiKey key. Exactly one provider sets default: true.
-  providers: []
-  # -- Highest data level a provider may receive when its trust is external.
-  externalDataSharing: metadata
-  # -- Spend and step limits. Each value is a positive whole number.
-  budgets:
-    session: 200000
-    userDay: 1000000
-    tenantDay: 2000000
-    steps: 32
-  # -- How long an approval waits for a person before it expires. Use m or h.
-  approvalExpiry: 24h
 # -- Tenant agent runner: the varroa-agent Deployment that runs sessions for
 # Tenant agent objects. Needs assistant, recordStore, and bff enabled. Core
 # install only; a hive member renders nothing.

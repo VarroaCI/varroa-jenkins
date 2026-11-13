@@ -79,8 +79,6 @@ func readSettings(ctx context.Context, q rowQuerier, scope string, forUpdate boo
 // settingsJSON is the wire shape of the settings column. A key that is absent
 // keeps its default.
 type settingsJSON struct {
-	DefaultProvider   string            `json:"default_provider"`
-	DefaultModel      string            `json:"default_model"`
 	TenantDataSharing map[string]string `json:"tenant_data_sharing"`
 	Enabled           *bool             `json:"enabled"`
 	Provider          string            `json:"provider"`
@@ -99,8 +97,6 @@ func decodeSettingsJSON(raw []byte, scope string, st *agent.Settings) error {
 			return fmt.Errorf("decode settings: %w", err)
 		}
 	}
-	st.DefaultProvider = w.DefaultProvider
-	st.DefaultModel = w.DefaultModel
 	st.TenantDataSharing = map[string]agent.DataSharing{}
 	for k, v := range w.TenantDataSharing {
 		st.TenantDataSharing[k] = agent.DataSharing(v)
@@ -135,14 +131,7 @@ func (p *Postgres) PutSettings(ctx context.Context, scope string, patch Settings
 		return agent.Settings{}, err
 	}
 	scalars := map[string]any{}
-	if scope == agent.ScopeGlobal {
-		if patch.DefaultProvider != nil {
-			scalars["default_provider"] = *patch.DefaultProvider
-		}
-		if patch.DefaultModel != nil {
-			scalars["default_model"] = *patch.DefaultModel
-		}
-	} else {
+	if scope != agent.ScopeGlobal {
 		if patch.Enabled != nil {
 			scalars["enabled"] = *patch.Enabled
 		}

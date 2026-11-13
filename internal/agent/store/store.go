@@ -157,15 +157,12 @@ type ResolveResult struct {
 }
 
 // SettingsPatch changes one or more settings fields. A nil field is left
-// unchanged. Global fields are Paused, DefaultProvider, DefaultModel,
-// TenantSet, and TenantRemove. User fields are Enabled, Provider, Model,
-// and DataSharing.
+// unchanged. Global fields are Paused, TenantSet, and TenantRemove. User
+// fields are Enabled, Provider, Model, and DataSharing.
 type SettingsPatch struct {
-	Paused          *bool
-	DefaultProvider *string
-	DefaultModel    *string
-	TenantSet       *agent.TenantLevel
-	TenantRemove    *string
+	Paused       *bool
+	TenantSet    *agent.TenantLevel
+	TenantRemove *string
 
 	Enabled     *bool
 	Provider    *string
@@ -192,12 +189,6 @@ func applyPatch(st *agent.Settings, scope string, p SettingsPatch, by string, no
 				st.PausedBy = by
 				st.PausedAt = &now
 			}
-		}
-		if p.DefaultProvider != nil {
-			st.DefaultProvider = *p.DefaultProvider
-		}
-		if p.DefaultModel != nil {
-			st.DefaultModel = *p.DefaultModel
 		}
 		if p.TenantSet != nil {
 			if st.TenantDataSharing == nil {
@@ -442,8 +433,7 @@ func scopeValid(scope string) bool {
 func validatePatch(scope string, p SettingsPatch) error {
 	global := scope == agent.ScopeGlobal
 	userSet := p.Enabled != nil || p.Provider != nil || p.Model != nil || p.DataSharing != nil
-	globalSet := p.Paused != nil || p.DefaultProvider != nil || p.DefaultModel != nil ||
-		p.TenantSet != nil || p.TenantRemove != nil
+	globalSet := p.Paused != nil || p.TenantSet != nil || p.TenantRemove != nil
 	if global && userSet {
 		return fmt.Errorf("%w: a global scope takes global fields only", ErrInvalid)
 	}

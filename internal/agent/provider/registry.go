@@ -90,30 +90,31 @@ func (r *Registry) HasModel(provider, model string) bool {
 }
 
 // Available reports whether the provider exists and can be called. A provider
-// with a secret needs a non-empty key file.
+// that needs a key needs a non-empty key file.
 func (r *Registry) Available(name string) bool {
 	e, ok := r.Get(name)
 	if !ok {
 		return false
 	}
-	if !e.Endpoint.HasSecret {
+	if !e.Endpoint.KeyRequired {
 		return true
 	}
 	k, err := r.LoadKey(name)
 	return err == nil && !k.Empty()
 }
 
-// LoadKey reads the key file of the provider on every call. A provider with no
-// secret gives an empty Key and no error.
+// LoadKey reads the key file of the provider on every call. The file is named
+// after the provider. A provider that needs no key gives an empty Key and no
+// error.
 func (r *Registry) LoadKey(name string) (Key, error) {
 	e, ok := r.Get(name)
 	if !ok {
 		return Key{}, fmt.Errorf("%w: unknown provider %q", ErrKeyUnavailable, name)
 	}
-	if !e.Endpoint.HasSecret {
+	if !e.Endpoint.KeyRequired {
 		return Key{}, nil
 	}
-	raw, err := os.ReadFile(filepath.Join(r.keyDir, name, "apiKey"))
+	raw, err := os.ReadFile(filepath.Join(r.keyDir, name))
 	if err != nil {
 		return Key{}, fmt.Errorf("%w: read key for %s: %v", ErrKeyUnavailable, name, err) //nolint:errorlint // the sentinel is the caller-visible error
 	}

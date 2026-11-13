@@ -137,12 +137,13 @@ func (s *Server) handleProposePipeline(w http.ResponseWriter, r *http.Request) {
 		s.assistantStoreError(w, err)
 		return
 	}
-	_, _, entry, err := rt.chooseProvider("", "", user, global)
+	snap := rt.snap()
+	_, _, entry, err := rt.chooseProvider(snap, "", "", user)
 	if err != nil {
 		s.writeAssistantStartError(w, err)
 		return
 	}
-	if !readRepoFileVisible(rt.sessionLevel(user, global, ref.Tenant, entry)) {
+	if !readRepoFileVisible(sessionLevel(snap, user, global, ref.Tenant, entry)) {
 		writeAssistantError(s, w, http.StatusConflict, proposeErrDataSharingTooLow,
 			"the data level of this tenant and provider hides read_repo_file")
 		return
@@ -179,7 +180,7 @@ func (s *Server) handleProposePipeline(w http.ResponseWriter, r *http.Request) {
 		sealed = c.Value
 	}
 	prompt, _ := prompts.Get(prompts.ProposePipeline)
-	sess, err := s.createAssistantSession(ctx, rt, claims, sessionStart{
+	sess, err := s.createAssistantSession(ctx, rt, snap, claims, sessionStart{
 		Values: map[string]any{
 			agent.CtxTenant: tenant,
 			agent.CtxRoute:  "/pipelines/" + tenant,

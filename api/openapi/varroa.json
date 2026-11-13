@@ -695,41 +695,6 @@
         ],
         "type": "object"
       },
-      "AssistantLimits": {
-        "properties": {
-          "approvalExpiry": {
-            "type": "string"
-          },
-          "budgets": {
-            "properties": {
-              "session": {
-                "format": "int64",
-                "type": "integer"
-              },
-              "steps": {
-                "type": "integer"
-              },
-              "tenantDay": {
-                "format": "int64",
-                "type": "integer"
-              },
-              "userDay": {
-                "format": "int64",
-                "type": "integer"
-              }
-            },
-            "type": "object"
-          },
-          "egress": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "externalDataSharing": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "AssistantMessageRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1005,15 +970,6 @@
       },
       "AssistantSettings": {
         "properties": {
-          "defaultModel": {
-            "type": "string"
-          },
-          "defaultProvider": {
-            "type": "string"
-          },
-          "limits": {
-            "$ref": "#/components/schemas/components_schemas_AssistantLimits"
-          },
           "paused": {
             "type": "boolean"
           },
@@ -1052,12 +1008,6 @@
       "AssistantSettingsUpdate": {
         "additionalProperties": false,
         "properties": {
-          "defaultModel": {
-            "type": "string"
-          },
-          "defaultProvider": {
-            "type": "string"
-          },
           "paused": {
             "type": "boolean"
           },
@@ -6938,41 +6888,6 @@
         ],
         "type": "object"
       },
-      "components_schemas_AssistantLimits": {
-        "properties": {
-          "approvalExpiry": {
-            "type": "string"
-          },
-          "budgets": {
-            "properties": {
-              "session": {
-                "format": "int64",
-                "type": "integer"
-              },
-              "steps": {
-                "type": "integer"
-              },
-              "tenantDay": {
-                "format": "int64",
-                "type": "integer"
-              },
-              "userDay": {
-                "format": "int64",
-                "type": "integer"
-              }
-            },
-            "type": "object"
-          },
-          "egress": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "externalDataSharing": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "components_schemas_AssistantMessageRequest": {
         "additionalProperties": false,
         "properties": {
@@ -7264,15 +7179,6 @@
       },
       "components_schemas_AssistantSettings": {
         "properties": {
-          "defaultModel": {
-            "type": "string"
-          },
-          "defaultProvider": {
-            "type": "string"
-          },
-          "limits": {
-            "$ref": "#/components/schemas/components_schemas_AssistantLimits"
-          },
           "paused": {
             "type": "boolean"
           },
@@ -7311,12 +7217,6 @@
       "components_schemas_AssistantSettingsUpdate": {
         "additionalProperties": false,
         "properties": {
-          "defaultModel": {
-            "type": "string"
-          },
-          "defaultProvider": {
-            "type": "string"
-          },
           "paused": {
             "type": "boolean"
           },
@@ -20206,7 +20106,7 @@
             "description": "The assistant is not enabled."
           }
         },
-        "summary": "Returns the kill switch, and for an admin the defaults and limits.",
+        "summary": "Returns the kill switch, and for an admin the tenant levels. The providers and limits come from GET /assistant/config.",
         "tags": [
           "Assistant"
         ]
@@ -20254,7 +20154,7 @@
             "description": "The assistant is not enabled."
           }
         },
-        "summary": "Changes the kill switch, the defaults, or a tenant data level. Admin only.",
+        "summary": "Changes the kill switch or a tenant data level. Admin only.",
         "tags": [
           "Assistant"
         ]

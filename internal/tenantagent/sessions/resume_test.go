@@ -62,7 +62,7 @@ func resumerFor(st *agentstore.Postgres, pool *pgxpool.Pool, owner string, start
 		Start: func(context.Context, agent.Session, loop.Trigger) {
 			started.Add(1)
 		},
-		Window: 25 * time.Hour,
+		Window: func() time.Duration { return 25 * time.Hour },
 		Now:    time.Now,
 	}
 }

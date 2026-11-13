@@ -37,7 +37,9 @@ export type StreamErrorCode =
   | "kill_switch"
   | "provider_error"
   | "session_key_missing"
-  | "lease_lost";
+  | "lease_lost"
+  | "data_level_lowered"
+  | "data_level_unchecked";
 
 /** The state of one approval. */
 export type AssistantApprovalState = "pending" | "approved" | "denied" | "expired";
@@ -141,32 +143,57 @@ export interface AssistantAcceptedState {
   state: AssistantSessionState;
 }
 
-export interface AssistantLimits {
-  budgets: { session: number; userDay: number; tenantDay: number; steps: number };
-  externalDataSharing: DataSharingLevel;
-  approvalExpiry: string;
-  egress: { networkPolicy: boolean; cidrs: string[]; ports: number[] };
-}
-
+/** The kill switch and the tenant levels. An admin also sees the tenant levels. */
 export interface AssistantSettings {
   paused: boolean;
-  pausedBy: string | null;
-  pausedAt: string | null;
-  defaultProvider: string;
-  defaultModel: string;
-  tenantDataSharing: Record<string, DataSharingLevel>;
-  updatedAt: string;
-  updatedBy: string;
-  limits: AssistantLimits;
+  pausedBy?: string | null;
+  pausedAt?: string | null;
+  tenantDataSharing?: Record<string, DataSharingLevel>;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
+/** The kill switch change that PUT /assistant/settings takes. */
 export interface AssistantSettingsUpdate {
   paused?: boolean;
-  defaultProvider?: string;
-  defaultModel?: string;
   tenantDataSharing?: {
     set?: { tenant: string; level: DataSharingLevel };
     remove?: string;
+  };
+}
+
+/** One model provider of the AssistantConfig object. */
+export interface AssistantConfigProvider {
+  name: string;
+  kind: "anthropic" | "openai-compatible";
+  baseURL?: string;
+  models: string[];
+  trust: "internal" | "external";
+  auth?: "apiKey" | "none";
+  cidrs?: string[];
+  port?: number;
+}
+
+/** The spec of the AssistantConfig object varroa-assistant. */
+export interface AssistantConfigSpec {
+  providers: AssistantConfigProvider[];
+  defaultProvider?: string;
+  defaultModel?: string;
+  externalDataSharing: DataSharingLevel;
+  budgets: { session: number; userDay: number; tenantDay: number; steps: number };
+  approvalExpiry: string;
+}
+
+/** The AssistantConfig object that GET and PUT /assistant/config carry. */
+export interface AssistantConfigObject {
+  apiVersion?: string;
+  kind?: string;
+  metadata: { name: string; resourceVersion?: string };
+  spec: AssistantConfigSpec;
+  status?: {
+    observedGeneration?: number;
+    providers?: { name: string; keySet: boolean }[];
+    conditions?: { type: string; status: string; reason?: string; message?: string }[];
   };
 }
 

@@ -24,7 +24,7 @@ export const A1_VALUES = {
     "approval_expired", "tenant_agent_session", "record_store_unreachable", "note_too_long", "note_session_invalid",
   ] as (AssistantErrorCode | RunNoteErrorCode)[],
   streamErrorCodes: [
-    "budget_session", "budget_day", "steps", "kill_switch", "provider_error", "session_key_missing", "lease_lost",
+    "budget_session", "budget_day", "steps", "kill_switch", "provider_error", "session_key_missing", "lease_lost", "data_level_lowered", "data_level_unchecked",
   ] as StreamErrorCode[],
   approvalStates: ["pending", "approved", "denied", "expired"] as AssistantApprovalState[],
 };
@@ -67,6 +67,8 @@ export const STREAM_ERROR_LABELS: Record<StreamErrorCode, string> = {
   provider_error: "The model provider answered with an error.",
   session_key_missing: "No provider key is set for this session.",
   lease_lost: "The session lost its run. An approved tool may have run.",
+  data_level_lowered: "The data level of this session was lowered. Start a new conversation.",
+  data_level_unchecked: "The data level of this session could not be checked. No model call ran. Start a new conversation.",
 };
 
 export const HTTP_LABELS: Record<AssistantErrorCode | RunNoteErrorCode, string> = {

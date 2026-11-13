@@ -278,8 +278,8 @@ func main() {
 		logger.Error("failed to export the mite signing key for the assistant", "error", err)
 		os.Exit(1)
 	}
-	assistantRT, err := buildAssistant(ctx, os.Getenv("VARROA_ASSISTANT_CONFIG"), os.Getenv("VARROA_RECORDSTORE_DSN"),
-		cluster, assistantPEM, busConn.Publish, logger)
+	assistantRT, err := buildAssistant(ctx, os.Getenv("VARROA_ASSISTANT_ENABLED") == "true", os.Getenv("VARROA_RECORDSTORE_DSN"),
+		cluster, assistantPEM, clientsetClient.DynamicClient(), busConn.Publish, logger)
 	if err != nil {
 		logger.Error("assistant did not start", "error", err)
 		os.Exit(1)

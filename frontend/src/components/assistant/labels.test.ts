@@ -17,7 +17,7 @@ describe("assistant labels", () => {
       expect(labelFor("streamErrorCodes", code)).toBe(STREAM_ERROR_LABELS[code]);
       expect(STREAM_ERROR_LABELS[code]).not.toBe("");
     }
-    expect(A1_VALUES.streamErrorCodes).toHaveLength(7);
+    expect(A1_VALUES.streamErrorCodes).toHaveLength(9);
     expect(labelFor("streamErrorCodes", "something_new")).toBe("something_new");
   });
 

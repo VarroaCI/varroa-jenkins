@@ -5,6 +5,7 @@ import { http, HttpResponse } from "msw";
 import type { AssistantSession } from "../types/assistant";
 import {
   createAssistantApproval,
+  createAssistantConfig,
   createAssistantSession,
   createAssistantSettings,
   createMyAssistant,
@@ -62,6 +63,14 @@ export function assistantHandlers(opts: AssistantHandlerOptions = {}) {
     http.put(`${BASE}/assistant/settings`, async ({ request }) => {
       await record(request);
       return HttpResponse.json(opts.settings ?? createAssistantSettings());
+    }),
+    http.get(`${BASE}/assistant/config`, async ({ request }) => {
+      await record(request);
+      return HttpResponse.json(createAssistantConfig());
+    }),
+    http.put(`${BASE}/assistant/config`, async ({ request }) => {
+      await record(request);
+      return HttpResponse.json(createAssistantConfig());
     }),
     http.get(`${BASE}/assistant/providers`, async ({ request }) => {
       await record(request);

@@ -16,8 +16,8 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/agent/policy"
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
 	agentstore "github.com/varroaci/varroa-jenkins/internal/agent/store"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 	"github.com/varroaci/varroa-jenkins/internal/tenantagent/accept"
-	"github.com/varroaci/varroa-jenkins/internal/tenantagent/config"
 	tenantstore "github.com/varroaci/varroa-jenkins/internal/tenantagent/store"
 )
 
@@ -47,10 +47,10 @@ const dedupeWindow = 2 * time.Hour
 // Creator writes the session row of a match. It holds the advisory lock of the
 // match key for the whole check, so two replicas cannot both start one session.
 type Creator struct {
-	Store    *agentstore.Postgres
-	Tenants  *tenantstore.Store
-	Cfg      config.Config
-	Registry *provider.Registry
+	Store   *agentstore.Postgres
+	Tenants *tenantstore.Store
+	// Live holds the AssistantConfig snapshot. Each Create reads one snapshot.
+	Live *assistantconfig.Live
 	// Settings reads the global settings: the kill switch and the tenant levels.
 	Settings func(ctx context.Context) (agent.Settings, error)
 	// Owner is this replica's lease owner, used for the rows it starts.
@@ -120,8 +120,9 @@ func (c *Creator) decide(ctx context.Context, tx pgx.Tx, m Match, settings agent
 		return Capped, agent.Session{}, nil, false, nil
 	}
 
-	provName, endpoint, reg := c.endpoint(m.TA)
-	level := dataLevel(m.TA, endpoint, settings, cfgCeiling(c.Cfg), m.Tenant)
+	snap := c.Live.Load()
+	provName, endpoint, reg := providerEndpoint(snap, m.TA)
+	level := dataLevel(m.TA, endpoint, settings, snap.Config.ExternalDataSharing, m.Tenant)
 	dayTotal, err := spendToday(ctx, tx, tenant, now)
 	if err != nil {
 		return "", agent.Session{}, nil, false, err
@@ -129,9 +130,9 @@ func (c *Creator) decide(ctx context.Context, tx pgx.Tx, m Match, settings agent
 	skip, start := agent.DecideCreate(agent.CreateInput{
 		Paused:            settings.Paused,
 		DayTotal:          dayTotal,
-		DayLimit:          dayLimit(c.Cfg, m.TA),
+		DayLimit:          dayLimit(snap, m.TA),
 		DataLevel:         level,
-		ProviderAvailable: reg && provAvailable(c.Registry, provName),
+		ProviderAvailable: reg && snap.Registry.Available(provName),
 	})
 
 	runID, err := c.Tenants.RunID(ctx, m.Tenant, m.Event.ItemPath, m.Event.BuildNumber)
@@ -155,7 +156,7 @@ func (c *Creator) decide(ctx context.Context, tx pgx.Tx, m Match, settings agent
 		Cluster:               m.Event.Cluster,
 		Trigger:               m.Trigger,
 		Provider:              provName,
-		Model:                 modelOf(m.TA, endpoint),
+		Model:                 modelOf(snap, provName, m.TA),
 		KeySource:             agent.KeySourceChart,
 		DataSharing:           level,
 		TenantAgentGeneration: &gen,
@@ -192,23 +193,17 @@ func (c *Creator) decide(ctx context.Context, tx pgx.Tx, m Match, settings agent
 }
 
 // endpoint returns the provider name, its endpoint, and whether the name is in
-// the registry. The TenantAgent's provider wins over the registry default.
-func (c *Creator) endpoint(ta *v1alpha1.TenantAgent) (string, provider.Endpoint, bool) {
-	if c.Registry == nil {
-		return ta.Spec.Provider, provider.Endpoint{}, false
-	}
+// the snapshot registry. The TenantAgent's provider wins over the registry
+// default.
+func providerEndpoint(snap *assistantconfig.Snapshot, ta *v1alpha1.TenantAgent) (string, provider.Endpoint, bool) {
 	name := ta.Spec.Provider
 	if name == "" {
-		if def, ok := c.Registry.Default(); ok {
+		if def, ok := snap.Registry.Default(); ok {
 			name = def.Endpoint.Name
 		}
 	}
-	e, ok := c.Registry.Get(name)
+	e, ok := snap.Registry.Get(name)
 	return name, e.Endpoint, ok
-}
-
-func provAvailable(reg *provider.Registry, name string) bool {
-	return reg != nil && reg.Available(name)
 }
 
 // debounceOf returns the debounce window of a trigger on a TenantAgent.
@@ -221,18 +216,13 @@ func debounceOf(ta *v1alpha1.TenantAgent, trigger string) time.Duration {
 	return defaultDebounce
 }
 
-// dayLimit returns the smaller of the chart budget and the TenantAgent budget.
-func dayLimit(cfg config.Config, ta *v1alpha1.TenantAgent) int64 {
-	limit := cfg.Assistant.Budgets.TenantDay
+// dayLimit returns the smaller of the assistant budget and the TenantAgent budget.
+func dayLimit(snap *assistantconfig.Snapshot, ta *v1alpha1.TenantAgent) int64 {
+	limit := snap.Config.Budgets.TenantDay
 	if ta.Spec.Budgets != nil && ta.Spec.Budgets.Day != nil && *ta.Spec.Budgets.Day < limit {
 		limit = *ta.Spec.Budgets.Day
 	}
 	return limit
-}
-
-// cfgCeiling returns the external data-sharing ceiling of the chart.
-func cfgCeiling(cfg config.Config) agent.DataSharing {
-	return cfg.Assistant.ExternalDataSharing
 }
 
 // dataLevel returns the effective data level of a session for the TenantAgent.
@@ -246,12 +236,13 @@ func dataLevel(ta *v1alpha1.TenantAgent, e provider.Endpoint, settings agent.Set
 	})
 }
 
-// modelOf returns the model the TenantAgent names, or the endpoint default.
-func modelOf(ta *v1alpha1.TenantAgent, e provider.Endpoint) string {
+// modelOf returns the model the TenantAgent names, or the snapshot model of
+// the provider.
+func modelOf(snap *assistantconfig.Snapshot, provName string, ta *v1alpha1.TenantAgent) string {
 	if ta.Spec.Model != "" {
 		return ta.Spec.Model
 	}
-	return e.DefaultModel()
+	return snap.Config.ModelFor(provName)
 }
 
 // jobOf returns the job path when the row names a job, else "".
