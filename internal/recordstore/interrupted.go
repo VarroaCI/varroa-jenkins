@@ -323,9 +323,9 @@ func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCa
 	return markInterruptedAndPublish(ctx, pool, nil, run, reason, now, dashboardURL)
 }
 
-// markInterruptedAndPublish marks one run and publishes its activity row on
-// conn after the commit. A nil conn writes the row and publishes nothing.
-func markInterruptedAndPublish(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, run runInterruptCandidate,
+// markInterruptedAndPublish marks one run and sends its activity row to
+// activityPub after the commit. A nil activityPub writes the row and publishes nothing.
+func markInterruptedAndPublish(ctx context.Context, pool *pgxpool.Pool, activityPub *activity.Publisher, run runInterruptCandidate,
 	reason string, now time.Time, dashboardURL string) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -341,7 +341,7 @@ func markInterruptedAndPublish(ctx context.Context, pool *pgxpool.Pool, conn *bu
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit interrupted-run marking: %w", err)
 	}
-	publishActivityAfterCommit(conn, &out)
+	publishActivityAfterCommit(activityPub, &out)
 	return true, nil
 }
 
@@ -644,7 +644,7 @@ func markedStatusLabel(status string) string {
 // fires here, and neither does the heartbeat-lost test. The confirmed
 // test does fire here, because a pod read proves the loss and needs no
 // heartbeat window.
-func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
+func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, activityPub *activity.Publisher, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, cluster, tenant string,
 	row tenantPlacementLivenessRow, now time.Time, grace time.Duration, dashboardURL string, logger *slog.Logger) (int, error) {
 	if logger == nil {
@@ -667,7 +667,7 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 		if !ok || reason == ReasonNoHeartbeat || reason == ReasonHeartbeatLost {
 			continue
 		}
-		changed, err := markInterruptedAndPublish(ctx, pool, conn, c, reason, now, dashboardURL)
+		changed, err := markInterruptedAndPublish(ctx, pool, activityPub, c, reason, now, dashboardURL)
 		if err != nil {
 			logger.Warn("announce-triggered interrupted marking failed", "run_id", c.runID, "error", err)
 			continue
@@ -721,7 +721,7 @@ func sweepConsumerSkip(info *nats.ConsumerInfo, maxPending uint64, now time.Time
 // reads any run, then applies the confirmed, moved, and silent tests to
 // every QUEUED or RUNNING run fleet-wide, marking and publishing for
 // each one that qualifies. It answers how many runs it marked.
-func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
+func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, activityPub *activity.Publisher, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, maxPending uint64, now time.Time,
 	grace time.Duration, dashboardURL string, logger *slog.Logger) (int, error) {
 	if logger == nil {
@@ -757,7 +757,7 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 		if !ok {
 			continue
 		}
-		changed, err := markInterruptedAndPublish(ctx, pool, conn, c, reason, now, dashboardURL)
+		changed, err := markInterruptedAndPublish(ctx, pool, activityPub, c, reason, now, dashboardURL)
 		if err != nil {
 			logger.Warn("interrupted sweep: mark failed", "run_id", c.runID, "error", err)
 			continue

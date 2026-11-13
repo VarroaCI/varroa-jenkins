@@ -98,7 +98,7 @@ func (g *Ingester) applyJobBranches(ctx context.Context, env IngestEnvelope) (Ap
 	if err := tx.Commit(ctx); err != nil {
 		return ApplyResult{}, fmt.Errorf("commit job.branches transaction: %w", err)
 	}
-	publishActivityAfterCommit(g.conn, &out)
+	publishActivityAfterCommit(g.activityPub, &out)
 	return result, nil
 }
 

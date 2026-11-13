@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
@@ -163,6 +164,7 @@ type Ingester struct {
 	sweepMetrics  *InterruptedMetrics
 	stateDeleter  ObjectDeleter
 	notifier      *RunNotifier
+	activityPub   *activity.Publisher
 
 	// webhookDashboardURL is the dashboard base URL a webhook payload's
 	// url field prefixes. webhookNudge wakes the dispatcher after a
@@ -228,6 +230,19 @@ func (g *Ingester) SetStateDeleter(d ObjectDeleter) {
 // every test with no bus relies on.
 func (g *Ingester) SetRunNotifier(n *RunNotifier) {
 	g.notifier = n
+}
+
+// SetActivityPublisher sets the publisher that sends each activity row the
+// ingest writes, after the commit. An Ingester built with no call to this
+// method writes the rows and publishes nothing, which every test with no bus
+// relies on.
+func (g *Ingester) SetActivityPublisher(p *activity.Publisher) {
+	g.activityPub = p
+}
+
+// ActivityPublisher returns the publisher that SetActivityPublisher set.
+func (g *Ingester) ActivityPublisher() *activity.Publisher {
+	return g.activityPub
 }
 
 // notify publishes one ingest envelope's live notifications: the run
@@ -352,7 +367,7 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 		result.RefusedInput = true
 	}
 	result.ReleasedFleetLocks = dispatched.releasedFleetLocks
-	publishActivityAfterCommit(g.conn, &dispatched.activity)
+	publishActivityAfterCommit(g.activityPub, &dispatched.activity)
 
 	if dispatched.action != nil && g.conn != nil {
 		if perr := PublishLedgerAction(g.conn, *dispatched.action); perr != nil {

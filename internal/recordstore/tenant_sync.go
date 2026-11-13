@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
@@ -37,6 +38,8 @@ const maxDeadInstances = 10
 // and its own ActionMetrics for the actions that marking publishes;
 // registration failure is logged and the responder still starts, with
 // marking and publishing counting nothing.
+// activityPub sends the activity row of each run that the announce marks,
+// after its commit. A nil activityPub publishes nothing.
 //
 // grace is the confirmed-gone grace the announce hook's own marking,
 // fleet-lock release, and intent re-fire apply. notifier publishes the
@@ -44,7 +47,7 @@ const maxDeadInstances = 10
 // nil notifier publishes nothing. logs reads a moved run's stored
 // console log for the resume action the announce hook's takeover
 // publishes, and a nil logs sends no log sequence.
-func RegisterTenantSyncResponder(mp metric.MeterProvider, conn *bus.Conn, pool *pgxpool.Pool, grace time.Duration,
+func RegisterTenantSyncResponder(mp metric.MeterProvider, conn *bus.Conn, activityPub *activity.Publisher, pool *pgxpool.Pool, grace time.Duration,
 	stateDeleter ObjectDeleter, logs LogIndexReader, notifier *RunNotifier, dashboardURL string,
 	logger *slog.Logger) (*bus.Responder, error) {
 	if logger == nil {
@@ -59,7 +62,7 @@ func RegisterTenantSyncResponder(mp metric.MeterProvider, conn *bus.Conn, pool *
 		logger.Warn("action metrics registration failed; the tenant sync responder starts anyway", "error", err)
 	}
 	handler := func(data []byte) []byte {
-		return handleTenantSync(conn, logger, pool, metrics, actionMetrics, stateDeleter, logs, grace, notifier,
+		return handleTenantSync(conn, activityPub, logger, pool, metrics, actionMetrics, stateDeleter, logs, grace, notifier,
 			dashboardURL, data)
 	}
 	return conn.ServeRequests(bus.TenantSyncSubject, tenantSyncQueueGroup, handler)
@@ -68,7 +71,7 @@ func RegisterTenantSyncResponder(mp metric.MeterProvider, conn *bus.Conn, pool *
 // handleTenantSync decodes a TenantSyncRequest and dispatches it by
 // Kind. A body the decoder rejects, and a kind outside the three known
 // values, both answer an error reply and write nothing.
-func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, metrics *InterruptedMetrics,
+func handleTenantSync(conn *bus.Conn, activityPub *activity.Publisher, logger *slog.Logger, pool *pgxpool.Pool, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, logs LogIndexReader, grace time.Duration,
 	notifier *RunNotifier, dashboardURL string, data []byte) []byte {
 	var req TenantSyncRequest
@@ -82,7 +85,7 @@ func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, m
 
 	switch req.Kind {
 	case TenantSyncKindAnnounce:
-		resp, err := handleTenantSyncAnnounce(ctx, conn, pool, metrics, actionMetrics, stateDeleter, logs, grace, notifier,
+		resp, err := handleTenantSyncAnnounce(ctx, conn, activityPub, pool, metrics, actionMetrics, stateDeleter, logs, grace, notifier,
 			dashboardURL, logger, req)
 		if err != nil {
 			logger.Error("tenant sync announce failed", "cluster", req.Cluster, "tenant", req.Tenant, "error", err)
@@ -213,10 +216,12 @@ type tenantPlacementRow struct {
 // interrupted-run moved test for every RUNNING run of the tenant, once
 // the write commits, and reports the count in the response's
 // InterruptedMarked field (design D9). conn and
-// metrics feed that marking; a nil metrics counts nothing. notifier
+// metrics feed that marking; a nil metrics counts nothing. activityPub
+// sends the activity row of each run that the announce marks, after its
+// commit. A nil activityPub publishes nothing. notifier
 // carries the lock notifications of the fleet-lock move and release,
 // and a nil notifier publishes nothing.
-func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool.Pool, metrics *InterruptedMetrics,
+func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, activityPub *activity.Publisher, pool *pgxpool.Pool, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, logs LogIndexReader, grace time.Duration,
 	notifier *RunNotifier, dashboardURL string, logger *slog.Logger, req TenantSyncRequest) (TenantSyncResponse, error) {
 	if req.Cluster == "" || req.Tenant == "" {
@@ -412,7 +417,7 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 
 	var interruptedMarked int
 	if old.cell != req.Cell || old.cellInstance != req.CellInstance || len(derived) > 0 {
-		n, markErr := MarkMovedRunsForTenant(ctx, pool, conn, metrics, actionMetrics, stateDeleter,
+		n, markErr := MarkMovedRunsForTenant(ctx, pool, conn, activityPub, metrics, actionMetrics, stateDeleter,
 			req.Cluster, req.Tenant, row, time.Now(), grace, dashboardURL, logger)
 		if markErr != nil {
 			logger.Error("interrupted-run marking after announce failed",

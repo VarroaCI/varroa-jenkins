@@ -146,7 +146,7 @@ func TestFireOnePublishesWakeThenRetryAndWritesActivity(t *testing.T) {
 		cluster: testCluster, tenant: testTenant, namespace: testNamespace, cell: "cell-a",
 		jobPath: "acme/fire-one", occurrence: occ, grace: backstopTestGrace,
 	}
-	fireOne(context.Background(), pool, conn, backstopMetrics, actionMetrics, c, now, nil)
+	fireOne(context.Background(), pool, conn, nil, backstopMetrics, actionMetrics, c, now, nil)
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -235,7 +235,7 @@ func TestFireOnePublishesActionsEvenWhenActivityInsertFails(t *testing.T) {
 		cluster: testCluster, tenant: testTenant, namespace: testNamespace, cell: "cell-a",
 		jobPath: "acme/activity-write-fails", occurrence: occ, grace: backstopTestGrace,
 	}
-	fireOne(context.Background(), pool, conn, backstopMetrics, actionMetrics, c, far, nil)
+	fireOne(context.Background(), pool, conn, nil, backstopMetrics, actionMetrics, c, far, nil)
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -314,7 +314,7 @@ func TestFireOneAndOrdinaryFireShareOneIntentKey(t *testing.T) {
 		cluster: testCluster, tenant: testTenant, namespace: testNamespace, cell: "cell-a",
 		jobPath: jobPath, occurrence: occ, grace: backstopTestGrace,
 	}
-	fireOne(context.Background(), pool, conn, backstopMetrics, nil, c, now, nil)
+	fireOne(context.Background(), pool, conn, nil, backstopMetrics, nil, c, now, nil)
 
 	var retryAction LedgerAction
 	found := false

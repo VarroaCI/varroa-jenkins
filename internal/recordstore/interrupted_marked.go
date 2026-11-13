@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
@@ -199,8 +200,8 @@ func endMarkedLostIntent(ctx context.Context, pool *pgxpool.Pool, c markedLostIn
 }
 
 // endMarkedLostIntentAndPublish ends one marked intent and publishes its
-// activity row on conn after the commit. A nil conn publishes nothing.
-func endMarkedLostIntentAndPublish(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c markedLostIntent,
+// activity row to activityPub after the commit. A nil activityPub publishes nothing.
+func endMarkedLostIntentAndPublish(ctx context.Context, pool *pgxpool.Pool, activityPub *activity.Publisher, c markedLostIntent,
 	reason string, markedBy, now time.Time, dashboardURL string) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -256,7 +257,7 @@ func endMarkedLostIntentAndPublish(ctx context.Context, pool *pgxpool.Pool, conn
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit marked lost intent end: %w", err)
 	}
-	publishActivityAfterCommit(conn, &out)
+	publishActivityAfterCommit(activityPub, &out)
 	return true, nil
 }
 
@@ -291,7 +292,7 @@ func endMarkedLostIntentAndPublish(ctx context.Context, pool *pgxpool.Pool, conn
 // was lost, and a retry would run with each declared default.
 //
 // A nil notifier and nil metrics are no-ops.
-func EndMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, notifier *RunNotifier,
+func EndMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, activityPub *activity.Publisher, notifier *RunNotifier,
 	metrics *InterruptedMetrics, actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, maxPending uint64,
 	now time.Time, grace time.Duration, dashboardURL string, logger *slog.Logger) (int, error) {
 	if logger == nil {
@@ -321,7 +322,7 @@ func EndMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 		if !exists || !confirmedGoneInstance(row.deadInstances, c.cellInstance, now, grace) {
 			continue
 		}
-		changed, err := endMarkedLostIntentAndPublish(ctx, pool, conn, c, ReasonCellRolled, time.Time{}, now, dashboardURL)
+		changed, err := endMarkedLostIntentAndPublish(ctx, pool, activityPub, c, ReasonCellRolled, time.Time{}, now, dashboardURL)
 		if err != nil {
 			logger.Warn("marked lost intent: end failed", "run_id", c.runID, "error", err)
 			continue
@@ -358,7 +359,7 @@ func EndMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 			return ended, err
 		}
 		for _, c := range stale {
-			if endStaleMarkedIntent(ctx, pool, conn, notifier, metrics, c, now, dashboardURL, logger) {
+			if endStaleMarkedIntent(ctx, pool, activityPub, notifier, metrics, c, now, dashboardURL, logger) {
 				ended++
 			}
 		}
@@ -374,9 +375,9 @@ func EndMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 // reports whether it wrote the mark. It publishes the run notification
 // and counts the mark. It counts a skipped retry when the tenant's policy
 // asks for an automatic one.
-func endStaleMarkedIntent(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, notifier *RunNotifier,
+func endStaleMarkedIntent(ctx context.Context, pool *pgxpool.Pool, activityPub *activity.Publisher, notifier *RunNotifier,
 	metrics *InterruptedMetrics, c markedLostIntent, now time.Time, dashboardURL string, logger *slog.Logger) bool {
-	changed, err := endMarkedLostIntentAndPublish(ctx, pool, conn, c, ReasonStartLost, now.Add(-ClaimExpiryAge), now, dashboardURL)
+	changed, err := endMarkedLostIntentAndPublish(ctx, pool, activityPub, c, ReasonStartLost, now.Add(-ClaimExpiryAge), now, dashboardURL)
 	if err != nil {
 		logger.Warn("stale marked intent: end failed", "run_id", c.runID, "error", err)
 		return false

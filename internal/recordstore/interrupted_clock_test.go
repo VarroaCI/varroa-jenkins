@@ -37,7 +37,7 @@ func TestSweepMarksARunWhosePodClockRunsFast(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil,
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, metrics, nil, nil,
 		DefaultSweepMaxPending, now, testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
@@ -86,7 +86,7 @@ func TestSweepLeavesARunWhosePodClockRunsSlow(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil,
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, metrics, nil, nil,
 		DefaultSweepMaxPending, now, testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)

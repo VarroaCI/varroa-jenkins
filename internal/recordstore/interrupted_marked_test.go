@@ -62,7 +62,7 @@ func seedMarkedPlacement(t *testing.T, db *sql.DB, confirmed bool, policy string
 func runEndMarked(t *testing.T, pool *pgxpool.Pool, conn *bus.Conn, notifier *RunNotifier,
 	metrics *InterruptedMetrics) int {
 	t.Helper()
-	ended, err := EndMarkedLostIntents(context.Background(), pool, conn, notifier, metrics, nil, nil,
+	ended, err := EndMarkedLostIntents(context.Background(), pool, conn, nil, notifier, metrics, nil, nil,
 		DefaultSweepMaxPending, time.Now().UTC(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("EndMarkedLostIntents: %v", err)
@@ -257,7 +257,7 @@ func TestEndMarkedLostIntentSupersedesAnAcceptedRow(t *testing.T) {
 		t.Fatalf("reason=%q accepted=%v, want %q and no accepted keys", reason, accepted, ReasonCellRolled)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil,
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil, nil,
 		DefaultSweepMaxPending, time.Now().UTC(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
@@ -548,7 +548,7 @@ func TestEndStaleMarkedIntentHonoursTheConsumerGate(t *testing.T) {
 	}
 	waitSweepConsumerPending(t, conn, 1)
 
-	ended, err := EndMarkedLostIntents(context.Background(), pool, conn, nil, nil, nil, nil,
+	ended, err := EndMarkedLostIntents(context.Background(), pool, conn, nil, nil, nil, nil, nil,
 		1, time.Now().UTC(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("EndMarkedLostIntents: %v", err)

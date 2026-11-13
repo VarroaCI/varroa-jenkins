@@ -105,7 +105,7 @@ func selectReadyFires(candidates []backstopFireCandidate, now time.Time) []backs
 // own coordinate. It counts
 // recorder_cron_fired_total and recorder_actions_published_total only
 // once the retry_run action, the fire itself, publishes without error.
-func fireOne(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *BackstopMetrics, actionMetrics *ActionMetrics,
+func fireOne(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, activityPub *activity.Publisher, metrics *BackstopMetrics, actionMetrics *ActionMetrics,
 	c backstopFireCandidate, now time.Time, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
@@ -149,7 +149,7 @@ func fireOne(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *B
 		metrics.addRefired(ctx)
 	}
 
-	if err := writeBackstopActivity(ctx, pool, conn, c, now); err != nil {
+	if err := writeBackstopActivity(ctx, pool, activityPub, c, now); err != nil {
 		logger.Warn("backstop fire: write activity row failed", "job_path", c.jobPath, "error", err)
 	}
 }
@@ -167,7 +167,7 @@ func backstopActivityMessage(c backstopFireCandidate) string {
 // writeBackstopActivity writes the fire's build.scheduled.backstop
 // activity row, naming the job path and the occurrence minute so a
 // later round's candidate suppression test can find it.
-func writeBackstopActivity(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c backstopFireCandidate, now time.Time) error {
+func writeBackstopActivity(ctx context.Context, pool *pgxpool.Pool, activityPub *activity.Publisher, c backstopFireCandidate, now time.Time) error {
 	event := activity.Event{
 		Timestamp:  now,
 		Type:       "build.scheduled.backstop",
@@ -193,6 +193,6 @@ func writeBackstopActivity(ctx context.Context, pool *pgxpool.Pool, conn *bus.Co
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit backstop activity write: %w", err)
 	}
-	publishActivityAfterCommit(conn, &out)
+	publishActivityAfterCommit(activityPub, &out)
 	return nil
 }
