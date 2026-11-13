@@ -106,6 +106,16 @@ The operator owns the Secret. It removes each key whose provider is not listed,
 or whose provider has `auth: none`. A Secret that you create by hand is adopted
 on the next pass. Its keys for listed providers stay.
 
+### Administration page
+
+Admins edit the object on the Administration page. Each save writes the whole
+object. A conflict shows a reload message.
+
+Removing the default provider needs a new default in the same save. A change
+that raises data sharing needs confirmation.
+
+A saved key is not shown again. The assistant reads a new key within a minute.
+
 ### External Postgres
 
 When you run an external Postgres, the session role needs write access to

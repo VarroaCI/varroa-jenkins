@@ -1,6 +1,5 @@
 .stack { display: flex; flex-direction: column; gap: 16px; }
 .tableScroll { composes: tableScroll from "./tables.module.css"; }
-.table { composes: dataTable from "./tables.module.css"; min-width: 560px; }
 .levelTable { composes: dataTable from "./tables.module.css"; }
 .nameCell { composes: nameCell from "./tables.module.css"; }
 .mono { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }

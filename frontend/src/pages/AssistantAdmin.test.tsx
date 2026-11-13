@@ -5,6 +5,7 @@ import { AssistantAdmin, CONFIG_CHANGED, pendingCountText } from "./AssistantAdm
 import * as client from "../api/client";
 import { ApiError } from "../hooks/useApi";
 import { createAssistantApproval, createAssistantConfig, createAssistantSettings } from "../test/assistantFactories";
+import { keyFailure } from "./assistantAdmin/ProviderKeyForm";
 
 vi.mock("../api/client", async (orig) => {
   const actual = await orig<typeof import("../api/client")>();
@@ -14,6 +15,8 @@ vi.mock("../api/client", async (orig) => {
     putAssistantSettings: vi.fn(async () => createAssistantSettings()),
     getAssistantConfig: vi.fn(),
     putAssistantConfig: vi.fn(async () => createAssistantConfig()),
+    putAssistantProviderKey: vi.fn(async () => undefined),
+    deleteAssistantProviderKey: vi.fn(async () => undefined),
     listAssistantApprovals: vi.fn(async () => ({ items: [createAssistantApproval()], nextCursor: null })),
   };
 });
@@ -54,11 +57,12 @@ describe("AssistantAdmin", () => {
     expect(pendingCountText(3, false)).toBe("3");
   });
 
-  it("lists the providers with their auth, CIDRs, and port, and names the object", async () => {
+  it("lists the providers with their auth, CIDRs, and port, and marks the default", async () => {
     renderAdmin();
     expect(await screen.findByText("http://192.168.1.99:8082/v1")).toBeTruthy();
     expect(screen.getByText("192.168.1.99/32")).toBeTruthy();
-    expect(screen.getByText("Edit the AssistantConfig object varroa-assistant to change this list.")).toBeTruthy();
+    expect(screen.getByText("smoke (default)")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add provider" })).toBeTruthy();
   });
 
   it("shows the egress condition, each provider's rule, and the key state", async () => {
@@ -107,11 +111,144 @@ describe("AssistantAdmin", () => {
     })));
   });
 
-  it("shows the limits from the object", async () => {
+  it("shows the limits from the object in editable fields", async () => {
     renderAdmin();
-    expect(await screen.findByText("Session budget")).toBeTruthy();
-    expect(screen.getByText("50000 tokens")).toBeTruthy();
-    expect(screen.getByText("1h")).toBeTruthy();
+    expect(await screen.findByLabelText("Session budget")).toHaveValue("50000");
+    expect(screen.getByLabelText("Approval expiry")).toHaveValue("1h");
+    expect(screen.getByLabelText("External data sharing")).toHaveValue("logs");
+  });
+
+  it("adds a provider and sends the whole list at the read version", async () => {
+    renderAdmin();
+    fireEvent.click(await screen.findByRole("button", { name: "Add provider" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "backup" } });
+    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://models.test/v1" } });
+    fireEvent.change(screen.getByLabelText("Models"), { target: { value: "model-c" } });
+    fireEvent.change(screen.getByLabelText("CIDRs"), { target: { value: "192.0.2.0/24" } });
+    fireEvent.change(screen.getByLabelText("Port"), { target: { value: "443" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(client.putAssistantConfig).toHaveBeenCalledWith({
+      apiVersion: "varroa.dev/v1alpha1",
+      kind: "AssistantConfig",
+      metadata: { name: "varroa-assistant", resourceVersion: "7" },
+      spec: expect.objectContaining({
+        providers: [
+          expect.objectContaining({ name: "smoke" }),
+          { name: "backup", kind: "openai-compatible", baseURL: "https://models.test/v1", models: ["model-c"], trust: "external", auth: "apiKey", cidrs: ["192.0.2.0/24"], port: 443 },
+        ],
+        defaultProvider: "smoke",
+      }),
+    }));
+  });
+
+  it("shows a field fault before any save", async () => {
+    renderAdmin();
+    fireEvent.click(await screen.findByRole("button", { name: "Add provider" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Bad Name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    expect(await screen.findByText(/Use up to 63 lowercase letters/)).toBeTruthy();
+    expect(client.putAssistantConfig).not.toHaveBeenCalled();
+  });
+
+  it("removing the default provider asks for a new default in the same save", async () => {
+    const base = createAssistantConfig();
+    vi.mocked(client.getAssistantConfig).mockResolvedValue(createAssistantConfig({
+      spec: {
+        ...base.spec,
+        providers: [
+          base.spec.providers[0],
+          { name: "backup", kind: "anthropic", models: ["model-c", "model-d"], trust: "external", auth: "none" },
+        ],
+      },
+    }));
+    renderAdmin();
+    fireEvent.click(await screen.findByRole("button", { name: "Remove smoke" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Remove provider smoke" });
+    expect(dialog).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("New default provider"), { target: { value: "backup" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove provider" }));
+    await waitFor(() => expect(client.putAssistantConfig).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({ resourceVersion: "7" }),
+      spec: expect.objectContaining({
+        providers: [expect.objectContaining({ name: "backup" })],
+        defaultProvider: "backup",
+        defaultModel: "model-c",
+      }),
+    })));
+  });
+
+  it("saves a provider key, clears the input, and never reads it back", async () => {
+    const base = createAssistantConfig();
+    vi.mocked(client.getAssistantConfig).mockResolvedValue(createAssistantConfig({
+      spec: { ...base.spec, providers: [{ ...base.spec.providers[0], auth: "apiKey" }] },
+      status: { providers: [{ name: "smoke", keySet: false }] },
+    }));
+    renderAdmin();
+    expect(await screen.findByText("not set")).toBeTruthy();
+    const input = screen.getByLabelText("API key for smoke");
+    expect(input).toHaveAttribute("type", "password");
+    fireEvent.change(input, { target: { value: "sk-test-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set key" }));
+    await waitFor(() => expect(client.putAssistantProviderKey).toHaveBeenCalledWith("smoke", { apiKey: "sk-test-123" }));
+    await waitFor(() => expect(screen.getByLabelText("API key for smoke")).toHaveValue(""));
+    expect(screen.queryByText("sk-test-123")).toBeNull();
+  });
+
+  it("clears the key input after a refused key save too", async () => {
+    const base = createAssistantConfig();
+    vi.mocked(client.getAssistantConfig).mockResolvedValue(createAssistantConfig({
+      spec: { ...base.spec, providers: [{ ...base.spec.providers[0], auth: "apiKey" }] },
+    }));
+    vi.mocked(client.putAssistantProviderKey).mockRejectedValueOnce(new ApiError(500, "boom"));
+    renderAdmin();
+    fireEvent.change(await screen.findByLabelText("API key for smoke"), { target: { value: "sk-refused-456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set key" }));
+    expect(await screen.findByText("The key was not saved.")).toBeTruthy();
+    expect(screen.getByLabelText("API key for smoke")).toHaveValue("");
+    expect(screen.queryByText("sk-refused-456")).toBeNull();
+  });
+
+  it("asks for a confirmation when external data sharing rises", async () => {
+    vi.mocked(client.getAssistantConfig).mockResolvedValue(createAssistantConfig({
+      spec: { ...createAssistantConfig().spec, externalDataSharing: "none" },
+    }));
+    renderAdmin();
+    fireEvent.change(await screen.findByLabelText("External data sharing"), { target: { value: "logs" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save limits" }));
+    expect(await screen.findByText("External data sharing rises from none to logs. External providers may then receive logs data.")).toBeTruthy();
+    expect(client.putAssistantConfig).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm save" }));
+    await waitFor(() => expect(client.putAssistantConfig).toHaveBeenCalledWith(expect.objectContaining({
+      spec: expect.objectContaining({ externalDataSharing: "logs" }),
+    })));
+  });
+
+  it("names a stale provider on a key refusal and a format fault on invalid_key", () => {
+    expect(keyFailure(new ApiError(400, "bad", { error: "the provider is not listed in the assistant config", code: "unknown_provider" })))
+      .toBe("the provider is not listed in the assistant config. Reload the page to see the current providers.");
+    expect(keyFailure(new ApiError(400, "bad", { error: "the key must be 1 to 4096 bytes", code: "invalid_key" })))
+      .toBe("The key must be 1 to 4096 bytes and not only white space.");
+    expect(keyFailure(new ApiError(500, "boom"))).toBe("The key was not saved.");
+  });
+
+  it("Back on a confirmation dismisses it without saving", async () => {
+    vi.mocked(client.getAssistantConfig).mockResolvedValue(createAssistantConfig({
+      spec: { ...createAssistantConfig().spec, externalDataSharing: "none" },
+    }));
+    renderAdmin();
+    fireEvent.change(await screen.findByLabelText("External data sharing"), { target: { value: "logs" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save limits" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Back" }));
+    expect(screen.queryByRole("alertdialog", { name: "Confirm the limit change" })).toBeNull();
+    expect(client.putAssistantConfig).not.toHaveBeenCalled();
+  });
+
+  it("shows the server message next to the form when a save is refused", async () => {
+    vi.mocked(client.putAssistantConfig).mockRejectedValueOnce(new ApiError(400, "bad", { error: "budgets.session must not be negative" }));
+    renderAdmin();
+    fireEvent.change(await screen.findByLabelText("Session budget"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save limits" }));
+    expect(await screen.findByText("budgets.session must not be negative")).toBeTruthy();
   });
 
   it("shows the reload message when another save won the version fence", async () => {

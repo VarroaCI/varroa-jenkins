@@ -1,0 +1,14 @@
+.tableScroll { composes: tableScroll from "../tables.module.css"; }
+.table { composes: dataTable from "../tables.module.css"; min-width: 760px; }
+.nameCell { composes: nameCell from "../tables.module.css"; }
+.mono { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.note { color: var(--text-2); font-size: 13px; margin: 8px 0 0; }
+.actions { composes: actions from "../forms.module.css"; flex-wrap: wrap; }
+.keys { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; }
+.keyName { font-weight: 600; font-size: 14px; }
+.keysHeading { font-size: 14px; margin: 16px 0 4px; }
+.dialog { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-top: 12px; }
+.group { composes: formGroup from "../forms.module.css"; margin: 12px 0 0; }
+.label { composes: formLabel from "../forms.module.css"; }
+.select { composes: formSelect from "../forms.module.css"; }
+.error { color: var(--bad-text); margin: 8px 0 0; }

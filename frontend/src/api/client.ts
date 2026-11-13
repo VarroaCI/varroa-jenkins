@@ -1676,6 +1676,19 @@ export function putAssistantSettings(body: AssistantSettingsUpdate): Promise<Ass
   return bffFetch<AssistantSettings>("/assistant/settings", { method: "PUT", body: JSON.stringify(body) });
 }
 
+/**
+ * putAssistantProviderKey sends a provider key to the operator. The reply has
+ * no body. The key is never kept by a cache, so callers do not use a mutation.
+ */
+export function putAssistantProviderKey(name: string, body: { apiKey: string }): Promise<void> {
+  return bffFetch<void>(`/assistant/providers/${enc(name)}/key`, { method: "PUT", body: JSON.stringify(body) });
+}
+
+/** deleteAssistantProviderKey removes the key of a provider. */
+export function deleteAssistantProviderKey(name: string): Promise<void> {
+  return bffFetch<void>(`/assistant/providers/${enc(name)}/key`, { method: "DELETE" });
+}
+
 /** getAssistantConfig reads the AssistantConfig object. An admin only. */
 export function getAssistantConfig(): Promise<AssistantConfigObject> {
   return bffFetch<AssistantConfigObject>("/assistant/config");
