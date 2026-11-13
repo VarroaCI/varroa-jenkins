@@ -121,8 +121,8 @@ func (h *RegistryHandler) OnCommandResult(name, ns string, result *mitev1.Comman
 	}
 }
 
-// OnTokenRefreshRequest is a no-op for the registry handler; token grants
-// are served directly by the Server's TokenGrantFunc callback.
+// OnTokenRefreshRequest is a no-op for the registry handler. The registry
+// handler has no bus, so no operator receives the request.
 func (h *RegistryHandler) OnTokenRefreshRequest(name, ns string, req *mitev1.TokenRefreshRequest) {}
 
 // OnContentResponse is a no-op in the BFF process — content-fetch is only

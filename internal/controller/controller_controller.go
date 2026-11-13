@@ -6418,17 +6418,6 @@ func appendSystemCredentials(yamlDoc string, creds []any) (string, error) {
 	return string(out), nil
 }
 
-// MintMiteToken is the public entry point for token minting, callable from
-// outside the reconciler (e.g., by the mite gRPC Server's TokenGrantFunc).
-// It returns an empty token and 0 expiry on failure (signer not configured).
-func (r *Reconciler) MintMiteToken(key string) (token string, expUnix int64, err error) {
-	if r.miteTokenSigner == nil {
-		return "", 0, fmt.Errorf("mite token signer not configured")
-	}
-	token, expUnix = r.mintOrGetMiteToken(key)
-	return token, expUnix, nil
-}
-
 // MintMiteTokenForce is the force-mint variant used for token refresh grants.
 // It always mints a fresh token whose expiry strictly exceeds any cached token
 // for the same mite, updates the per-mite cache, and returns the new token and

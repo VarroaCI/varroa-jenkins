@@ -40,11 +40,6 @@ type Server struct {
 	broadcaster   *sse.Broadcaster
 	streamHandler StreamHandler // pluggable stream backend
 
-	// TokenGrantFunc is called when a mite sends a TokenRefreshRequest.
-	// It returns a fresh Jenkins token and its expiry. If nil, token
-	// refresh requests are forwarded to the StreamHandler only.
-	TokenGrantFunc func(controllerName, namespace string) (token string, exp int64, err error)
-
 	// ServerEndpoint is the endpoint returned in RegisterResponse so mites
 	// know where to connect their CommandStream. Defaults to the legacy
 	// hardcoded value if not set.
@@ -363,31 +358,9 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 			handler.OnCommandResult(controllerName, namespace, m.CommandResult)
 
 		case *mitev1.MiteMessage_TokenRefreshRequest:
-			// First notify the handler so it can forward to the bus if needed.
+			// The operator answers the request with a TokenGrant on the
+			// desired-state request. The server must not mint a token itself.
 			handler.OnTokenRefreshRequest(controllerName, namespace, m.TokenRefreshRequest)
-			// If a grant function is configured, mint and send a TokenGrant directly.
-			if s.TokenGrantFunc != nil {
-				token, exp, err := s.TokenGrantFunc(controllerName, namespace)
-				if err != nil {
-					if s.Logger != nil {
-						s.Logger.Error("token grant failed", "controller", controllerName, "namespace", namespace, "error", err)
-					}
-				} else {
-					grant := &mitev1.OperatorMessage{
-						Message: &mitev1.OperatorMessage_TokenGrant{
-							TokenGrant: &mitev1.TokenGrant{
-								MiteJenkinsToken:    token,
-								MiteJenkinsTokenExp: exp,
-							},
-						},
-					}
-					if sndErr := send(grant); sndErr != nil {
-						if s.Logger != nil {
-							s.Logger.Error("token grant send failed", "controller", controllerName, "namespace", namespace, "error", sndErr)
-						}
-					}
-				}
-			}
 
 		case *mitev1.MiteMessage_ObservabilityReport:
 			handler.OnObservabilityReport(controllerName, namespace, m.ObservabilityReport)
