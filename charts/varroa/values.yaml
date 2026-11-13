@@ -776,6 +776,14 @@ nats:
     # deployments consume. Design D1, D3, D4, D5: single account, three users
     # with per-role ACLs.
     merge:
+      # The server pings a client that sent nothing for ping_interval. It
+      # closes the client when ping_max pings in a row get no answer. A client
+      # cut off by a partition thus loses its subscriptions within
+      # (ping_max + 2) times ping_interval: 80 s. The server defaults (2m, 2)
+      # keep them for 6 to 8 minutes. Routes use the same interval, and the
+      # server caps it at 30 s for routes.
+      ping_interval: 20s
+      ping_max: 2
       # nats resolves include paths relative to the main config dir (/etc/nats-config),
       # so reach the sibling secret mount at /etc/nats-auth via "../".
       zzzauth$include: ../nats-auth/auth.conf

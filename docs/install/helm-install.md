@@ -74,7 +74,7 @@ Wait for all control-plane pods to become `Ready`. NATS cannot start until its v
 | Authentication | `auth.*`, `dex.*` |
 | Dashboard routing | `global.domain`, `frontend.host`, `ingress.*` |
 | Control-plane capacity | `operator.*`, `gateway.hpa.*`, `bff.hpa.*` |
-| NATS server and storage | `nats.container.image`, `nats.config.cluster.*`, `nats.config.jetstream.fileStore.pvc.*`, `jetStreamReplicas` |
+| NATS server and storage | `nats.container.image`, `nats.config.cluster.*`, `nats.config.jetstream.fileStore.pvc.*`, `nats.config.merge.ping_interval`, `nats.config.merge.ping_max`, `jetStreamReplicas` |
 | Activity retention | `recordStore.retention.activity` |
 | Restart copy retention | `recordStore.retention.restartSource` |
 | Network isolation | `networkPolicy.*` |
