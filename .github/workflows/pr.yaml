@@ -254,7 +254,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      # The govulncheck version is pinned. A new release can fail the scan on code that did not change.
+      # Bump it on purpose, in its own pull request.
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
       # Exit code 3 means that the code calls a vulnerable symbol. The step fails at once.
       # Exit codes 137 and 143 mean that the kernel or the runner killed the scan. The step fails at once.
       # Any other failure means that the scan did not finish. The step then tries again.
