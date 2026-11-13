@@ -10,6 +10,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/ca"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
@@ -163,7 +164,7 @@ func publishTriggerBuildID(t *testing.T, conn *bus.Conn, id string) {
 }
 
 // awaitImperativeID waits for the imperative with the wanted command id.
-func awaitImperativeID(t *testing.T, imps chan *mitev1.ImperativeCommand, id string, wait time.Duration) {
+func awaitImperativeID(t *testing.T, imps chan *mitev1.ImperativeCommand, id string) {
 	t.Helper()
 	select {
 	case imp, ok := <-imps:
@@ -173,8 +174,8 @@ func awaitImperativeID(t *testing.T, imps chan *mitev1.ImperativeCommand, id str
 		if imp.CommandId != id {
 			t.Fatalf("got command %q, want %q", imp.CommandId, id)
 		}
-	case <-time.After(wait):
-		t.Fatalf("no imperative %s after %s", id, wait)
+	case <-time.After(15 * time.Second):
+		t.Fatalf("no imperative %s after %s", id, 15*time.Second)
 	}
 }
 
@@ -193,7 +194,7 @@ func TestImperativePumpHoldsInFlightLimit(t *testing.T) {
 	}
 
 	for i := 1; i <= limit; i++ {
-		awaitImperativeID(t, imps, fmt.Sprintf("cmd-%02d", i), 15*time.Second)
+		awaitImperativeID(t, imps, fmt.Sprintf("cmd-%02d", i))
 	}
 	assertNoSecondCopy(t, imps)
 
@@ -202,7 +203,7 @@ func TestImperativePumpHoldsInFlightLimit(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("send result: %v", err)
 	}
-	awaitImperativeID(t, imps, fmt.Sprintf("cmd-%02d", limit+1), 15*time.Second)
+	awaitImperativeID(t, imps, fmt.Sprintf("cmd-%02d", limit+1))
 	assertNoSecondCopy(t, imps)
 }
 
@@ -288,4 +289,125 @@ func drainAll(t *testing.T, conn *bus.Conn, sub *nats.Subscription, n int) []*na
 	}
 	t.Fatal("no message arrived")
 	return nil
+}
+
+// connectGrantMite opens one CommandStream as the redelivery cell and returns
+// the imperatives and the token grants that the stream delivers.
+func connectGrantMite(t *testing.T, addr string, certAuth *ca.CA) (chan *mitev1.ImperativeCommand, chan *mitev1.TokenGrant) {
+	t.Helper()
+	gconn := dialWithMiteCert(t, addr, certAuth, redeliveryCell, redeliveryNS)
+	t.Cleanup(func() { _ = gconn.Close() })
+	stream, err := mitev1.NewMiteClient(gconn).CommandStream(context.Background())
+	if err != nil {
+		t.Fatalf("command stream: %v", err)
+	}
+	if err := stream.Send(&mitev1.MiteMessage{
+		Message: &mitev1.MiteMessage_Hello{
+			Hello: &mitev1.Hello{ControllerName: redeliveryCell, Namespace: redeliveryNS, Version: "test-v1"},
+		},
+	}); err != nil {
+		t.Fatalf("send hello: %v", err)
+	}
+	imps := make(chan *mitev1.ImperativeCommand, 32)
+	grants := make(chan *mitev1.TokenGrant, 8)
+	go func() {
+		defer close(imps)
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				return
+			}
+			if imp := msg.GetImperative(); imp != nil {
+				imps <- imp
+			}
+			if g := msg.GetTokenGrant(); g != nil {
+				grants <- g
+			}
+		}
+	}()
+	return imps, grants
+}
+
+// TestImperativeBacklogDoesNotHoldTokenGrant fills the in-flight limit with
+// unanswered imperatives. A token grant must still reach the mite at once,
+// because it travels on the desired-state request, not behind the backlog.
+func TestImperativeBacklogDoesNotHoldTokenGrant(t *testing.T) {
+	limit := imperativeInFlightLimitDefault
+	natsSrv := startNATS(t)
+	busConn, lis, certAuth := startGatewayWithCA(t, natsSrv.ClientURL())
+	imps, grants := connectGrantMite(t, lis.Addr().String(), certAuth)
+
+	total := limit + 3
+	for i := 1; i <= total; i++ {
+		publishTriggerBuildID(t, busConn, fmt.Sprintf("cmd-%02d", i))
+	}
+	for i := 1; i <= limit; i++ {
+		awaitImperativeID(t, imps, fmt.Sprintf("cmd-%02d", i))
+	}
+
+	requestTokenGrant(t, busConn, redeliveryNS, redeliveryCell, &mitev1.TokenGrant{
+		MiteJenkinsToken:    "fresh-token",
+		MiteJenkinsTokenExp: 4242,
+	})
+	select {
+	case g := <-grants:
+		if g.MiteJenkinsToken != "fresh-token" {
+			t.Fatalf("unexpected token grant: %+v", g)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("token grant waited behind the imperative backlog")
+	}
+	assertNoSecondCopy(t, imps)
+
+	info, err := busConn.JetStream().StreamInfo(bus.DefaultStreamName)
+	if err != nil {
+		t.Fatalf("stream info: %v", err)
+	}
+	if info.State.Msgs != uint64(total) {
+		t.Errorf("stream holds %d messages, want %d imperatives and no grant", info.State.Msgs, total)
+	}
+}
+
+// TestImperativeSubjectDropsTokenGrant proves that a token grant someone
+// publishes on the imperative subject is acked and dropped, never forwarded.
+// No grant may ride the imperative consumer.
+func TestImperativeSubjectDropsTokenGrant(t *testing.T) {
+	natsSrv := startNATS(t)
+	busConn, lis, certAuth := startGatewayWithCA(t, natsSrv.ClientURL())
+	imps, grants := connectGrantMite(t, lis.Addr().String(), certAuth)
+
+	grantData, err := json.Marshal(&mitev1.OperatorMessage{
+		Message: &mitev1.OperatorMessage_TokenGrant{TokenGrant: &mitev1.TokenGrant{
+			MiteJenkinsToken:    "stray-token",
+			MiteJenkinsTokenExp: 4242,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal grant: %v", err)
+	}
+	subject := bus.MiteOutSubject(bus.DefaultCluster, redeliveryNS, redeliveryCell)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		_, err := busConn.JetStream().Publish(subject, grantData)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("publish grant on imperative subject: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	publishTriggerBuildID(t, busConn, "after-grant")
+	awaitImperativeID(t, imps, "after-grant")
+
+	select {
+	case g := <-grants:
+		t.Fatalf("grant on the imperative subject reached the mite: %+v", g)
+	case <-time.After(500 * time.Millisecond):
+	}
+	waitFor(t, func() bool {
+		info, err := busConn.JetStream().StreamInfo(bus.DefaultStreamName)
+		return err == nil && info.State.Msgs == 1
+	}, 2*time.Second, "the dropped grant was not acked: only the imperative should remain")
 }

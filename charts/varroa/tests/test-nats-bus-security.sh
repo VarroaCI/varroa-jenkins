@@ -5,7 +5,7 @@
 # Verifies that `helm template` produces:
 #   - TLS required (cert_file/key_file in nats config)
 #   - Three users (operator, gateway, bff) with per-service ACLs
-#   - Operator-only publish to mite.*.*.*.desired (the desired-state request)
+#   - Operator-only publish to mite.*.*.*.desired (the desired-state and token-grant request)
 #   - Gateway-only subscribe to mite.*.*.*.desired
 #   - No identity holds any mite_desired KV grant (the bucket must not exist)
 #   - BFF has a per-bucket JetStream flow-control publish grant
@@ -84,9 +84,9 @@ else
   check "Operator does NOT subscribe to mite.*.*.*.desired" 0
 fi
 
-# 3b. operator publish includes mite.*.*.*.out (token grant + imperative commands)
+# 3b. operator publish includes mite.*.*.*.out (imperative commands)
 grep -q 'mite.\*.\*.\*.out' <<<"$operator_block"
-check "Operator can publish to mite.*.*.*.out (token grant)" $?
+check "Operator can publish to mite.*.*.*.out (imperative commands)" $?
 
 # 4. gateway subscribes to the desired-state request and does not publish it
 grep -q '"mite\.\*\.\*\.\*\.desired"' <<<"$(subscribe_list "$gateway_block")"

@@ -28,7 +28,8 @@ type desiredInbox interface {
 	Unsubscribe() error
 }
 
-// desiredRequest is one desired-state request from the operator.
+// desiredRequest is one request from the operator on the desired-state
+// subject: a desired-state command or a token grant.
 type desiredRequest struct {
 	Data []byte
 	// Confirm answers the operator. Call it only after the command reached
@@ -89,6 +90,21 @@ func (i natsDesiredInbox) Unsubscribe() error {
 	return i.sub.Unsubscribe()
 }
 
+// directMessageKind names the operator messages that the desired-state
+// subject carries. Both carry credentials, so neither may ride a stream. Any
+// other message returns "": an imperative on this path would skip the
+// in-flight limit and the result bookkeeping of the imperative pump.
+func directMessageKind(op *mitev1.OperatorMessage) string {
+	switch {
+	case op.GetDesiredState() != nil:
+		return "desired-state"
+	case op.GetTokenGrant() != nil:
+		return "token-grant"
+	default:
+		return ""
+	}
+}
+
 // subscribeDesired makes one subscription attempt for the mite. OnConnect
 // calls it before it announces the connection, so the operator's push on the
 // new epoch finds a responder. A failed attempt returns nil, and
@@ -105,8 +121,9 @@ func (h *BusHandler) subscribeDesired(ns, name string) desiredInbox {
 	return inbox
 }
 
-// serveDesiredState forwards each desired-state request for the mite to the
-// gRPC stream and answers the operator after each successful send. inbox is
+// serveDesiredState forwards each request for the mite on the desired-state
+// subject to the gRPC stream and answers the operator after each successful
+// send. Each request carries a desired-state command or a token grant. inbox is
 // the subscription OnConnect opened, or nil when that attempt failed. The
 // subscription is rebuilt for as long as the mite stays connected: a lost
 // subscription otherwise starves the mite of every desired-state push.
@@ -142,7 +159,8 @@ func (h *BusHandler) serveDesiredState(ctx context.Context, ns, name string, sen
 }
 
 // pumpDesired forwards requests until ctx is cancelled (returns nil) or the
-// subscription dies (returns the cause). A server denial of the
+// subscription dies (returns the cause). Each request carries a desired-state
+// command or a token grant. A server denial of the
 // subscription is such a death. A failed send gets no answer. During
 // a reconnect two gateway replicas can hold a subscription for one mite, and
 // only the replica with the live stream may answer.
@@ -169,18 +187,23 @@ func (h *BusHandler) pumpDesired(ctx context.Context, inbox desiredInbox, ns, na
 			h.log().Error("unmarshal desired failed", "controller", key, "error", err)
 			continue
 		}
+		kind := directMessageKind(&op)
+		if kind == "" {
+			h.log().Error("desired-state subject carried an unsupported message, dropping it", "controller", key)
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
 		}
 		if err := send(&op); err != nil {
-			h.log().Error("send desired to mite failed", "controller", key, "error", err)
+			h.log().Error("send to mite failed", "controller", key, "kind", kind, "error", err)
 			continue
 		}
 		if req.Confirm != nil {
 			if err := req.Confirm(); err != nil && !errors.Is(err, nats.ErrMsgNoReply) {
-				h.log().Warn("desired-state confirm failed", "controller", key, "error", err)
+				h.log().Warn("confirm failed", "controller", key, "kind", kind, "error", err)
 			}
 		}
 	}

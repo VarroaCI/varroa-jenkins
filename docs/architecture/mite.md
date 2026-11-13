@@ -38,13 +38,13 @@ Each desired-state command has a deadline. The default is 20 minutes. Set `Provi
 
 The gateway extends the 60-second ack wait of a running one-shot command every 15 seconds, so a slow command does not repeat.
 
-The gateway sends a mite at most 8 one-shot commands that have no result. The other commands stay in JetStream in publish order. The gateway sends the next command when the mite returns a result. When the stream ends, the gateway releases the unanswered commands in publish order. A token grant uses the same JetStream subject. It waits behind the one-shot commands that the operator published before it.
+The gateway sends a mite at most 8 one-shot commands that have no result. The other commands stay in JetStream in publish order. The gateway sends the next command when the mite returns a result. When the stream ends, the gateway releases the unanswered commands in publish order. A token grant does not use JetStream, so these commands never delay it.
 
 The effective reconciliation policy controls termination draining. The default drain timeout is 900 seconds. During termination the mite places Jenkins in quiet-down mode, waits for running builds, then exits when builds finish or the timeout expires.
 
 ## Credential Delivery
 
-The desired-state command carries tenant credentials, runner SSH keys, and the mite's Jenkins token. NATS stores no copy. The operator sends each command to the gateway that holds the mite stream. The operator usually pushes the command to a reconnecting mite in the reconcile that sees the new connection. A failed runner read, an armed force-reprovision annotation, or a pod roll moves the push to a later reconcile. While the operator is down, it gets no desired state, and a restarted cell starts without tenant credentials. A token grant can stay queued in JetStream for up to 24 hours.
+The desired-state command carries tenant credentials, runner SSH keys, and the mite's Jenkins token. NATS stores no copy. The operator sends each command to the gateway that holds the mite stream. The operator usually pushes the command to a reconnecting mite in the reconcile that sees the new connection. A failed runner read, an armed force-reprovision annotation, or a pod roll moves the push to a later reconcile. While the operator is down, it gets no desired state, and a restarted cell starts without tenant credentials. The token grant travels the same way. The mite asks for a new token when less than 10 minutes of its 60-minute token remain. It asks again every 30 seconds until a grant arrives. When no gateway confirms a grant, the operator drops it.
 
 ## Build Claims and Build Events
 

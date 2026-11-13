@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -250,14 +251,39 @@ func TestBusTransport_InfoDeletedRecordIsMissing(t *testing.T) {
 	}
 }
 
+// fakeGatewayDesired answers the desired-state request subject of one mite as
+// a gateway would. Each request body arrives on the returned channel.
+func fakeGatewayDesired(t *testing.T, s *server.Server, ns, name string) <-chan []byte {
+	t.Helper()
+	gw, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("gateway connect: %v", err)
+	}
+	t.Cleanup(gw.Close)
+	got := make(chan []byte, 8)
+	sub, err := gw.Subscribe(bus.MiteDesiredSubject(bus.DefaultCluster, ns, name), func(m *nats.Msg) {
+		got <- m.Data
+		_ = m.Respond(nil)
+	})
+	if err != nil {
+		t.Fatalf("gateway subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	if err := gw.NATSConn().Flush(); err != nil {
+		t.Fatalf("gateway flush: %v", err)
+	}
+	return got
+}
+
 // TestBusTransport_TokenRefreshGrant verifies that in bus mode a mite's
 // TokenRefreshRequest (published on the mite→operator subject) is answered
-// with a freshly minted TokenGrant published on the operator→mite subject.
-// Without this the dedicated grant path is silently dropped in bus mode.
+// with a freshly minted TokenGrant sent as a core NATS request on the
+// desired-state subject. No stream may hold the grant.
 func TestBusTransport_TokenRefreshGrant(t *testing.T) {
-	tr := newBusTransport(t, startNATS(t))
+	s := startNATS(t)
+	tr := newBusTransport(t, s)
 
-	// The operator→mite stream must exist for PublishJetStream to succeed.
+	// The stream exists, so a stray JetStream publish of the grant would land in it.
 	if err := tr.conn.EnsureStream(bus.StreamConfig("varroa")); err != nil {
 		t.Fatalf("ensure stream: %v", err)
 	}
@@ -269,13 +295,7 @@ func TestBusTransport_TokenRefreshGrant(t *testing.T) {
 	}
 
 	ns, name := "ns", "ctrl"
-
-	// Subscribe to the mite-out subject to capture the grant.
-	sub, err := tr.conn.JetStream().SubscribeSync(bus.MiteOutSubject(bus.DefaultCluster, ns, name))
-	if err != nil {
-		t.Fatalf("subscribe mite-out: %v", err)
-	}
-	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	granted := fakeGatewayDesired(t, s, ns, name)
 
 	// Create the inbound subscription, then publish a TokenRefreshRequest.
 	tr.DrainResults(ns, name)
@@ -298,26 +318,35 @@ func TestBusTransport_TokenRefreshGrant(t *testing.T) {
 		t.Fatal("TokenGrantFunc was not called for the TokenRefreshRequest")
 	}
 
-	msg, err := sub.NextMsg(2 * time.Second)
+	select {
+	case body := <-granted:
+		var om mitev1.OperatorMessage
+		if err := json.Unmarshal(body, &om); err != nil {
+			t.Fatalf("unmarshal grant: %v", err)
+		}
+		tg := om.GetTokenGrant()
+		if tg == nil || tg.MiteJenkinsToken != "minted-token" || tg.MiteJenkinsTokenExp != 4242 {
+			t.Errorf("unexpected token grant: %+v", tg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no TokenGrant reached the desired-state subject")
+	}
+
+	info, err := tr.conn.JetStream().StreamInfo(bus.DefaultStreamName)
 	if err != nil {
-		t.Fatalf("no TokenGrant published to mite-out: %v", err)
+		t.Fatalf("stream info: %v", err)
 	}
-	var om mitev1.OperatorMessage
-	if err := json.Unmarshal(msg.Data, &om); err != nil {
-		t.Fatalf("unmarshal grant: %v", err)
+	if info.State.Msgs != 0 {
+		t.Errorf("stream holds %d messages after a token grant, want 0", info.State.Msgs)
 	}
-	tg := om.GetTokenGrant()
-	if tg == nil || tg.MiteJenkinsToken != "minted-token" || tg.MiteJenkinsTokenExp != 4242 {
-		t.Errorf("unexpected token grant: %+v", tg)
+	if _, err := tr.conn.JetStream().StreamNameBySubject(bus.MiteDesiredSubject(bus.DefaultCluster, ns, name)); err == nil {
+		t.Error("the desired-state subject is captured by a stream")
 	}
 }
 
 func TestBusTransport_TokenRefreshBeforeSendAnsweredAfterEnsureInbound(t *testing.T) {
-	tr := newBusTransport(t, startNATS(t))
-
-	if err := tr.conn.EnsureStream(bus.StreamConfig("varroa")); err != nil {
-		t.Fatalf("ensure stream: %v", err)
-	}
+	s := startNATS(t)
+	tr := newBusTransport(t, s)
 
 	called := make(chan string, 4)
 	tr.TokenGrantFunc = func(ns, name string) (string, int64, error) {
@@ -326,12 +355,7 @@ func TestBusTransport_TokenRefreshBeforeSendAnsweredAfterEnsureInbound(t *testin
 	}
 
 	ns, name := "ns", "ctrl"
-
-	sub, err := tr.conn.JetStream().SubscribeSync(bus.MiteOutSubject(bus.DefaultCluster, ns, name))
-	if err != nil {
-		t.Fatalf("subscribe mite-out: %v", err)
-	}
-	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	granted := fakeGatewayDesired(t, s, ns, name)
 
 	data, err := json.Marshal(&mitev1.MiteMessage{
 		Message: &mitev1.MiteMessage_TokenRefreshRequest{TokenRefreshRequest: &mitev1.TokenRefreshRequest{}},
@@ -365,16 +389,17 @@ func TestBusTransport_TokenRefreshBeforeSendAnsweredAfterEnsureInbound(t *testin
 		t.Fatal("TokenGrantFunc was not called after EnsureInbound")
 	}
 
-	msg, err := sub.NextMsg(2 * time.Second)
-	if err != nil {
-		t.Fatalf("no TokenGrant published to mite-out: %v", err)
-	}
-	var om mitev1.OperatorMessage
-	if err := json.Unmarshal(msg.Data, &om); err != nil {
-		t.Fatalf("unmarshal grant: %v", err)
-	}
-	if tg := om.GetTokenGrant(); tg == nil || tg.MiteJenkinsToken != "minted-token" {
-		t.Errorf("unexpected token grant: %+v", tg)
+	select {
+	case body := <-granted:
+		var om mitev1.OperatorMessage
+		if err := json.Unmarshal(body, &om); err != nil {
+			t.Fatalf("unmarshal grant: %v", err)
+		}
+		if tg := om.GetTokenGrant(); tg == nil || tg.MiteJenkinsToken != "minted-token" {
+			t.Errorf("unexpected token grant: %+v", tg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no TokenGrant reached the desired-state subject")
 	}
 
 	// A second EnsureInbound keeps the one subscription, so one request yields one grant.
@@ -385,16 +410,50 @@ func TestBusTransport_TokenRefreshBeforeSendAnsweredAfterEnsureInbound(t *testin
 	case <-time.After(2 * time.Second):
 		t.Fatal("TokenGrantFunc was not called after the second EnsureInbound")
 	}
-	if _, err := sub.NextMsg(2 * time.Second); err != nil {
-		t.Fatalf("no second TokenGrant published: %v", err)
+	select {
+	case <-granted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no second TokenGrant reached the desired-state subject")
 	}
 	select {
 	case got := <-called:
 		t.Errorf("duplicate TokenGrantFunc call %q for one request", got)
 	case <-time.After(300 * time.Millisecond):
 	}
-	if msg, err := sub.NextMsg(300 * time.Millisecond); err == nil {
-		t.Errorf("duplicate TokenGrant published: %q", msg.Data)
+	select {
+	case body := <-granted:
+		t.Errorf("duplicate TokenGrant sent: %q", body)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestBusTransport_TokenGrantWithoutGatewayIsDropped verifies that a grant with
+// no gateway to confirm it returns at once and keeps no copy in a stream.
+func TestBusTransport_TokenGrantWithoutGatewayIsDropped(t *testing.T) {
+	tr := newBusTransport(t, startNATS(t))
+	if err := tr.conn.EnsureStream(bus.StreamConfig("varroa")); err != nil {
+		t.Fatalf("ensure stream: %v", err)
+	}
+	var logs lockedBuffer
+	tr.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	tr.TokenGrantFunc = func(ns, name string) (string, int64, error) {
+		return "minted-token", 4242, nil
+	}
+
+	start := time.Now()
+	tr.handleTokenRefresh("ns", "gone")
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("handleTokenRefresh took %v with no gateway, want under 2s", elapsed)
+	}
+	if !strings.Contains(logs.String(), "token grant not delivered") {
+		t.Errorf("missing drop log, got: %s", logs.String())
+	}
+	info, err := tr.conn.JetStream().StreamInfo(bus.DefaultStreamName)
+	if err != nil {
+		t.Fatalf("stream info: %v", err)
+	}
+	if info.State.Msgs != 0 {
+		t.Errorf("stream holds %d messages for a dropped grant, want 0", info.State.Msgs)
 	}
 }
 

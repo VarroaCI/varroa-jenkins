@@ -725,3 +725,131 @@ func TestPresenceLockReusedAcrossReconnect(t *testing.T) {
 		t.Fatal("reconnect swapped in a new presence mutex; concurrent writers no longer exclude each other")
 	}
 }
+
+// describeOperator names an operator message for the send assertions.
+func describeOperator(op *mitev1.OperatorMessage) string {
+	if ds := op.GetDesiredState(); ds != nil {
+		return ds.CommandId
+	}
+	if g := op.GetTokenGrant(); g != nil {
+		return "grant:" + g.MiteJenkinsToken
+	}
+	return "other"
+}
+
+// operatorReq builds a request that carries op, and a confirm func that
+// records id on confirmed.
+func operatorReq(t *testing.T, op *mitev1.OperatorMessage, id string, confirmed chan<- string) desiredRequest {
+	t.Helper()
+	payload, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return desiredRequest{Data: payload, Confirm: func() error {
+		if confirmed != nil {
+			confirmed <- id
+		}
+		return nil
+	}}
+}
+
+// TestServeDesiredStateForwardsTokenGrant proves that a token grant sent on the
+// desired-state subject reaches the mite and is confirmed after the send.
+func TestServeDesiredStateForwardsTokenGrant(t *testing.T) {
+	inbox := newFakeDesiredInbox()
+	h := &BusHandler{
+		metrics:      noopGatewayMetrics(),
+		cluster:      "core",
+		desired:      &flakyDesiredSource{inbox: inbox},
+		watchBackoff: 5 * time.Millisecond,
+		cancels:      make(map[string]context.CancelFunc),
+	}
+
+	sent := make(chan string, 4)
+	send := func(op *mitev1.OperatorMessage) error {
+		sent <- describeOperator(op)
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.serveDesiredState(ctx, "varroa", "grant-ctl", send, inbox)
+
+	confirmed := make(chan string, 4)
+	grant := &mitev1.OperatorMessage{Message: &mitev1.OperatorMessage_TokenGrant{
+		TokenGrant: &mitev1.TokenGrant{MiteJenkinsToken: "t1", MiteJenkinsTokenExp: 99},
+	}}
+	inbox.reqs <- operatorReq(t, grant, "grant", confirmed)
+
+	select {
+	case got := <-sent:
+		if got != "grant:t1" {
+			t.Fatalf("sent %q, want the token grant", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the token grant was not sent to the mite")
+	}
+	select {
+	case id := <-confirmed:
+		if id != "grant" {
+			t.Fatalf("confirmed %q, want grant", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the token grant was never confirmed")
+	}
+}
+
+// TestServeDesiredStateDropsOtherMessages proves that an imperative on the
+// desired-state subject is dropped without a send or an answer. The request
+// after it is still forwarded and confirmed.
+func TestServeDesiredStateDropsOtherMessages(t *testing.T) {
+	inbox := newFakeDesiredInbox()
+	h := &BusHandler{
+		metrics:      noopGatewayMetrics(),
+		cluster:      "core",
+		desired:      &flakyDesiredSource{inbox: inbox},
+		watchBackoff: 5 * time.Millisecond,
+		cancels:      make(map[string]context.CancelFunc),
+	}
+
+	sent := make(chan string, 4)
+	send := func(op *mitev1.OperatorMessage) error {
+		sent <- describeOperator(op)
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.serveDesiredState(ctx, "varroa", "drop-ctl", send, inbox)
+
+	confirmed := make(chan string, 4)
+	imp := &mitev1.OperatorMessage{Message: &mitev1.OperatorMessage_Imperative{
+		Imperative: &mitev1.ImperativeCommand{CommandId: "imp"},
+	}}
+	inbox.reqs <- operatorReq(t, imp, "imp", confirmed)
+	inbox.reqs <- desiredReq(t, "after", confirmed)
+
+	select {
+	case got := <-sent:
+		if got != "after" {
+			t.Fatalf("sent %q first, want only the desired-state command after", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the desired-state command after the imperative was not sent")
+	}
+	select {
+	case id := <-confirmed:
+		if id != "after" {
+			t.Fatalf("confirmed %q, want after", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the desired-state command was never confirmed")
+	}
+	select {
+	case got := <-sent:
+		t.Fatalf("unexpected second send %q", got)
+	case id := <-confirmed:
+		t.Fatalf("unexpected second confirm %q", id)
+	case <-time.After(50 * time.Millisecond):
+	}
+}

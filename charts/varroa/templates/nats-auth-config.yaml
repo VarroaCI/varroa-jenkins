@@ -15,9 +15,9 @@ stringData:
           password: "{{ htpasswd "ignored" (include "varroa.nats.operatorPassword" .) | trimPrefix "ignored:" }}"
           permissions: {
             publish: [
-              // Desired-state request to the gateway that holds the
-              // mite stream. Core NATS only: the command carries credential
-              // values, and no stream or bucket may store it.
+              // Desired-state and token-grant requests to the gateway that
+              // holds the mite stream. Core NATS only: both carry credential
+              // values, and no stream or bucket may store them.
               "mite.*.*.*.desired"
               "mite.*.*.*.out"
               "events.brood.*"
@@ -161,8 +161,9 @@ stringData:
 {{- end }}
             ]
             subscribe: [
-              // Desired-state requests from the operator. The gateway
-              // answers in the operator's inbox after the send succeeds.
+              // Desired-state and token-grant requests from the operator.
+              // The gateway answers in the operator's inbox after the send
+              // succeeds.
               "mite.*.*.*.desired"
               "mite.*.*.*.content"
               "_INBOX_gateway.>"
