@@ -47,7 +47,7 @@ func varroaRoleBindingDeps(t *testing.T) *api.Dependencies {
 			},
 		},
 	)
-	return &api.Dependencies{Client: &stubClient{}, Store: store}
+	return &api.Dependencies{Client: &stubClient{}, Store: store, Authorizer: adminTestAuthorizer()}
 }
 
 // listVarroaRoleBindingsResult calls list_varroa_role_bindings and returns
@@ -127,7 +127,7 @@ func TestGetVarroaRoleBinding_ReturnsFederationStatus(t *testing.T) {
 			{Cluster: "edge", State: v1alpha1.BindingFailed, Reason: "HiveUnavailable", Message: "offline", LastTransitionTime: metav1.Now()},
 		}},
 	})
-	handler := NewHandler(&api.Dependencies{Client: &stubClient{}, Store: store})
+	handler := NewHandler(&api.Dependencies{Client: &stubClient{}, Store: store, Authorizer: adminTestAuthorizer()})
 	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
 		"name":      "get_varroa_role_binding",
 		"arguments": map[string]interface{}{"name": "vrb"},

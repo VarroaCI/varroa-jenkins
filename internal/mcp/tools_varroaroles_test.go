@@ -61,7 +61,7 @@ func varroaRoleDeps(t *testing.T) *api.Dependencies {
 			},
 		},
 	})
-	return &api.Dependencies{Client: &stubClient{}, Store: store}
+	return &api.Dependencies{Client: &stubClient{}, Store: store, Authorizer: adminTestAuthorizer()}
 }
 
 // listVarroaRolesResult calls list_varroa_roles and returns the decoded

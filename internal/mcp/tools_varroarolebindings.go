@@ -36,6 +36,16 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 		withListOutput(varroaRoleBindingListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.Authorizer == nil {
+			return mcp.NewToolResultError("authorizer not configured"), nil
+		}
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
+		if !deps.Authorizer.CanReadRoleBindings(claims) {
+			return mcp.NewToolResultError("access denied: missing rolebindings:read permission"), nil
+		}
 		args := getArgs(req)
 		bindings, err := crdstore.List[v1alpha1.VarroaRoleBinding](ctx, deps.Store, "", "")
 		if err != nil {
@@ -57,6 +67,16 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 		mcp.WithString("name", mcp.Required(), mcp.Description("Binding name")),
 	)
 	addTool(mcpServer, kindRead, getRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.Authorizer == nil {
+			return mcp.NewToolResultError("authorizer not configured"), nil
+		}
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
+		if !deps.Authorizer.CanReadRoleBindings(claims) {
+			return mcp.NewToolResultError("access denied: missing rolebindings:read permission"), nil
+		}
 		name := strArg(getArgs(req), "name")
 		binding, err := crdstore.Get[v1alpha1.VarroaRoleBinding](ctx, deps.Store, name, "")
 		if err != nil {

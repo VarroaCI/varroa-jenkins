@@ -36,6 +36,8 @@ reports `destructiveHint: false`.
 
 `list_jenkins_role_bindings` shows `controllerScope` with `namespaces` and `selector`. `selector` is true when the binding sets a label selector; the label keys and values are not shown. A row without `controllerScope` binds on every controller. `get_jenkins_role_binding` returns the selector terms.
 
+The eight read tools for RBAC objects need a read grant. `list_jenkins_roles` and `get_jenkins_role` need `jenkinsroles:read`. `list_jenkins_role_bindings` and `get_jenkins_role_binding` need `jenkinsrolebindings:read`. `list_varroa_roles` and `get_varroa_role` need `roles:read`. `list_varroa_role_bindings` and `get_varroa_role_binding` need `rolebindings:read`. These are the grants that the REST routes check. Only a cluster-wide binding gives them. A namespace-scoped binding does not. The built-in roles `varroa:admin`, `varroa:operator`, `varroa:developer`, and `varroa:viewer` hold these grants. The gate runs before any read, and before the `cluster` argument of a get tool. A caller without the grant gets the tool error `access denied: missing <grant> permission` on every cluster. The tool reads nothing for that caller.
+
 `call_jenkins_tool` is open-world because the target Jenkins plugin defines the
 remote tool's effect. Review its discovered schema for every controller.
 

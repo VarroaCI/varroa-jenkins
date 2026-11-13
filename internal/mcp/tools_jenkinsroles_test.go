@@ -48,7 +48,7 @@ func jenkinsRoleDeps(t *testing.T) *api.Dependencies {
 			},
 		},
 	)
-	return &api.Dependencies{Client: &stubClient{}, Store: store}
+	return &api.Dependencies{Client: &stubClient{}, Store: store, Authorizer: adminTestAuthorizer()}
 }
 
 // listJenkinsRolesResult calls list_jenkins_roles and returns the decoded

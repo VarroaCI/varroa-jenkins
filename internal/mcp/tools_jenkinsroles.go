@@ -34,6 +34,16 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		withListOutput(jenkinsRoleListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listJR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.Authorizer == nil {
+			return mcp.NewToolResultError("authorizer not configured"), nil
+		}
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
+		if !deps.Authorizer.CanReadJenkinsRoles(claims) {
+			return mcp.NewToolResultError("access denied: missing jenkinsroles:read permission"), nil
+		}
 		args := getArgs(req)
 		roles, err := crdstore.List[v1alpha1.JenkinsRole](ctx, deps.Store, "", "")
 		if err != nil {
@@ -55,6 +65,16 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindRead, getJR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.Authorizer == nil {
+			return mcp.NewToolResultError("authorizer not configured"), nil
+		}
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
+		if !deps.Authorizer.CanReadJenkinsRoles(claims) {
+			return mcp.NewToolResultError("access denied: missing jenkinsroles:read permission"), nil
+		}
 		args := getArgs(req)
 		name := strArg(args, "name")
 		cl, res := resolveConfigCluster(ctx, deps, args)
