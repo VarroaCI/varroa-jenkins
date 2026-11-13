@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
@@ -57,9 +58,12 @@ type Ledger struct {
 
 	// vetoMarking and vetoNotifier wire the veto mark. A false
 	// vetoMarking (NewLedger's default, until SetVetoMarking is called)
-	// marks no vetoed run.
-	vetoMarking  bool
-	vetoNotifier *RunNotifier
+	// marks no vetoed run. vetoActivityPub publishes the
+	// build.claim_vetoed row after the commit. A nil value publishes
+	// nothing.
+	vetoMarking     bool
+	vetoNotifier    *RunNotifier
+	vetoActivityPub *activity.Publisher
 
 	// waitNotifier publishes a wait notification after each claim that
 	// writes or deletes a wait row. A nil notifier publishes nothing.

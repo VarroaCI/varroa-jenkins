@@ -18,7 +18,9 @@ import (
 const activityNoPartitionCode = "23514"
 
 // ActivityIngester writes one activity.Event to the Postgres "activity"
-// table. The recorder is its only writer.
+// table. The recorder is its only writer. Insert publishes nothing. Its
+// only caller is the activity-recorder consumer, whose row came from the
+// stream. A recorder path that writes its own row uses insertActivityForPublish.
 type ActivityIngester struct {
 	pool *pgxpool.Pool
 }

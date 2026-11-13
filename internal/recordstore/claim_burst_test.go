@@ -246,7 +246,7 @@ func TestExpireUnclaimedRunsEndsAnAbandonedGrant(t *testing.T) {
 	aged := seed(ClaimExpiryAge + time.Minute)
 	recent := seed(ClaimExpiryAge - time.Minute)
 
-	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, metrics, claimExpiryNow, nil)
+	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, metrics, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("expire: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestExpireUnclaimedRunsSharesOneBatch(t *testing.T) {
 	mustGrant(t, NewLedger(pool, nil), req)
 	backdateGrant(t, db, abandoned, accepted)
 
-	first, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
+	first, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, nil, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("first round: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestExpireUnclaimedRunsSharesOneBatch(t *testing.T) {
 	if status, _ := readStatusResult(t, db, abandoned); status != StatusCompleted {
 		t.Fatalf("abandoned run after the first round = %s, want COMPLETED", status)
 	}
-	second, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
+	second, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, nil, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("second round: %v", err)
 	}

@@ -56,7 +56,7 @@ func (r *webhookReceiver) count() int {
 // httptest receiver. Production never replaces the guarded client, which
 // refuses loopback addresses, so this replacement is a test-only seam.
 func newTestDispatcher(pool *pgxpool.Pool, srv *httptest.Server, now time.Time) *WebhookDispatcher {
-	d := NewWebhookDispatcher(pool, NewActivityIngester(pool), nil, nil)
+	d := NewWebhookDispatcher(pool, nil, nil, nil)
 	d.client = srv.Client()
 	d.client.Timeout = webhookTimeout
 	d.now = func() time.Time { return now }
@@ -311,4 +311,28 @@ func TestWebhookDispatch_DropsWhenWebhookRemoved(t *testing.T) {
 	if state, _ := webhookState(t, db, runID); state != "dropped" {
 		t.Fatalf("state = %q, want dropped", state)
 	}
+}
+
+// TestWebhookDispatch_PublishesTheFailureActivityRow proves that the
+// tenant.webhook_failed row reaches the live stream after its write.
+func TestWebhookDispatch_PublishesTheFailureActivityRow(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	pub, conn := newActivityStreamPublisher(t)
+	rec, srv := newWebhookReceiver(t, http.StatusInternalServerError)
+	runID := seedWebhookRun(t, pool, db, "manual:webhook-publish", srv.URL)
+
+	d := newTestDispatcher(pool, srv, time.Now())
+	d.activityPub = pub
+	for i := 0; i < webhookMaxAttempts; i++ {
+		if _, err := db.Exec(`UPDATE varroa.webhook_deliveries SET next_attempt_at = now() - interval '1 second' WHERE run_id = $1`, runID); err != nil {
+			t.Fatalf("make row due: %v", err)
+		}
+		d.round(context.Background())
+	}
+	if rec.count() != webhookMaxAttempts {
+		t.Fatalf("receiver got %d requests, want %d", rec.count(), webhookMaxAttempts)
+	}
+	assertStoredRowEvent(t, pool, db, storedActivityEvents(t, pub, conn), "tenant.webhook_failed")
 }

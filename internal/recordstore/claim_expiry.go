@@ -2,7 +2,6 @@ package recordstore
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -175,14 +174,15 @@ func selectClaimExpiryCandidates(ctx context.Context, pool *pgxpool.Pool, class 
 }
 
 // markClaimExpired writes one run's TRIGGER_FAILED record and its
-// build.claim_expired activity row in one transaction. It reports
+// activity row in one transaction. After the commit it publishes that row
+// through activityPub. A nil activityPub publishes nothing. It reports
 // whether the conditional update changed the row. A miss means a claim
 // or a real event won the race.
 //
 // The write keeps the accepted keys, so every reader that asks for a
 // real build still excludes the row. A late run.started replaces the
 // row through the ordinary TRIGGER_FAILED supersede.
-func markClaimExpired(ctx context.Context, pool *pgxpool.Pool, class claimExpiryClass, c claimExpiryCandidate, cutoff, now time.Time) (bool, error) {
+func markClaimExpired(ctx context.Context, pool *pgxpool.Pool, activityPub *activity.Publisher, class claimExpiryClass, c claimExpiryCandidate, cutoff, now time.Time) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("begin claim-expiry marking: %w", err)
@@ -224,40 +224,16 @@ func markClaimExpired(ctx context.Context, pool *pgxpool.Pool, class claimExpiry
 		ItemPath: c.jobPath,
 		Result:   ResultTriggerFailed,
 	}
-	if err := insertRunActivityTx(ctx, tx, event); err != nil {
+	var out activityOutbox
+	if err := insertActivityForPublish(ctx, tx, event, &out); err != nil {
 		return false, fmt.Errorf("claim-expiry activity row: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit claim-expiry marking: %w", err)
 	}
+	publishActivityAfterCommit(activityPub, &out)
 	return true, nil
-}
-
-// insertRunActivityTx normalizes event and writes it as one activity row
-// through db, which is the caller's transaction. The row then commits or
-// rolls back with the run write it records. A row with the same key is
-// kept as it is.
-func insertRunActivityTx(ctx context.Context, db DBTX, event activity.Event) error {
-	event.Normalize()
-	payloadJSON, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("marshal activity payload: %w", err)
-	}
-	if _, err := db.Exec(ctx, `
-		INSERT INTO varroa.activity
-			(event_key, ts, type, source, severity, cluster, namespace, controller,
-			 actor, message, phase, reason, item_path, build_number, result, url, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-		ON CONFLICT (ts, event_key) DO NOTHING
-	`,
-		activity.EventKey(event), event.Timestamp, event.Type, event.Source, event.Severity, event.Cluster, event.Namespace,
-		event.Controller, event.Actor, event.Message, event.Phase, event.Reason, event.ItemPath,
-		nullableBuildNumber(event.BuildNumber), event.Result, event.URL, string(payloadJSON),
-	); err != nil {
-		return fmt.Errorf("insert activity row: %w", err)
-	}
-	return nil
 }
 
 // ExpireUnclaimedRuns marks every accepted run that no claim reached
@@ -276,8 +252,11 @@ func insertRunActivityTx(ctx context.Context, db DBTX, event activity.Event) err
 // for example behind a long previous build or for an executor, is marked
 // too. Its later run.started then replaces the row with the real build.
 //
+// Each marked run publishes its activity row through activityPub after the
+// commit. A nil activityPub writes the rows and publishes nothing.
+//
 // A nil notifier and nil metrics are no-ops.
-func ExpireUnclaimedRuns(ctx context.Context, pool *pgxpool.Pool, notifier *RunNotifier,
+func ExpireUnclaimedRuns(ctx context.Context, pool *pgxpool.Pool, activityPub *activity.Publisher, notifier *RunNotifier,
 	metrics *ClaimExpiryMetrics, now time.Time, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -299,7 +278,7 @@ func ExpireUnclaimedRuns(ctx context.Context, pool *pgxpool.Pool, notifier *RunN
 		}
 		attempted += len(candidates)
 		for _, c := range candidates {
-			changed, err := markClaimExpired(ctx, pool, class, c, cutoff, now)
+			changed, err := markClaimExpired(ctx, pool, activityPub, class, c, cutoff, now)
 			if err != nil {
 				logger.Warn("claim-expiry sweep: mark failed", "run_id", c.runID, "reason", class.reason, "error", err)
 				continue

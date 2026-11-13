@@ -147,7 +147,7 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 		logger.Warn("gone instance agent release round failed", "error", err)
 	}
 
-	if _, err := ExpireUnclaimedRuns(ctx, pool, cfg.RunNotifier, cfg.ClaimExpiryMetrics, now, logger); err != nil {
+	if _, err := ExpireUnclaimedRuns(ctx, pool, cfg.ActivityPublisher, cfg.RunNotifier, cfg.ClaimExpiryMetrics, now, logger); err != nil {
 		logger.Warn("claim-expiry sweep failed", "error", err)
 	}
 

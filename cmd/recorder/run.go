@@ -192,7 +192,7 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("register claim-expiry metrics: %w", err)
 	}
 	runNotifier := recordstore.NewRunNotifier(busConn, logger)
-	ledger.SetVetoMarking(runNotifier)
+	ledger.SetVetoMarking(runNotifier, activityPub)
 	ledger.SetWaitNotifier(runNotifier)
 	backstopCfg := recordstore.BackstopConfig{
 		MaxSweepPending:    cfg.SweepMaxPending,
@@ -237,7 +237,7 @@ func run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("register webhook metrics: %w", err)
 	}
-	webhookDispatcher := recordstore.NewWebhookDispatcher(pool, activityIngester, webhookMetrics, logger)
+	webhookDispatcher := recordstore.NewWebhookDispatcher(pool, activityPub, webhookMetrics, logger)
 	ingester.SetWebhooks(cfg.DashboardURL, webhookDispatcher.Nudge)
 
 	maintCfg := recordstore.MaintenanceConfig{

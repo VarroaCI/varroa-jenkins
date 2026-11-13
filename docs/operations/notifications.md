@@ -165,8 +165,8 @@ The record store makes up to six attempts. It waits between attempts:
 After the sixth failed attempt, the delivery state becomes `failed`. The
 record store then writes one activity event with type
 `tenant.webhook_failed` and severity `error`. The event names the tenant,
-the run, the delivery identifier, and the last error. It appears in the
-activity feed.
+the run, the delivery identifier, and the last error. The record store publishes
+it after the write, so it appears in the live activity feed at once.
 
 Delivery is at least once. A receiver can get the same delivery more than
 once, for example after a timeout that hides a success. Use

@@ -69,7 +69,7 @@ func TestExpireUnclaimedRunsMarksAnAgedQueuedRun(t *testing.T) {
 	accepted := claimExpiryNow.Add(-ClaimExpiryAge - time.Minute)
 	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-a", accepted)
 
-	n, err := ExpireUnclaimedRuns(context.Background(), pool, notifier, metrics, claimExpiryNow, nil)
+	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, notifier, metrics, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("expire unclaimed runs: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestExpireUnclaimedRunsMarksAnAgedQueuedRun(t *testing.T) {
 		t.Fatalf("recorder_claim_expired_total = %d, want 1", c)
 	}
 
-	again, err := ExpireUnclaimedRuns(context.Background(), pool, notifier, metrics, claimExpiryNow, nil)
+	again, err := ExpireUnclaimedRuns(context.Background(), pool, nil, notifier, metrics, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("second round: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestExpireUnclaimedRunsLeavesAYoungRun(t *testing.T) {
 	accepted := claimExpiryNow.Add(-ClaimExpiryAge + time.Minute)
 	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-a", accepted)
 
-	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
+	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, nil, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("expire unclaimed runs: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestExpireUnclaimedRunsLeavesARunWithAnIntent(t *testing.T) {
 	mustGrant(t, NewLedger(pool, nil), req)
 	backdateGrant(t, db, runID, accepted)
 
-	if _, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil); err != nil {
+	if _, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, nil, claimExpiryNow, nil); err != nil {
 		t.Fatalf("expire unclaimed runs: %v", err)
 	}
 	payload := readRunPayload(t, db, runID.String())
@@ -206,7 +206,7 @@ func TestExpireUnclaimedRunsLeavesARunWithAResume(t *testing.T) {
 		t.Fatalf("arm a resume: %v", err)
 	}
 
-	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
+	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, nil, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("expire unclaimed runs: %v", err)
 	}
@@ -238,14 +238,14 @@ func TestExpireUnclaimedRunsBoundsOneRound(t *testing.T) {
 		t.Fatalf("seed accepted runs: %v", err)
 	}
 
-	first, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
+	first, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, nil, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("first round: %v", err)
 	}
 	if first != claimExpiryBatch {
 		t.Fatalf("first round expired = %d, want %d", first, claimExpiryBatch)
 	}
-	second, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
+	second, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, nil, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("second round: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestRunStartedSupersedesAnExpiredRun(t *testing.T) {
 		t.Fatalf("age the accepted row: %v", err)
 	}
 
-	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
+	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, nil, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("expire unclaimed runs: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestClaimExpiry_LiveWaitKeepsRun(t *testing.T) {
 		t.Fatalf("insert live wait: %v", err)
 	}
 
-	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
+	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, nil, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("expire: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestClaimAbandoned_LateGrantAfterWaitNotMarked(t *testing.T) {
 	mustGrant(t, NewLedger(pool, nil), req)
 	backdateGrant(t, db, runID, claimExpiryNow.Add(-time.Minute))
 
-	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, metrics, claimExpiryNow, nil)
+	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, metrics, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("expire: %v", err)
 	}
@@ -371,4 +371,25 @@ func TestClaimAbandoned_LateGrantAfterWaitNotMarked(t *testing.T) {
 	if status, _ := readStatusResult(t, db, runID); status != "QUEUED" {
 		t.Fatalf("status = %s, want QUEUED", status)
 	}
+}
+
+// TestExpireUnclaimedRunsPublishesTheActivityRow proves that a marked run's
+// build.claim_expired row reaches the live stream after its commit.
+func TestExpireUnclaimedRunsPublishesTheActivityRow(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	pub, conn := newActivityStreamPublisher(t)
+	accepted := claimExpiryNow.Add(-ClaimExpiryAge - time.Minute)
+	seedAcceptedOnlyRunRowInstance(t, db, "pod-a", accepted)
+
+	n, err := ExpireUnclaimedRuns(context.Background(), pool, pub, nil, nil, claimExpiryNow, nil)
+	if err != nil || n != 1 {
+		t.Fatalf("first round marked %d runs, err %v; want 1", n, err)
+	}
+	again, err := ExpireUnclaimedRuns(context.Background(), pool, pub, nil, nil, claimExpiryNow, nil)
+	if err != nil || again != 0 {
+		t.Fatalf("second round marked %d runs, err %v; want 0", again, err)
+	}
+	assertStoredRowEvent(t, pool, db, storedActivityEvents(t, pub, conn), "build.claim_expired")
 }

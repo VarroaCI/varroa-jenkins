@@ -3,12 +3,18 @@ package recordstore
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -248,5 +254,114 @@ func TestPublishAfterCommit_AckModeCopyWritesNoSecondRow(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("activity rows = %d, want 1", n)
+	}
+}
+
+// newActivityStreamPublisher starts a bus, creates the activity stream, and
+// returns an ack-mode publisher over it, with the connection it uses.
+func newActivityStreamPublisher(t *testing.T) (*activity.Publisher, *bus.Conn) {
+	t.Helper()
+	s := startIngestTestServer(t)
+	conn, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(conn.Close)
+	if err := EnsureActivityStream(conn, 1); err != nil {
+		t.Fatalf("ensure activity stream: %v", err)
+	}
+	return activity.NewAckedPublisher("core", conn, activity.AckedOptions{}), conn
+}
+
+// storedActivityEvents closes pub, then reads every event the activity
+// stream holds. It returns nil when the stream is empty.
+func storedActivityEvents(t *testing.T, pub *activity.Publisher, conn *bus.Conn) []activity.Event {
+	t.Helper()
+	pub.Close(15 * time.Second)
+	info, err := conn.StreamInfo(bus.ActivityStreamName)
+	if err != nil {
+		t.Fatalf("stream info: %v", err)
+	}
+	if info.State.Msgs == 0 {
+		return nil
+	}
+	if err := conn.EnsureConsumer(bus.ActivityStreamName, ActivityRecorderConsumerName, activityRecorderConsumerConfig()); err != nil {
+		t.Fatalf("ensure consumer: %v", err)
+	}
+	sub, err := conn.PullSubscribe("activity.>", bus.ActivityStreamName, ActivityRecorderConsumerName)
+	if err != nil {
+		t.Fatalf("pull subscribe: %v", err)
+	}
+	msgs, err := conn.DrainConsumer(sub, int(info.State.Msgs))
+	if err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	var out []activity.Event
+	for _, m := range msgs {
+		var e activity.Event
+		if err := json.Unmarshal(m.Data, &e); err != nil {
+			t.Fatalf("decode stored event: %v", err)
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// assertStoredRowEvent checks that events holds one event of typ, and that
+// its row is already in the table: a re-ingest of that event writes nothing.
+func assertStoredRowEvent(t *testing.T, pool *pgxpool.Pool, db *sql.DB, events []activity.Event, typ string) {
+	t.Helper()
+	if len(events) != 1 || events[0].Type != typ {
+		t.Fatalf("stored events = %+v, want one %s", events, typ)
+	}
+	e := events[0]
+	e.Normalize()
+	key := activity.EventKey(e)
+	var rowKey string
+	if err := db.QueryRow(`SELECT event_key FROM varroa.activity WHERE type = $1`, typ).Scan(&rowKey); err != nil {
+		t.Fatalf("read %s row: %v", typ, err)
+	}
+	if rowKey != key {
+		t.Fatalf("row key = %q, published event key = %q", rowKey, key)
+	}
+	inserted, err := NewActivityIngester(pool).Insert(context.Background(), e, key)
+	if err != nil {
+		t.Fatalf("re-ingest: %v", err)
+	}
+	if inserted {
+		t.Fatal("the published event has no stored row")
+	}
+}
+
+// TestRecorderActivityWritersPublish scans the recorder source. Only the
+// shared helper and the activity-recorder consumer may write an activity
+// row, so every other writer must publish after its commit.
+func TestRecorderActivityWritersPublish(t *testing.T) {
+	t.Parallel()
+
+	insertRe := regexp.MustCompile(`(?i)insert\s+into\s+varroa\.activity\b`)
+	ingesterRe := regexp.MustCompile(`ActivityIngester`)
+	// The recorder command may wire the ingester into its consumer, so it is
+	// checked for a direct row write only.
+	for _, root := range []string{".", "../../cmd/recorder"} {
+		files, err := filepath.Glob(filepath.Join(root, "*.go"))
+		if err != nil {
+			t.Fatalf("glob: %v", err)
+		}
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			body, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatalf("read %s: %v", f, err)
+			}
+			if insertRe.Match(body) && filepath.Base(f) != "activity_publish.go" && filepath.Base(f) != "activity_ingest.go" {
+				t.Errorf("%s writes an activity row outside insertActivityForPublish", f)
+			}
+			if root == "." && ingesterRe.Match(body) && filepath.Base(f) != "activity_ingest.go" && filepath.Base(f) != "activity_consumer.go" {
+				t.Errorf("%s uses ActivityIngester, which publishes nothing", f)
+			}
+		}
 	}
 }
