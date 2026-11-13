@@ -1,6 +1,7 @@
 // AssistantAdmin is the Administration page of the assistant: the kill
 // switch, the pending approvals, the providers and the defaults of the
-// AssistantConfig object, the tenant data levels, and the limits.
+// AssistantConfig object, the tenant data levels, and the limits. Every save
+// of the object sends the whole object at the version of the read.
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -14,11 +15,14 @@ import { ApiError, isRecordStoreUnreachable } from "../hooks/useApi";
 import { SectionPage } from "../components/SectionPage";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
-import { KVGrid } from "../components/KVGrid";
 import { age } from "../components/activityTimeline.util";
+import { configBody } from "./assistantAdmin/assistantConfigEdit";
+import { ProvidersCard } from "./assistantAdmin/ProvidersCard";
+import { LimitsCard } from "./assistantAdmin/LimitsCard";
 import styles from "./AssistantAdmin.module.css";
 import type {
   AssistantConfigObject,
+  AssistantConfigSpec,
   AssistantSettings,
   AssistantSettingsUpdate,
   DataSharingLevel,
@@ -28,6 +32,7 @@ const LEVELS: DataSharingLevel[] = ["none", "metadata", "logs"];
 
 /** CONFIG_CHANGED tells an admin that another save won the version fence. */
 export const CONFIG_CHANGED = "The configuration changed while this page was open. The page shows the latest values. Make the change again.";
+const SAVE_FAILED = "The change was not saved.";
 
 /** pendingCountText words the pending count. A list with a next page reads as "or more". */
 export function pendingCountText(count: number, more: boolean): string {
@@ -48,9 +53,11 @@ export function AssistantAdmin() {
     retry: false,
   });
   const config = useQuery({ queryKey: ["assistant-config"], queryFn: getAssistantConfig, retry: false });
+  const cfg = config.data;
   const [confirming, setConfirming] = useState(false);
   const [defaultProvider, setDefaultProvider] = useState<string | null>(null);
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
+  const [defaultsError, setDefaultsError] = useState("");
   const [tenant, setTenant] = useState("");
   const [level, setLevel] = useState<DataSharingLevel>("none");
   const [error, setError] = useState("");
@@ -68,24 +75,28 @@ export function AssistantAdmin() {
   });
 
   const save = useMutation({
-    mutationFn: (body: AssistantConfigObject) => putAssistantConfig(body),
+    mutationFn: ({ spec, base }: { spec: AssistantConfigSpec; base: AssistantConfigObject }) =>
+      putAssistantConfig(configBody(base, spec)),
     onSuccess: (data: AssistantConfigObject) => {
-      setError("");
-      setDefaultProvider(null);
-      setDefaultModel(null);
       queryClient.setQueryData(["assistant-config"], data);
     },
-    onError: (err) => {
-      if (err instanceof ApiError && err.status === 409) {
-        setError(CONFIG_CHANGED);
-        setDefaultProvider(null);
-        setDefaultModel(null);
-        void queryClient.invalidateQueries({ queryKey: ["assistant-config"] });
-        return;
-      }
-      setError(err instanceof ApiError ? err.serverMessage || "The change was not saved." : "The change was not saved.");
-    },
   });
+
+  // commit saves the whole object at the version of the read. It resolves to
+  // "" on success, or to the message the form shows. A 409 refetches the object.
+  const commit = async (spec: AssistantConfigSpec): Promise<string> => {
+    if (!cfg) return "The configuration has not loaded. Reload the page.";
+    try {
+      await save.mutateAsync({ spec, base: cfg });
+      return "";
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        void queryClient.invalidateQueries({ queryKey: ["assistant-config"] });
+        return CONFIG_CHANGED;
+      }
+      return err instanceof ApiError && err.serverMessage ? err.serverMessage : SAVE_FAILED;
+    }
+  };
 
   if (isRecordStoreUnreachable(settings.error)) {
     return (
@@ -105,13 +116,11 @@ export function AssistantAdmin() {
   }
 
   const s = settings.data;
-  const cfg = config.data;
   const providerList = cfg?.spec.providers ?? [];
-  const keyStateOf = (name: string, auth: string | undefined): string => {
-    if (auth === "none") return "not needed";
-    const state = cfg?.status?.providers?.find((s) => s.name === name);
-    if (state === undefined) return "not reported";
-    return state.keySet ? "set" : "not set";
+  const keySetOf = (name: string): boolean | undefined =>
+    cfg?.status?.providers?.find((st) => st.name === name)?.keySet;
+  const onKeyChanged = () => {
+    void queryClient.invalidateQueries({ queryKey: ["assistant-config"] });
   };
   const egress = cfg?.status?.conditions?.find((c) => c.type === "EgressReady");
   const egressSummary = egress === undefined
@@ -126,14 +135,20 @@ export function AssistantAdmin() {
   const modelsOf = providerList.find((p) => p.name === shownProvider)?.models ?? [];
   const defaultsSaveable = cfg !== undefined && (providerList.length === 0 || listed);
 
-  function saveDefaults() {
+  async function saveDefaults() {
     if (!cfg) return;
-    save.mutate({
-      apiVersion: cfg.apiVersion,
-      kind: cfg.kind,
-      metadata: cfg.metadata,
-      spec: { ...cfg.spec, defaultProvider: shownProvider, defaultModel: shownModel },
-    });
+    const message = await commit({ ...cfg.spec, defaultProvider: shownProvider, defaultModel: shownModel });
+    if (message === "") {
+      setDefaultsError("");
+      setDefaultProvider(null);
+      setDefaultModel(null);
+    } else {
+      setDefaultsError(message);
+      if (message === CONFIG_CHANGED) {
+        setDefaultProvider(null);
+        setDefaultModel(null);
+      }
+    }
   }
 
   return (
@@ -178,31 +193,13 @@ export function AssistantAdmin() {
         )}
 
         {cfg && (
-          <Card title="Providers">
-            <div className={styles.tableScroll}>
-              <table className={styles.table}>
-                <thead>
-                  <tr><th>Name</th><th>Kind</th><th>Models</th><th>Trust</th><th>Auth</th><th>Key</th><th>Base URL</th><th>CIDRs</th><th>Port</th></tr>
-                </thead>
-                <tbody>
-                  {providerList.map((p) => (
-                    <tr key={p.name}>
-                      <td className={styles.nameCell}>{p.name}</td>
-                      <td>{p.kind}</td>
-                      <td>{p.models.join(", ")}</td>
-                      <td>{p.trust}</td>
-                      <td>{p.auth ?? "apiKey"}</td>
-                      <td>{keyStateOf(p.name, p.auth)}</td>
-                      <td className={styles.mono}>{p.baseURL ?? ""}</td>
-                      <td className={styles.mono}>{(p.cidrs ?? []).join(", ")}</td>
-                      <td>{p.port ?? ""}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className={styles.note}>Edit the AssistantConfig object varroa-assistant to change this list.</p>
-          </Card>
+          <ProvidersCard
+            spec={cfg.spec}
+            keySetOf={keySetOf}
+            busy={save.isPending}
+            commit={commit}
+            onKeyChanged={onKeyChanged}
+          />
         )}
 
         {cfg && (
@@ -251,13 +248,14 @@ export function AssistantAdmin() {
               </div>
             </div>
             <div className={styles.actions}>
-              <Button variant="primary" disabled={!defaultsSaveable || save.isPending} onClick={saveDefaults}>
+              <Button variant="primary" disabled={!defaultsSaveable || save.isPending} onClick={() => void saveDefaults()}>
                 Save defaults
               </Button>
             </div>
             {providerList.length > 0 && !listed && (
               <p role="status" className={styles.note}>Pick a listed provider as the default.</p>
             )}
+            {defaultsError && <p role="alert" className={styles.error}>{defaultsError}</p>}
           </Card>
         )}
 
@@ -310,18 +308,12 @@ export function AssistantAdmin() {
         )}
 
         {cfg && (
-          <Card title="Limits">
-            <KVGrid
-              items={[
-                { key: "Session budget", value: `${cfg.spec.budgets.session} tokens` },
-                { key: "User day budget", value: `${cfg.spec.budgets.userDay} tokens` },
-                { key: "Tenant day budget", value: `${cfg.spec.budgets.tenantDay} tokens` },
-                { key: "Steps per session", value: String(cfg.spec.budgets.steps) },
-                { key: "External data sharing", value: cfg.spec.externalDataSharing },
-                { key: "Approval expiry", value: cfg.spec.approvalExpiry },
-              ]}
-            />
-          </Card>
+          <LimitsCard
+            key={JSON.stringify([cfg.spec.budgets, cfg.spec.approvalExpiry, cfg.spec.externalDataSharing])}
+            spec={cfg.spec}
+            busy={save.isPending}
+            commit={commit}
+          />
         )}
       </div>
     </SectionPage>

@@ -1,0 +1,10 @@
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 16px; }
+.group { composes: formGroup from "../forms.module.css"; margin-bottom: 12px; }
+.label { composes: formLabel from "../forms.module.css"; }
+.input { composes: formInput from "../forms.module.css"; }
+.select { composes: formSelect from "../forms.module.css"; }
+.fieldError { color: var(--bad-text); font-size: 13px; margin: 4px 0 0; }
+.actions { composes: actions from "../forms.module.css"; flex-wrap: wrap; }
+.confirm { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-top: 8px; }
+.error { color: var(--bad-text); margin: 8px 0 0; }
+.note { color: var(--text-2); font-size: 13px; margin: 0 0 8px; }

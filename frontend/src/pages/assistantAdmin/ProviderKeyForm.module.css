@@ -1,0 +1,5 @@
+.keyRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.field { flex: 1 1 220px; min-width: 0; }
+.input { composes: formInput from "../forms.module.css"; }
+.note { color: var(--text-2); font-size: 13px; margin: 0; flex-basis: 100%; }
+.error { color: var(--bad-text); margin: 0; flex-basis: 100%; }
