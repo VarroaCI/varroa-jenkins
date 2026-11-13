@@ -130,7 +130,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if !deps.Authorizer.CanWriteComposedBundlesInNamespace(claims, "create", ns) {
 			return mcp.NewToolResultError("access denied: missing composedbundles:create permission in namespace " + ns), nil
 		}
-		cl, res := resolveConfigCluster(ctx, deps, args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
 		if res != nil {
 			return res, nil
 		}
@@ -158,7 +158,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 				return mcp.NewToolResultError(fmt.Sprintf("invalid variables: %v", err)), nil
 			}
 		}
-		created, err := createOnCluster(ctx, deps, cl, bundle, func(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
+		created, err := createOnCluster(ctx, bundle, func(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
 			return deps.ConfigBrood.CreateComposedBundle(ctx, cl.name, ns, strArg(args, "name"), body)
 		})
 		if err != nil {
@@ -199,7 +199,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if !deps.Authorizer.CanWriteComposedBundlesInNamespace(claims, "update", ns) {
 			return mcp.NewToolResultError("access denied: missing composedbundles:update permission in namespace " + ns), nil
 		}
-		cl, res := resolveConfigCluster(ctx, deps, args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
 		if res != nil {
 			return res, nil
 		}
@@ -278,13 +278,11 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if !deps.Authorizer.CanWriteComposedBundlesInNamespace(claims, "delete", ns) {
 			return mcp.NewToolResultError("access denied: missing composedbundles:delete permission in namespace " + ns), nil
 		}
-		cl, res := resolveConfigCluster(ctx, deps, args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
 		if res != nil {
 			return res, nil
 		}
-		if err := deleteOnCluster[v1alpha1.ComposedBundle](ctx, deps, cl, name, ns, func(ctx context.Context) error {
-			return deps.ConfigBrood.DeleteComposedBundle(ctx, cl.name, ns, name)
-		}); err != nil {
+		if err := deps.ConfigBrood.DeleteComposedBundle(ctx, cl.name, ns, name); err != nil {
 			return mcp.NewToolResultError("failed to delete composed bundle" + cl.onCluster() + ": " + err.Error()), nil
 		}
 		emitConfigActivity(ctx, deps, claims, cl, activity.Event{

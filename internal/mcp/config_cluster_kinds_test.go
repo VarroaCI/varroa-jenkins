@@ -56,20 +56,22 @@ func (m *memberConfig) ListComposedBundles(ctx context.Context, _, ns string) ([
 	return memberList[v1alpha1.ComposedBundle](ctx, m.store, ns)
 }
 
-func (m *memberConfig) CreateComposedBundle(ctx context.Context, _, _, _ string, body json.RawMessage) (json.RawMessage, error) {
-	if m.unreachable {
-		return nil, errMemberDown
+func (m *memberConfig) CreateComposedBundle(ctx context.Context, cluster, _, _ string, body json.RawMessage) (json.RawMessage, error) {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return nil, err
 	}
-	m.updates = append(m.updates, "create composedbundle")
-	return memberCreate[v1alpha1.ComposedBundle](ctx, m.store, body)
+	*writes = append(*writes, "create composedbundle")
+	return memberCreate[v1alpha1.ComposedBundle](ctx, store, body)
 }
 
-func (m *memberConfig) DeleteComposedBundle(ctx context.Context, _, ns, name string) error {
-	if m.unreachable {
-		return errMemberDown
+func (m *memberConfig) DeleteComposedBundle(ctx context.Context, cluster, ns, name string) error {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return err
 	}
-	m.updates = append(m.updates, "delete composedbundle")
-	return crdstore.Delete[v1alpha1.ComposedBundle](ctx, m.store, name, ns)
+	*writes = append(*writes, "delete composedbundle")
+	return crdstore.Delete[v1alpha1.ComposedBundle](ctx, store, name, ns)
 }
 
 func (m *memberConfig) ComposeBundle(_ context.Context, cluster, _ string, _ json.RawMessage) (*bus.BundleComposePreview, error) {
@@ -113,20 +115,22 @@ func (m *memberConfig) ListCatalogSources(ctx context.Context, _, ns string) ([]
 	return memberList[v1alpha1.CatalogSource](ctx, m.store, ns)
 }
 
-func (m *memberConfig) CreateCatalogSource(ctx context.Context, _, _, _ string, body json.RawMessage) (json.RawMessage, error) {
-	if m.unreachable {
-		return nil, errMemberDown
+func (m *memberConfig) CreateCatalogSource(ctx context.Context, cluster, _, _ string, body json.RawMessage) (json.RawMessage, error) {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return nil, err
 	}
-	m.updates = append(m.updates, "create catalogsource")
-	return memberCreate[v1alpha1.CatalogSource](ctx, m.store, body)
+	*writes = append(*writes, "create catalogsource")
+	return memberCreate[v1alpha1.CatalogSource](ctx, store, body)
 }
 
-func (m *memberConfig) DeleteCatalogSource(ctx context.Context, _, ns, name string) error {
-	if m.unreachable {
-		return errMemberDown
+func (m *memberConfig) DeleteCatalogSource(ctx context.Context, cluster, ns, name string) error {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return err
 	}
-	m.updates = append(m.updates, "delete catalogsource")
-	return crdstore.Delete[v1alpha1.CatalogSource](ctx, m.store, name, ns)
+	*writes = append(*writes, "delete catalogsource")
+	return crdstore.Delete[v1alpha1.CatalogSource](ctx, store, name, ns)
 }
 
 func (m *memberConfig) SyncCatalogSource(_ context.Context, cluster, ns, name string) error {
@@ -144,20 +148,22 @@ func (m *memberConfig) ListJenkinsRoles(ctx context.Context, _ string) ([]json.R
 	return memberList[v1alpha1.JenkinsRole](ctx, m.store, "")
 }
 
-func (m *memberConfig) CreateJenkinsRole(ctx context.Context, _, _ string, body json.RawMessage) (json.RawMessage, error) {
-	if m.unreachable {
-		return nil, errMemberDown
+func (m *memberConfig) CreateJenkinsRole(ctx context.Context, cluster, _ string, body json.RawMessage) (json.RawMessage, error) {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return nil, err
 	}
-	m.updates = append(m.updates, "create jenkinsrole")
-	return memberCreate[v1alpha1.JenkinsRole](ctx, m.store, body)
+	*writes = append(*writes, "create jenkinsrole")
+	return memberCreate[v1alpha1.JenkinsRole](ctx, store, body)
 }
 
-func (m *memberConfig) DeleteJenkinsRole(ctx context.Context, _, name string) error {
-	if m.unreachable {
-		return errMemberDown
+func (m *memberConfig) DeleteJenkinsRole(ctx context.Context, cluster, name string) error {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return err
 	}
-	m.updates = append(m.updates, "delete jenkinsrole")
-	return crdstore.Delete[v1alpha1.JenkinsRole](ctx, m.store, name, "")
+	*writes = append(*writes, "delete jenkinsrole")
+	return crdstore.Delete[v1alpha1.JenkinsRole](ctx, store, name, "")
 }
 
 func (m *memberConfig) ListJenkinsRoleBindings(ctx context.Context, _ string) ([]json.RawMessage, error) {
@@ -167,20 +173,22 @@ func (m *memberConfig) ListJenkinsRoleBindings(ctx context.Context, _ string) ([
 	return memberList[v1alpha1.JenkinsRoleBinding](ctx, m.store, "")
 }
 
-func (m *memberConfig) CreateJenkinsRoleBinding(ctx context.Context, _, _ string, body json.RawMessage) (json.RawMessage, error) {
-	if m.unreachable {
-		return nil, errMemberDown
+func (m *memberConfig) CreateJenkinsRoleBinding(ctx context.Context, cluster, _ string, body json.RawMessage) (json.RawMessage, error) {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return nil, err
 	}
-	m.updates = append(m.updates, "create jenkinsrolebinding")
-	return memberCreate[v1alpha1.JenkinsRoleBinding](ctx, m.store, body)
+	*writes = append(*writes, "create jenkinsrolebinding")
+	return memberCreate[v1alpha1.JenkinsRoleBinding](ctx, store, body)
 }
 
-func (m *memberConfig) DeleteJenkinsRoleBinding(ctx context.Context, _, name string) error {
-	if m.unreachable {
-		return errMemberDown
+func (m *memberConfig) DeleteJenkinsRoleBinding(ctx context.Context, cluster, name string) error {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return err
 	}
-	m.updates = append(m.updates, "delete jenkinsrolebinding")
-	return crdstore.Delete[v1alpha1.JenkinsRoleBinding](ctx, m.store, name, "")
+	*writes = append(*writes, "delete jenkinsrolebinding")
+	return crdstore.Delete[v1alpha1.JenkinsRoleBinding](ctx, store, name, "")
 }
 
 // listedNames returns the name of each row of a list result, for a list that

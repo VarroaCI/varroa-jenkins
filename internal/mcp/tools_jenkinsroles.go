@@ -114,7 +114,7 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 			return mcp.NewToolResultError("access denied: missing jenkinsroles:create permission"), nil
 		}
 		args := getArgs(req)
-		cl, res := resolveConfigCluster(ctx, deps, args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
 		if res != nil {
 			return res, nil
 		}
@@ -127,7 +127,7 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 				Description: strArg(args, "description"),
 			},
 		}
-		created, err := createOnCluster(ctx, deps, cl, role, func(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
+		created, err := createOnCluster(ctx, role, func(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
 			return deps.ConfigBrood.CreateJenkinsRole(ctx, cl.name, name, body)
 		})
 		if err != nil {
@@ -161,7 +161,7 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		if !deps.Authorizer.CanUpdateJenkinsRole(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsroles:update permission"), nil
 		}
-		cl, res := resolveConfigCluster(ctx, deps, args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
 		if res != nil {
 			return res, nil
 		}
@@ -210,13 +210,11 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		if !deps.Authorizer.CanDeleteJenkinsRole(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsroles:delete permission"), nil
 		}
-		cl, res := resolveConfigCluster(ctx, deps, args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
 		if res != nil {
 			return res, nil
 		}
-		if err := deleteOnCluster[v1alpha1.JenkinsRole](ctx, deps, cl, name, "", func(ctx context.Context) error {
-			return deps.ConfigBrood.DeleteJenkinsRole(ctx, cl.name, name)
-		}); err != nil {
+		if err := deps.ConfigBrood.DeleteJenkinsRole(ctx, cl.name, name); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete Jenkins role%s: %v", cl.onCluster(), err)), nil
 		}
 		emitConfigActivity(ctx, deps, claims, cl, api.AccessActivityEvent(api.AccessJenkinsRole, api.AccessDeleted, name))

@@ -303,7 +303,9 @@ func TestUpdateComposedBundle_AppliesVariables(t *testing.T) {
 			Variables:   map[string]string{"env": "prod"},
 		},
 	})
-	handler := NewHandler(composedBundleAdminDeps(store))
+	deps := composedBundleAdminDeps(store)
+	withLocalOperator(deps)
+	handler := NewHandler(deps)
 	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
 		"name": "update_composed_bundle",
 		"arguments": map[string]interface{}{
@@ -399,7 +401,9 @@ func TestUpdateComposedBundle_StringFieldsSetAndClear(t *testing.T) {
 			for k, v := range tc.args {
 				args[k] = v
 			}
-			handler := NewHandler(composedBundleAdminDeps(store))
+			deps := composedBundleAdminDeps(store)
+			withLocalOperator(deps)
+			handler := NewHandler(deps)
 			resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
 				"name":      "update_composed_bundle",
 				"arguments": args,
@@ -905,7 +909,9 @@ func TestUpdateComposedBundle_ReplacesInputs(t *testing.T) {
 			},
 		},
 	})
-	handler := NewHandler(composedBundleAdminDeps(store))
+	deps := composedBundleAdminDeps(store)
+	withLocalOperator(deps)
+	handler := NewHandler(deps)
 	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
 		"name": "update_composed_bundle",
 		"arguments": map[string]interface{}{
@@ -945,7 +951,9 @@ func TestUpdateComposedBundle_OmittedInputsPreserved(t *testing.T) {
 			},
 		},
 	})
-	handler := NewHandler(composedBundleAdminDeps(store))
+	deps := composedBundleAdminDeps(store)
+	withLocalOperator(deps)
+	handler := NewHandler(deps)
 	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
 		"name": "update_composed_bundle",
 		"arguments": map[string]interface{}{
@@ -986,7 +994,9 @@ func TestUpdateComposedBundle_EmptyInputsRejected(t *testing.T) {
 			},
 		},
 	})
-	handler := NewHandler(composedBundleAdminDeps(store))
+	deps := composedBundleAdminDeps(store)
+	withLocalOperator(deps)
+	handler := NewHandler(deps)
 	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
 		"name": "update_composed_bundle",
 		"arguments": map[string]interface{}{
@@ -1043,7 +1053,9 @@ func TestUpdateComposedBundle_MalformedInputsRejected(t *testing.T) {
 					},
 				},
 			})
-			handler := NewHandler(composedBundleAdminDeps(store))
+			deps := composedBundleAdminDeps(store)
+			withLocalOperator(deps)
+			handler := NewHandler(deps)
 			resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
 				"name": "update_composed_bundle",
 				"arguments": map[string]interface{}{
@@ -1073,7 +1085,9 @@ func TestUpdateComposedBundle_MalformedInputsRejected(t *testing.T) {
 
 func TestCreateComposedBundle_EmptyInputsRejected(t *testing.T) {
 	store := crdstore.NewFake()
-	handler := NewHandler(composedBundleAdminDeps(store))
+	deps := composedBundleAdminDeps(store)
+	withLocalOperator(deps)
+	handler := NewHandler(deps)
 	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
 		"name": "create_composed_bundle",
 		"arguments": map[string]interface{}{
@@ -1123,6 +1137,7 @@ func TestMCPGetComposedBundle_ScopedDeveloperOtherNamespaceDenied(t *testing.T) 
 
 func TestMCPCreateComposedBundle_ScopedDeveloper(t *testing.T) {
 	deps := scopedConfigDeps([]v1alpha1.APIRule{{Resources: []string{"composedbundles"}, Verbs: []string{"create"}}})
+	withLocalOperator(deps)
 	own := callToolAs(t, deps, mcpScopedDevClaims, "create_composed_bundle", map[string]interface{}{
 		"namespace": "team-a", "name": "own", "inputs": scopedBundleInputs(),
 	})
@@ -1137,6 +1152,7 @@ func TestMCPCreateComposedBundle_ScopedDeveloper(t *testing.T) {
 
 func TestMCPUpdateComposedBundle_ScopedDeveloper(t *testing.T) {
 	deps := scopedConfigDeps([]v1alpha1.APIRule{{Resources: []string{"composedbundles"}, Verbs: []string{"update"}}})
+	withLocalOperator(deps)
 	seedConfig(t, deps, scopedBundleObject("team-a", "own"), scopedBundleObject("team-b", "other"))
 	own := callToolAs(t, deps, mcpScopedDevClaims, "update_composed_bundle", map[string]interface{}{
 		"namespace": "team-a", "name": "own", "inputs": scopedBundleInputs(),
@@ -1152,6 +1168,7 @@ func TestMCPUpdateComposedBundle_ScopedDeveloper(t *testing.T) {
 
 func TestMCPDeleteComposedBundle_ScopedDeveloper(t *testing.T) {
 	deps := scopedConfigDeps([]v1alpha1.APIRule{{Resources: []string{"composedbundles"}, Verbs: []string{"delete"}}})
+	withLocalOperator(deps)
 	seedConfig(t, deps, scopedBundleObject("team-a", "own"), scopedBundleObject("team-b", "other"))
 	own := callToolAs(t, deps, mcpScopedDevClaims, "delete_composed_bundle", map[string]interface{}{
 		"namespace": "team-a", "name": "own",

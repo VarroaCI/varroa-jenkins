@@ -47,11 +47,13 @@ func scopedDeveloperDeps() *api.Dependencies {
 		ObjectMeta: metav1.ObjectMeta{Name: "src", Namespace: "team-a"},
 		Spec:       v1alpha1.CatalogSourceSpec{RepoURL: "https://example.com/repo.git"},
 	})
-	return &api.Dependencies{
+	deps := &api.Dependencies{
 		Client:     &stubClient{},
 		Authorizer: api.NewAuthorizer(rbac.NewTestResolverWithRoles(roles, bindings), false),
 		Store:      store,
 	}
+	withLocalOperator(deps)
+	return deps
 }
 
 var mcpScopedDevClaims = &auth.Claims{Subject: "dev-user"}

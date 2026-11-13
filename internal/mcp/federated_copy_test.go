@@ -17,6 +17,7 @@ import (
 // refuses a federated copy and writes nothing.
 func TestUpdateJenkinsRole_RefusesFederatedCopy(t *testing.T) {
 	deps := adminDeps()
+	withLocalOperator(deps)
 	store := deps.Store.(*crdstore.Fake)
 	crdstore.MustSeed(store, &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{
 		Name:        "r1",
@@ -44,6 +45,7 @@ func TestUpdateJenkinsRole_RefusesFederatedCopy(t *testing.T) {
 // update tool refuses a federated copy and writes nothing.
 func TestUpdateJenkinsRoleBinding_RefusesFederatedCopy(t *testing.T) {
 	deps := adminDeps()
+	withLocalOperator(deps)
 	store := deps.Store.(*crdstore.Fake)
 	crdstore.MustSeed(store, &v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{
 		Name:        "b1",

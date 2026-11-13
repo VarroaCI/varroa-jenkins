@@ -191,6 +191,7 @@ func TestUpdateLocal_WriteErrorIsNotRetried(t *testing.T) {
 
 func TestUpdateJenkinsRole_ConcurrentWriteSurvives(t *testing.T) {
 	deps := adminDeps()
+	withLocalOperator(deps)
 	store := deps.Store.(*crdstore.Fake)
 	crdstore.MustSeed(store, &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: "r1"}})
 	raceFirstGet[v1alpha1.JenkinsRole](t, store)
@@ -211,6 +212,7 @@ func TestUpdateJenkinsRole_ConcurrentWriteSurvives(t *testing.T) {
 
 func TestUpdateJenkinsRoleBinding_ConcurrentWriteSurvives(t *testing.T) {
 	deps := adminDeps()
+	withLocalOperator(deps)
 	store := deps.Store.(*crdstore.Fake)
 	crdstore.MustSeed(store, &v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "jrb1"}, Spec: v1alpha1.JenkinsRoleBindingSpec{RoleRef: "old"}})
 	raceFirstGet[v1alpha1.JenkinsRoleBinding](t, store)
@@ -271,6 +273,7 @@ func TestUpdateVarroaRoleBinding_ConcurrentWriteSurvives(t *testing.T) {
 
 func TestUpdateComposedBundle_ConcurrentWriteSurvives(t *testing.T) {
 	deps := adminDeps()
+	withLocalOperator(deps)
 	store := deps.Store.(*crdstore.Fake)
 	crdstore.MustSeed(store, &v1alpha1.ComposedBundle{ObjectMeta: metav1.ObjectMeta{Name: "cb1", Namespace: "ns"}, Spec: v1alpha1.ComposedBundleSpec{DisplayName: "old"}})
 	raceFirstGet[v1alpha1.ComposedBundle](t, store)
@@ -291,6 +294,7 @@ func TestUpdateComposedBundle_ConcurrentWriteSurvives(t *testing.T) {
 
 func TestUpdateCatalogSource_ConcurrentWriteSurvives(t *testing.T) {
 	deps := adminDeps()
+	withLocalOperator(deps)
 	store := deps.Store.(*crdstore.Fake)
 	crdstore.MustSeed(store, &v1alpha1.CatalogSource{ObjectMeta: metav1.ObjectMeta{Name: "src1", Namespace: "ns"}, Spec: v1alpha1.CatalogSourceSpec{RepoURL: "https://example.com/repo.git", Revision: "v1"}})
 	raceFirstGet[v1alpha1.CatalogSource](t, store)

@@ -28,6 +28,7 @@ func assertCreateRefused[T any](t *testing.T, store *crdstore.Fake, seed *T, ns,
 
 	deps := deleteUserDeps(store)
 	deps.IdentityConfig.Mode = "local"
+	withLocalOperator(deps)
 	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
 		"name":      tool,
 		"arguments": args,

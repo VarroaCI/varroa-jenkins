@@ -71,24 +71,41 @@ func broodObject[T any](get func(ctx context.Context) (json.RawMessage, error), 
 			}
 			return &obj, nil
 		},
-		write: func(ctx context.Context, obj *T) (*T, error) {
-			if update == nil {
-				return nil, errors.New("the object is read-only on this cluster")
-			}
-			body, err := json.Marshal(obj)
-			if err != nil {
-				return nil, fmt.Errorf("encode the object: %w", err)
-			}
-			raw, err := update(ctx, body)
-			if err != nil {
-				return nil, err
-			}
-			var written T
-			if err := json.Unmarshal(raw, &written); err != nil {
-				return nil, fmt.Errorf("decode the written object: %w", err)
-			}
-			return &written, nil
-		},
+		write: broodWrite[T](update),
+	}
+}
+
+// localObject addresses one object on the local cluster. The read uses store.
+// The write goes through update, the ConfigBrood method of its kind, so the
+// local operator runs it. The write body carries the resourceVersion of the
+// read, so the local operator answers conflict for a stale read.
+func localObject[T any](store crdstore.Backend, name, namespace string, update func(ctx context.Context, obj json.RawMessage) (json.RawMessage, error)) configObject[T] {
+	return configObject[T]{
+		get:   storeObject[T](store, name, namespace).get,
+		write: broodWrite[T](update),
+	}
+}
+
+// broodWrite sends obj through update and decodes the object that the operator
+// wrote. A nil update makes the object read-only.
+func broodWrite[T any](update func(ctx context.Context, obj json.RawMessage) (json.RawMessage, error)) func(ctx context.Context, obj *T) (*T, error) {
+	return func(ctx context.Context, obj *T) (*T, error) {
+		if update == nil {
+			return nil, errors.New("the object is read-only on this cluster")
+		}
+		body, err := json.Marshal(obj)
+		if err != nil {
+			return nil, fmt.Errorf("encode the object: %w", err)
+		}
+		raw, err := update(ctx, body)
+		if err != nil {
+			return nil, err
+		}
+		var written T
+		if err := json.Unmarshal(raw, &written); err != nil {
+			return nil, fmt.Errorf("decode the written object: %w", err)
+		}
+		return &written, nil
 	}
 }
 
@@ -129,7 +146,8 @@ func updateObject[T any](ctx context.Context, target configObject[T], merge func
 	}
 }
 
-// updateLocal is updateObject on the local store.
+// updateLocal is updateObject on the local store. Only the Varroa role tools
+// use it, because no operator route exists for a Varroa role.
 func updateLocal[T any](ctx context.Context, store crdstore.Backend, name, namespace string, merge func(obj *T) error, texts updateTexts) (*T, *mcp.CallToolResult) {
 	return updateObject(ctx, storeObject[T](store, name, namespace), merge, texts)
 }

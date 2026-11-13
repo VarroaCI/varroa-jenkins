@@ -30,14 +30,41 @@ func (memberBrood) Clusters(context.Context) ([]api.ClusterInfo, error) {
 	}, nil
 }
 
-// memberConfig serves the four config kinds of the update tools from a second
-// fake store, as a member operator would. It records each write in updates.
+// memberConfig serves the config kinds from fake stores, as the operators of
+// the clusters would. A write on core changes local and appends to localWrites.
+// A write on any other cluster changes store and appends to updates.
 type memberConfig struct {
 	api.ConfigBrood
 	store       *crdstore.Fake
+	local       *crdstore.Fake
 	unreachable bool
+	localDown   bool
 	updates     []string
+	localWrites []string
 	composed    []string
+}
+
+var errLocalDown = &api.ErrClusterUnreachable{Cluster: "core", Err: errors.New("no responders")}
+
+// on returns the store and the write log of the operator of cluster, or the
+// error of an operator that does not answer.
+func (m *memberConfig) on(cluster string) (*crdstore.Fake, *[]string, error) {
+	if cluster == "core" {
+		if m.localDown {
+			return nil, nil, errLocalDown
+		}
+		return m.local, &m.localWrites, nil
+	}
+	if m.unreachable {
+		return nil, nil, errMemberDown
+	}
+	return m.store, &m.updates, nil
+}
+
+// withLocalOperator wires a ConfigBrood into deps. Its local operator writes
+// the store of deps, as the operator of the local cluster does over the bus.
+func withLocalOperator(deps *api.Dependencies) {
+	deps.ConfigBrood = &memberConfig{store: crdstore.NewFake(), local: deps.Store.(*crdstore.Fake)}
 }
 
 func memberGet[T any](ctx context.Context, store *crdstore.Fake, name, namespace string) (json.RawMessage, error) {
@@ -75,9 +102,13 @@ func (m *memberConfig) GetComposedBundle(ctx context.Context, _, ns, name string
 	return memberGet[v1alpha1.ComposedBundle](ctx, m.store, name, ns)
 }
 
-func (m *memberConfig) UpdateComposedBundle(ctx context.Context, _, _, _ string, body json.RawMessage) (json.RawMessage, error) {
-	m.updates = append(m.updates, "composedbundle")
-	return memberUpdate[v1alpha1.ComposedBundle](ctx, m.store, body)
+func (m *memberConfig) UpdateComposedBundle(ctx context.Context, cluster, _, _ string, body json.RawMessage) (json.RawMessage, error) {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return nil, err
+	}
+	*writes = append(*writes, "composedbundle")
+	return memberUpdate[v1alpha1.ComposedBundle](ctx, store, body)
 }
 
 func (m *memberConfig) GetCatalogSource(ctx context.Context, _, ns, name string) (json.RawMessage, error) {
@@ -87,9 +118,13 @@ func (m *memberConfig) GetCatalogSource(ctx context.Context, _, ns, name string)
 	return memberGet[v1alpha1.CatalogSource](ctx, m.store, name, ns)
 }
 
-func (m *memberConfig) UpdateCatalogSource(ctx context.Context, _, _, _ string, body json.RawMessage) (json.RawMessage, error) {
-	m.updates = append(m.updates, "catalogsource")
-	return memberUpdate[v1alpha1.CatalogSource](ctx, m.store, body)
+func (m *memberConfig) UpdateCatalogSource(ctx context.Context, cluster, _, _ string, body json.RawMessage) (json.RawMessage, error) {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return nil, err
+	}
+	*writes = append(*writes, "catalogsource")
+	return memberUpdate[v1alpha1.CatalogSource](ctx, store, body)
 }
 
 func (m *memberConfig) GetJenkinsRole(ctx context.Context, _, name string) (json.RawMessage, error) {
@@ -99,9 +134,13 @@ func (m *memberConfig) GetJenkinsRole(ctx context.Context, _, name string) (json
 	return memberGet[v1alpha1.JenkinsRole](ctx, m.store, name, "")
 }
 
-func (m *memberConfig) UpdateJenkinsRole(ctx context.Context, _, _ string, body json.RawMessage) (json.RawMessage, error) {
-	m.updates = append(m.updates, "jenkinsrole")
-	return memberUpdate[v1alpha1.JenkinsRole](ctx, m.store, body)
+func (m *memberConfig) UpdateJenkinsRole(ctx context.Context, cluster, _ string, body json.RawMessage) (json.RawMessage, error) {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return nil, err
+	}
+	*writes = append(*writes, "jenkinsrole")
+	return memberUpdate[v1alpha1.JenkinsRole](ctx, store, body)
 }
 
 func (m *memberConfig) GetJenkinsRoleBinding(ctx context.Context, _, name string) (json.RawMessage, error) {
@@ -111,9 +150,13 @@ func (m *memberConfig) GetJenkinsRoleBinding(ctx context.Context, _, name string
 	return memberGet[v1alpha1.JenkinsRoleBinding](ctx, m.store, name, "")
 }
 
-func (m *memberConfig) UpdateJenkinsRoleBinding(ctx context.Context, _, _ string, body json.RawMessage) (json.RawMessage, error) {
-	m.updates = append(m.updates, "jenkinsrolebinding")
-	return memberUpdate[v1alpha1.JenkinsRoleBinding](ctx, m.store, body)
+func (m *memberConfig) UpdateJenkinsRoleBinding(ctx context.Context, cluster, _ string, body json.RawMessage) (json.RawMessage, error) {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return nil, err
+	}
+	*writes = append(*writes, "jenkinsrolebinding")
+	return memberUpdate[v1alpha1.JenkinsRoleBinding](ctx, store, body)
 }
 
 // memberDeps starts from the admin deps. Its local store is core; the member
@@ -122,7 +165,7 @@ func memberDeps(t *testing.T) (*api.Dependencies, *crdstore.Fake, *memberConfig,
 	t.Helper()
 	deps := adminDeps()
 	local := deps.Store.(*crdstore.Fake)
-	member := &memberConfig{store: crdstore.NewFake()}
+	member := &memberConfig{store: crdstore.NewFake(), local: local}
 	sink := &recordingSink{}
 	deps.Brood = memberBrood{}
 	deps.ConfigBrood = member
@@ -312,6 +355,9 @@ func TestConfigUpdateTools_NoClusterWritesTheLocalCluster(t *testing.T) {
 			}
 			if len(member.updates) != 0 {
 				t.Errorf("member writes = %v, want none", member.updates)
+			}
+			if len(member.localWrites) != 1 {
+				t.Errorf("local operator writes = %v, want one", member.localWrites)
 			}
 			if len(sink.events) != 1 || sink.events[0].Cluster != "" {
 				t.Errorf("events = %+v, want one event with no cluster", sink.events)

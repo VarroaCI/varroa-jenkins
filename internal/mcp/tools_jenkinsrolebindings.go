@@ -122,7 +122,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if !deps.Authorizer.CanCreateJenkinsRoleBinding(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsrolebindings:create permission"), nil
 		}
-		cl, res := resolveConfigCluster(ctx, deps, args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
 		if res != nil {
 			return res, nil
 		}
@@ -144,7 +144,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 				JenkinsScope:    jenkinsScope,
 			},
 		}
-		created, err := createOnCluster(ctx, deps, cl, binding, func(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
+		created, err := createOnCluster(ctx, binding, func(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
 			return deps.ConfigBrood.CreateJenkinsRoleBinding(ctx, cl.name, name, body)
 		})
 		if err != nil {
@@ -184,7 +184,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if !deps.Authorizer.CanUpdateJenkinsRoleBinding(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsrolebindings:update permission"), nil
 		}
-		cl, res := resolveConfigCluster(ctx, deps, args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
 		if res != nil {
 			return res, nil
 		}
@@ -244,13 +244,11 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if !deps.Authorizer.CanDeleteJenkinsRoleBinding(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsrolebindings:delete permission"), nil
 		}
-		cl, res := resolveConfigCluster(ctx, deps, args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
 		if res != nil {
 			return res, nil
 		}
-		if err := deleteOnCluster[v1alpha1.JenkinsRoleBinding](ctx, deps, cl, name, "", func(ctx context.Context) error {
-			return deps.ConfigBrood.DeleteJenkinsRoleBinding(ctx, cl.name, name)
-		}); err != nil {
+		if err := deps.ConfigBrood.DeleteJenkinsRoleBinding(ctx, cl.name, name); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete Jenkins role binding%s: %v", cl.onCluster(), err)), nil
 		}
 		emitConfigActivity(ctx, deps, claims, cl, api.AccessActivityEvent(api.AccessJenkinsRoleBinding, api.AccessDeleted, name))
