@@ -16,6 +16,9 @@ import (
 func NewServer(deps *api.Dependencies) *server.MCPServer {
 	mcpServer := server.NewMCPServer("varroa", "0.0.0-dev",
 		server.WithToolCapabilities(false),
+		// Validation checks types and required arguments. addTool refuses an
+		// undeclared argument; WithStrictInputSchemaDefault stays off, because mcp-go
+		// renders its refusal as a Go struct that does not say the argument is not allowed.
 		server.WithInputSchemaValidation(),
 		server.WithInstructions(guide.Text),
 	)

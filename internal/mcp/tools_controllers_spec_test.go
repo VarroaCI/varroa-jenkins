@@ -257,6 +257,44 @@ func TestUpdateControllerRejectsUnrecognizedArguments(t *testing.T) {
 	}
 }
 
+// create_controller refuses an argument that its schema does not declare, and
+// names the spec field to use instead.
+func TestCreateControllerRejectsUnrecognizedArguments(t *testing.T) {
+	cases := []struct {
+		name string
+		arg  string
+		args map[string]interface{}
+	}{
+		{
+			name: "resources",
+			arg:  "resources",
+			args: map[string]interface{}{
+				"namespace": "ns", "name": "fresh",
+				"resources": map[string]interface{}{"limits": map[string]interface{}{"cpu": "2"}},
+			},
+		},
+		{
+			name: "force",
+			arg:  "force",
+			args: map[string]interface{}{"namespace": "ns", "name": "fresh", "force": true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := callToolAs(t, specTestDeps(), mcpAdminClaims, "create_controller", tc.args)
+			if !tr.IsError {
+				t.Fatal("expected an error result for an unrecognized argument")
+			}
+			msg := toolText(tr)
+			for _, want := range []string{`"` + tc.arg + `"`, "spec"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error message does not mention %q: %s", want, msg)
+				}
+			}
+		})
+	}
+}
+
 // The passthrough is a literal merge patch, so an explicit empty value clears
 // the field — the shorthands deliberately do not, and the docs say so.
 func TestControllerSpecPatchPassthroughCanClear(t *testing.T) {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"sort"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -203,9 +202,6 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if !deps.Authorizer.CanCreateController(claims, ns, name) {
 			return mcp.NewToolResultError("access denied: missing controllers:create permission"), nil
 		}
-		if msg := unknownControllerArgsError(args, nil); msg != "" {
-			return mcp.NewToolResultError(msg), nil
-		}
 		cr := &v1alpha1.Controller{ObjectMeta: objMeta(args)}
 		// Same patch shape as update_controller, so a field settable on an
 		// existing controller is settable at creation too.
@@ -285,9 +281,6 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		cluster := clusterOrDefault(args)
 		if !deps.Authorizer.CanUpdateController(claims, ns, name) {
 			return mcp.NewToolResultError("access denied: missing controllers:update permission"), nil
-		}
-		if msg := unknownControllerArgsError(args, controllerUpdateOnlyArgs); msg != "" {
-			return mcp.NewToolResultError(msg), nil
 		}
 		spec, err := controllerSpecPatch(args)
 		if err != nil {
@@ -592,25 +585,6 @@ func controllerSvc(deps *api.Dependencies) *api.ControllerService {
 	}
 }
 
-// controllerSpecArgs are the arguments create_controller and update_controller
-// understand: the addressing ones plus everything controllerSpecPatch reads.
-// Any other argument is rejected by unknownControllerArgsError before a patch
-// is built, so extending this allowlist means teaching controllerSpecPatch to
-// read the new key too — otherwise it is accepted and then ignored.
-var controllerSpecArgs = map[string]bool{
-	"namespace": true, "name": true, "cluster": true,
-	"version": true, "composedBundleRef": true, "powerState": true,
-	"hibernation": true, "spec": true,
-}
-
-// controllerUpdateOnlyArgs are arguments update_controller understands and
-// create_controller does not. They control HOW the patch is applied rather than
-// what it contains, so controllerSpecPatch deliberately never reads them — the
-// "accepted and then ignored" trap the allowlist comment warns about does not
-// apply here. Keeping them out of controllerSpecArgs is what makes
-// create_controller still reject `force` by name instead of swallowing it.
-var controllerUpdateOnlyArgs = map[string]bool{"force": true}
-
 // validControllerPowerStates are the spec.powerState values the contract
 // accepts. Hibernated is deliberately absent: hibernation is reported in
 // status, not requested in spec, and is driven by the hibernate/wake actions.
@@ -667,29 +641,9 @@ func controllerSpecPatch(args map[string]any) (map[string]interface{}, error) {
 const noSpecFields = "nothing to update: supply version, composedBundleRef, " +
 	"powerState, hibernation, or a spec merge patch"
 
-// unknownControllerArgsError rejects arguments the tool does not understand,
-// naming them. Dropping them silently lets an unsupported field like
-// `hibernation` vanish into a generic "nothing to update", which reads as a
-// malformed request rather than an unsupported field. Rejecting
-// rather than warning also covers the harder half — a misplaced argument
-// alongside a valid one, where the call otherwise succeeds and the caller has
-// no way to learn that half of what they sent never landed.
-// extra names arguments valid for this tool only; pass nil when there are none.
-func unknownControllerArgsError(args map[string]any, extra map[string]bool) string {
-	var unknown []string
-	for k := range args {
-		if !controllerSpecArgs[k] && !extra[k] {
-			unknown = append(unknown, k)
-		}
-	}
-	if len(unknown) == 0 {
-		return ""
-	}
-	sort.Strings(unknown)
-	return "unrecognized argument(s) " + strings.Join(unknown, ", ") +
-		": only version, composedBundleRef, powerState and hibernation are named " +
-		"arguments — every other Controller spec field goes inside spec"
-}
+// controllerSpecFieldsHint follows the refusal of an undeclared argument by
+// create_controller and update_controller.
+const controllerSpecFieldsHint = "Put every other Controller spec field inside spec."
 
 // mergeControllerSpec applies a spec merge patch to a Controller in-process,
 // for the local-direct paths that have no brood to send a patch to. It
