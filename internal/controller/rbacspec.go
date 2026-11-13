@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 
@@ -31,15 +33,19 @@ func IsRBACSpecRole(role string) bool {
 }
 
 // rbacBindingName is the name of the JenkinsRoleBinding that the operator
-// writes for one rbacSpec role of the controller namespace/name.
+// writes for one rbacSpec role of the controller namespace/name. A slash occurs
+// in neither part, so the hash gives each controller its own names. The name
+// has at most 31 characters for any input.
 func rbacBindingName(namespace, name, role string) string {
-	return fmt.Sprintf("ctrl-%s-%s-%s", namespace, name, role)
+	sum := sha256.Sum256([]byte(namespace + "/" + name))
+	return "ctrl-" + hex.EncodeToString(sum[:])[:16] + "-" + role
 }
 
 // ownsRBACBinding reports whether b is an rbacSpec binding of the controller
 // namespace/name. The labels alone are not proof, because a copy of a generated
 // binding keeps them. The name must also be the rbacBindingName of an rbacSpec
-// role. The labels separate two controllers whose names give the same string.
+// role. The operator never writes the earlier dash-joined name, so a binding at
+// that name is not owned, even when its labels name this controller.
 func ownsRBACBinding(b *v1alpha1.JenkinsRoleBinding, namespace, name string) bool {
 	if b.Labels[v1alpha1.LabelManagedBy] != v1alpha1.ManagedByOperator ||
 		b.Labels[v1alpha1.LabelControllerNamespace] != namespace ||

@@ -259,12 +259,18 @@ spec:
 The shorthand accepts `admin`, `operator`, `developer`, and `viewer`. Use role
 bindings for custom or cross-controller scope.
 
-The operator writes one Jenkins role binding for each role in the shorthand. The binding name is `ctrl-<namespace>-<controller>-<role>`. The operator removes a binding only when both conditions are true:
+The operator writes one Jenkins role binding for each role in the shorthand. The binding name is `ctrl-<hash>-<role>`. The hash is the first 16 hexadecimal characters of the SHA-256 of `<namespace>/<controller>`. Each controller has its own hash, so two controllers never write the same binding.
 
-- The name has that form for this controller and one of the four roles.
+To list the bindings of one controller, run `kubectl get jenkinsrolebindings -l varroa.dev/controller-namespace=<namespace>,varroa.dev/controller-name=<controller>`.
+
+The operator removes a binding only when both conditions are true:
+
+- The name is `ctrl-<hash>-<role>` for this controller and one of the four roles.
 - The labels `varroa.dev/managed-by: varroa-operator`, `varroa.dev/controller-namespace`, and `varroa.dev/controller-name` name this controller.
 
-A binding with another name stays, also when it carries these labels. Do not give your own binding one of these names. The operator replaces that binding when the shorthand contains its role.
+The operator does not remove a binding with the earlier `ctrl-<namespace>-<controller>-<role>` name. To remove one, run `kubectl delete jenkinsrolebinding <name>`.
+
+A binding with another name stays, also when it carries these labels. Do not give your own binding a `ctrl-` name. The operator replaces that binding when the shorthand contains its role.
 
 ## Change a role or a binding through the API
 

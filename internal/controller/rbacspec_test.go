@@ -4,12 +4,14 @@ import (
 	"context"
 	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -95,8 +97,8 @@ func TestBuildDesiredRoleBindings_TwoGroupsOneRole(t *testing.T) {
 	}
 
 	b := bindings[0]
-	if b.Name != "ctrl-ns-test-developer" {
-		t.Errorf("expected name 'ctrl-ns-test-developer', got %q", b.Name)
+	if b.Name != rbacBindingName("ns", "test", "developer") {
+		t.Errorf("expected name %q, got %q", rbacBindingName("ns", "test", "developer"), b.Name)
 	}
 	if b.Spec.RoleRef != "varroa-developer" {
 		t.Errorf("expected RoleRef 'varroa-developer', got %q", b.Spec.RoleRef)
@@ -165,8 +167,8 @@ func TestBuildDesiredRoleBindings_UnknownRoleSkipped(t *testing.T) {
 	if len(bindings) != 1 {
 		t.Fatalf("expected 1 binding, got %d", len(bindings))
 	}
-	if bindings[0].Name != "ctrl-ns-test-admin" {
-		t.Errorf("expected name 'ctrl-ns-test-admin', got %q", bindings[0].Name)
+	if bindings[0].Name != rbacBindingName("ns", "test", "admin") {
+		t.Errorf("expected name %q, got %q", rbacBindingName("ns", "test", "admin"), bindings[0].Name)
 	}
 	if bindings[0].Spec.RoleRef != "varroa-admin" {
 		t.Errorf("expected RoleRef 'varroa-admin', got %q", bindings[0].Spec.RoleRef)
@@ -231,11 +233,17 @@ func TestBuildDesiredRoleBindings_MultipleRoles(t *testing.T) {
 // carries the LabelControllerName label, so the label stamp issues no patch.
 func seedRBACController(t *testing.T, store *crdstore.Fake, roles ...string) *v1alpha1.Controller {
 	t.Helper()
+	return seedRBACControllerAt(t, store, "ns", "test", roles...)
+}
+
+// seedRBACControllerAt seeds namespace/name with one group per role.
+func seedRBACControllerAt(t *testing.T, store *crdstore.Fake, namespace, name string, roles ...string) *v1alpha1.Controller {
+	t.Helper()
 	cr := &v1alpha1.Controller{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test",
-			Namespace: "ns",
-			Labels:    map[string]string{v1alpha1.LabelControllerName: "test"},
+			Name:      name,
+			Namespace: namespace,
+			Labels:    map[string]string{v1alpha1.LabelControllerName: name},
 		},
 	}
 	if len(roles) > 0 {
@@ -311,32 +319,32 @@ func TestSyncRBACBindings_KeepsLabeledBindingWithOtherName(t *testing.T) {
 	if !bindingExists(t, store, "payments-admins") {
 		t.Error("labeled binding with a non-derived name was deleted")
 	}
-	if !bindingExists(t, store, "ctrl-ns-test-developer") {
-		t.Error("desired binding ctrl-ns-test-developer was not written")
+	if !bindingExists(t, store, rbacBindingName("ns", "test", "developer")) {
+		t.Error("desired developer binding was not written")
 	}
 }
 
 func TestSyncRBACBindings_DeletesOwnedBindingOfRemovedRole(t *testing.T) {
 	store := crdstore.NewFake()
 	cr := seedRBACController(t, store, "developer")
-	crdstore.MustSeed(store, labeledBinding("ctrl-ns-test-admin", "ns", "test"))
+	crdstore.MustSeed(store, labeledBinding(rbacBindingName("ns", "test", "admin"), "ns", "test"))
 
 	r := &Reconciler{store: store, Logger: slog.Default()}
 	if err := r.syncRBACBindings(context.Background(), cr); err != nil {
 		t.Fatalf("syncRBACBindings: %v", err)
 	}
-	if bindingExists(t, store, "ctrl-ns-test-admin") {
+	if bindingExists(t, store, rbacBindingName("ns", "test", "admin")) {
 		t.Error("owned binding of a removed role survived")
 	}
-	if !bindingExists(t, store, "ctrl-ns-test-developer") {
-		t.Error("desired binding ctrl-ns-test-developer missing")
+	if !bindingExists(t, store, rbacBindingName("ns", "test", "developer")) {
+		t.Error("desired developer binding missing")
 	}
 }
 
 func TestSyncRBACBindings_KeepsUnlabeledBindingAtDerivedName(t *testing.T) {
 	store := crdstore.NewFake()
 	cr := seedRBACController(t, store, "developer")
-	unlabeled := labeledBinding("ctrl-ns-test-admin", "ns", "test")
+	unlabeled := labeledBinding(rbacBindingName("ns", "test", "admin"), "ns", "test")
 	unlabeled.Labels = nil
 	crdstore.MustSeed(store, unlabeled)
 
@@ -344,7 +352,7 @@ func TestSyncRBACBindings_KeepsUnlabeledBindingAtDerivedName(t *testing.T) {
 	if err := r.syncRBACBindings(context.Background(), cr); err != nil {
 		t.Fatalf("syncRBACBindings: %v", err)
 	}
-	if !bindingExists(t, store, "ctrl-ns-test-admin") {
+	if !bindingExists(t, store, rbacBindingName("ns", "test", "admin")) {
 		t.Error("unlabeled object at a derived name was deleted")
 	}
 }
@@ -352,7 +360,7 @@ func TestSyncRBACBindings_KeepsUnlabeledBindingAtDerivedName(t *testing.T) {
 func TestSyncRBACBindings_DeleteCarriesListedVersion(t *testing.T) {
 	store := crdstore.NewFake()
 	cr := seedRBACController(t, store, "developer")
-	stale := labeledBinding("ctrl-ns-test-admin", "ns", "test")
+	stale := labeledBinding(rbacBindingName("ns", "test", "admin"), "ns", "test")
 	crdstore.MustSeed(store, stale)
 
 	rec := &rbacDeleteRecorder{Fake: store, t: t}
@@ -360,7 +368,8 @@ func TestSyncRBACBindings_DeleteCarriesListedVersion(t *testing.T) {
 	if err := r.syncRBACBindings(context.Background(), cr); err != nil {
 		t.Fatalf("syncRBACBindings: %v", err)
 	}
-	want := []string{"ctrl-ns-test-admin uid-ctrl-ns-test-admin " + stale.ResourceVersion}
+	name := rbacBindingName("ns", "test", "admin")
+	want := []string{name + " uid-" + name + " " + stale.ResourceVersion}
 	if !reflect.DeepEqual(rec.deletes, want) {
 		t.Errorf("deletes = %q, want %q", rec.deletes, want)
 	}
@@ -369,18 +378,18 @@ func TestSyncRBACBindings_DeleteCarriesListedVersion(t *testing.T) {
 func TestSyncRBACBindings_DeleteConflictKeepsBinding(t *testing.T) {
 	store := crdstore.NewFake()
 	cr := seedRBACController(t, store, "developer")
-	crdstore.MustSeed(store, labeledBinding("ctrl-ns-test-admin", "ns", "test"))
+	crdstore.MustSeed(store, labeledBinding(rbacBindingName("ns", "test", "admin"), "ns", "test"))
 	jrbGVR, err := crdstore.GVRFor[v1alpha1.JenkinsRoleBinding]()
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.FailNext("delete", jrbGVR, apierrors.NewConflict(jrbGVR.GroupResource(), "ctrl-ns-test-admin", nil))
+	store.FailNext("delete", jrbGVR, apierrors.NewConflict(jrbGVR.GroupResource(), rbacBindingName("ns", "test", "admin"), nil))
 
 	r := &Reconciler{store: store, Logger: slog.Default()}
 	if err := r.syncRBACBindings(context.Background(), cr); err != nil {
 		t.Fatalf("syncRBACBindings: %v", err)
 	}
-	if !bindingExists(t, store, "ctrl-ns-test-admin") {
+	if !bindingExists(t, store, rbacBindingName("ns", "test", "admin")) {
 		t.Error("binding was deleted despite a conflict")
 	}
 }
@@ -389,11 +398,11 @@ func TestDeleteControllerBindings_DeletesOnlyOwned(t *testing.T) {
 	store := crdstore.NewFake()
 	cr := seedRBACController(t, store)
 	crdstore.MustSeed(store,
-		labeledBinding("ctrl-ns-test-viewer", "ns", "test"),
+		labeledBinding(rbacBindingName("ns", "test", "viewer"), "ns", "test"),
 		labeledBinding("copy-of-viewer", "ns", "test"),
-		labeledBinding("ctrl-ns-other-viewer", "ns", "other"),
+		labeledBinding(rbacBindingName("ns", "other", "viewer"), "ns", "other"),
 	)
-	unlabeled := labeledBinding("ctrl-ns-test-admin", "ns", "test")
+	unlabeled := labeledBinding(rbacBindingName("ns", "test", "admin"), "ns", "test")
 	unlabeled.Labels = nil
 	crdstore.MustSeed(store, unlabeled)
 
@@ -401,10 +410,10 @@ func TestDeleteControllerBindings_DeletesOnlyOwned(t *testing.T) {
 	if err := r.deleteControllerBindings(context.Background(), cr); err != nil {
 		t.Fatalf("deleteControllerBindings: %v", err)
 	}
-	if bindingExists(t, store, "ctrl-ns-test-viewer") {
+	if bindingExists(t, store, rbacBindingName("ns", "test", "viewer")) {
 		t.Error("owned binding survived the finalizer")
 	}
-	for _, kept := range []string{"copy-of-viewer", "ctrl-ns-other-viewer", "ctrl-ns-test-admin"} {
+	for _, kept := range []string{"copy-of-viewer", rbacBindingName("ns", "other", "viewer"), rbacBindingName("ns", "test", "admin")} {
 		if !bindingExists(t, store, kept) {
 			t.Errorf("%s was deleted but is not owned", kept)
 		}
@@ -418,22 +427,22 @@ func TestOwnsRBACBinding(t *testing.T) {
 		ns, ctl string
 		want    bool
 	}{
-		{"owned", labeledBinding("ctrl-ns-test-admin", "ns", "test"), "ns", "test", true},
+		{"owned", labeledBinding(rbacBindingName("ns", "test", "admin"), "ns", "test"), "ns", "test", true},
 		{"labels with another name", labeledBinding("payments-admins", "ns", "test"), "ns", "test", false},
 		{"derived name without labels", func() *v1alpha1.JenkinsRoleBinding {
-			b := labeledBinding("ctrl-ns-test-admin", "ns", "test")
+			b := labeledBinding(rbacBindingName("ns", "test", "admin"), "ns", "test")
 			b.Labels = nil
 			return b
 		}(), "ns", "test", false},
-		{"suffix not an rbacSpec role", labeledBinding("ctrl-ns-test-superuser", "ns", "test"), "ns", "test", false},
+		{"suffix not an rbacSpec role", labeledBinding(rbacBindingName("ns", "test", "superuser"), "ns", "test"), "ns", "test", false},
 		{"managed-by not the operator", func() *v1alpha1.JenkinsRoleBinding {
-			b := labeledBinding("ctrl-ns-test-admin", "ns", "test")
+			b := labeledBinding(rbacBindingName("ns", "test", "admin"), "ns", "test")
 			b.Labels[v1alpha1.LabelManagedBy] = "local"
 			return b
 		}(), "ns", "test", false},
-		{"labels of another controller", labeledBinding("ctrl-ns-test-admin", "ns", "other"), "ns", "test", false},
-		{"dash-joined names collide", labeledBinding("ctrl-a-b-c-admin", "a-b", "c"), "a", "b-c", false},
-		{"dash-joined names owned by the labeled controller", labeledBinding("ctrl-a-b-c-admin", "a-b", "c"), "a-b", "c", true},
+		{"labels of another controller", labeledBinding(rbacBindingName("ns", "test", "admin"), "ns", "other"), "ns", "test", false},
+		{"hash name of another controller with labels of this one", labeledBinding(rbacBindingName("a-b", "c", "admin"), "a", "b-c"), "a", "b-c", false},
+		{"dash-joined name with labels of this controller", labeledBinding("ctrl-ns-test-admin", "ns", "test"), "ns", "test", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -500,5 +509,84 @@ func TestSyncRBACBindings_LabelStampClaimsNoSpec(t *testing.T) {
 	}
 	if _, hasSpec := p.Meta["spec"]; hasSpec {
 		t.Fatalf("label stamp carried a spec key: %#v", p.Meta)
+	}
+}
+
+func TestRBACBindingName_Golden(t *testing.T) {
+	cases := []struct{ ns, name, role, want string }{
+		{"ns", "test", "developer", "ctrl-cf4a83dbe7472025-developer"},
+		{"a-b", "c", "admin", "ctrl-4e84717d75bd540d-admin"},
+		{"a", "b-c", "admin", "ctrl-b88f83c840abe581-admin"},
+	}
+	for _, tc := range cases {
+		if got := rbacBindingName(tc.ns, tc.name, tc.role); got != tc.want {
+			t.Errorf("rbacBindingName(%q, %q, %q) = %q, want %q", tc.ns, tc.name, tc.role, got, tc.want)
+		}
+	}
+}
+
+func TestRBACBindingName_ValidForLongNames(t *testing.T) {
+	ns := strings.Repeat("a", 63)
+	name := strings.Repeat("b", 253)
+	for role := range rbacSpecRoleRefs() {
+		n := rbacBindingName(ns, name, role)
+		if errs := validation.IsDNS1123Subdomain(n); len(errs) != 0 {
+			t.Errorf("rbacBindingName for role %q is not a valid name: %v", role, errs)
+		}
+		if len(n) > 31 {
+			t.Errorf("rbacBindingName for role %q has %d characters, want at most 31", role, len(n))
+		}
+	}
+}
+
+func TestSyncRBACBindings_DashSplitControllersKeepOwnBindings(t *testing.T) {
+	store := crdstore.NewFake()
+	a := seedRBACControllerAt(t, store, "a-b", "c", "admin")
+	b := seedRBACControllerAt(t, store, "a", "b-c", "admin")
+	ctx := context.Background()
+	r := &Reconciler{store: store, Logger: slog.Default()}
+
+	syncAll := func(order ...*v1alpha1.Controller) {
+		t.Helper()
+		for _, cr := range order {
+			if err := r.syncRBACBindings(ctx, cr); err != nil {
+				t.Fatalf("syncRBACBindings %s/%s: %v", cr.Namespace, cr.Name, err)
+			}
+		}
+	}
+	versions := func() map[string]string {
+		t.Helper()
+		out := make(map[string]string)
+		for _, n := range []string{rbacBindingName("a-b", "c", "admin"), rbacBindingName("a", "b-c", "admin")} {
+			obj, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](ctx, store, n, "")
+			if err != nil {
+				t.Fatalf("get %s: %v", n, err)
+			}
+			out[n] = obj.ResourceVersion
+		}
+		return out
+	}
+
+	syncAll(a, b)
+	firstRound := versions()
+	syncAll(b, a)
+	if got := versions(); !reflect.DeepEqual(got, firstRound) {
+		t.Errorf("bindings rewritten on a later sync: before %v, after %v", firstRound, got)
+	}
+
+	for _, cr := range []*v1alpha1.Controller{a, b} {
+		obj, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](ctx, store, rbacBindingName(cr.Namespace, cr.Name, "admin"), "")
+		if err != nil {
+			t.Fatalf("get binding of %s/%s: %v", cr.Namespace, cr.Name, err)
+		}
+		if obj.Labels[v1alpha1.LabelControllerNamespace] != cr.Namespace || obj.Labels[v1alpha1.LabelControllerName] != cr.Name {
+			t.Errorf("binding of %s/%s carries labels of another controller: %v", cr.Namespace, cr.Name, obj.Labels)
+		}
+		if got := obj.Spec.ControllerScope.Namespaces; !reflect.DeepEqual(got, []string{cr.Namespace}) {
+			t.Errorf("binding of %s/%s scope namespaces = %v", cr.Namespace, cr.Name, got)
+		}
+		if got := obj.Spec.ControllerScope.ControllerSelector.MatchLabels[v1alpha1.LabelControllerName]; got != cr.Name {
+			t.Errorf("binding of %s/%s scope selector = %q", cr.Namespace, cr.Name, got)
+		}
 	}
 }
