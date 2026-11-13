@@ -40,6 +40,8 @@ The gateway extends the 60-second ack wait of a running one-shot command every 1
 
 The gateway sends a mite at most 8 one-shot commands that have no result. The other commands stay in JetStream in publish order. The gateway sends the next command when the mite returns a result. When the stream ends, the gateway releases the unanswered commands in publish order. A token grant does not use JetStream, so these commands never delay it.
 
+The mite runs one command at a time. While the items gate is open, a one-shot command runs before a waiting desired-state command. A desired-state command waits behind at most 8 one-shot commands. An `idle` apply that waits for builds lets one-shot commands run. The mite checks the deferred apply again after at most 9 one-shot commands. With no one-shot command, it checks again after 15 seconds.
+
 The effective reconciliation policy controls termination draining. The default drain timeout is 900 seconds. During termination the mite places Jenkins in quiet-down mode, waits for running builds, then exits when builds finish or the timeout expires.
 
 ## Credential Delivery

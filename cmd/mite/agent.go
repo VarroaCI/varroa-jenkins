@@ -1240,6 +1240,13 @@ type commandWork struct {
 // The gateway sends at most 8 imperatives that have no result. The cap must
 // stay at or above that limit. A full queue ends the stream session.
 const imperativeQueueCap = 16
+
+// desiredSkipLimit is the most imperative commands that take answers while
+// a desired-state command waits in the slot. The next take answers the
+// desired state. A burst of up to this many imperatives still runs first.
+// A queue that the gateway refills cannot hold the desired state back
+// for longer than this many imperatives.
+const desiredSkipLimit = 8
 const defaultCommandDeadline = 20 * time.Minute
 
 // triggerReadyWaitDefault is the readiness wait of one TRIGGER_BUILD
@@ -1259,7 +1266,9 @@ const triggerNotFoundRecheckDefault = 5 * time.Second
 // commandMailbox is a mutex-guarded queue with a single-slot replace-on-arrival
 // desired-state entry (newest-wins) and a bounded FIFO imperative queue.
 // Desired-state commands coalesce instead of queueing; imperatives preserve
-// arrival order and cannot be silently dropped.
+// arrival order and cannot be silently dropped. take answers imperatives
+// first, but a waiting desired state goes next after desiredSkipLimit
+// imperatives.
 type commandMailbox struct {
 	mu         sync.Mutex
 	desired    *commandWork  // replace-on-arrival slot (newest-wins)
@@ -1276,6 +1285,12 @@ type commandMailbox struct {
 	// apply finds no job, so the apply goes first while the items gate
 	// is closed.
 	desiredFirst func() bool
+	// skipped counts the imperatives that take answered while the desired
+	// slot held a command. A served take of the desired slot sets it to zero,
+	// and so does clearSkipped after an inline apply. An inline take that
+	// restores the command, and a newer push, keep the count, so neither
+	// can restart the wait.
+	skipped int
 }
 
 func newCommandMailbox() *commandMailbox {
@@ -1333,36 +1348,71 @@ func (mb *commandMailbox) finish(w commandWork) {
 
 func (mb *commandMailbox) take() (commandWork, bool) {
 	if mb.desiredFirst != nil && mb.desiredFirst() {
-		if w, ok := mb.takeDesired(); ok {
+		if w, ok := mb.serveDesired(); ok {
 			return w, true
 		}
 	}
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
+	if mb.desired != nil && (len(mb.imperative) == 0 || mb.skipped >= desiredSkipLimit) {
+		return mb.serveDesiredLocked(), true
+	}
 	if len(mb.imperative) > 0 {
 		w := mb.imperative[0]
 		mb.imperative = mb.imperative[1:]
-		return w, true
-	}
-	if mb.desired != nil {
-		w := *mb.desired
-		mb.desired = nil
+		if mb.desired != nil {
+			mb.skipped++
+		}
 		return w, true
 	}
 	return commandWork{}, false
 }
 
-// takeDesired empties the desired slot and answers its command. It
-// answers false when the slot is empty.
+// takeDesired empties the desired slot and answers its command. It leaves
+// skipped unchanged, because an inline caller may restore the command
+// unserved, and that restore must keep the wait. It answers false when the
+// slot is empty.
 func (mb *commandMailbox) takeDesired() (commandWork, bool) {
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
 	if mb.desired == nil {
 		return commandWork{}, false
 	}
+	return mb.takeDesiredLocked(), true
+}
+
+// serveDesired answers the desired command for a worker run. It sets skipped
+// to zero, so the next wait starts at once. It answers false when the slot
+// is empty.
+func (mb *commandMailbox) serveDesired() (commandWork, bool) {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	if mb.desired == nil {
+		return commandWork{}, false
+	}
+	return mb.serveDesiredLocked(), true
+}
+
+// clearSkipped starts a new wait. An inline caller calls it when it serves
+// the desired command it took, so the slot and the count stay consistent.
+func (mb *commandMailbox) clearSkipped() {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	mb.skipped = 0
+}
+
+// serveDesiredLocked is serveDesired for a caller that holds mu.
+func (mb *commandMailbox) serveDesiredLocked() commandWork {
+	mb.skipped = 0
+	return mb.takeDesiredLocked()
+}
+
+// takeDesiredLocked empties the desired slot and answers the command. The
+// caller holds mu and the slot holds a command.
+func (mb *commandMailbox) takeDesiredLocked() commandWork {
 	w := *mb.desired
 	mb.desired = nil
-	return w, true
+	return w
 }
 
 // restoreDesired puts w back into an empty desired slot and sends no
@@ -1377,6 +1427,13 @@ func (mb *commandMailbox) restoreDesired(w commandWork) {
 		return
 	}
 	mb.desired = &w
+}
+
+// hasImperative reports whether the imperative queue holds a command.
+func (mb *commandMailbox) hasImperative() bool {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	return len(mb.imperative) > 0
 }
 
 func (mb *commandMailbox) notify() {
@@ -1561,6 +1618,12 @@ func (a *Agent) commandWorker(ctx context.Context, mb *commandMailbox) {
 					idleTimer := time.NewTimer(a.heartbeatInterval)
 				idleLoop:
 					for {
+						// take can answer a deferred command while imperatives
+						// stay queued, and their signal can already be used.
+						// Wake the loop at once so a deferred apply never holds them.
+						if mb.hasImperative() {
+							mb.notify()
+						}
 						select {
 						case <-ctx.Done():
 							idleTimer.Stop()
@@ -1585,8 +1648,11 @@ func (a *Agent) commandWorker(ctx context.Context, mb *commandMailbox) {
 								if newW.imperativeCmd != nil {
 									if w.span != nil {
 										w.span.End()
+										w.span = nil
 									}
-									mb.putDesired(w)
+									// A newer desired state that arrived during the
+									// deferral stays in the slot, and w is dropped.
+									mb.restoreDesired(w)
 									a.runCommand(ctx, newW)
 									mb.finish(newW)
 									continue workLoop
@@ -2083,6 +2149,7 @@ func (a *Agent) awaitRunReady(ctx context.Context, mb *commandMailbox, jobPath s
 					if dw.ctx == nil {
 						dw.ctx = ctx
 					}
+					mb.clearSkipped()
 					a.runInlineDesired(ctx, wctx, mb, dw)
 					if wctx.Err() != nil {
 						return waitErr()
@@ -2160,6 +2227,7 @@ func (a *Agent) triggerUntilJobExists(ctx context.Context, mb *commandMailbox, r
 				if a.deferInlineApply(dw) {
 					mb.restoreDesired(dw)
 				} else {
+					mb.clearSkipped()
 					a.runInlineDesired(ctx, wctx, mb, dw)
 					applied = true
 				}
