@@ -3,6 +3,11 @@
 Inspect each tool's schema and annotations before calling it. Tool discovery is
 the authoritative reference for available names and arguments.
 
+A tool refuses a call that passes an argument that its schema does not declare.
+The error names each such argument and lists the arguments that the tool takes.
+A refused call changes nothing. The check runs after the required-argument check,
+so a call that omits a required argument gets a validation error first.
+
 ## Interpret annotations
 
 | Annotation | Meaning |

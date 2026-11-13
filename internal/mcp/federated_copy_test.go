@@ -68,9 +68,9 @@ func TestUpdateJenkinsRoleBinding_RefusesFederatedCopy(t *testing.T) {
 }
 
 // TestJenkinsRBACTools_DeclareNoMetadataArgs pins that the Jenkins RBAC tools
-// declare no metadata argument. The server rejects an undeclared argument, so
-// the MCP path cannot set the federation label. A new metadata argument needs
-// the BFF label guard first.
+// declare no metadata argument. addTool refuses an argument that the schema
+// does not declare, so the MCP path cannot set the federation label. A new
+// metadata argument needs the BFF label guard first.
 func TestJenkinsRBACTools_DeclareNoMetadataArgs(t *testing.T) {
 	want := map[string]bool{
 		"create_jenkins_role":         false,
