@@ -113,7 +113,7 @@ kubectl logs -n <namespace> statefulset/<name>-<uid8> -c mite --tail=100
 | Symptom | Check |
 |---|---|
 | Phase remains `Running` | Gateway reachability on TCP 9090, bootstrap token errors, and mite logs. |
-| `MiteConnected=False`, reason `StreamLost` | The stream was lost after connect. The message names the cause. `no presence record` or `heartbeat older than` means the gateway stopped reporting the mite: check the gateway pods. `presence record unreadable` means the operator could not read NATS: check the NATS pods. |
+| `MiteConnected=False`, reason `StreamLost` | The stream was lost after connect. The message names the cause. `no presence record` or `heartbeat older than` means the gateway stopped reporting the mite: check the gateway pods. `presence record unreadable` means the operator could not read the presence record from the NATS stream leader: check the NATS pods. |
 | Frequent reconnects | Gateway availability, NetworkPolicy, DNS, and certificate errors. |
 | `MiteStreamDegraded=True` | NATS availability, or a NATS grant that denies a gateway subscription. Commands wait while the stream stays connected. |
 | Commands time out | Jenkins readiness, command deadline, and long-running configuration work. |

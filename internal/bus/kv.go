@@ -11,10 +11,27 @@ import (
 // ErrKVKeyExists is returned by Create when the key is already present.
 var ErrKVKeyExists = errors.New("bus: kv key exists")
 
+// leaderReadWait bounds one GetFromLeader request to the stream leader.
+const leaderReadWait = 2 * time.Second
+
+// Header names and values that nats.go writes on KV delete and purge
+// markers. nats.go does not export them.
+const (
+	kvOperationHeader = "KV-Operation"
+	kvOperationDelete = "DEL"
+	kvOperationPurge  = "PURGE"
+)
+
 // KV is a thin wrapper around nats.KeyValue for storing mite snapshots
 // and presence entries.
 type KV struct {
 	bucket nats.KeyValue
+
+	// js and stream serve GetFromLeader. subjectPrefix is the KV subject
+	// prefix that maps a key to its stream subject ("$KV.<bucket>.").
+	js            nats.JetStreamContext
+	stream        string
+	subjectPrefix string
 }
 
 // keyValueConfig builds the nats.KeyValueConfig for a KV bucket. It is a
@@ -46,7 +63,12 @@ func (c *Conn) EnsureKV(bucket string, ttl time.Duration) (*KV, error) {
 			return nil, fmt.Errorf("ensure kv %s: %w", bucket, err)
 		}
 	}
-	return &KV{bucket: kv}, nil
+	return &KV{
+		bucket:        kv,
+		js:            c.js,
+		stream:        "KV_" + bucket,
+		subjectPrefix: "$KV." + bucket + ".",
+	}, nil
 }
 
 // KeyValue returns the raw nats.KeyValue for advanced operations.
@@ -62,6 +84,27 @@ func (kv *KV) Get(key string) ([]byte, error) {
 		return nil, fmt.Errorf("kv get %s: %w", key, err)
 	}
 	return entry.Value(), nil
+}
+
+// GetFromLeader reads the latest value of a key from the stream leader.
+// Use it where an old copy changes a decision. Every replica answers a
+// direct get from its own copy, so a replica cut off from its leader can
+// return a stale value. A missing or deleted key gives nil and a nil
+// error. A stream with no leader gives an error. The read waits at most
+// leaderReadWait. Do not fall back to Get on an error.
+func (kv *KV) GetFromLeader(key string) ([]byte, error) {
+	msg, err := kv.js.GetLastMsg(kv.stream, kv.subjectPrefix+key, nats.MaxWait(leaderReadWait))
+	if errors.Is(err, nats.ErrMsgNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("kv leader get %s: %w", key, err)
+	}
+	switch msg.Header.Get(kvOperationHeader) {
+	case kvOperationDelete, kvOperationPurge:
+		return nil, nil
+	}
+	return msg.Data, nil
 }
 
 // Put stores a value under the given key.

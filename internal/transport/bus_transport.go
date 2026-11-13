@@ -410,8 +410,10 @@ func (b *BusTransport) Connected(ns, name string) bool {
 
 // Info returns the presence record of the mite of ns/name. A missing record
 // gives ok=false and a nil error. A read or decode failure gives an error.
+// The read goes to the stream leader, so a stale replica never answers it.
 func (b *BusTransport) Info(ns, name string) (info MiteInfo, ok bool, err error) {
-	data, err := b.presenceKV.Get(bus.PresenceKey(b.cluster, ns, name))
+	// Info reads from the stream leader, because its answer moves the phase.
+	data, err := b.presenceKV.GetFromLeader(bus.PresenceKey(b.cluster, ns, name))
 	if err != nil {
 		return MiteInfo{}, false, err
 	}
