@@ -38,8 +38,8 @@ MASKED=$(mask <<< "$RENDER")
 
 rc=0; grep -q 'assistant' <<< "$MASKED" && rc=1 || true
 check "no assistant string in the masked default render" "$rc"
-rc=0; grep -q 'VARROA_ASSISTANT_CONFIG' <<< "$MASKED" && rc=1 || true
-check "no VARROA_ASSISTANT_CONFIG in the masked default render" "$rc"
+rc=0; grep -q 'VARROA_ASSISTANT_ENABLED' <<< "$MASKED" && rc=1 || true
+check "no VARROA_ASSISTANT_ENABLED in the masked default render" "$rc"
 rc=0; grep -q 'agentsessions' <<< "$MASKED" && rc=1 || true
 check "no agentsessions grant in the masked default render" "$rc"
 

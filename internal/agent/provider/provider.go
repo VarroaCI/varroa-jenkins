@@ -1,6 +1,6 @@
 // Package provider holds the model-provider contract of the agent runtime. An
 // adapter turns one Request into a stream of Deltas. The package also holds the
-// provider registry, the decoder of the assistant configuration, and the
+// provider registry, the validator of the assistant configuration, and the
 // key handling. A key reaches an adapter only through Key.SetHeader.
 package provider
 
@@ -18,9 +18,6 @@ const CallDeadline = 120 * time.Second
 
 // IdleLimit bounds the silence between two stream lines of one provider call.
 const IdleLimit = 60 * time.Second
-
-// ConfigEnv names the environment variable that holds the assistant config.
-const ConfigEnv = "VARROA_ASSISTANT_CONFIG"
 
 // DefaultKeyDir is the directory that holds one provider key file per provider.
 const DefaultKeyDir = "/etc/varroa/assistant"

@@ -1223,19 +1223,6 @@ type ComponentsSchemasAssistantError struct {
 // ComponentsSchemasAssistantErrorCode defines model for ComponentsSchemasAssistantError.Code.
 type ComponentsSchemasAssistantErrorCode string
 
-// ComponentsSchemasAssistantLimits defines model for components_schemas_AssistantLimits.
-type ComponentsSchemasAssistantLimits struct {
-	ApprovalExpiry *string `json:"approvalExpiry,omitempty"`
-	Budgets        *struct {
-		Session   *int64 `json:"session,omitempty"`
-		Steps     *int   `json:"steps,omitempty"`
-		TenantDay *int64 `json:"tenantDay,omitempty"`
-		UserDay   *int64 `json:"userDay,omitempty"`
-	} `json:"budgets,omitempty"`
-	Egress              *map[string]interface{} `json:"egress,omitempty"`
-	ExternalDataSharing *string                 `json:"externalDataSharing,omitempty"`
-}
-
 // ComponentsSchemasAssistantMessageRequest defines model for components_schemas_AssistantMessageRequest.
 type ComponentsSchemasAssistantMessageRequest struct {
 	Message string `json:"message"`
@@ -1348,9 +1335,6 @@ type ComponentsSchemasAssistantSessionList struct {
 
 // ComponentsSchemasAssistantSettings defines model for components_schemas_AssistantSettings.
 type ComponentsSchemasAssistantSettings struct {
-	DefaultModel      *string                                                         `json:"defaultModel,omitempty"`
-	DefaultProvider   *string                                                         `json:"defaultProvider,omitempty"`
-	Limits            *ComponentsSchemasAssistantLimits                               `json:"limits,omitempty"`
 	Paused            bool                                                            `json:"paused"`
 	PausedAt          *time.Time                                                      `json:"pausedAt"`
 	PausedBy          *string                                                         `json:"pausedBy,omitempty"`
@@ -1364,9 +1348,7 @@ type ComponentsSchemasAssistantSettingsTenantDataSharing string
 
 // ComponentsSchemasAssistantSettingsUpdate defines model for components_schemas_AssistantSettingsUpdate.
 type ComponentsSchemasAssistantSettingsUpdate struct {
-	DefaultModel      *string `json:"defaultModel,omitempty"`
-	DefaultProvider   *string `json:"defaultProvider,omitempty"`
-	Paused            *bool   `json:"paused,omitempty"`
+	Paused            *bool `json:"paused,omitempty"`
 	TenantDataSharing *struct {
 		Remove *string `json:"remove,omitempty"`
 		Set    *struct {

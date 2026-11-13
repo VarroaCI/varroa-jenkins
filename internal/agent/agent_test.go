@@ -58,7 +58,7 @@ func TestEnumerationsMatchRegistry(t *testing.T) {
 	check("EventTypes", EventTypes(), []string{"user", "assistant", "tool_call", "tool_result", "approval_requested", "approval_resolved", "error", "done"})
 	check("ApprovalStates", ApprovalStates(), []string{"pending", "approved", "denied", "expired"})
 	check("SkipReasons", SkipReasons(), []string{"budget_day", "kill_switch", "data_sharing_none", "provider_unavailable"})
-	check("ErrorCodes", ErrorCodes(), []string{"budget_session", "budget_day", "steps", "kill_switch", "provider_error", "session_key_missing", "lease_lost"})
+	check("ErrorCodes", ErrorCodes(), []string{"budget_session", "budget_day", "steps", "kill_switch", "provider_error", "session_key_missing", "lease_lost", "data_level_lowered", "data_level_unchecked"})
 	check("KeySources", KeySources(), []string{"chart", "user"})
 	check("TargetKinds", TargetKinds(), []string{"run", "job", "controller", "none"})
 	check("DataLevels", DataLevels(), []string{"none", "metadata", "logs"})

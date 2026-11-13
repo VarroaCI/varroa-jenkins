@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -129,4 +130,35 @@ func TestUpdateAssistantConfigToolRetriesOnConflict(t *testing.T) {
 	if len(op.puts) != 2 {
 		t.Fatalf("puts: %d, want 2 (one conflict, one retry)", len(op.puts))
 	}
+}
+
+// assertObjectText fails unless the text content is the AssistantConfig JSON
+// object, not a base64 string of it.
+func assertObjectText(t *testing.T, tr toolResult) {
+	t.Helper()
+	if tr.IsError {
+		t.Fatalf("tool failed: %s", toolText(tr))
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(toolText(tr)), &obj); err != nil {
+		t.Fatalf("text content is not a JSON object: %v: %q", err, toolText(tr))
+	}
+	if obj["kind"] != "AssistantConfig" {
+		t.Fatalf("kind = %v, want AssistantConfig", obj["kind"])
+	}
+}
+
+// TestGetAssistantConfigToolAnswersTheObject pins that the read answers the JSON object.
+func TestGetAssistantConfigToolAnswersTheObject(t *testing.T) {
+	deps := assistantConfigDeps(&fakeMCPAssistantOperator{stored: storedAssistantObject("3")})
+	assertObjectText(t, callToolAs(t, deps, mcpAdminClaims, "get_assistant_config", map[string]interface{}{}))
+}
+
+// TestUpdateAssistantConfigToolAnswersTheObject pins that the write reply is the JSON object.
+func TestUpdateAssistantConfigToolAnswersTheObject(t *testing.T) {
+	op := &fakeMCPAssistantOperator{stored: storedAssistantObject("1"), rv: 1}
+	deps := assistantConfigDeps(op)
+	assertObjectText(t, callToolAs(t, deps, mcpAdminClaims, "update_assistant_config", map[string]interface{}{
+		"object": `{"spec":{"budgets":{"session":300000}}}`,
+	}))
 }

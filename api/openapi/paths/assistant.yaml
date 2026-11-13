@@ -344,7 +344,7 @@
   get:
     operationId: getAssistantSettings
     tags: [Assistant]
-    summary: Returns the kill switch, and for an admin the defaults and limits.
+    summary: Returns the kill switch, and for an admin the tenant levels. The providers and limits come from GET /assistant/config.
     responses:
       "200":
         description: The global assistant settings.
@@ -365,7 +365,7 @@
   put:
     operationId: putAssistantSettings
     tags: [Assistant]
-    summary: Changes the kill switch, the defaults, or a tenant data level. Admin only.
+    summary: Changes the kill switch or a tenant data level. Admin only.
     requestBody:
       required: true
       content:

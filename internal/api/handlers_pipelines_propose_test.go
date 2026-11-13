@@ -18,6 +18,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/agent/prompts"
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
 	"github.com/varroaci/varroa-jenkins/internal/agent/store"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
@@ -343,7 +344,6 @@ func TestProposePipeline_UserProviderSetsLevelAndSession(t *testing.T) {
 		},
 		ExternalDataSharing: agent.DataNone,
 		Budgets:             provider.Budgets{Session: 100000, UserDay: 1000000, TenantDay: 1000000, Steps: 32},
-		ApprovalExpiryText:  "1h",
 		ApprovalExpiry:      time.Hour,
 	}
 	for _, tc := range []struct {
@@ -365,8 +365,7 @@ func TestProposePipeline_UserProviderSetsLevelAndSession(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		f.rt.Registry = reg
-		f.rt.Config = cfg
+		f.rt.Live = assistantconfig.NewLiveWith(&assistantconfig.Snapshot{Config: cfg, Registry: reg})
 		ext := "ext"
 		if _, err := f.mem.PutSettings(context.Background(), agent.UserScope(proposeWriter), store.SettingsPatch{Provider: &ext}, proposeWriter); err != nil {
 			t.Fatal(err)

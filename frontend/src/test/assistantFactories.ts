@@ -2,6 +2,7 @@
 import type {
   AssistantApproval,
   AssistantSession,
+  AssistantConfigObject,
   AssistantSettings,
   MyAssistant,
   RunNote,
@@ -73,16 +74,29 @@ export function createAssistantSettings(overrides: Partial<AssistantSettings> = 
     paused: false,
     pausedBy: null,
     pausedAt: null,
-    defaultProvider: "smoke",
-    defaultModel: "varroa-smoke",
     tenantDataSharing: {},
     updatedAt: "2026-10-18T10:00:00Z",
     updatedBy: "admin",
-    limits: {
-      budgets: { session: 50000, userDay: 200000, tenantDay: 500000, steps: 16 },
+    ...overrides,
+  };
+}
+
+/** createAssistantConfig is the AssistantConfig object with one listed provider. */
+export function createAssistantConfig(overrides: Partial<AssistantConfigObject> = {}): AssistantConfigObject {
+  return {
+    apiVersion: "varroa.dev/v1alpha1",
+    kind: "AssistantConfig",
+    metadata: { name: "varroa-assistant", resourceVersion: "7" },
+    spec: {
+      providers: [{
+        name: "smoke", kind: "openai-compatible", baseURL: "http://192.168.1.99:8082/v1",
+        models: ["varroa-smoke"], trust: "internal", auth: "none", cidrs: ["192.168.1.99/32"], port: 8082,
+      }],
+      defaultProvider: "smoke",
+      defaultModel: "varroa-smoke",
       externalDataSharing: "logs",
+      budgets: { session: 50000, userDay: 200000, tenantDay: 500000, steps: 16 },
       approvalExpiry: "1h",
-      egress: { networkPolicy: true, cidrs: ["192.168.1.99/32"], ports: [8082] },
     },
     ...overrides,
   };

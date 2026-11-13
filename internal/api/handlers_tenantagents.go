@@ -123,7 +123,7 @@ func (s *Server) tenantAgentWritableRef(claims *auth.Claims, refs []TenantRef) (
 func (s *Server) tenantAgentDayLimit(ta *v1alpha1.TenantAgent) int64 {
 	var limit int64
 	if rt := s.deps.Assistant; rt != nil {
-		limit = rt.Config.Budgets.TenantDay
+		limit = rt.snap().Config.Budgets.TenantDay
 	}
 	if ta.Spec.Budgets != nil && ta.Spec.Budgets.Day != nil && (limit == 0 || *ta.Spec.Budgets.Day < limit) {
 		limit = *ta.Spec.Budgets.Day
@@ -309,22 +309,21 @@ func (s *Server) handleTenantAgentCapabilities(w http.ResponseWriter, r *http.Re
 // tenantAgentLevel returns the effective data level of a Tenant agent session of
 // ta on tenant, as the create decision computes it.
 func (s *Server) tenantAgentLevel(rt *AssistantRuntime, ta *v1alpha1.TenantAgent, settings agent.Settings, tenant string) agent.DataSharing {
+	snap := rt.snap()
 	var trust agent.ProviderTrust
-	if rt.Registry != nil {
-		entry, ok := rt.Registry.Default()
-		if ta.Spec.Provider != "" {
-			entry, ok = rt.Registry.Get(ta.Spec.Provider)
-		}
-		if ok {
-			trust = entry.Endpoint.Trust
-		}
+	entry, ok := snap.Registry.Default()
+	if ta.Spec.Provider != "" {
+		entry, ok = snap.Registry.Get(ta.Spec.Provider)
+	}
+	if ok {
+		trust = entry.Endpoint.Trust
 	}
 	return datashare.Effective(datashare.Inputs{
 		User:            agent.DataSharing(ta.Spec.DataSharing),
 		Tenant:          tenant,
 		TenantLevels:    settings.TenantDataSharing,
 		Trust:           trust,
-		ExternalCeiling: rt.Config.ExternalDataSharing,
+		ExternalCeiling: snap.Config.ExternalDataSharing,
 	})
 }
 

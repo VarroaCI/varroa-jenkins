@@ -7620,22 +7620,6 @@ AssistantApprovalOutcome:
         content: {type: string}
         isError: {type: boolean}
 
-AssistantLimits:
-  type: object
-  properties:
-    budgets:
-      type: object
-      properties:
-        session: {type: integer, format: int64}
-        userDay: {type: integer, format: int64}
-        tenantDay: {type: integer, format: int64}
-        steps: {type: integer}
-    externalDataSharing: {type: string}
-    approvalExpiry: {type: string}
-    egress:
-      type: object
-      additionalProperties: true
-
 AssistantSettings:
   type: object
   required: [paused]
@@ -7643,22 +7627,16 @@ AssistantSettings:
     paused: {type: boolean}
     pausedBy: {type: string}
     pausedAt: {type: string, format: date-time, nullable: true}
-    defaultProvider: {type: string}
-    defaultModel: {type: string}
     tenantDataSharing:
       type: object
       additionalProperties: {type: string, enum: [none, metadata, logs]}
     updatedAt: {type: string, format: date-time}
     updatedBy: {type: string}
-    limits:
-      $ref: '#/AssistantLimits'
 
 AssistantSettingsUpdate:
   type: object
   properties:
     paused: {type: boolean}
-    defaultProvider: {type: string}
-    defaultModel: {type: string}
     tenantDataSharing:
       type: object
       properties:

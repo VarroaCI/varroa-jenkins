@@ -646,12 +646,12 @@ func testSettingsPerFieldWrite(t *testing.T, f factory) {
 	if !st.Paused || st.PausedBy != "ops" || st.PausedAt == nil {
 		t.Fatalf("paused settings = %+v", st)
 	}
-	model := "m2"
-	st, err = s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{DefaultModel: &model}, "ops")
+	tenant := agent.TenantLevel{Tenant: "acme", Level: agent.DataMetadata}
+	st, err = s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{TenantSet: &tenant}, "ops")
 	if err != nil {
-		t.Fatalf("PutSettings model: %v", err)
+		t.Fatalf("PutSettings tenant: %v", err)
 	}
-	if !st.Paused || st.DefaultModel != "m2" {
+	if !st.Paused || st.TenantDataSharing["acme"] != agent.DataMetadata {
 		t.Fatalf("a second field write changed the first: %+v", st)
 	}
 	if _, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{Enabled: &paused}, "ops"); !errors.Is(err, ErrInvalid) {
@@ -713,29 +713,29 @@ func testSettingsCheckSeesMergedState(t *testing.T, f factory) {
 	clock := newTestClock()
 	s := f(t, Options{Now: clock.Now})
 	ctx := context.Background()
-	alpha, a1 := "alpha", "a1"
-	if _, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{DefaultProvider: &alpha, DefaultModel: &a1}, "ops"); err != nil {
+	paused := true
+	if _, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{Paused: &paused}, "ops"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	b1 := "b1"
+	tenant := agent.TenantLevel{Tenant: "acme", Level: agent.DataMetadata}
 	var seen agent.Settings
 	_, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{
-		DefaultModel: &b1,
+		TenantSet: &tenant,
 		Check: func(after agent.Settings) error {
 			seen = after
 			return nil
 		},
 	}, "ops")
 	if err != nil {
-		t.Fatalf("put model: %v", err)
+		t.Fatalf("put tenant: %v", err)
 	}
-	if seen.DefaultProvider != "alpha" || seen.DefaultModel != "b1" {
-		t.Fatalf("check saw %s/%s, want alpha/b1", seen.DefaultProvider, seen.DefaultModel)
+	if !seen.Paused || seen.TenantDataSharing["acme"] != agent.DataMetadata {
+		t.Fatalf("check saw %+v, want paused with acme set", seen)
 	}
-	beta := "beta"
+	resume := false
 	_, err = s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{
-		DefaultProvider: &beta,
-		Check:           func(agent.Settings) error { return errRefused },
+		Paused: &resume,
+		Check:  func(agent.Settings) error { return errRefused },
 	}, "ops")
 	if !errors.Is(err, errRefused) {
 		t.Fatalf("refused put = %v, want errRefused", err)
@@ -744,8 +744,8 @@ func testSettingsCheckSeesMergedState(t *testing.T, f factory) {
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}
-	if st.DefaultProvider != "alpha" || st.DefaultModel != "b1" {
-		t.Fatalf("refused write changed the scope: %s/%s", st.DefaultProvider, st.DefaultModel)
+	if !st.Paused {
+		t.Fatalf("refused write changed the scope: %+v", st)
 	}
 }
 
@@ -776,19 +776,15 @@ func testSettingsCheckSerializesWriters(t *testing.T, f factory) {
 	clock := newTestClock()
 	s := f(t, Options{Now: clock.Now})
 	ctx := context.Background()
-	alpha, a1 := "alpha", "a1"
-	if _, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{DefaultProvider: &alpha, DefaultModel: &a1}, "ops"); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
 	t.Cleanup(unblock)
-	empty := ""
+	paused := true
 	doneB := make(chan error, 1)
 	go func() {
-		_, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{DefaultProvider: &empty, DefaultModel: &empty,
+		_, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{Paused: &paused,
 			Check: func(agent.Settings) error {
 				close(entered)
 				<-release
@@ -798,12 +794,11 @@ func testSettingsCheckSerializesWriters(t *testing.T, f factory) {
 	}()
 	<-entered
 
-	onlyModel := "a1"
 	doneA := make(chan error, 1)
 	go func() {
-		_, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{DefaultModel: &onlyModel,
+		_, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{TenantSet: &agent.TenantLevel{Tenant: "acme", Level: agent.DataMetadata},
 			Check: func(a agent.Settings) error {
-				if a.DefaultModel != "" && a.DefaultProvider == "" {
+				if a.Paused {
 					return errRefused
 				}
 				return nil
@@ -826,8 +821,8 @@ func testSettingsCheckSerializesWriters(t *testing.T, f factory) {
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}
-	if st.DefaultProvider != "" || st.DefaultModel != "" {
-		t.Fatalf("stored pair = %q/%q, want empty", st.DefaultProvider, st.DefaultModel)
+	if !st.Paused {
+		t.Fatalf("the refused second writer changed the stored pause: %+v", st)
 	}
 }
 

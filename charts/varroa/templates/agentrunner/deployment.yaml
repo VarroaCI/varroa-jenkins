@@ -49,8 +49,8 @@ spec:
               value: {{ .Values.cluster.name | quote }}
             - name: VARROA_BFF_URL
               value: {{ printf "http://%s:8080" (include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff")) | quote }}
-            - name: VARROA_ASSISTANT_CONFIG
-              value: {{ include "varroa.assistant.config" . | quote }}
+            - name: VARROA_ASSISTANT_ENABLED
+              value: "true"
             - name: VARROA_RECORDSTORE_DSN
               valueFrom:
                 secretKeyRef:
@@ -79,12 +79,10 @@ spec:
             - name: tenant-agent-key
               mountPath: /etc/varroa/tenant-agent-key
               readOnly: true
-{{- range $i, $p := .Values.assistant.providers }}
-{{- if $p.secretRef }}
-            - name: assistant-key-{{ $i }}
-              mountPath: /etc/varroa/assistant/{{ $p.name }}
+{{- if .Values.assistant.enabled }}
+            - name: assistant-keys
+              mountPath: /etc/varroa/assistant
               readOnly: true
-{{- end }}
 {{- end }}
             - name: tmp
               mountPath: /tmp
@@ -119,16 +117,11 @@ spec:
             items:
               - key: key
                 path: key
-{{- range $i, $p := .Values.assistant.providers }}
-{{- if $p.secretRef }}
-        - name: assistant-key-{{ $i }}
+{{- if .Values.assistant.enabled }}
+        - name: assistant-keys
           secret:
-            secretName: {{ $p.secretRef }}
+            secretName: varroa-assistant-keys
             optional: true
-            items:
-              - key: apiKey
-                path: apiKey
-{{- end }}
 {{- end }}
         - name: tmp
           emptyDir: {}

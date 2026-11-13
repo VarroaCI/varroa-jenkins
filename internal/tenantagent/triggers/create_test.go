@@ -15,11 +15,10 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/agent"
-	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider/factories"
 	agentstore "github.com/varroaci/varroa-jenkins/internal/agent/store"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
-	"github.com/varroaci/varroa-jenkins/internal/tenantagent/config"
 	tenantstore "github.com/varroaci/varroa-jenkins/internal/tenantagent/store"
 )
 
@@ -76,23 +75,23 @@ func testCreator(t *testing.T, paused bool) *Creator {
 		t.Fatalf("agent store: %v", err)
 	}
 	t.Cleanup(st.Close)
-	raw := []byte(`{"providers":[{"name":"local","kind":"openai-compatible","baseURL":"http://127.0.0.1:1/v1",` +
-		`"models":["m1"],"trust":"internal","default":true,"hasSecret":false}],` +
-		`"externalDataSharing":"logs","budgets":{"session":1000,"userDay":1000,"tenantDay":1000000,"steps":4},` +
-		`"approvalExpiry":"24h"}`)
-	pc, err := provider.Decode(raw)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	reg, err := provider.NewRegistry(pc, factories.DefaultFactories(), t.TempDir())
-	if err != nil {
-		t.Fatalf("registry: %v", err)
+	snap := assistantconfig.Build(&v1alpha1.AssistantConfig{Spec: v1alpha1.AssistantConfigSpec{
+		Providers: []v1alpha1.AssistantProvider{{
+			Name: "local", Kind: v1alpha1.AssistantProviderKindOpenAICompatible, BaseURL: "http://127.0.0.1:1/v1",
+			Models: []string{"m1"}, Trust: v1alpha1.AssistantTrustInternal, Auth: v1alpha1.AssistantAuthNone,
+		}},
+		DefaultProvider:     "local",
+		ExternalDataSharing: "logs",
+		Budgets:             v1alpha1.AssistantBudgets{Session: 1000, UserDay: 1000, TenantDay: 1000000, Steps: 4},
+		ApprovalExpiry:      "24h",
+	}}, factories.DefaultFactories(), t.TempDir())
+	if snap.Err != nil {
+		t.Fatalf("snapshot: %v", snap.Err)
 	}
 	return &Creator{
-		Store:    st,
-		Tenants:  tenantstore.New(pool, nil),
-		Cfg:      config.Config{Assistant: pc},
-		Registry: reg,
+		Store:   st,
+		Tenants: tenantstore.New(pool, nil),
+		Live:    assistantconfig.NewLiveWith(snap),
 		Settings: func(context.Context) (agent.Settings, error) {
 			return agent.Settings{Paused: paused}, nil
 		},
@@ -110,6 +109,34 @@ func testFor(eventKey string, _ *v1alpha1.TenantAgent) Match {
 		ItemKey:  "obj/build",
 		EventKey: eventKey,
 		Event:    rowOf("build.failed", "obj/build", "core"),
+	}
+}
+
+// TestCreatorUsesConfigDefaultModel proves that a session with no model of its
+// own takes the default model of the snapshot, not the first listed model.
+func TestCreatorUsesConfigDefaultModel(t *testing.T) {
+	c := testCreator(t, false)
+	snap := assistantconfig.Build(&v1alpha1.AssistantConfig{Spec: v1alpha1.AssistantConfigSpec{
+		Providers: []v1alpha1.AssistantProvider{{
+			Name: "local", Kind: v1alpha1.AssistantProviderKindOpenAICompatible, BaseURL: "http://127.0.0.1:1/v1",
+			Models: []string{"m1", "m2"}, Trust: v1alpha1.AssistantTrustInternal, Auth: v1alpha1.AssistantAuthNone,
+		}},
+		DefaultProvider:     "local",
+		DefaultModel:        "m2",
+		ExternalDataSharing: "logs",
+		Budgets:             v1alpha1.AssistantBudgets{Session: 1000, UserDay: 1000, TenantDay: 1000000, Steps: 4},
+		ApprovalExpiry:      "24h",
+	}}, factories.DefaultFactories(), t.TempDir())
+	if snap.Err != nil {
+		t.Fatalf("snapshot: %v", snap.Err)
+	}
+	c.Live = assistantconfig.NewLiveWith(snap)
+	s, out, err := c.Create(context.Background(), testFor("model-default", nil))
+	if err != nil || out != Created {
+		t.Fatalf("Create = %v, %v", out, err)
+	}
+	if s.Model != "m2" {
+		t.Fatalf("session model = %q, want the default m2", s.Model)
 	}
 }
 

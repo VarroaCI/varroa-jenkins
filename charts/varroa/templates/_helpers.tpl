@@ -352,19 +352,6 @@ imagePullSecrets:
 {{- end -}}
 
 {{/*
-Assistant configuration that the BFF reads from VARROA_ASSISTANT_CONFIG.
-Each provider carries hasSecret in place of its Secret name, so no Secret
-name reaches the environment.
-*/}}
-{{- define "varroa.assistant.config" -}}
-{{- $providers := list -}}
-{{- range .Values.assistant.providers -}}
-{{- $providers = append $providers (dict "name" .name "kind" .kind "baseURL" (default "" .baseURL) "models" .models "trust" .trust "default" (default false .default) "hasSecret" (not (empty .secretRef))) -}}
-{{- end -}}
-{{- dict "providers" $providers "externalDataSharing" .Values.assistant.externalDataSharing "budgets" .Values.assistant.budgets "approvalExpiry" .Values.assistant.approvalExpiry "egress" (dict "networkPolicy" .Values.networkPolicy.enabled "cidrs" (default list .Values.networkPolicy.assistantEgress.cidrs) "ports" (default list .Values.networkPolicy.assistantEgress.ports)) | toJson -}}
-{{- end -}}
-
-{{/*
 Assistant model-provider egress rule. Renders nothing unless the assistant is
 enabled and assistantEgress.cidrs is non-empty. The guard fails the render
 for an enabled assistant with an empty list.

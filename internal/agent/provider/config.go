@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -11,15 +10,15 @@ import (
 )
 
 // Endpoint describes one configured provider. The secret itself is never in
-// the config. HasSecret says that a key file exists for the provider.
+// the config. KeyRequired says that the provider reads a key file.
 type Endpoint struct {
-	Name      string              `json:"name"`
-	Kind      agent.ProviderKind  `json:"kind"`
-	BaseURL   string              `json:"baseURL"`
-	Models    []string            `json:"models"`
-	Trust     agent.ProviderTrust `json:"trust"`
-	Default   bool                `json:"default"`
-	HasSecret bool                `json:"hasSecret"`
+	Name        string              `json:"name"`
+	Kind        agent.ProviderKind  `json:"kind"`
+	BaseURL     string              `json:"baseURL"`
+	Models      []string            `json:"models"`
+	Trust       agent.ProviderTrust `json:"trust"`
+	Default     bool                `json:"default"`
+	KeyRequired bool                `json:"keyRequired"`
 }
 
 // DefaultModel returns the first model of the endpoint.
@@ -38,91 +37,110 @@ type Budgets struct {
 	Steps     int   `json:"steps"`
 }
 
-// Egress describes the network path of the assistant.
-type Egress struct {
-	NetworkPolicy bool     `json:"networkPolicy"`
-	CIDRs         []string `json:"cidrs"`
-	Ports         []int    `json:"ports"`
-}
-
-// Config is the decoded assistant configuration.
+// Config is the assistant configuration that the runtime reads. It is built
+// from an AssistantConfig object and checked by Validate.
 type Config struct {
 	Providers           []Endpoint        `json:"providers"`
+	DefaultProvider     string            `json:"defaultProvider"`
+	DefaultModel        string            `json:"defaultModel"`
 	ExternalDataSharing agent.DataSharing `json:"externalDataSharing"`
 	Budgets             Budgets           `json:"budgets"`
-	ApprovalExpiryText  string            `json:"approvalExpiry"`
-	ApprovalExpiry      time.Duration     `json:"-"`
-	Egress              Egress            `json:"egress"`
+	ApprovalExpiry      time.Duration     `json:"approvalExpiry"`
 }
 
-var (
-	endpointNameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
-	expiryRE       = regexp.MustCompile(`^[1-9][0-9]*(m|h)$`)
-)
+var endpointNameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 
-// Decode reads and checks the assistant configuration. Each rule has its own
-// error that names the field. Unknown JSON keys are accepted.
-func Decode(raw []byte) (Config, error) {
-	var c Config
-	if err := json.Unmarshal(raw, &c); err != nil {
-		return Config{}, fmt.Errorf("assistant config: %w", err)
-	}
+// Validate checks a configuration. Each rule has its own error that names the
+// field. An empty provider list is valid, and then the runtime has no
+// providers.
+func Validate(c *Config) error {
 	seen := map[string]bool{}
 	defaults := 0
 	for i, e := range c.Providers {
 		if !endpointNameRE.MatchString(e.Name) {
-			return Config{}, fmt.Errorf("assistant config: providers[%d].name %q is not a valid name", i, e.Name)
+			return fmt.Errorf("assistant config: providers[%d].name %q is not a valid name", i, e.Name)
 		}
 		if seen[e.Name] {
-			return Config{}, fmt.Errorf("assistant config: providers[%d].name %q is not unique", i, e.Name)
+			return fmt.Errorf("assistant config: providers[%d].name %q is not unique", i, e.Name)
 		}
 		seen[e.Name] = true
 		if !containsKind(e.Kind) {
-			return Config{}, fmt.Errorf("assistant config: providers[%d].kind %q is not valid", i, e.Kind)
+			return fmt.Errorf("assistant config: providers[%d].kind %q is not valid", i, e.Kind)
 		}
 		if !containsTrust(e.Trust) {
-			return Config{}, fmt.Errorf("assistant config: providers[%d].trust %q is not valid", i, e.Trust)
+			return fmt.Errorf("assistant config: providers[%d].trust %q is not valid", i, e.Trust)
 		}
 		if e.Kind == agent.ProviderOpenAICompatible && e.BaseURL == "" {
-			return Config{}, fmt.Errorf("assistant config: providers[%d].baseURL is required for openai-compatible", i)
+			return fmt.Errorf("assistant config: providers[%d].baseURL is required for openai-compatible", i)
 		}
 		if e.BaseURL != "" && !strings.HasPrefix(e.BaseURL, "http://") && !strings.HasPrefix(e.BaseURL, "https://") {
-			return Config{}, fmt.Errorf("assistant config: providers[%d].baseURL must start with http:// or https://", i)
+			return fmt.Errorf("assistant config: providers[%d].baseURL must start with http:// or https://", i)
 		}
 		if len(e.Models) == 0 {
-			return Config{}, fmt.Errorf("assistant config: providers[%d].models is empty", i)
+			return fmt.Errorf("assistant config: providers[%d].models is empty", i)
 		}
 		if e.Default {
 			defaults++
 		}
 	}
 	if len(c.Providers) > 0 && defaults != 1 {
-		return Config{}, fmt.Errorf("assistant config: exactly one provider must be default, found %d", defaults)
+		return fmt.Errorf("assistant config: exactly one provider must be the default, found %d", defaults)
 	}
-	if len(c.Providers) > 0 && !c.ExternalDataSharing.Valid() {
-		return Config{}, fmt.Errorf("assistant config: externalDataSharing %q is not valid", c.ExternalDataSharing)
+	if len(c.Providers) == 0 && c.DefaultProvider != "" {
+		return fmt.Errorf("assistant config: defaultProvider %q names no provider", c.DefaultProvider)
+	}
+	if c.DefaultModel != "" && !listsModel(c, c.DefaultProvider, c.DefaultModel) {
+		return fmt.Errorf("assistant config: defaultModel %q is not listed for provider %q", c.DefaultModel, c.DefaultProvider)
+	}
+	if !c.ExternalDataSharing.Valid() {
+		return fmt.Errorf("assistant config: externalDataSharing %q is not valid", c.ExternalDataSharing)
 	}
 	if c.Budgets.Session <= 0 {
-		return Config{}, fmt.Errorf("assistant config: budgets.session must be above zero")
+		return fmt.Errorf("assistant config: budgets.session must be above zero")
 	}
 	if c.Budgets.UserDay <= 0 {
-		return Config{}, fmt.Errorf("assistant config: budgets.userDay must be above zero")
+		return fmt.Errorf("assistant config: budgets.userDay must be above zero")
 	}
 	if c.Budgets.TenantDay <= 0 {
-		return Config{}, fmt.Errorf("assistant config: budgets.tenantDay must be above zero")
+		return fmt.Errorf("assistant config: budgets.tenantDay must be above zero")
 	}
 	if c.Budgets.Steps <= 0 {
-		return Config{}, fmt.Errorf("assistant config: budgets.steps must be above zero")
+		return fmt.Errorf("assistant config: budgets.steps must be above zero")
 	}
-	if !expiryRE.MatchString(c.ApprovalExpiryText) {
-		return Config{}, fmt.Errorf("assistant config: approvalExpiry %q must match a number with m or h", c.ApprovalExpiryText)
+	if c.ApprovalExpiry <= 0 {
+		return fmt.Errorf("assistant config: approvalExpiry must be above zero")
 	}
-	d, err := time.ParseDuration(c.ApprovalExpiryText)
-	if err != nil {
-		return Config{}, fmt.Errorf("assistant config: approvalExpiry %q: %w", c.ApprovalExpiryText, err)
+	return nil
+}
+
+// ModelFor returns the model a session uses on a provider. The default
+// provider uses the configured default model. Any other provider uses its
+// first listed model.
+func (c Config) ModelFor(name string) string {
+	for _, e := range c.Providers {
+		if e.Name != name {
+			continue
+		}
+		if e.Name == c.DefaultProvider && c.DefaultModel != "" {
+			return c.DefaultModel
+		}
+		return e.DefaultModel()
 	}
-	c.ApprovalExpiry = d
-	return c, nil
+	return ""
+}
+
+func listsModel(c *Config, name, model string) bool {
+	for _, e := range c.Providers {
+		if e.Name != name {
+			continue
+		}
+		for _, m := range e.Models {
+			if m == model {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func containsKind(k agent.ProviderKind) bool {

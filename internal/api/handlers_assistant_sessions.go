@@ -16,6 +16,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/agent/prompts"
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
 	"github.com/varroaci/varroa-jenkins/internal/agent/store"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 )
 
@@ -72,7 +73,7 @@ type sessionStart struct {
 // startAssistantSession creates a session for the caller. It answers a
 // *assistantFail for every refusal. A skipped session is stored and not run.
 // A running session starts its loop after its creation event.
-func (s *Server) startAssistantSession(ctx context.Context, rt *AssistantRuntime, claims *auth.Claims, req assistantStartRequest, sealed string) (agent.Session, error) {
+func (s *Server) startAssistantSession(ctx context.Context, rt *AssistantRuntime, snap *assistantconfig.Snapshot, claims *auth.Claims, req assistantStartRequest, sealed string) (agent.Session, error) {
 	if (req.Message == "") == (req.Prompt == "") {
 		return agent.Session{}, failWith(http.StatusBadRequest, "", "send either a message or a prompt")
 	}
@@ -92,13 +93,13 @@ func (s *Server) startAssistantSession(ctx context.Context, rt *AssistantRuntime
 		first = p.Text
 		values[agent.CtxPrompt] = p.ID
 	}
-	return s.createAssistantSession(ctx, rt, claims, sessionStart{Values: values, First: first, Provider: req.Provider, Model: req.Model}, sealed)
+	return s.createAssistantSession(ctx, rt, snap, claims, sessionStart{Values: values, First: first, Provider: req.Provider, Model: req.Model}, sealed)
 }
 
 // createAssistantSession applies the start rules to a validated start: the
 // user switch, the busy cap, the context, the provider, the data level, and
 // the skip decision. It stores the session and starts its loop.
-func (s *Server) createAssistantSession(ctx context.Context, rt *AssistantRuntime, claims *auth.Claims, st sessionStart, sealed string) (agent.Session, error) {
+func (s *Server) createAssistantSession(ctx context.Context, rt *AssistantRuntime, snap *assistantconfig.Snapshot, claims *auth.Claims, st sessionStart, sealed string) (agent.Session, error) {
 	sub := claims.Subject
 	user, err := rt.Store.GetSettings(ctx, agent.UserScope(sub))
 	if err != nil {
@@ -124,7 +125,7 @@ func (s *Server) createAssistantSession(ctx context.Context, rt *AssistantRuntim
 	if err != nil {
 		return agent.Session{}, err
 	}
-	name, model, entry, err := rt.chooseProvider(st.Provider, st.Model, user, global)
+	name, model, entry, err := rt.chooseProvider(snap, st.Provider, st.Model, user)
 	if err != nil {
 		return agent.Session{}, err
 	}
@@ -138,21 +139,21 @@ func (s *Server) createAssistantSession(ctx context.Context, rt *AssistantRuntim
 				key, keySource, available = k, agent.KeySourceUser, true
 			}
 		}
-		if !available && rt.Registry.Available(name) {
-			if k, err := rt.Registry.LoadKey(name); err == nil {
+		if !available && snap.Registry.Available(name) {
+			if k, err := snap.Registry.LoadKey(name); err == nil {
 				key, available = k, true
 			}
 		}
 	}
 
-	level := rt.sessionLevel(user, global, tenant, entry)
+	level := sessionLevel(snap, user, global, tenant, entry)
 
 	day, err := rt.Store.DaySpend(ctx, sub)
 	if err != nil {
 		return agent.Session{}, err
 	}
 	skip, start := agent.DecideCreate(agent.CreateInput{
-		Paused: global.Paused, DayTotal: day, DayLimit: rt.Config.Budgets.UserDay,
+		Paused: global.Paused, DayTotal: day, DayLimit: snap.Config.Budgets.UserDay,
 		DataLevel: level, ProviderAvailable: available,
 	})
 
@@ -186,14 +187,14 @@ func (s *Server) createAssistantSession(ctx context.Context, rt *AssistantRuntim
 	if err != nil {
 		return agent.Session{}, err
 	}
-	rt.startRun(rt.RunConfig(claims, created, key, assistantTenantLookup{s: s, claims: claims}), loop.TriggerStart)
+	rt.startRun(rt.RunConfig(snap, claims, created, key, assistantTenantLookup{s: s, claims: claims}), loop.TriggerStart)
 	return created, nil
 }
 
 // sessionLevel is the effective data level of a session of the user, for the
 // tenant and the provider entry (nil when no provider is configured). The
 // route and the session start share this rule.
-func (rt *AssistantRuntime) sessionLevel(user, global agent.Settings, tenant string, entry *provider.Entry) agent.DataSharing {
+func sessionLevel(snap *assistantconfig.Snapshot, user, global agent.Settings, tenant string, entry *provider.Entry) agent.DataSharing {
 	userLevel := user.DataSharing
 	if !userLevel.Valid() {
 		userLevel = agent.DataLogs
@@ -204,7 +205,7 @@ func (rt *AssistantRuntime) sessionLevel(user, global agent.Settings, tenant str
 	}
 	return datashare.Effective(datashare.Inputs{
 		User: userLevel, Tenant: tenant, TenantLevels: global.TenantDataSharing,
-		Trust: trust, ExternalCeiling: rt.Config.ExternalDataSharing,
+		Trust: trust, ExternalCeiling: snap.Config.ExternalDataSharing,
 	})
 }
 
@@ -252,28 +253,25 @@ func (s *Server) assistantContext(ctx context.Context, claims *auth.Claims, valu
 
 // chooseProvider picks the provider and model of a new session. A provider
 // named in the request must exist. Otherwise the first known of the user
-// setting, the global default, and the registry default applies. The entry
+// setting, the snapshot default, and the registry default applies. The entry
 // may be nil.
-func (rt *AssistantRuntime) chooseProvider(reqProvider, reqModel string, user, global agent.Settings) (string, string, *provider.Entry, error) {
-	if rt.Registry == nil {
-		return "", "", nil, nil
-	}
+func (rt *AssistantRuntime) chooseProvider(snap *assistantconfig.Snapshot, reqProvider, reqModel string, user agent.Settings) (string, string, *provider.Entry, error) {
 	var entry provider.Entry
 	var ok bool
 	if reqProvider != "" {
-		entry, ok = rt.Registry.Get(reqProvider)
+		entry, ok = snap.Registry.Get(reqProvider)
 		if !ok {
 			return "", "", nil, failWith(http.StatusBadRequest, "", "unknown provider")
 		}
 	}
 	if !ok && user.Provider != "" {
-		entry, ok = rt.Registry.Get(user.Provider)
+		entry, ok = snap.Registry.Get(user.Provider)
 	}
-	if !ok && global.DefaultProvider != "" {
-		entry, ok = rt.Registry.Get(global.DefaultProvider)
+	if !ok && snap.Config.DefaultProvider != "" {
+		entry, ok = snap.Registry.Get(snap.Config.DefaultProvider)
 	}
 	if !ok {
-		entry, ok = rt.Registry.Default()
+		entry, ok = snap.Registry.Default()
 		if !ok {
 			return "", "", nil, nil
 		}
@@ -281,13 +279,10 @@ func (rt *AssistantRuntime) chooseProvider(reqProvider, reqModel string, user, g
 	name := entry.Endpoint.Name
 	model := reqModel
 	if model == "" {
-		switch {
-		case user.Provider == name && user.Model != "":
+		if user.Provider == name && user.Model != "" {
 			model = user.Model
-		case global.DefaultProvider == name && global.DefaultModel != "":
-			model = global.DefaultModel
-		default:
-			model = entry.Endpoint.DefaultModel()
+		} else {
+			model = snap.Config.ModelFor(name)
 		}
 	}
 	if !assistantContains(entry.Endpoint.Models, model) {
@@ -328,7 +323,7 @@ func (s *Server) handleCreateAssistantSession(w http.ResponseWriter, r *http.Req
 	if c, err := r.Cookie(AssistantKeyCookie); err == nil {
 		sealed = c.Value
 	}
-	sess, err := s.startAssistantSession(r.Context(), rt, claims, req, sealed)
+	sess, err := s.startAssistantSession(r.Context(), rt, rt.snap(), claims, req, sealed)
 	if err != nil {
 		s.writeAssistantStartError(w, err)
 		return
@@ -512,11 +507,21 @@ func (s *Server) handlePostAssistantMessage(w http.ResponseWriter, r *http.Reque
 		writeAssistantError(s, w, http.StatusConflict, assistantErrBusy, "the session is not waiting for a message")
 		return
 	}
-	if sess.Tokens() >= rt.Config.Budgets.Session {
+	snap := rt.snap()
+	if sess.Tokens() >= snap.Config.Budgets.Session {
 		writeAssistantError(s, w, http.StatusConflict, assistantErrBusy, "the session token budget is spent")
 		return
 	}
-	key, serr := s.sessionKey(r, rt, sess)
+	lowered, err := rt.levelLowered(r.Context(), snap, sess)
+	if err != nil {
+		s.assistantStoreError(w, err)
+		return
+	}
+	if lowered {
+		writeAssistantError(s, w, http.StatusConflict, assistantErrDataLevel, "the data level of this session is lower now. Start a new conversation.")
+		return
+	}
+	key, serr := s.sessionKey(r, rt, snap, sess)
 	if serr != nil {
 		writeAssistantError(s, w, http.StatusConflict, assistantErrKeyUnavail, "the provider key is not available")
 		return
@@ -536,13 +541,13 @@ func (s *Server) handlePostAssistantMessage(w http.ResponseWriter, r *http.Reque
 	}
 	sess.State = agent.StateRunning
 	sess.LeaseOwner = rt.Owner
-	rt.startRun(rt.RunConfig(claims, sess, key, assistantTenantLookup{s: s, claims: claims}), loop.TriggerMessage)
+	rt.startRun(rt.RunConfig(snap, claims, sess, key, assistantTenantLookup{s: s, claims: claims}), loop.TriggerMessage)
 	s.writeJSON(w, http.StatusAccepted, map[string]string{"state": string(agent.StateRunning)})
 }
 
 // sessionKey returns the provider key a session needs. A user-key session
 // reads its sealed cookie, and a chart-key session reads the key file.
-func (s *Server) sessionKey(r *http.Request, rt *AssistantRuntime, sess agent.Session) (provider.Key, error) {
+func (s *Server) sessionKey(r *http.Request, rt *AssistantRuntime, snap *assistantconfig.Snapshot, sess agent.Session) (provider.Key, error) {
 	claims := auth.ClaimsFromContext(r.Context())
 	if sess.KeySource == agent.KeySourceUser {
 		c, err := r.Cookie(AssistantKeyCookie)
@@ -555,7 +560,7 @@ func (s *Server) sessionKey(r *http.Request, rt *AssistantRuntime, sess agent.Se
 		}
 		return k, nil
 	}
-	return rt.Registry.LoadKey(sess.Provider)
+	return snap.Registry.LoadKey(sess.Provider)
 }
 
 // handleCancelAssistantSession serves POST /assistant/sessions/{id}/cancel.
@@ -584,4 +589,25 @@ func (s *Server) handleCancelAssistantSession(w http.ResponseWriter, r *http.Req
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// levelLowered reports whether the data level a session of its principal would
+// have now, under snap, is below the level the session started with. A
+// continuation of such a session would send data that the current settings
+// forbid.
+func (rt *AssistantRuntime) levelLowered(ctx context.Context, snap *assistantconfig.Snapshot, sess agent.Session) (bool, error) {
+	user, err := rt.Store.GetSettings(ctx, agent.UserScope(sess.Principal))
+	if err != nil {
+		return false, err
+	}
+	global, err := rt.Store.GetSettings(ctx, agent.ScopeGlobal)
+	if err != nil {
+		return false, err
+	}
+	var entry *provider.Entry
+	if e, ok := snap.Registry.Get(sess.Provider); ok {
+		entry = &e
+	}
+	now := sessionLevel(snap, user, global, sess.Tenant, entry)
+	return datashare.Rank(now) < datashare.Rank(sess.DataSharing), nil
 }

@@ -12,9 +12,10 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/agent"
+	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
 	"github.com/varroaci/varroa-jenkins/internal/tenantagent/accept"
-	"github.com/varroaci/varroa-jenkins/internal/tenantagent/config"
 	tenantstore "github.com/varroaci/varroa-jenkins/internal/tenantagent/store"
 )
 
@@ -125,7 +126,7 @@ func baseTicker(src *fakeSource, relay *fakeRelay, out *fakeWriter, now *time.Ti
 		Spend:     fakeSpend{},
 		Settings:  func(context.Context) (agent.Settings, error) { return agent.Settings{}, nil },
 		Placement: func(string) (string, bool) { return "core", true },
-		Cfg:       testCfg(),
+		Live:      testLive(),
 		Relay:     relay,
 		Cluster:   "core",
 		Now:       func() time.Time { return *now },
@@ -199,7 +200,7 @@ func TestConditions_Reasons(t *testing.T) {
 			if c.mut != nil {
 				c.mut(&cur, &in, &settings)
 			}
-			reason, _ := tk.pausedReason(&cur, c.v, in, settings, c.spend)
+			reason, _ := tk.pausedReason(&cur, c.v, in, settings, c.spend, tk.Live.Load())
 			if reason != c.reason {
 				t.Fatalf("paused reason = %s, want %s", reason, c.reason)
 			}
@@ -312,8 +313,12 @@ func TestTicker_WritesOnlyOnChange(t *testing.T) {
 	}
 }
 
-func testCfg() config.Config {
-	var cfg config.Config
-	cfg.Assistant.Budgets.TenantDay = 1000000
-	return cfg
+// testLive holds a snapshot with the day budget of the tests and no providers.
+func testLive() *assistantconfig.Live {
+	reg, err := provider.NewRegistry(provider.Config{}, nil, "")
+	if err != nil {
+		panic(err)
+	}
+	cfg := provider.Config{Budgets: provider.Budgets{TenantDay: 1000000}}
+	return assistantconfig.NewLiveWith(&assistantconfig.Snapshot{Config: cfg, Registry: reg})
 }

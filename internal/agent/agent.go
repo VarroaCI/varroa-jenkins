@@ -78,7 +78,11 @@ const (
 	CodeKillSwitch        ErrorCode = "kill_switch"
 	CodeProviderError     ErrorCode = "provider_error"
 	CodeSessionKeyMissing ErrorCode = "session_key_missing"
-	CodeLeaseLost         ErrorCode = "lease_lost"
+	// CodeDataLevelLowered ends a session whose data level dropped below the level it started with.
+	CodeDataLevelLowered ErrorCode = "data_level_lowered"
+	// CodeDataLevelUnchecked ends a session whose data level could not be read. No provider call ran.
+	CodeDataLevelUnchecked ErrorCode = "data_level_unchecked"
+	CodeLeaseLost          ErrorCode = "lease_lost"
 )
 
 // KeySource says where a session's provider key came from.
@@ -221,7 +225,7 @@ func SkipReasons() []SkipReason {
 // ErrorCodes lists every error code in registry order.
 func ErrorCodes() []ErrorCode {
 	return []ErrorCode{CodeBudgetSession, CodeBudgetDay, CodeSteps, CodeKillSwitch,
-		CodeProviderError, CodeSessionKeyMissing, CodeLeaseLost}
+		CodeProviderError, CodeSessionKeyMissing, CodeLeaseLost, CodeDataLevelLowered, CodeDataLevelUnchecked}
 }
 
 // KeySources lists every key source in registry order.
@@ -351,8 +355,6 @@ type Settings struct {
 	Paused            bool
 	PausedBy          string
 	PausedAt          *time.Time
-	DefaultProvider   string
-	DefaultModel      string
 	TenantDataSharing map[string]DataSharing
 
 	Enabled     bool

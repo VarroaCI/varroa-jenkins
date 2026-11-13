@@ -18,8 +18,9 @@ A write sends the whole object, with its `metadata.resourceVersion`. A stale
 version answers `409`. A write with no version only creates the object. An object
 that does not exist reads as the default spec: no provider and the default limits.
 
-This release stores the object. The assistant runtime still reads its providers and
-limits from the chart values until the runtime change ships.
+The runtime follows the object. A change applies to the next request, message,
+or run. No restart is needed. A run that is in progress keeps the budgets it
+started with. An approval expiry change applies to approvals made after the change.
 
 ## Configure the assistant
 
@@ -33,20 +34,6 @@ recordStore:
   enabled: true
 assistant:
   enabled: true
-  providers:
-    - name: primary
-      kind: anthropic
-      baseURL: https://models.example.net
-      models: [model-a]
-      trust: external
-      default: true
-      secretRef: assistant-primary-key
-    - name: local
-      kind: openai-compatible
-      baseURL: http://models.internal:8000/v1
-      models: [model-b]
-      trust: internal
-      secretRef: assistant-local-key
 networkPolicy:
   enabled: true
   assistantEgress:
@@ -54,19 +41,67 @@ networkPolicy:
     ports: [443, 8000]
 ```
 
+Then write the object `varroa-assistant`:
+
+```yaml
+apiVersion: varroa.dev/v1alpha1
+kind: AssistantConfig
+metadata:
+  name: varroa-assistant
+spec:
+  providers:
+    - name: primary
+      kind: anthropic
+      models: [model-a]
+      trust: external
+      auth: apiKey
+    - name: local
+      kind: openai-compatible
+      baseURL: http://models.internal:8000/v1
+      models: [model-b]
+      trust: internal
+      auth: none
+  defaultProvider: primary
+  defaultModel: model-a
+  externalDataSharing: metadata
+  budgets: {session: 200000, userDay: 1000000, tenantDay: 2000000, steps: 32}
+  approvalExpiry: 24h
+```
+
 Each provider has these fields:
 
 - `name` is a lowercase DNS label. It must be unique.
 - `kind` is the wire protocol: `anthropic` or `openai-compatible`.
 - `baseURL` is required for `openai-compatible`. It starts with `http://` or `https://`.
-- `models` lists the model ids that a user may choose.
+- `models` lists the model ids that a user may choose. It needs at least one.
 - `trust` is `internal` when the endpoint runs inside your network, and `external` otherwise.
-- `default: true` marks the provider for new sessions. Exactly one provider sets it.
-  A new session uses your saved provider. When the chart does not list it, the session uses the admin default provider, then the chart default.
-- `secretRef` names a Secret that holds the key under the `apiKey` key.
+- `auth` is `apiKey` (the default) when the provider needs a key, and `none` when it does not.
+- `cidrs` and `port` describe the network path of the provider. The chart's
+  `networkPolicy.assistantEgress` still sets the egress rules in this release.
 
-Rotate a key by updating the Secret. The BFF reads the key file on every call.
-A restart is not needed.
+Exactly one provider is the default. `defaultProvider` names it, and
+`defaultModel` must be one of its models. A new session uses your saved
+provider. When your saved provider is not listed, the session uses the default
+provider and model. A Tenant agent that names no provider uses the default too.
+
+The API refuses a write that removes the default provider without naming a new one.
+
+### Provider keys
+
+A provider with `auth: apiKey` reads its key from the Secret
+`varroa-assistant-keys`. The Secret holds one data key for each provider name.
+The BFF and the Tenant agent runner read the mounted file on each call.
+
+```bash
+kubectl -n varroa-system create secret generic varroa-assistant-keys \
+  --from-literal=primary=<key>
+kubectl -n varroa-system patch secret varroa-assistant-keys --type merge \
+  -p '{"stringData":{"local":"<key>"}}'
+```
+
+The first command creates the Secret. The second adds or rotates one key. The
+mounted file updates within about one minute. A key file that is empty makes the
+provider unavailable.
 
 `networkPolicy.assistantEgress.cidrs` must name the provider addresses when
 `networkPolicy.enabled` is true. The render fails when it is empty.
@@ -86,13 +121,14 @@ GRANT INSERT, UPDATE ON varroa.agent_sessions, varroa.agent_session_events,
 | Value | Default | Meaning |
 |---|---|---|
 | `assistant.enabled` | `false` | Turns the runtime on. |
-| `assistant.providers` | `[]` | The model providers. |
-| `assistant.externalDataSharing` | `metadata` | The highest data level for an `external` provider. |
-| `assistant.budgets.session` | `200000` | Tokens for one session. |
-| `assistant.budgets.userDay` | `1000000` | Tokens for one user in one UTC day. |
-| `assistant.budgets.tenantDay` | `2000000` | Tokens for one tenant in one UTC day. |
-| `assistant.budgets.steps` | `32` | Provider calls for one session. |
-| `assistant.approvalExpiry` | `24h` | How long an approval waits. |
+
+The chart fails the render when `assistant.providers`, `assistant.budgets`,
+`assistant.approvalExpiry`, or `assistant.externalDataSharing` is set. Set those
+fields in the `AssistantConfig` object instead.
+
+The defaults of the object are: `externalDataSharing` `metadata`, `budgets.session`
+`200000`, `budgets.userDay` `1000000`, `budgets.tenantDay` `2000000`,
+`budgets.steps` `32`, and `approvalExpiry` `24h`.
 
 ## Use the assistant
 
@@ -133,7 +169,7 @@ session key is kept for this login only. It is not stored in the browser.
 
 When an admin removes your saved provider, the Assistant tab shows a notice. Pick a provider or Default, then save.
 The API refuses a model that your saved provider does not list. A model needs a provider.
-When the provider list does not load, the Assistant tab shows a notice. The Administration page shows the same notices for the default provider.
+When the provider list does not load, the Assistant tab shows a notice.
 
 Agent rows appear in the activity feed under the Agents filter.
 
@@ -162,8 +198,8 @@ The system prompt carries the [operator guide](guide.md). The guide costs prompt
 A session stops when a budget is spent. The stop writes an error event. The
 day budget is checked before every provider call.
 
-On the Administration page, a change of the default provider clears the default model.
-An empty default model uses the first model of the provider.
+The Administration page saves the defaults with `PUT /api/v1/assistant/config`.
+An empty default model uses the first model of the default provider.
 The API refuses a default model that the default provider does not list.
 
 An admin sets the kill switch with `PUT /api/v1/assistant/settings`. While it
@@ -225,6 +261,8 @@ with `session_key_missing`.
 | `provider_error` | Error event | The provider call failed. Check the provider and its key. |
 | `session_key_missing` | Error event | The user key cookie is missing. Store the key again. |
 | `lease_lost` | Error event | Another replica stopped the run. An approved tool may have run. Send a new message. |
+| `data_level_lowered` | Error event | The data level of the session dropped below its start level. Start a new conversation. |
+| `data_level_unchecked` | Error event | The data level could not be read on resume. No model call ran. Start a new conversation. |
 | `assistant_disabled` | HTTP 503 | The assistant is off, or the record store schema is too old. Turn on the assistant, or update the recorder. |
 | `record_store_unreachable` | HTTP 503 | The record store does not answer. Retry when it answers. |
 | `assistant_key_unavailable` | HTTP 503 or 409 | No key is available for the provider. |

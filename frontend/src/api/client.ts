@@ -8,6 +8,7 @@ import type {
   AssistantAcceptedState,
   AssistantSettings,
   AssistantSettingsUpdate,
+  AssistantConfigObject,
   AssistantProviderList,
   MyAssistant,
   MyAssistantUpdate,
@@ -1673,6 +1674,16 @@ export function getAssistantSettings(): Promise<AssistantSettings> {
 
 export function putAssistantSettings(body: AssistantSettingsUpdate): Promise<AssistantSettings> {
   return bffFetch<AssistantSettings>("/assistant/settings", { method: "PUT", body: JSON.stringify(body) });
+}
+
+/** getAssistantConfig reads the AssistantConfig object. An admin only. */
+export function getAssistantConfig(): Promise<AssistantConfigObject> {
+  return bffFetch<AssistantConfigObject>("/assistant/config");
+}
+
+/** putAssistantConfig writes the whole object. A resourceVersion in it fences the write. */
+export function putAssistantConfig(body: AssistantConfigObject): Promise<AssistantConfigObject> {
+  return bffFetch<AssistantConfigObject>("/assistant/config", { method: "PUT", body: JSON.stringify(body) });
 }
 
 export function listAssistantProviders(): Promise<AssistantProviderList> {

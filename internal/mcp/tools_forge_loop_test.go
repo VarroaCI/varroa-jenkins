@@ -17,6 +17,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
 	"github.com/varroaci/varroa-jenkins/internal/agent/store"
 	"github.com/varroaci/varroa-jenkins/internal/api"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
 )
@@ -73,7 +74,6 @@ func loopRuntime(t *testing.T, deps *api.Dependencies, turns ...[]provider.Delta
 		}},
 		ExternalDataSharing: agent.DataLogs,
 		Budgets:             provider.Budgets{Session: 100000, UserDay: 1000000, TenantDay: 1000000, Steps: 32},
-		ApprovalExpiryText:  "1h",
 		ApprovalExpiry:      time.Hour,
 	}
 	factories := map[agent.ProviderKind]provider.Factory{
@@ -87,9 +87,8 @@ func loopRuntime(t *testing.T, deps *api.Dependencies, turns ...[]provider.Delta
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rt := &api.AssistantRuntime{
-		Config:   cfg,
-		Registry: reg,
-		Store:    store.WithNotify(mem, nil, logger),
+		Live:  assistantconfig.NewLiveWith(&assistantconfig.Snapshot{Config: cfg, Registry: reg}),
+		Store: store.WithNotify(mem, nil, logger),
 		HostFor: func(c *auth.Claims) loop.ToolHost {
 			return NewInProcessHostWithOrigin(NewServer(deps), c, OriginAssistant)
 		},

@@ -1,12 +1,13 @@
 // AssistantAdmin is the Administration page of the assistant: the kill
-// switch, the pending approvals, the providers, the defaults, the tenant
-// data levels, the limits, and the egress.
+// switch, the pending approvals, the providers and the defaults of the
+// AssistantConfig object, the tenant data levels, and the limits.
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  getAssistantConfig,
   getAssistantSettings,
   listAssistantApprovals,
-  listAssistantProviders,
+  putAssistantConfig,
   putAssistantSettings,
 } from "../api/client";
 import { ApiError, isRecordStoreUnreachable } from "../hooks/useApi";
@@ -16,10 +17,17 @@ import { Button } from "../components/Button";
 import { KVGrid } from "../components/KVGrid";
 import { age } from "../components/activityTimeline.util";
 import styles from "./AssistantAdmin.module.css";
-import { PROVIDERS_FAILED, savedProviderGone } from "../components/assistant/providerChoice";
-import type { AssistantSettings, AssistantSettingsUpdate, DataSharingLevel } from "../types/assistant";
+import type {
+  AssistantConfigObject,
+  AssistantSettings,
+  AssistantSettingsUpdate,
+  DataSharingLevel,
+} from "../types/assistant";
 
 const LEVELS: DataSharingLevel[] = ["none", "metadata", "logs"];
+
+/** CONFIG_CHANGED tells an admin that another save won the version fence. */
+export const CONFIG_CHANGED = "The configuration changed while this page was open. The page shows the latest values. Make the change again.";
 
 /** pendingCountText words the pending count. A list with a next page reads as "or more". */
 export function pendingCountText(count: number, more: boolean): string {
@@ -39,7 +47,7 @@ export function AssistantAdmin() {
     queryFn: () => listAssistantApprovals({ scope: "all", state: "pending" }),
     retry: false,
   });
-  const providers = useQuery({ queryKey: ["assistant-providers"], queryFn: listAssistantProviders, retry: false });
+  const config = useQuery({ queryKey: ["assistant-config"], queryFn: getAssistantConfig, retry: false });
   const [confirming, setConfirming] = useState(false);
   const [defaultProvider, setDefaultProvider] = useState<string | null>(null);
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
@@ -55,6 +63,26 @@ export function AssistantAdmin() {
       queryClient.setQueryData(["assistant-settings"], data);
     },
     onError: (err) => {
+      setError(err instanceof ApiError ? err.serverMessage || "The change was not saved." : "The change was not saved.");
+    },
+  });
+
+  const save = useMutation({
+    mutationFn: (body: AssistantConfigObject) => putAssistantConfig(body),
+    onSuccess: (data: AssistantConfigObject) => {
+      setError("");
+      setDefaultProvider(null);
+      setDefaultModel(null);
+      queryClient.setQueryData(["assistant-config"], data);
+    },
+    onError: (err) => {
+      if (err instanceof ApiError && err.status === 409) {
+        setError(CONFIG_CHANGED);
+        setDefaultProvider(null);
+        setDefaultModel(null);
+        void queryClient.invalidateQueries({ queryKey: ["assistant-config"] });
+        return;
+      }
       setError(err instanceof ApiError ? err.serverMessage || "The change was not saved." : "The change was not saved.");
     },
   });
@@ -77,13 +105,24 @@ export function AssistantAdmin() {
   }
 
   const s = settings.data;
-  const providerList = providers.data?.items ?? [];
+  const cfg = config.data;
+  const providerList = cfg?.spec.providers ?? [];
   const tenants = Object.entries(s?.tenantDataSharing ?? {});
-  const shownProvider = defaultProvider ?? s?.defaultProvider ?? "";
-  const shownModel = defaultModel ?? s?.defaultModel ?? "";
-  const providerListLoaded = providers.data !== undefined;
-  const gone = savedProviderGone(shownProvider, providerList, providerListLoaded);
-  const listFailed = providers.isError && !providerListLoaded;
+  const shownProvider = defaultProvider ?? cfg?.spec.defaultProvider ?? "";
+  const shownModel = defaultModel ?? cfg?.spec.defaultModel ?? "";
+  const listed = providerList.some((p) => p.name === shownProvider);
+  const modelsOf = providerList.find((p) => p.name === shownProvider)?.models ?? [];
+  const defaultsSaveable = cfg !== undefined && (providerList.length === 0 || listed);
+
+  function saveDefaults() {
+    if (!cfg) return;
+    save.mutate({
+      apiVersion: cfg.apiVersion,
+      kind: cfg.kind,
+      metadata: cfg.metadata,
+      spec: { ...cfg.spec, defaultProvider: shownProvider, defaultModel: shownModel },
+    });
+  }
 
   return (
     <SectionPage title="Assistant" loading={settings.isLoading} empty={!settings.isLoading && !s}>
@@ -117,25 +156,43 @@ export function AssistantAdmin() {
           <p>{pendingCountText(pending.data?.items.length ?? 0, !!pending.data?.nextCursor)} pending</p>
         </Card>
 
-        <Card title="Providers">
-          <div className={styles.tableScroll}>
-            <table className={styles.table}>
-              <thead>
-                <tr><th>Name</th><th>Kind</th><th>Models</th><th>Trust</th><th>Base URL</th></tr>
-              </thead>
-              <tbody>
-                {providerList.map((p) => (
-                  <tr key={p.name}>
-                    <td className={styles.nameCell}>{p.name}</td><td>{p.kind}</td><td>{p.models.join(", ")}</td><td>{p.trust}</td><td className={styles.mono}>{p.baseURL}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className={styles.note}>The chart sets this list.</p>
-        </Card>
+        {config.isError && (
+          <Card title="Configuration">
+            <p role="alert">The assistant configuration did not load. The providers, defaults, and limits return when it answers.</p>
+            <div className={styles.actions}>
+              <Button onClick={() => void config.refetch()}>Retry</Button>
+            </div>
+          </Card>
+        )}
 
-        {s && (
+        {cfg && (
+          <Card title="Providers">
+            <div className={styles.tableScroll}>
+              <table className={styles.table}>
+                <thead>
+                  <tr><th>Name</th><th>Kind</th><th>Models</th><th>Trust</th><th>Auth</th><th>Base URL</th><th>CIDRs</th><th>Port</th></tr>
+                </thead>
+                <tbody>
+                  {providerList.map((p) => (
+                    <tr key={p.name}>
+                      <td className={styles.nameCell}>{p.name}</td>
+                      <td>{p.kind}</td>
+                      <td>{p.models.join(", ")}</td>
+                      <td>{p.trust}</td>
+                      <td>{p.auth ?? "apiKey"}</td>
+                      <td className={styles.mono}>{p.baseURL ?? ""}</td>
+                      <td className={styles.mono}>{(p.cidrs ?? []).join(", ")}</td>
+                      <td>{p.port ?? ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className={styles.note}>Edit the AssistantConfig object varroa-assistant to change this list.</p>
+          </Card>
+        )}
+
+        {cfg && (
           <Card title="Defaults">
             <div className={styles.formGrid}>
               <div className={styles.formGroup}>
@@ -150,9 +207,7 @@ export function AssistantAdmin() {
                     setDefaultModel("");
                   }}
                 >
-                  <option value="">Chart default</option>
-                  {gone && <option value={shownProvider} disabled>{`${shownProvider} (removed)`}</option>}
-                  {listFailed && shownProvider !== "" && <option value={shownProvider} disabled>{shownProvider}</option>}
+                  {!listed && <option value="">No default</option>}
                   {providerList.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
                 </select>
               </div>
@@ -163,19 +218,20 @@ export function AssistantAdmin() {
                   aria-label="Default model"
                   className={styles.formInput}
                   value={shownModel}
-                  placeholder={providerList.find((p) => p.name === shownProvider)?.models[0] ?? ""}
-                  disabled={gone}
+                  placeholder={modelsOf[0] ?? ""}
+                  disabled={!listed}
                   onChange={(e) => setDefaultModel(e.target.value)}
                 />
               </div>
             </div>
             <div className={styles.actions}>
-              <Button variant="primary" disabled={gone} onClick={() => update.mutate({ defaultProvider: shownProvider, defaultModel: shownModel })}>
+              <Button variant="primary" disabled={!defaultsSaveable || save.isPending} onClick={saveDefaults}>
                 Save defaults
               </Button>
             </div>
-            {gone && <p role="status" className={styles.note}>The saved default provider {shownProvider} is not available. Pick a listed provider or Chart default.</p>}
-            {listFailed && <p role="alert" className={styles.note}>{PROVIDERS_FAILED}</p>}
+            {providerList.length > 0 && !listed && (
+              <p role="status" className={styles.note}>Pick a listed provider as the default.</p>
+            )}
           </Card>
         )}
 
@@ -227,31 +283,18 @@ export function AssistantAdmin() {
           </Card>
         )}
 
-        {s && (
+        {cfg && (
           <Card title="Limits">
             <KVGrid
               items={[
-                { key: "Session budget", value: `${s.limits.budgets.session} tokens` },
-                { key: "User day budget", value: `${s.limits.budgets.userDay} tokens` },
-                { key: "Tenant day budget", value: `${s.limits.budgets.tenantDay} tokens` },
-                { key: "Steps per session", value: String(s.limits.budgets.steps) },
-                { key: "External data sharing", value: s.limits.externalDataSharing },
-                { key: "Approval expiry", value: s.limits.approvalExpiry },
+                { key: "Session budget", value: `${cfg.spec.budgets.session} tokens` },
+                { key: "User day budget", value: `${cfg.spec.budgets.userDay} tokens` },
+                { key: "Tenant day budget", value: `${cfg.spec.budgets.tenantDay} tokens` },
+                { key: "Steps per session", value: String(cfg.spec.budgets.steps) },
+                { key: "External data sharing", value: cfg.spec.externalDataSharing },
+                { key: "Approval expiry", value: cfg.spec.approvalExpiry },
               ]}
             />
-          </Card>
-        )}
-
-        {s && (
-          <Card title="Egress">
-            {s.limits.egress.networkPolicy ? (
-              <>
-                <p>Network policy on. CIDRs: {s.limits.egress.cidrs.join(", ")}. Ports: {s.limits.egress.ports.join(", ")}.</p>
-                <p className={styles.note}>These are chart values, not a live probe.</p>
-              </>
-            ) : (
-              <p>The BFF egress is not pinned.</p>
-            )}
           </Card>
         )}
       </div>

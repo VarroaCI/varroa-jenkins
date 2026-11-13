@@ -10,27 +10,30 @@ import (
 	"os"
 	"time"
 
+	"k8s.io/client-go/dynamic"
+
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider/factories"
 	"github.com/varroaci/varroa-jenkins/internal/agent/sealedkey"
 	"github.com/varroaci/varroa-jenkins/internal/agent/store"
 	"github.com/varroaci/varroa-jenkins/internal/api"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 )
 
+// assistantSyncTimeout bounds the wait for the first list of the
+// AssistantConfig object at start. A variable so a test can shorten it.
+var assistantSyncTimeout = 10 * time.Second
+
 // buildAssistant returns the assistant runtime for this BFF replica. It
-// returns nil and no error when the assistant is off or cannot start: its
-// config is invalid, its DSN is unset, or its providers do not load. A
-// broken assistant config is logged, and the BFF starts without the
-// assistant. A store that does not answer at startup does not turn the
-// assistant off. The store connects on its first call, and the calls answer
-// 503 until it answers. Every store call runs under that bound.
-func buildAssistant(ctx context.Context, cfgRaw, dsn, cluster, signingPEM string, publish func(string, []byte) error, logger *slog.Logger) (*api.AssistantRuntime, error) {
-	if cfgRaw == "" {
-		return nil, nil
-	}
-	cfg, err := provider.Decode([]byte(cfgRaw))
-	if err != nil {
-		logger.Error("assistant config is invalid; the assistant is off", "error", err.Error())
+// returns nil and no error when the assistant is off or cannot start: the
+// flag is off, or its DSN is unset. The runtime follows the AssistantConfig
+// object for the rest of the process, so a change needs no restart. A store
+// that does not answer at startup does not turn the assistant off. The store
+// connects on its first call, and the calls answer 503 until it answers.
+// Every store call runs under that bound.
+func buildAssistant(ctx context.Context, enabled bool, dsn, cluster, signingPEM string, dyn dynamic.Interface,
+	publish func(string, []byte) error, logger *slog.Logger) (*api.AssistantRuntime, error) {
+	if !enabled {
 		return nil, nil
 	}
 	if dsn == "" {
@@ -42,12 +45,6 @@ func buildAssistant(ctx context.Context, cfgRaw, dsn, cluster, signingPEM string
 		logger.Error("assistant store did not open; the assistant is off", "error", err.Error())
 		return nil, nil
 	}
-	reg, err := provider.NewRegistry(cfg, factories.DefaultFactories(), provider.DefaultKeyDir)
-	if err != nil {
-		st.Close()
-		logger.Error("assistant providers did not load; the assistant is off", "error", err.Error())
-		return nil, nil
-	}
 	var sealer *sealedkey.Sealer
 	if signingPEM != "" {
 		if sealer, err = sealedkey.New(signingPEM); err != nil {
@@ -55,8 +52,22 @@ func buildAssistant(ctx context.Context, cfgRaw, dsn, cluster, signingPEM string
 			return nil, fmt.Errorf("assistant key sealer: %w", err)
 		}
 	}
+	live := assistantconfig.NewLive()
+	go func() {
+		if err := assistantconfig.Watch(ctx, dyn, live, factories.DefaultFactories(), provider.DefaultKeyDir, logger); err != nil {
+			logger.Error("assistant config watch stopped", "error", err.Error())
+		}
+	}()
+	select {
+	case <-live.Synced():
+	case <-time.After(assistantSyncTimeout):
+		logger.Warn("assistant config did not sync in time; the runtime follows it when it syncs")
+	case <-ctx.Done():
+		st.Close()
+		return nil, nil
+	}
 	go logAssistantStoreState(ctx, startupSchemaTimeout, st, logger)
-	return api.NewAssistantRuntime(cfg, reg, store.WithTimeout(st, assistantStoreCallTimeout), sealer, assistantOwner(), cluster, publish, logger), nil
+	return api.NewAssistantRuntime(live, store.WithTimeout(st, assistantStoreCallTimeout), sealer, assistantOwner(), cluster, publish, logger), nil
 }
 
 // assistantStoreCallTimeout bounds each assistant store call. A variable so a

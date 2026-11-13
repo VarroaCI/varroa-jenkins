@@ -5,11 +5,13 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/internal/agent"
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 )
 
-// newChooseProviderRuntime wires a runtime with two chart providers. The
-// provider alpha is the registry default.
-func newChooseProviderRuntime(t *testing.T) *AssistantRuntime {
+// newChooseSnapshot builds a snapshot with two chart providers. The provider
+// alpha is the registry default. defProv and defModel are the defaults of the
+// object.
+func newChooseSnapshot(t *testing.T, defProv, defModel string) *assistantconfig.Snapshot {
 	t.Helper()
 	cfg := provider.Config{
 		Providers: []provider.Endpoint{
@@ -22,6 +24,8 @@ func newChooseProviderRuntime(t *testing.T) *AssistantRuntime {
 				Models: []string{"b1", "b2"}, Trust: agent.TrustInternal,
 			},
 		},
+		DefaultProvider:     defProv,
+		DefaultModel:        defModel,
 		ExternalDataSharing: agent.DataLogs,
 	}
 	factories := map[agent.ProviderKind]provider.Factory{
@@ -33,7 +37,21 @@ func newChooseProviderRuntime(t *testing.T) *AssistantRuntime {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &AssistantRuntime{Registry: reg, Config: cfg}
+	return &assistantconfig.Snapshot{Config: cfg, Registry: reg}
+}
+
+// TestChooseProviderUsesConfigDefault proves that a new session with no saved
+// provider takes the default provider and default model of the snapshot.
+func TestChooseProviderUsesConfigDefault(t *testing.T) {
+	snap := newChooseSnapshot(t, "beta", "b2")
+	rt := &AssistantRuntime{}
+	prov, model, entry, err := rt.chooseProvider(snap, "", "", agent.Settings{})
+	if err != nil {
+		t.Fatalf("chooseProvider: %v", err)
+	}
+	if prov != "beta" || model != "b2" || entry == nil {
+		t.Fatalf("chooseProvider = (%q, %q), want (beta, b2)", prov, model)
+	}
 }
 
 func TestChooseProvider_FallbackOrder(t *testing.T) {
@@ -42,35 +60,45 @@ func TestChooseProvider_FallbackOrder(t *testing.T) {
 		reqProvider string
 		reqModel    string
 		user        agent.Settings
-		global      agent.Settings
+		snapProv    string
+		snapModel   string
 		wantProv    string
 		wantModel   string
 		wantErr     bool
 	}{
 		{
-			name:      "stale user provider uses the global default",
+			name:      "stale user provider uses the snapshot default",
 			user:      agent.Settings{Provider: "gone", Model: "x"},
-			global:    agent.Settings{DefaultProvider: "beta", DefaultModel: "b2"},
+			snapProv:  "beta",
+			snapModel: "b2",
 			wantProv:  "beta",
 			wantModel: "b2",
 		},
 		{
-			name:      "stale user and stale global use the registry default",
+			name:      "stale user and no snapshot default use the registry default",
 			user:      agent.Settings{Provider: "gone"},
-			global:    agent.Settings{DefaultProvider: "gone2"},
+			snapProv:  "gone2",
 			wantProv:  "alpha",
 			wantModel: "a1",
 		},
 		{
-			name:      "known user provider wins over the global default",
+			name:      "known user provider wins over the snapshot default",
 			user:      agent.Settings{Provider: "beta", Model: "b1"},
-			global:    agent.Settings{DefaultProvider: "alpha"},
+			snapProv:  "alpha",
 			wantProv:  "beta",
 			wantModel: "b1",
 		},
 		{
-			name:      "empty user uses the global default",
-			global:    agent.Settings{DefaultProvider: "beta"},
+			name:      "empty user uses the snapshot default model",
+			snapProv:  "beta",
+			snapModel: "b2",
+			wantProv:  "beta",
+			wantModel: "b2",
+		},
+		{
+			name:      "a non-default provider takes its first model",
+			user:      agent.Settings{Provider: "beta"},
+			snapProv:  "alpha",
 			wantProv:  "beta",
 			wantModel: "b1",
 		},
@@ -82,8 +110,9 @@ func TestChooseProvider_FallbackOrder(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rt := newChooseProviderRuntime(t)
-			prov, model, entry, err := rt.chooseProvider(tc.reqProvider, tc.reqModel, tc.user, tc.global)
+			snap := newChooseSnapshot(t, tc.snapProv, tc.snapModel)
+			rt := &AssistantRuntime{}
+			prov, model, entry, err := rt.chooseProvider(snap, tc.reqProvider, tc.reqModel, tc.user)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("chooseProvider() error = nil, want error")

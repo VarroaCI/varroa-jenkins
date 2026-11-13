@@ -146,8 +146,8 @@ spec:
                   key: token
 {{- end }}
 {{- if .Values.assistant.enabled }}
-            - name: VARROA_ASSISTANT_CONFIG
-              value: {{ include "varroa.assistant.config" . | quote }}
+            - name: VARROA_ASSISTANT_ENABLED
+              value: "true"
 {{- end }}
 {{- if .Values.agentRunner.enabled }}
             - name: VARROA_TENANT_AGENT_KEY_FILE
@@ -201,13 +201,9 @@ spec:
               readOnly: true
 {{- end }}
 {{- if .Values.assistant.enabled }}
-{{- range $i, $p := .Values.assistant.providers }}
-{{- if $p.secretRef }}
-            - name: assistant-key-{{ $i }}
-              mountPath: /etc/varroa/assistant/{{ $p.name }}
+            - name: assistant-keys
+              mountPath: /etc/varroa/assistant
               readOnly: true
-{{- end }}
-{{- end }}
 {{- end }}
             - name: tmp
               mountPath: /tmp
@@ -245,17 +241,10 @@ spec:
                 path: key
 {{- end }}
 {{- if .Values.assistant.enabled }}
-{{- range $i, $p := .Values.assistant.providers }}
-{{- if $p.secretRef }}
-        - name: assistant-key-{{ $i }}
+        - name: assistant-keys
           secret:
-            secretName: {{ $p.secretRef }}
+            secretName: varroa-assistant-keys
             optional: true
-            items:
-              - key: apiKey
-                path: apiKey
-{{- end }}
-{{- end }}
 {{- end }}
         - name: tmp
           emptyDir: {}

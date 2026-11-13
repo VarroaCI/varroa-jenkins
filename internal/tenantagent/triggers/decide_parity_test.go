@@ -45,7 +45,7 @@ func TestCreateDecisionParity(t *testing.T) {
 			}
 			want, _ := agent.DecideCreate(agent.CreateInput{
 				Paused:            tc.paused,
-				DayLimit:          c.Cfg.Assistant.Budgets.TenantDay,
+				DayLimit:          c.Live.Load().Config.Budgets.TenantDay,
 				DataLevel:         tc.level,
 				ProviderAvailable: tc.avail,
 			})

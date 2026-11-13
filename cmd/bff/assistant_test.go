@@ -12,34 +12,37 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/agent"
 	"github.com/varroaci/varroa-jenkins/internal/agent/store"
 )
 
 func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-// TestBuildAssistant_NoConfigIsOff proves an unset config leaves the assistant off.
-func TestBuildAssistant_NoConfigIsOff(t *testing.T) {
-	rt, err := buildAssistant(context.Background(), "", "", "core", "", nil, quietLogger())
+// fakeAssistantDyn returns a dynamic client that holds no AssistantConfig object.
+func fakeAssistantDyn() dynamic.Interface {
+	gvr := v1alpha1.SchemeGroupVersion.WithResource("assistantconfigs")
+	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{gvr: "AssistantConfigList"})
+}
+
+// TestBuildAssistant_DisabledIsOff proves that a BFF with the flag off builds no assistant.
+func TestBuildAssistantOffWhenNotEnabled(t *testing.T) {
+	rt, err := buildAssistant(context.Background(), false, "postgres://unused", "core", "", fakeAssistantDyn(), nil, quietLogger())
 	if err != nil || rt != nil {
 		t.Fatalf("buildAssistant = %v, %v; want nil, nil", rt, err)
 	}
 }
 
-// TestBuildAssistant_BadConfigIsOff proves a config that does not decode
-// leaves the assistant off, and the BFF still starts.
-func TestBuildAssistant_BadConfigIsOff(t *testing.T) {
-	rt, err := buildAssistant(context.Background(), "{not json", "postgres://unused", "core", "", nil, quietLogger())
-	if err != nil || rt != nil {
-		t.Fatalf("buildAssistant = %v, %v; want nil, nil", rt, err)
-	}
-}
-
-// TestBuildAssistant_NoDSNIsOff proves a valid config without a record store
-// DSN leaves the assistant off.
+// TestBuildAssistant_NoDSNIsOff proves that an enabled assistant without a
+// record store DSN stays off.
 func TestBuildAssistant_NoDSNIsOff(t *testing.T) {
-	cfg := `{"providers":[],"externalDataSharing":"metadata","budgets":{"session":1,"userDay":1,"tenantDay":1,"steps":1},"approvalExpiry":"1h"}`
-	rt, err := buildAssistant(context.Background(), cfg, "", "core", "", nil, quietLogger())
+	rt, err := buildAssistant(context.Background(), true, "", "core", "", fakeAssistantDyn(), nil, quietLogger())
 	if err != nil || rt != nil {
 		t.Fatalf("buildAssistant = %v, %v; want nil, nil", rt, err)
 	}
@@ -90,9 +93,8 @@ func silentRecordStoreDSN(t *testing.T) string {
 func TestBuildAssistant_UnreachableStoreKeepsRuntime(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cfg := `{"providers":[],"externalDataSharing":"metadata","budgets":{"session":1,"userDay":1,"tenantDay":1,"steps":1},"approvalExpiry":"1h"}`
 	start := time.Now()
-	rt, err := buildAssistant(ctx, cfg, silentRecordStoreDSN(t), "core", "", nil, quietLogger())
+	rt, err := buildAssistant(ctx, true, silentRecordStoreDSN(t), "core", "", fakeAssistantDyn(), nil, quietLogger())
 	if err != nil {
 		t.Fatalf("buildAssistant error = %v, want nil", err)
 	}
@@ -112,11 +114,10 @@ func TestBuildAssistant_StoreCallsStopAtTheDeadline(t *testing.T) {
 	assistantStoreCallTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { assistantStoreCallTimeout = saved })
 
-	cfg := `{"providers":[],"externalDataSharing":"metadata","budgets":{"session":1,"userDay":1,"tenantDay":1,"steps":1},"approvalExpiry":"1h"}`
 	// connect_timeout is raised so the call ends on the per-call bound, not on
 	// the connect timeout.
 	dsn := strings.Replace(silentRecordStoreDSN(t), "connect_timeout=1", "connect_timeout=30", 1)
-	rt, err := buildAssistant(context.Background(), cfg, dsn, "core", "", nil, quietLogger())
+	rt, err := buildAssistant(context.Background(), true, dsn, "core", "", fakeAssistantDyn(), nil, quietLogger())
 	if err != nil || rt == nil {
 		t.Fatalf("buildAssistant = %v, %v; want a runtime", rt, err)
 	}

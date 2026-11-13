@@ -116,7 +116,7 @@ connections:
     hosts: [api.anthropic.com]
     purpose: "Send assistant requests to the Anthropic Messages API when a provider of kind anthropic leaves baseURL empty."
     protocol: HTTPS 443
-    control: "assistant.providers[].baseURL (the adapter default when it is empty)"
+    control: "AssistantConfig spec.providers[].baseURL (the adapter default when it is empty)"
     disable: "Yes. Keep assistant.enabled false."
 
   - component: bff
@@ -124,7 +124,7 @@ connections:
     hosts: []
     purpose: Send assistant requests to the configured model provider.
     protocol: "HTTPS 443, or the port in the base URL"
-    control: assistant.providers[].baseURL
+    control: AssistantConfig spec.providers[].baseURL
     disable: "Yes. Keep assistant.enabled false."
 
   # Update center
@@ -194,7 +194,7 @@ connections:
     hosts: []
     purpose: Send Tenant agent session requests to the configured model provider.
     protocol: HTTPS 443
-    control: assistant.providers[].baseURL
+    control: AssistantConfig spec.providers[].baseURL
     disable: "Yes. Keep agentRunner.enabled false."
 
   - component: agentrunner
@@ -202,7 +202,7 @@ connections:
     hosts: [api.anthropic.com]
     purpose: "Send Tenant agent session requests to the Anthropic Messages API when a provider of kind anthropic leaves baseURL empty."
     protocol: HTTPS 443
-    control: "assistant.providers[].baseURL (the adapter default when it is empty)"
+    control: "AssistantConfig spec.providers[].baseURL (the adapter default when it is empty)"
     disable: "Yes. Keep agentRunner.enabled false."
 
   # Mite

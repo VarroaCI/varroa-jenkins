@@ -15,7 +15,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/agent"
 	"github.com/varroaci/varroa-jenkins/internal/agent/policy"
-	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
+	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 	"github.com/varroaci/varroa-jenkins/internal/tenantagent/accept"
 	"github.com/varroaci/varroa-jenkins/internal/tenantagent/config"
 	"github.com/varroaci/varroa-jenkins/internal/tenantagent/instructions"
@@ -62,11 +62,11 @@ type Ticker struct {
 	Rollover  *spend.Rollover
 	Settings  func(ctx context.Context) (agent.Settings, error)
 	Placement func(tenant string) (string, bool)
-	Registry  *provider.Registry
-	Cfg       config.Config
-	Relay     instructions.Reader
-	Cluster   string
-	Now       func() time.Time
+	// Live holds the AssistantConfig snapshot. Each status reads one snapshot.
+	Live    *assistantconfig.Live
+	Relay   instructions.Reader
+	Cluster string
+	Now     func() time.Time
 
 	attempts map[types.UID]attempt
 }
@@ -130,7 +130,8 @@ func (t *Ticker) statusOf(ctx context.Context, ta *v1alpha1.TenantAgent, v accep
 	st := v1alpha1.TenantAgentStatus{ObservedGeneration: ta.Generation, InstructionsSHA: ta.Status.InstructionsSHA}
 	var conds []metav1.Condition
 
-	pStatus, pReason, pMsg := config.ProviderReady(t.Cfg, t.Registry, ta)
+	snap := t.Live.Load()
+	pStatus, pReason, pMsg := config.ProviderReady(snap, ta)
 	conds = append(conds, condition(ta, v1alpha1.TenantAgentCondProviderReady, pStatus == metav1.ConditionTrue, pReason, pMsg, now))
 
 	iCond, sha := t.instructionsOf(ctx, ta, now)
@@ -145,7 +146,7 @@ func (t *Ticker) statusOf(ctx context.Context, ta *v1alpha1.TenantAgent, v accep
 	if err != nil {
 		return st, fmt.Errorf("read spend: %w", err)
 	}
-	pausedReason, pausedMsg := t.pausedReason(ta, v, in, settings, spendToday)
+	pausedReason, pausedMsg := t.pausedReason(ta, v, in, settings, spendToday, snap)
 	paused := pausedReason != reasonActive
 	conds = append(conds, condition(ta, v1alpha1.TenantAgentCondPaused, paused, pausedReason, pausedMsg, now))
 
@@ -234,7 +235,7 @@ func unattendedOf(ta *v1alpha1.TenantAgent, settings agent.Settings, now time.Ti
 // the order of the design: Duplicate, NamespaceNotOwned, TenantNotFound,
 // Disabled, KillSwitch, BudgetDay. It returns reasonActive when none holds.
 func (t *Ticker) pausedReason(ta *v1alpha1.TenantAgent, v accept.Verdict, in accept.Input,
-	settings agent.Settings, spendToday int64) (string, string) {
+	settings agent.Settings, spendToday int64, snap *assistantconfig.Snapshot) (string, string) {
 	if !v.Accepted && v.Reason == accept.ReasonDuplicate {
 		return v1alpha1.TenantAgentReasonDuplicate, "another TenantAgent holds this tenant"
 	}
@@ -253,15 +254,15 @@ func (t *Ticker) pausedReason(ta *v1alpha1.TenantAgent, v accept.Verdict, in acc
 	if settings.Paused {
 		return v1alpha1.TenantAgentReasonKillSwitch, "the assistant kill switch is on"
 	}
-	if spendToday >= dayLimit(t.Cfg, ta) {
+	if spendToday >= dayLimit(snap, ta) {
 		return v1alpha1.TenantAgentReasonBudgetDay, "the tenant's day budget is spent"
 	}
 	return reasonActive, "the tenant agent may run"
 }
 
 // dayLimit returns the smaller of the chart day budget and the TenantAgent's own.
-func dayLimit(cfg config.Config, ta *v1alpha1.TenantAgent) int64 {
-	limit := cfg.Assistant.Budgets.TenantDay
+func dayLimit(snap *assistantconfig.Snapshot, ta *v1alpha1.TenantAgent) int64 {
+	limit := snap.Config.Budgets.TenantDay
 	if ta.Spec.Budgets != nil && ta.Spec.Budgets.Day != nil && *ta.Spec.Budgets.Day < limit {
 		limit = *ta.Spec.Budgets.Day
 	}

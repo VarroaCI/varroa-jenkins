@@ -15,4 +15,8 @@ rules:
   - apiGroups: ["varroa.dev"]
     resources: ["tenantagents/status"]
     verbs: ["update", "patch"]
+  # The provider configuration follows the AssistantConfig singleton.
+  - apiGroups: ["varroa.dev"]
+    resources: ["assistantconfigs"]
+    verbs: ["get", "list", "watch"]
 {{- end }}

@@ -38,11 +38,7 @@ func registerAssistantConfigTools(mcpServer *server.MCPServer, deps *api.Depende
 		if serr != nil {
 			return mcp.NewToolResultError("failed to read the assistant config: " + serr.Message), nil
 		}
-		raw, err := json.Marshal(obj)
-		if err != nil {
-			return mcp.NewToolResultError("failed to encode the assistant config"), nil
-		}
-		return resultJSON(raw)
+		return resultJSON(withAssistantTypeMeta(obj))
 	})
 
 	updateAC := mcp.NewTool("update_assistant_config",
@@ -91,12 +87,17 @@ func registerAssistantConfigTools(mcpServer *server.MCPServer, deps *api.Depende
 			Type:    "assistantconfig.updated",
 			Message: "AssistantConfig " + v1alpha1.AssistantConfigName + " updated",
 		})
-		raw, err := json.Marshal(out)
-		if err != nil {
-			return mcp.NewToolResultError("failed to encode the assistant config"), nil
-		}
-		return resultJSON(raw)
+		return resultJSON(withAssistantTypeMeta(out))
 	})
+}
+
+// withAssistantTypeMeta sets the apiVersion and kind of the singleton on a copy,
+// so the answer names its kind even when the store did not set it.
+func withAssistantTypeMeta(obj *v1alpha1.AssistantConfig) *v1alpha1.AssistantConfig {
+	out := *obj
+	out.APIVersion = "varroa.dev/v1alpha1"
+	out.Kind = v1alpha1.AssistantConfigKind
+	return &out
 }
 
 // mergeAssistantConfig applies a JSON merge patch to base and keeps base's
