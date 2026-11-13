@@ -13,11 +13,13 @@ import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import ClusterSelector from "../components/ClusterSelector";
 import FederatedCopyNote from "../components/FederatedCopyNote";
+import RbacSpecBindingNote from "../components/RbacSpecBindingNote";
 import { clusterQuery } from "../routing";
 import styles from "./JenkinsRoleBindingForm.module.css";
 import NoAccessibleClusters from "../components/NoAccessibleClusters";
 import { useConfigurationCluster } from "../hooks/useConfigurationCluster";
 import { FEDERATED_COPY_CODE, federatedCopySource } from "../lib/federatedCopy";
+import { rbacSpecOwner } from "../lib/rbacSpecBinding";
 
 interface LabelEntry {
   key: string;
@@ -69,7 +71,9 @@ export default function JenkinsRoleBindingForm() {
   const [loaded, setLoaded] = useState<JenkinsRoleBinding | null>(null);
   // A federated copy is owned by federation. The editor shows it read-only, and the scope sections open.
   const source = loaded ? federatedCopySource("JenkinsRoleBinding", loaded.metadata) : null;
-  const readOnly = source !== null;
+  // An rbacSpec binding is read-only too: the operator replaces each change on its next pass.
+  const owner = loaded ? rbacSpecOwner(loaded.metadata) : null;
+  const readOnly = source !== null || owner !== null;
   const showScope = scopeOpen || readOnly;
   const showJenkinsScope = jenkinsScopeOpen || readOnly;
 
@@ -242,6 +246,7 @@ export default function JenkinsRoleBindingForm() {
 
       {error && <div className={styles.errorBanner}>{error}</div>}
       {source && <FederatedCopyNote objectNoun="Jenkins role binding" source={source} />}
+      {owner && <RbacSpecBindingNote cluster={cluster} owner={owner} />}
 
       <form onSubmit={handleSubmit}>
         <Card>

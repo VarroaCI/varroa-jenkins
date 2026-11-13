@@ -59,7 +59,14 @@ func jenkinsRoleBindingDeps(t *testing.T) *api.Dependencies {
 // the decoded structuredContent.
 func listJenkinsRoleBindingsResult(t *testing.T, args map[string]interface{}) map[string]any {
 	t.Helper()
-	handler := NewHandler(jenkinsRoleBindingDeps(t))
+	return listJenkinsRoleBindingsResultWith(t, jenkinsRoleBindingDeps(t), args)
+}
+
+// listJenkinsRoleBindingsResultWith is listJenkinsRoleBindingsResult over the
+// given dependencies.
+func listJenkinsRoleBindingsResultWith(t *testing.T, deps *api.Dependencies, args map[string]interface{}) map[string]any {
+	t.Helper()
+	handler := NewHandler(deps)
 	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
 		"name":      "list_jenkins_role_bindings",
 		"arguments": args,
@@ -162,7 +169,7 @@ func TestListJenkinsRoleBindings_DefaultsToSummary(t *testing.T) {
 	for _, item := range []map[string]any{scoped, nilScope} {
 		allowed := map[string]bool{
 			"name": true, "roleRef": true, "subjectCount": true,
-			"controllerScope": true, "scopeType": true, "scopeFolder": true,
+			"controllerScope": true, "scopeType": true, "scopeFolder": true, "controller": true,
 		}
 		for k := range item {
 			if !allowed[k] {
@@ -832,5 +839,95 @@ func TestSummarizeJenkinsRoleBinding_ControllerScope(t *testing.T) {
 		if strings.Contains(string(raw), leak) {
 			t.Errorf("summary leaks label text %q: %s", leak, raw)
 		}
+	}
+}
+
+// TestSummarizeJenkinsRoleBinding_Controller pins the controller field: an
+// operator-owned rbacSpec binding names its controller, and a renamed copy that
+// keeps the labels does not.
+func TestSummarizeJenkinsRoleBinding_Controller(t *testing.T) {
+	labels := map[string]string{
+		v1alpha1.LabelManagedBy:           v1alpha1.ManagedByOperator,
+		v1alpha1.LabelControllerNamespace: "prod-a",
+		v1alpha1.LabelControllerName:      "jenkins-1",
+	}
+	owned := &v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{
+		Name: "ctrl-fbff6b43b023e716-admin", Labels: labels,
+	}}
+	renamed := &v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{
+		Name: "payments-admins", Labels: labels,
+	}}
+	bare := &v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-fbff6b43b023e716-admin"}}
+
+	if got := summarizeJenkinsRoleBinding(owned).Controller; got == nil ||
+		*got != (jenkinsRoleBindingController{Namespace: "prod-a", Name: "jenkins-1"}) {
+		t.Errorf("owned binding controller = %+v, want prod-a/jenkins-1", got)
+	}
+	if got := summarizeJenkinsRoleBinding(renamed).Controller; got != nil {
+		t.Errorf("renamed copy controller = %+v, want nil", got)
+	}
+	if got := summarizeJenkinsRoleBinding(bare).Controller; got != nil {
+		t.Errorf("binding without labels controller = %+v, want nil", got)
+	}
+}
+
+// TestListJenkinsRoleBindings_ShowsRBACSpecController seeds an owned binding
+// and a renamed copy, and checks that only the owned row names its controller.
+func TestListJenkinsRoleBindings_ShowsRBACSpecController(t *testing.T) {
+	store := crdstore.NewFake()
+	labels := map[string]string{
+		v1alpha1.LabelManagedBy:           v1alpha1.ManagedByOperator,
+		v1alpha1.LabelControllerNamespace: "prod-a",
+		v1alpha1.LabelControllerName:      "jenkins-1",
+	}
+	crdstore.MustSeed(store,
+		&v1alpha1.JenkinsRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "ctrl-fbff6b43b023e716-admin", Labels: labels},
+			Spec:       v1alpha1.JenkinsRoleBindingSpec{RoleRef: "varroa-admin"},
+		},
+		&v1alpha1.JenkinsRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "payments-admins", Labels: labels},
+			Spec:       v1alpha1.JenkinsRoleBindingSpec{RoleRef: "varroa-admin"},
+		},
+	)
+	deps := &api.Dependencies{Client: &stubClient{}, Store: store, Authorizer: adminTestAuthorizer()}
+
+	sc := listJenkinsRoleBindingsResultWith(t, deps, map[string]interface{}{})
+	items, ok := sc["items"].([]any)
+	if !ok || len(items) != 2 {
+		t.Fatalf("expected 2 items, got %v", sc["items"])
+	}
+	byName := map[string]map[string]any{}
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		byName[item["name"].(string)] = item
+	}
+	want := map[string]any{"namespace": "prod-a", "name": "jenkins-1"}
+	if got := byName["ctrl-fbff6b43b023e716-admin"]["controller"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("owned binding controller = %v, want %v", got, want)
+	}
+	if _, present := byName["payments-admins"]["controller"]; present {
+		t.Errorf("renamed copy must not carry controller: %v", byName["payments-admins"])
+	}
+
+	var schemaDoc any
+	if err := json.Unmarshal(jenkinsRoleBindingListOutputSchema, &schemaDoc); err != nil {
+		t.Fatalf("declared schema is not valid JSON: %v", err)
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("list_jenkins_role_bindings.json", schemaDoc); err != nil {
+		t.Fatalf("add schema resource: %v", err)
+	}
+	schema, err := c.Compile("list_jenkins_role_bindings.json")
+	if err != nil {
+		t.Fatalf("declared schema does not compile: %v", err)
+	}
+	b, _ := json.Marshal(sc)
+	var instance any
+	if err := json.Unmarshal(b, &instance); err != nil {
+		t.Fatalf("unmarshal instance: %v", err)
+	}
+	if err := schema.Validate(instance); err != nil {
+		t.Errorf("output violates declared outputSchema: %v\npayload: %s", err, b)
 	}
 }

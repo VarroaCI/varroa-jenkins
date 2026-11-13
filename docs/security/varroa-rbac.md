@@ -263,6 +263,8 @@ The operator writes one Jenkins role binding for each role in the shorthand. The
 
 To list the bindings of one controller, run `kubectl get jenkinsrolebindings -l varroa.dev/controller-namespace=<namespace>,varroa.dev/controller-name=<controller>`.
 
+The **Jenkins Role Bindings** page shows a `Controller: <namespace>/<controller>` badge on each such binding. The badge links to the controller. The filter matches the binding name or the controller. The row action reads View, and the form opens read-only. The operator replaces each change on its next pass, so change `spec.rbacSpec` on the controller instead. Delete stays on the row. While the controller still holds the role, the operator writes the binding again.
+
 The operator removes a binding only when both conditions are true:
 
 - The name is `ctrl-<hash>-<role>` for this controller and one of the four roles.

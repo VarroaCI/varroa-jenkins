@@ -60,6 +60,21 @@ func ownsRBACBinding(b *v1alpha1.JenkinsRoleBinding, namespace, name string) boo
 	return false
 }
 
+// RBACSpecBindingOwner returns the controller whose spec.rbacSpec writes b.
+// It reads the controller from the labels of b. It returns ok only when
+// ownsRBACBinding accepts b for that controller.
+func RBACSpecBindingOwner(b *v1alpha1.JenkinsRoleBinding) (namespace, name string, ok bool) {
+	if b == nil {
+		return "", "", false
+	}
+	namespace = b.Labels[v1alpha1.LabelControllerNamespace]
+	name = b.Labels[v1alpha1.LabelControllerName]
+	if namespace == "" || name == "" || !ownsRBACBinding(b, namespace, name) {
+		return "", "", false
+	}
+	return namespace, name, true
+}
+
 // ownedRBACBindings lists the JenkinsRoleBindings that ownsRBACBinding accepts for cr.
 func (r *Reconciler) ownedRBACBindings(ctx context.Context, cr *v1alpha1.Controller) ([]*v1alpha1.JenkinsRoleBinding, error) {
 	all, err := crdstore.List[v1alpha1.JenkinsRoleBinding](ctx, r.store, "", "")

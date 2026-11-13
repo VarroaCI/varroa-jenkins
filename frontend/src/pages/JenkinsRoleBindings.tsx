@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { listJenkinsRoleBindings, deleteJenkinsRoleBinding } from "../api/client";
 import type { JenkinsRoleBinding } from "../types";
 import { Button } from "../components/Button";
@@ -7,10 +7,11 @@ import { Card } from "../components/Card";
 import ClusterSelector from "../components/ClusterSelector";
 import { useAuth } from "../context/AuthContext";
 import { canDoGlobal } from "../hooks/usePermissions";
-import { clusterQuery } from "../routing";
+import { clusterQuery, controllerRoute } from "../routing";
 import NoAccessibleClusters from "../components/NoAccessibleClusters";
 import { useConfigurationCluster } from "../hooks/useConfigurationCluster";
 import { federatedCopySource, federatedCopySummary } from "../lib/federatedCopy";
+import { rbacSpecOwner, rbacSpecOwnerLabel, rbacSpecOwnerSummary } from "../lib/rbacSpecBinding";
 import styles from "./JenkinsRoleBindings.module.css";
 import tableStyles from "./JenkinsRBACTable.module.css";
 
@@ -62,8 +63,11 @@ export default function JenkinsRoleBindings() {
 
   const filtered = useMemo(() => {
     return bindings.filter((b) => {
-      if (search && !b.metadata.name.toLowerCase().includes(search.toLowerCase())) return false;
-      return true;
+      if (!search) return true;
+      const term = search.toLowerCase();
+      if (b.metadata.name.toLowerCase().includes(term)) return true;
+      const owner = rbacSpecOwner(b.metadata);
+      return owner !== null && rbacSpecOwnerLabel(owner).toLowerCase().includes(term);
     });
   }, [bindings, search]);
 
@@ -110,7 +114,7 @@ export default function JenkinsRoleBindings() {
         <div className={styles.searchBox}>
           <span>⌕</span>
           <input
-            placeholder="Filter by name..."
+            placeholder="Filter by name or controller..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -134,6 +138,7 @@ export default function JenkinsRoleBindings() {
             <thead><tr><th>Name</th><th>Cluster</th><th>Role</th><th>Subjects</th><th>Scope</th><th>Actions</th></tr></thead>
             <tbody>{filtered.map((b) => {
               const copy = federatedCopySource("JenkinsRoleBinding", b.metadata);
+              const owner = rbacSpecOwner(b.metadata);
               return <tr key={b.metadata.name}>
               <td data-label="Name" className={tableStyles.name}>
                 <span>
@@ -142,6 +147,15 @@ export default function JenkinsRoleBindings() {
                     <span className={tableStyles.federatedBadge} title={federatedCopySummary(copy)}>
                       Federated
                     </span>
+                  )}
+                  {owner && cluster && (
+                    <Link
+                      className={tableStyles.controllerBadge}
+                      to={controllerRoute(cluster, owner.namespace, owner.name)}
+                      title={rbacSpecOwnerSummary(owner)}
+                    >
+                      Controller: {rbacSpecOwnerLabel(owner)}
+                    </Link>
                   )}
                 </span>
               </td>
@@ -158,7 +172,7 @@ export default function JenkinsRoleBindings() {
                       navigate(`/access/jenkins-role-bindings/${b.metadata.name}/edit${clusterQuery(cluster)}`)
                     }
                   >
-                    {copy ? "View" : "Edit"}
+                    {copy || owner ? "View" : "Edit"}
                   </Button>
                 )}
                 {canDoGlobal(permissions, "jenkinsrolebindings", "delete") && (
