@@ -73,9 +73,10 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 	})
 
 	getCB := mcp.NewTool("get_composed_bundle",
-		mcp.WithDescription("Get a specific composed bundle"),
+		mcp.WithDescription("Get a specific composed bundle. With cluster, the tool reads the bundle on that cluster only."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Bundle namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Bundle name")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindRead, getCB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -85,14 +86,18 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if err != nil {
 			return mcp.NewToolResultError("authentication required"), nil
 		}
-		ns, _ := getArgs(req)["namespace"].(string)
-		name, _ := getArgs(req)["name"].(string)
-		if !deps.Authorizer.CanReadConfigInNamespace(claims, "composedbundles", ns, deps.OperatorNamespace) {
+		args := getArgs(req)
+		ns, name := strArg(args, "namespace"), strArg(args, "name")
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		if !deps.Authorizer.CanReadConfigInNamespace(claims, "composedbundles", ns, cl.operatorNamespace(ctx, deps)) {
 			return mcp.NewToolResultError("access denied: missing composedbundles:read permission in namespace " + ns), nil
 		}
-		bundle, err := crdstore.Get[v1alpha1.ComposedBundle](ctx, deps.Store, name, ns)
+		bundle, err := composedBundleObject(deps, cl, ns, name).get(ctx)
 		if err != nil {
-			return mcp.NewToolResultError("composed bundle not found: " + err.Error()), nil
+			return mcp.NewToolResultError(readErrorText("composed bundle not found", "composed bundle "+ns+"/"+name+cl.onCluster(), err)), nil
 		}
 		return resultJSON(bundle)
 	})
@@ -159,7 +164,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 	})
 
 	updateCB := mcp.NewTool("update_composed_bundle",
-		mcp.WithDescription("Update an existing composed bundle. When another writer changes the object during the call, the tool reads it again and merges again, up to three times."),
+		mcp.WithDescription("Update an existing composed bundle. When another writer changes the object during the call, the tool reads it again and merges again, up to three times. With cluster, the tool reads and writes the bundle on that cluster only."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Bundle namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Bundle name")),
 		mcp.WithString("displayName", mcp.Description("Human-readable display name")),
@@ -167,6 +172,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		mcp.WithString("jcascMergeStrategy", mcp.Description("JCasC merge strategy")),
 		mcp.WithObject("variables", mcp.Description("Template variables")),
 		mcp.WithArray("inputs", mcp.Description("Bundle inputs (itemRef, gitSource or ociSource). When present, replaces the whole list in order; omit to leave inputs unchanged.")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindUpdate, updateCB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -181,7 +187,11 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if !deps.Authorizer.CanWriteComposedBundlesInNamespace(claims, "update", ns) {
 			return mcp.NewToolResultError("access denied: missing composedbundles:update permission in namespace " + ns), nil
 		}
-		existing, res := updateLocal[v1alpha1.ComposedBundle](ctx, deps.Store, name, ns, func(obj *v1alpha1.ComposedBundle) error {
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		existing, res := updateObject(ctx, composedBundleObject(deps, cl, ns, name), func(obj *v1alpha1.ComposedBundle) error {
 			// Key presence, not non-empty value, decides whether a field is touched.
 			// Testing the value conflates "leave this alone" with "clear this", so a
 			// non-empty field could never be cleared through MCP while REST PUT
@@ -222,14 +232,14 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 			return nil
 		}, updateTexts{
 			tool:     "update_composed_bundle",
-			object:   "composed bundle " + ns + "/" + name,
+			object:   "composed bundle " + ns + "/" + name + cl.onCluster(),
 			notFound: "composed bundle not found",
 			failed:   "failed to update composed bundle",
 		})
 		if res != nil {
 			return res, nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
+		emitConfigActivity(ctx, deps, claims, cl, activity.Event{
 			Type:      "composedbundle.updated",
 			Message:   "ComposedBundle " + name + " updated in " + ns,
 			Namespace: ns,

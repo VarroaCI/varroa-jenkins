@@ -51,14 +51,20 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 	})
 
 	getJRB := mcp.NewTool("get_jenkins_role_binding",
-		mcp.WithDescription("Get a specific Jenkins role binding by name"),
+		mcp.WithDescription("Get a specific Jenkins role binding by name. With cluster, the tool reads the binding on that cluster only."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Binding name")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindRead, getJRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		name := strArg(getArgs(req), "name")
-		binding, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, name, "")
+		args := getArgs(req)
+		name := strArg(args, "name")
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		binding, err := jenkinsRoleBindingObject(deps, cl, name).get(ctx)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Jenkins role binding not found: %v", err)), nil
+			return mcp.NewToolResultError(readErrorText("Jenkins role binding not found", "Jenkins role binding "+name+cl.onCluster(), err)), nil
 		}
 		return resultJSON(binding)
 	})
@@ -117,17 +123,18 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 	})
 
 	updateJRB := mcp.NewTool("update_jenkins_role_binding",
-		mcp.WithDescription("Update an existing Jenkins role binding. When another writer changes the object during the call, the tool reads it again and merges again, up to three times. The tool refuses a federated copy: an object with the label varroa.dev/federated-from."),
+		mcp.WithDescription("Update an existing Jenkins role binding. When another writer changes the object during the call, the tool reads it again and merges again, up to three times. The tool refuses a federated copy: an object with the label varroa.dev/federated-from. With cluster, the tool reads and writes the binding on that cluster only."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Binding name")),
 		mcp.WithString("roleRef", mcp.Description("JenkinsRole name to bind")),
 		mcp.WithArray("subjects", mcp.Description("Subject references")),
 		mcp.WithObject("controllerScope", mcp.Description("Controller limits: namespaces, controllerSelector, or both. "+
 			"This argument replaces the stored controllerScope as a whole. To change one field, send the "+
-			"spec.controllerScope of get_jenkins_role_binding with that field changed. Omit the argument to keep the stored controllerScope. "+
+			"spec.controllerScope of get_jenkins_role_binding on the same cluster with that field changed. Omit the argument to keep the stored controllerScope. "+
 			"This tool never removes a stored controllerScope; to bind on every controller, use the Kubernetes API or kubectl.")),
 		mcp.WithObject("jenkinsScope", mcp.Description("Jenkins item limits: type Global, Folder, or Pattern, with folder, propagate, or pattern. "+
 			"This argument replaces the stored jenkinsScope as a whole. Omit the argument to keep the stored jenkinsScope. "+
 			"Send {\"type\":\"Global\"} to remove the item limit.")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindUpdate, updateJRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -142,7 +149,11 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if !deps.Authorizer.CanUpdateJenkinsRoleBinding(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsrolebindings:update permission"), nil
 		}
-		existing, res := updateLocal[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, name, "", func(obj *v1alpha1.JenkinsRoleBinding) error {
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		existing, res := updateObject(ctx, jenkinsRoleBindingObject(deps, cl, name), func(obj *v1alpha1.JenkinsRoleBinding) error {
 			if msg := rbac.FederatedCopyMessage("JenkinsRoleBinding", obj.Name, obj.Labels, obj.Annotations); msg != "" {
 				return errors.New(msg)
 			}
@@ -169,14 +180,14 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 			return nil
 		}, updateTexts{
 			tool:     "update_jenkins_role_binding",
-			object:   "Jenkins role binding " + name,
+			object:   "Jenkins role binding " + name + cl.onCluster(),
 			notFound: "Jenkins role binding not found",
 			failed:   "failed to update Jenkins role binding",
 		})
 		if res != nil {
 			return res, nil
 		}
-		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRoleBinding, api.AccessUpdated, name))
+		emitConfigActivity(ctx, deps, claims, cl, api.AccessActivityEvent(api.AccessJenkinsRoleBinding, api.AccessUpdated, name))
 		return resultJSON(existing)
 	})
 

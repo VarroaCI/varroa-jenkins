@@ -72,9 +72,10 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 	})
 
 	getCS := mcp.NewTool("get_catalog_source",
-		mcp.WithDescription("Get a specific catalog source"),
+		mcp.WithDescription("Get a specific catalog source. With cluster, the tool reads the source on that cluster only."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Source namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Source name")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindRead, getCS, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -85,12 +86,17 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 			return mcp.NewToolResultError("authentication required"), nil
 		}
 		args := getArgs(req)
-		if !deps.Authorizer.CanReadConfigInNamespace(claims, "catalogsources", strArg(args, "namespace"), deps.OperatorNamespace) {
-			return mcp.NewToolResultError("access denied: missing catalogsources:read permission in namespace " + strArg(args, "namespace")), nil
+		ns, name := strArg(args, "namespace"), strArg(args, "name")
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
 		}
-		source, err := crdstore.Get[v1alpha1.CatalogSource](ctx, deps.Store, strArg(args, "name"), strArg(args, "namespace"))
+		if !deps.Authorizer.CanReadConfigInNamespace(claims, "catalogsources", ns, cl.operatorNamespace(ctx, deps)) {
+			return mcp.NewToolResultError("access denied: missing catalogsources:read permission in namespace " + ns), nil
+		}
+		source, err := catalogSourceObject(deps, cl, ns, name).get(ctx)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("catalog source not found: %v", err)), nil
+			return mcp.NewToolResultError(readErrorText("catalog source not found", "catalog source "+ns+"/"+name+cl.onCluster(), err)), nil
 		}
 		return resultJSON(source)
 	})
@@ -169,7 +175,7 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 	})
 
 	updateCS := mcp.NewTool("update_catalog_source",
-		mcp.WithDescription("Update an existing catalog source. When another writer changes the object during the call, the tool reads it again and merges again, up to three times."),
+		mcp.WithDescription("Update an existing catalog source. When another writer changes the object during the call, the tool reads it again and merges again, up to three times. With cluster, the tool reads and writes the source on that cluster only."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Source namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Source name")),
 		mcp.WithString("repoURL", mcp.Description("Git repository URL (exactly one of repoURL or ociRef)")),
@@ -179,6 +185,7 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		mcp.WithString("secretRef", mcp.Description("Auth secret name (git credentials or registry pull secret)")),
 		mcp.WithBoolean("trusted", mcp.Description("Mark the source trusted")),
 		mcp.WithNumber("syncIntervalSeconds", mcp.Description("Sync interval in seconds: 0 (use the default, 300) or 30 to 31536000")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindUpdate, updateCS, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -196,7 +203,11 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if err := v1alpha1.CheckCatalogSourceWritable(name); err != nil {
 			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
 		}
-		existing, res := updateLocal[v1alpha1.CatalogSource](ctx, deps.Store, name, ns, func(obj *v1alpha1.CatalogSource) error {
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		existing, res := updateObject(ctx, catalogSourceObject(deps, cl, ns, name), func(obj *v1alpha1.CatalogSource) error {
 			// Key presence decides whether a field is touched (omit = preserve, "" =
 			// clear). Choosing a source kind clears the other kind's fields so the
 			// CRD's at-most-one rule holds; asking for both in one call is rejected
@@ -247,14 +258,14 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 			return nil
 		}, updateTexts{
 			tool:     "update_catalog_source",
-			object:   "catalog source " + ns + "/" + name,
+			object:   "catalog source " + ns + "/" + name + cl.onCluster(),
 			notFound: "catalog source not found",
 			failed:   "failed to update catalog source",
 		})
 		if res != nil {
 			return res, nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
+		emitConfigActivity(ctx, deps, claims, cl, activity.Event{
 			Type:      "catalogsource.updated",
 			Message:   "CatalogSource " + name + " updated in " + ns,
 			Namespace: ns,

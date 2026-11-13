@@ -50,14 +50,20 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 	})
 
 	getJR := mcp.NewTool("get_jenkins_role",
-		mcp.WithDescription("Get a specific Jenkins role by name"),
+		mcp.WithDescription("Get a specific Jenkins role by name. With cluster, the tool reads the role on that cluster only."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Role name")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindRead, getJR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		name := strArg(getArgs(req), "name")
-		role, err := crdstore.Get[v1alpha1.JenkinsRole](ctx, deps.Store, name, "")
+		args := getArgs(req)
+		name := strArg(args, "name")
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		role, err := jenkinsRoleObject(deps, cl, name).get(ctx)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Jenkins role not found: %v", err)), nil
+			return mcp.NewToolResultError(readErrorText("Jenkins role not found", "Jenkins role "+name+cl.onCluster(), err)), nil
 		}
 		return resultJSON(role)
 	})
@@ -100,11 +106,12 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 	})
 
 	updateJR := mcp.NewTool("update_jenkins_role",
-		mcp.WithDescription("Update an existing Jenkins role. When another writer changes the object during the call, the tool reads it again and merges again, up to three times. The tool refuses a federated copy: an object with the label varroa.dev/federated-from."),
+		mcp.WithDescription("Update an existing Jenkins role. When another writer changes the object during the call, the tool reads it again and merges again, up to three times. The tool refuses a federated copy: an object with the label varroa.dev/federated-from. With cluster, the tool reads and writes the role on that cluster only."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Role name")),
 		mcp.WithString("description", mcp.Description("Human-readable description")),
 		mcp.WithString("roleType", mcp.Description("Role type: Global, Item, Agent")),
 		mcp.WithArray("permissions", mcp.Description("Permission IDs")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindUpdate, updateJR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -119,7 +126,11 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		if !deps.Authorizer.CanUpdateJenkinsRole(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsroles:update permission"), nil
 		}
-		existing, res := updateLocal[v1alpha1.JenkinsRole](ctx, deps.Store, name, "", func(obj *v1alpha1.JenkinsRole) error {
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		existing, res := updateObject(ctx, jenkinsRoleObject(deps, cl, name), func(obj *v1alpha1.JenkinsRole) error {
 			if msg := rbac.FederatedCopyMessage("JenkinsRole", obj.Name, obj.Labels, obj.Annotations); msg != "" {
 				return errors.New(msg)
 			}
@@ -135,14 +146,14 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 			return nil
 		}, updateTexts{
 			tool:     "update_jenkins_role",
-			object:   "Jenkins role " + name,
+			object:   "Jenkins role " + name + cl.onCluster(),
 			notFound: "Jenkins role not found",
 			failed:   "failed to update Jenkins role",
 		})
 		if res != nil {
 			return res, nil
 		}
-		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRole, api.AccessUpdated, name))
+		emitConfigActivity(ctx, deps, claims, cl, api.AccessActivityEvent(api.AccessJenkinsRole, api.AccessUpdated, name))
 		return resultJSON(existing)
 	})
 

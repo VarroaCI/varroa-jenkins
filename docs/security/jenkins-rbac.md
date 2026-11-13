@@ -115,7 +115,7 @@ A copy carries the label `varroa.dev/federated-from`. Federation rewrites each c
 
 - The dashboard opens a copy read-only. A note names the source objects. The Jenkins role and binding lists mark a copy `Federated`, and its row action reads View.
 - The `PUT` routes for `jenkinsroles` and `jenkinsrolebindings` answer `409` with the code `federated_copy`. The write changes nothing. A retry does not succeed.
-- The MCP tools `update_jenkins_role` and `update_jenkins_role_binding` refuse a copy too.
+- The MCP tools `update_jenkins_role` and `update_jenkins_role_binding` refuse a copy too, on each cluster that their `cluster` argument names.
 - Only federation sets the label. A `POST` or `PUT` body that sets `varroa.dev/federated-from` on another object answers `400` with the code `federated_label`. The write changes nothing.
 - `DELETE` still works. Delete a stale copy on the hive as described below.
 
