@@ -37,6 +37,7 @@ type memberConfig struct {
 	store       *crdstore.Fake
 	unreachable bool
 	updates     []string
+	composed    []string
 }
 
 func memberGet[T any](ctx context.Context, store *crdstore.Fake, name, namespace string) (json.RawMessage, error) {
@@ -400,8 +401,16 @@ func TestConfigClusterArgumentDeclared(t *testing.T) {
 		"get_catalog_source": true, "update_catalog_source": true,
 		"get_jenkins_role": true, "update_jenkins_role": true,
 		"get_jenkins_role_binding": true, "update_jenkins_role_binding": true,
+		"list_composed_bundles": true, "create_composed_bundle": true, "delete_composed_bundle": true,
+		"validate_composed_bundle": true, "preview_composed_bundle": true,
+		"list_catalog_items": true, "get_catalog_item": true,
+		"list_catalog_sources": true, "create_catalog_source": true, "delete_catalog_source": true, "sync_catalog_source": true,
+		"list_jenkins_roles": true, "create_jenkins_role": true, "delete_jenkins_role": true,
+		"list_jenkins_role_bindings": true, "create_jenkins_role_binding": true, "delete_jenkins_role_binding": true,
 		"update_varroa_role": false, "update_varroa_role_binding": false,
 		"get_varroa_role": false, "get_varroa_role_binding": false,
+		"list_varroa_roles": false, "create_varroa_role": false, "delete_varroa_role": false,
+		"list_varroa_role_bindings": false, "create_varroa_role_binding": false, "delete_varroa_role_binding": false,
 	}
 	byName := map[string]listedTool{}
 	for _, tool := range liveTools(t) {

@@ -3,17 +3,16 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
-	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
 
@@ -26,11 +25,12 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		mcp.WithDescription("List Jenkins roles managed by Varroa. Returns a compact "+
 			"summary per role (name, roleType, description, permissionCount) \u2014 enough to "+
 			"survey the permission sets defined for the fleet. Use get_jenkins_role for "+
-			"the full resource."),
+			"the full resource. With cluster, the tool lists the roles of that cluster only."),
 		mcp.WithBoolean("verbose", mcp.Description("Return full JenkinsRole resources instead "+
 			"of summaries. Expensive: full resources carry spec.permissions, so a fleet-sized "+
 			"listing can exhaust the context window. Prefer get_jenkins_role for detail on "+
 			"specific roles.")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 		withListOutput(jenkinsRoleListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listJR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -45,9 +45,15 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 			return mcp.NewToolResultError("access denied: missing jenkinsroles:read permission"), nil
 		}
 		args := getArgs(req)
-		roles, err := crdstore.List[v1alpha1.JenkinsRole](ctx, deps.Store, "", "")
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		roles, err := listOnCluster[v1alpha1.JenkinsRole](ctx, deps, cl, "", func(ctx context.Context) ([]json.RawMessage, error) {
+			return deps.ConfigBrood.ListJenkinsRoles(ctx, cl.name)
+		})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list Jenkins roles: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list Jenkins roles%s: %v", cl.onCluster(), err)), nil
 		}
 		if verbose, _ := args["verbose"].(bool); verbose {
 			return resultJSON(roles)
@@ -89,11 +95,12 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 	})
 
 	createJR := mcp.NewTool("create_jenkins_role",
-		mcp.WithDescription("Create a new Jenkins role"),
+		mcp.WithDescription("Create a new Jenkins role. With cluster, the tool creates the role on that cluster only."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Role name (DNS-1123)")),
 		mcp.WithString("description", mcp.Description("Human-readable description")),
 		mcp.WithString("roleType", mcp.Description("Role type: Global, Item, Agent; default Global")),
 		mcp.WithArray("permissions", mcp.Required(), mcp.Description("Permission IDs")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindCreateStrict, createJR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -107,22 +114,30 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 			return mcp.NewToolResultError("access denied: missing jenkinsroles:create permission"), nil
 		}
 		args := getArgs(req)
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		name := strArg(args, "name")
 		role := &v1alpha1.JenkinsRole{
-			ObjectMeta: metav1.ObjectMeta{Name: strArg(args, "name")},
+			ObjectMeta: metav1.ObjectMeta{Name: name},
 			Spec: v1alpha1.JenkinsRoleSpec{
 				RoleType:    strArg(args, "roleType"),
 				Permissions: firstSlice(strSliceArg(args, "permissions")),
 				Description: strArg(args, "description"),
 			},
 		}
-		if err := crdstore.Create[v1alpha1.JenkinsRole](ctx, deps.Store, role); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				return mcp.NewToolResultError(fmt.Sprintf("Jenkins role %s already exists; use update_jenkins_role to change it", strArg(args, "name"))), nil
+		created, err := createOnCluster(ctx, deps, cl, role, func(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
+			return deps.ConfigBrood.CreateJenkinsRole(ctx, cl.name, name, body)
+		})
+		if err != nil {
+			if isAlreadyExistsErr(err) {
+				return mcp.NewToolResultError(alreadyExistsText("Jenkins role "+name, "update_jenkins_role", cl)), nil
 			}
-			return mcp.NewToolResultError(fmt.Sprintf("failed to create Jenkins role: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to create Jenkins role%s: %v", cl.onCluster(), err)), nil
 		}
-		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRole, api.AccessCreated, strArg(args, "name")))
-		return resultJSON(role)
+		emitConfigActivity(ctx, deps, claims, cl, api.AccessActivityEvent(api.AccessJenkinsRole, api.AccessCreated, name))
+		return resultJSON(created)
 	})
 
 	updateJR := mcp.NewTool("update_jenkins_role",
@@ -178,8 +193,9 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 	})
 
 	deleteJR := mcp.NewTool("delete_jenkins_role",
-		mcp.WithDescription("Delete a Jenkins role"),
+		mcp.WithDescription("Delete a Jenkins role. With cluster, the tool deletes the role on that cluster only."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Role name")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindDelete, deleteJR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -189,15 +205,22 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		if err != nil {
 			return mcp.NewToolResultError("authentication required"), nil
 		}
-		name := strArg(getArgs(req), "name")
+		args := getArgs(req)
+		name := strArg(args, "name")
 		if !deps.Authorizer.CanDeleteJenkinsRole(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsroles:delete permission"), nil
 		}
-		if err := crdstore.Delete[v1alpha1.JenkinsRole](ctx, deps.Store, name, ""); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to delete Jenkins role: %v", err)), nil
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
 		}
-		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRole, api.AccessDeleted, name))
-		return mcp.NewToolResultText("Jenkins role " + name + " deleted"), nil
+		if err := deleteOnCluster[v1alpha1.JenkinsRole](ctx, deps, cl, name, "", func(ctx context.Context) error {
+			return deps.ConfigBrood.DeleteJenkinsRole(ctx, cl.name, name)
+		}); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to delete Jenkins role%s: %v", cl.onCluster(), err)), nil
+		}
+		emitConfigActivity(ctx, deps, claims, cl, api.AccessActivityEvent(api.AccessJenkinsRole, api.AccessDeleted, name))
+		return deletedResult("Jenkins role "+name, cl), nil
 	})
 }
 

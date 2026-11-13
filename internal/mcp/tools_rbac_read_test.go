@@ -24,9 +24,9 @@ var rbacReadTools = []struct {
 	resource string
 	cluster  bool
 }{
-	{tool: "list_jenkins_roles", args: map[string]any{}, resource: "jenkinsroles"},
+	{tool: "list_jenkins_roles", args: map[string]any{}, resource: "jenkinsroles", cluster: true},
 	{tool: "get_jenkins_role", args: map[string]any{"name": "r1"}, resource: "jenkinsroles", cluster: true},
-	{tool: "list_jenkins_role_bindings", args: map[string]any{}, resource: "jenkinsrolebindings"},
+	{tool: "list_jenkins_role_bindings", args: map[string]any{}, resource: "jenkinsrolebindings", cluster: true},
 	{tool: "get_jenkins_role_binding", args: map[string]any{"name": "b1"}, resource: "jenkinsrolebindings", cluster: true},
 	{tool: "list_varroa_roles", args: map[string]any{}, resource: "roles"},
 	{tool: "get_varroa_role", args: map[string]any{"name": "vr1"}, resource: "roles"},

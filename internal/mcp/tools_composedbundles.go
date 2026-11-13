@@ -2,8 +2,6 @@
 package mcp
 
 import (
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,7 +14,6 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
-	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // =============================================================================
@@ -29,12 +26,13 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 			"summary per bundle (name, namespace, displayName, phase, itemCount, "+
 			"inputCount, warningCount, resolvedHash, contentRef, message) \u2014 enough to "+
 			"survey a fleet and spot bundles that failed to compose. Use "+
-			"get_composed_bundle for the full resource."),
+			"get_composed_bundle for the full resource. With cluster, the tool lists the bundles of that cluster only."),
 		mcp.WithString("namespace", mcp.Description("Optional namespace to filter by")),
 		mcp.WithBoolean("verbose", mcp.Description("Return full ComposedBundle resources instead "+
 			"of summaries. Expensive: full resources carry status.warnings, inputSummary and "+
 			"observedRevisions, so a fleet-sized listing can exhaust the context window. Prefer "+
 			"get_composed_bundle for detail on specific bundles.")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 		withListOutput(composedBundleListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listCB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -50,11 +48,17 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		}
 		args := getArgs(req)
 		ns := namespaceOrDefault(args)
-		bundles, err := crdstore.List[v1alpha1.ComposedBundle](ctx, deps.Store, ns, "")
-		if err != nil {
-			return mcp.NewToolResultError("failed to list composed bundles: " + err.Error()), nil
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
 		}
-		keep := deps.Authorizer.ConfigReadFilter(claims, "composedbundles", deps.OperatorNamespace)
+		bundles, err := listOnCluster[v1alpha1.ComposedBundle](ctx, deps, cl, ns, func(ctx context.Context) ([]json.RawMessage, error) {
+			return deps.ConfigBrood.ListComposedBundles(ctx, cl.name, ns)
+		})
+		if err != nil {
+			return mcp.NewToolResultError("failed to list composed bundles" + cl.onCluster() + ": " + err.Error()), nil
+		}
+		keep := deps.Authorizer.ConfigReadFilter(claims, "composedbundles", cl.operatorNamespace(ctx, deps))
 		visible := bundles[:0]
 		for _, b := range bundles {
 			if keep(b.Namespace) {
@@ -111,6 +115,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		mcp.WithArray("inputs", mcp.Required(), mcp.Description("Bundle inputs (itemRef, gitSource or ociSource)")),
 		mcp.WithString("jcascMergeStrategy", mcp.Description("JCasC merge strategy: errorOnConflict (default), override")),
 		mcp.WithObject("variables", mcp.Description("Template variables for the bundle")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindCreateStrict, createCB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -124,6 +129,10 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		ns := strArg(args, "namespace")
 		if !deps.Authorizer.CanWriteComposedBundlesInNamespace(claims, "create", ns) {
 			return mcp.NewToolResultError("access denied: missing composedbundles:create permission in namespace " + ns), nil
+		}
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
 		}
 		bundle := &v1alpha1.ComposedBundle{
 			ObjectMeta: objMeta(args),
@@ -149,18 +158,21 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 				return mcp.NewToolResultError(fmt.Sprintf("invalid variables: %v", err)), nil
 			}
 		}
-		if err := crdstore.Create[v1alpha1.ComposedBundle](ctx, deps.Store, bundle); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				return mcp.NewToolResultError(fmt.Sprintf("composed bundle %s/%s already exists; use update_composed_bundle to change it", ns, strArg(args, "name"))), nil
+		created, err := createOnCluster(ctx, deps, cl, bundle, func(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
+			return deps.ConfigBrood.CreateComposedBundle(ctx, cl.name, ns, strArg(args, "name"), body)
+		})
+		if err != nil {
+			if isAlreadyExistsErr(err) {
+				return mcp.NewToolResultError(alreadyExistsText("composed bundle "+ns+"/"+strArg(args, "name"), "update_composed_bundle", cl)), nil
 			}
-			return mcp.NewToolResultError(fmt.Sprintf("failed to create composed bundle: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to create composed bundle%s: %v", cl.onCluster(), err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
+		emitConfigActivity(ctx, deps, claims, cl, activity.Event{
 			Type:      "composedbundle.created",
 			Message:   "ComposedBundle " + strArg(args, "name") + " created in " + ns,
 			Namespace: ns,
 		})
-		return resultJSON(bundle)
+		return resultJSON(created)
 	})
 
 	updateCB := mcp.NewTool("update_composed_bundle",
@@ -248,9 +260,10 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 	})
 
 	deleteCB := mcp.NewTool("delete_composed_bundle",
-		mcp.WithDescription("Delete a composed bundle"),
+		mcp.WithDescription("Delete a composed bundle. With cluster, the tool deletes the bundle on that cluster only."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Bundle namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Bundle name")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindDelete, deleteCB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -265,15 +278,21 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if !deps.Authorizer.CanWriteComposedBundlesInNamespace(claims, "delete", ns) {
 			return mcp.NewToolResultError("access denied: missing composedbundles:delete permission in namespace " + ns), nil
 		}
-		if err := crdstore.Delete[v1alpha1.ComposedBundle](ctx, deps.Store, name, ns); err != nil {
-			return mcp.NewToolResultError("failed to delete composed bundle: " + err.Error()), nil
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
+		if err := deleteOnCluster[v1alpha1.ComposedBundle](ctx, deps, cl, name, ns, func(ctx context.Context) error {
+			return deps.ConfigBrood.DeleteComposedBundle(ctx, cl.name, ns, name)
+		}); err != nil {
+			return mcp.NewToolResultError("failed to delete composed bundle" + cl.onCluster() + ": " + err.Error()), nil
+		}
+		emitConfigActivity(ctx, deps, claims, cl, activity.Event{
 			Type:      "composedbundle.deleted",
 			Message:   "ComposedBundle " + name + " deleted in " + ns,
 			Namespace: ns,
 		})
-		return mcp.NewToolResultText("composed bundle " + ns + "/" + name + " deleted"), nil
+		return deletedResult("composed bundle "+ns+"/"+name, cl), nil
 	})
 
 	validateCB := mcp.NewTool("validate_composed_bundle",
@@ -284,6 +303,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		mcp.WithArray("inputs", mcp.Required(), mcp.Description("Bundle inputs (itemRef, gitSource or ociSource)")),
 		mcp.WithString("jcascMergeStrategy", mcp.Description("JCasC merge strategy: errorOnConflict (default), override")),
 		mcp.WithObject("variables", mcp.Description("Template variables for the bundle")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindRead, validateCB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -304,7 +324,11 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if deps.ConfigBrood == nil {
 			return mcp.NewToolResultError("config brood not configured"), nil
 		}
-		preview, err := composeBundleFromArgs(ctx, deps, args)
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		preview, err := composeBundleFromArgs(ctx, deps, cl, args)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -346,6 +370,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		mcp.WithArray("inputs", mcp.Required(), mcp.Description("Bundle inputs (itemRef, gitSource or ociSource)")),
 		mcp.WithString("jcascMergeStrategy", mcp.Description("JCasC merge strategy: errorOnConflict (default), override")),
 		mcp.WithObject("variables", mcp.Description("Template variables for the bundle")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindRead, previewCB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -366,7 +391,11 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if deps.ConfigBrood == nil {
 			return mcp.NewToolResultError("config brood not configured"), nil
 		}
-		preview, err := composeBundleFromArgs(ctx, deps, args)
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		preview, err := composeBundleFromArgs(ctx, deps, cl, args)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -377,8 +406,8 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 
 // composeBundleFromArgs builds a ComposedBundleSpec from the create-style
 // argument parsing (inputs/variables via marshalUnmarshal) and runs it through
-// the composer. Callers guard ConfigBrood before invoking.
-func composeBundleFromArgs(ctx context.Context, deps *api.Dependencies, args map[string]any) (*bus.BundleComposePreview, error) {
+// the composer on the cluster c. Callers guard ConfigBrood before invoking.
+func composeBundleFromArgs(ctx context.Context, deps *api.Dependencies, c configCluster, args map[string]any) (*bus.BundleComposePreview, error) {
 	var spec v1alpha1.ComposedBundleSpec
 	if inputs := args["inputs"]; inputs != nil {
 		if err := marshalUnmarshal(inputs, &spec.Inputs); err != nil {
@@ -392,9 +421,9 @@ func composeBundleFromArgs(ctx context.Context, deps *api.Dependencies, args map
 	}
 	spec.JcascMergeStrategy = strArg(args, "jcascMergeStrategy")
 	specJSON, _ := json.Marshal(spec)
-	preview, err := deps.ConfigBrood.ComposeBundle(ctx, localCluster(deps), namespaceOrDefault(args), specJSON)
+	preview, err := deps.ConfigBrood.ComposeBundle(ctx, c.name, namespaceOrDefault(args), specJSON)
 	if err != nil {
-		return nil, fmt.Errorf("failed to compose bundle: %v", err)
+		return nil, fmt.Errorf("failed to compose bundle%s: %v", c.onCluster(), err)
 	}
 	return preview, nil
 }

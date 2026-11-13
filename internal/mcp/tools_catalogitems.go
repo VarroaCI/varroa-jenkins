@@ -3,12 +3,15 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
@@ -24,9 +27,10 @@ func registerCatalogItemTools(mcpServer *server.MCPServer, deps *api.Dependencie
 			"sourceRef, contentHash, valid) rather than raw CRs. For an item whose "+
 			"type is pipeline-template, the content this tool does not return is "+
 			"one PipelineTemplate document, not items YAML; this tool does not "+
-			"parse it."),
+			"parse it. With cluster, the tool lists the items of that cluster only."),
 		mcp.WithString("namespace", mcp.Description("Optional namespace to filter by")),
 		mcp.WithString("source", mcp.Description("Optional catalog source name filter")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 		withListOutput(catalogItemListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listCI, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -40,22 +44,27 @@ func registerCatalogItemTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		if !deps.Authorizer.CanReadCatalogItems(claims) {
 			return mcp.NewToolResultError("access denied: missing catalogitems:read permission"), nil
 		}
-		ns := namespaceOrDefault(getArgs(req))
-		source, _ := getArgs(req)["source"].(string)
-		items, err := crdstore.List[v1alpha1.CatalogItem](ctx, deps.Store, ns, "")
-		if err != nil {
-			return mcp.NewToolResultError("failed to list catalog items: " + err.Error()), nil
+		args := getArgs(req)
+		ns := namespaceOrDefault(args)
+		source, _ := args["source"].(string)
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
 		}
-		keep := deps.Authorizer.ConfigReadFilter(claims, "catalogitems", deps.OperatorNamespace)
-		summaries := make([]any, 0, len(items))
-		for _, item := range items {
-			if !keep(item.Namespace) {
+		rows, err := listCatalogItemRows(ctx, deps, cl, ns)
+		if err != nil {
+			return mcp.NewToolResultError("failed to list catalog items" + cl.onCluster() + ": " + err.Error()), nil
+		}
+		keep := deps.Authorizer.ConfigReadFilter(claims, "catalogitems", cl.operatorNamespace(ctx, deps))
+		summaries := make([]bus.CatalogItemSummary, 0, len(rows))
+		for _, s := range rows {
+			if !keep(s.Namespace) {
 				continue
 			}
-			if source != "" && item.Spec.SourceRef != source {
+			if source != "" && s.SourceRef != source {
 				continue
 			}
-			summaries = append(summaries, controller.ProjectCatalogItemSummary(item))
+			summaries = append(summaries, s)
 		}
 		return resultJSON(summaries)
 	})
@@ -63,9 +72,11 @@ func registerCatalogItemTools(mcpServer *server.MCPServer, deps *api.Dependencie
 	getCI := mcp.NewTool("get_catalog_item",
 		mcp.WithDescription("Get a specific catalog item, as its raw CR. When "+
 			"spec.type is pipeline-template, status.content is one PipelineTemplate "+
-			"document, not items YAML; this tool does not parse it."),
+			"document, not items YAML; this tool does not parse it. With cluster, the "+
+			"tool reads the item on that cluster only."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Item namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Item name")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindRead, getCI, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -75,17 +86,50 @@ func registerCatalogItemTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		if err != nil {
 			return mcp.NewToolResultError("authentication required"), nil
 		}
-		ns, _ := getArgs(req)["namespace"].(string)
-		name, _ := getArgs(req)["name"].(string)
-		if !deps.Authorizer.CanReadConfigInNamespace(claims, "catalogitems", ns, deps.OperatorNamespace) {
+		args := getArgs(req)
+		ns, name := strArg(args, "namespace"), strArg(args, "name")
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		if !deps.Authorizer.CanReadConfigInNamespace(claims, "catalogitems", ns, cl.operatorNamespace(ctx, deps)) {
 			return mcp.NewToolResultError("access denied: missing catalogitems:read permission in namespace " + ns), nil
 		}
-		item, err := crdstore.Get[v1alpha1.CatalogItem](ctx, deps.Store, name, ns)
+		item, err := catalogItemObject(deps, cl, ns, name).get(ctx)
 		if err != nil {
-			return mcp.NewToolResultError("catalog item not found: " + err.Error()), nil
+			return mcp.NewToolResultError(readErrorText("catalog item not found", "catalog item "+ns+"/"+name+cl.onCluster(), err)), nil
 		}
 		return resultJSON(item)
 	})
+}
+
+// listCatalogItemRows returns the catalog item summaries of the cluster c. The
+// local cluster projects deps.Store. A member answers its own summaries.
+func listCatalogItemRows(ctx context.Context, deps *api.Dependencies, c configCluster, ns string) ([]bus.CatalogItemSummary, error) {
+	if c.local {
+		items, err := crdstore.List[v1alpha1.CatalogItem](ctx, deps.Store, ns, "")
+		if err != nil {
+			return nil, err
+		}
+		out := make([]bus.CatalogItemSummary, 0, len(items))
+		for _, item := range items {
+			out = append(out, controller.ProjectCatalogItemSummary(item))
+		}
+		return out, nil
+	}
+	raws, err := deps.ConfigBrood.ListCatalogItems(ctx, c.name, ns, api.CatalogItemFilter{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]bus.CatalogItemSummary, 0, len(raws))
+	for i, raw := range raws {
+		var s bus.CatalogItemSummary
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, fmt.Errorf("decode item %d: %w", i, err)
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 // catalogItemListOutputSchema describes the result of list_catalog_items.

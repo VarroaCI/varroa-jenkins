@@ -3,17 +3,22 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // clusterArgDescription is the schema text of the cluster argument of a config tool.
-const clusterArgDescription = "Target cluster (default: local cluster). With a cluster, the tool reads or writes the object on that cluster only."
+const clusterArgDescription = "Target cluster (default: local cluster). With a cluster, the tool acts on that cluster only."
 
 // configCluster is the one cluster that a config tool call reads or writes.
 type configCluster struct {
@@ -122,5 +127,99 @@ func jenkinsRoleBindingObject(deps *api.Dependencies, c configCluster, name stri
 		func(ctx context.Context, obj json.RawMessage) (json.RawMessage, error) {
 			return deps.ConfigBrood.UpdateJenkinsRoleBinding(ctx, c.name, name, obj)
 		},
+	)
+}
+
+// listOnCluster lists the objects of one kind on the cluster c. The local
+// cluster reads deps.Store. A member answers through list, one JSON object for
+// each item.
+func listOnCluster[T any](ctx context.Context, deps *api.Dependencies, c configCluster, namespace string,
+	list func(ctx context.Context) ([]json.RawMessage, error)) ([]*T, error) {
+	if c.local {
+		return crdstore.List[T](ctx, deps.Store, namespace, "")
+	}
+	raws, err := list(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*T, 0, len(raws))
+	for i, raw := range raws {
+		var obj T
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			return nil, fmt.Errorf("decode item %d: %w", i, err)
+		}
+		out = append(out, &obj)
+	}
+	return out, nil
+}
+
+// createOnCluster creates obj on the cluster c and returns the stored object.
+// A member refusal of an existing name is a conflict answer.
+func createOnCluster[T any](ctx context.Context, deps *api.Dependencies, c configCluster, obj *T,
+	create func(ctx context.Context, body json.RawMessage) (json.RawMessage, error)) (*T, error) {
+	if c.local {
+		if err := crdstore.Create[T](ctx, deps.Store, obj); err != nil {
+			return nil, err
+		}
+		return obj, nil
+	}
+	body, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("encode the object: %w", err)
+	}
+	raw, err := create(ctx, body)
+	if err != nil {
+		return nil, err
+	}
+	var created T
+	if err := json.Unmarshal(raw, &created); err != nil {
+		return nil, fmt.Errorf("decode the created object: %w", err)
+	}
+	return &created, nil
+}
+
+// deleteOnCluster deletes one object on the cluster c. The local cluster deletes
+// from deps.Store. A member runs remove.
+func deleteOnCluster[T any](ctx context.Context, deps *api.Dependencies, c configCluster, name, namespace string,
+	remove func(ctx context.Context) error) error {
+	if c.local {
+		return crdstore.Delete[T](ctx, deps.Store, name, namespace)
+	}
+	return remove(ctx)
+}
+
+// isAlreadyExistsErr reports a create refusal for an existing name, from the
+// local store or from a member operator, which answers conflict.
+func isAlreadyExistsErr(err error) bool {
+	var be *api.BroodError
+	return apierrors.IsAlreadyExists(err) || (errors.As(err, &be) && be.Code == bus.CodeConflict)
+}
+
+// alreadyExistsText words a create refusal. On a member, the text names the
+// cluster and the update call repeats it.
+func alreadyExistsText(object, updateTool string, c configCluster) string {
+	if c.local {
+		return object + " already exists; use " + updateTool + " to change it"
+	}
+	return object + " on cluster " + c.name + " already exists; use " + updateTool + " with cluster " + c.name + " to change it"
+}
+
+// deletedResult reports a deleted object. The text names the object and, on a
+// member, the cluster. It never carries the object body.
+func deletedResult(object string, c configCluster) *mcp.CallToolResult {
+	return mcp.NewToolResultText(object + c.onCluster() + " deleted")
+}
+
+// catalogItemObject addresses one CatalogItem on the cluster c. A catalog item
+// is read-only, so the object has no write.
+func catalogItemObject(deps *api.Dependencies, c configCluster, namespace, name string) configObject[v1alpha1.CatalogItem] {
+	if c.local {
+		return storeObject[v1alpha1.CatalogItem](deps.Store, name, namespace)
+	}
+	return broodObject[v1alpha1.CatalogItem](
+		func(ctx context.Context) (json.RawMessage, error) {
+			return deps.ConfigBrood.GetCatalogItem(ctx, c.name, namespace, name)
+		},
+		nil,
 	)
 }
