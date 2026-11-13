@@ -49,6 +49,7 @@ var registry = map[reflect.Type]kindInfo{
 	reflect.TypeOf(v1alpha1.UpdateCenter{}):          {updateCentersGVR, "UpdateCenter", false, true},
 	reflect.TypeOf(v1alpha1.ProfileCandidate{}):      {profileCandidateGVR, "ProfileCandidate", false, true},
 	reflect.TypeOf(v1alpha1.CellPool{}):              {cellPoolGVR, "CellPool", false, true},
+	reflect.TypeOf(v1alpha1.AssistantConfig{}):       {assistantConfigGVR, "AssistantConfig", false, true},
 }
 
 // clearStatusFields lists, per resource, the status keys a merge patch must
@@ -136,6 +137,8 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	// tenants is omitempty. A pool whose last tenant leaves must report an
 	// empty list, or a merge patch leaves the stale names in etcd.
 	cellPoolGVR: {"tenants": nil},
+	// assistantConfigGVR holds the provider key state and the conditions in status.
+	assistantConfigGVR: {"providers": nil, "conditions": nil},
 	// federation is omitempty. A binding whose last hive leaves membership
 	// must report an empty list, or a merge patch leaves the stale entries.
 	varroaRoleBindingGVR: {"federation": nil},
@@ -255,6 +258,7 @@ var (
 	updateCentersGVR         = gvr("updatecenters")
 	profileCandidateGVR      = gvr("profilecandidates")
 	cellPoolGVR              = gvr("cellpools")
+	assistantConfigGVR       = gvr("assistantconfigs")
 )
 
 func gvr(resource string) schema.GroupVersionResource {

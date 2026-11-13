@@ -4419,3 +4419,107 @@ func (in *TenantAgentLastSession) DeepCopy() *TenantAgentLastSession {
 	in.DeepCopyInto(out)
 	return out
 }
+
+// DeepCopyInto is a hand-written deepcopy for AssistantConfig.
+func (in *AssistantConfig) DeepCopyInto(out *AssistantConfig) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+// DeepCopy creates a new AssistantConfig.
+func (in *AssistantConfig) DeepCopy() *AssistantConfig {
+	if in == nil {
+		return nil
+	}
+	out := new(AssistantConfig)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object.
+func (in *AssistantConfig) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyInto is a hand-written deepcopy for AssistantConfigList.
+func (in *AssistantConfigList) DeepCopyInto(out *AssistantConfigList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]AssistantConfig, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy creates a new AssistantConfigList.
+func (in *AssistantConfigList) DeepCopy() *AssistantConfigList {
+	if in == nil {
+		return nil
+	}
+	out := new(AssistantConfigList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object.
+func (in *AssistantConfigList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyInto is a hand-written deepcopy for AssistantConfigSpec.
+func (in *AssistantConfigSpec) DeepCopyInto(out *AssistantConfigSpec) {
+	*out = *in
+	if in.Providers != nil {
+		in, out := &in.Providers, &out.Providers
+		*out = make([]AssistantProvider, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	out.Budgets = in.Budgets
+}
+
+// DeepCopyInto is a hand-written deepcopy for AssistantProvider.
+func (in *AssistantProvider) DeepCopyInto(out *AssistantProvider) {
+	*out = *in
+	if in.Models != nil {
+		in, out := &in.Models, &out.Models
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.CIDRs != nil {
+		in, out := &in.CIDRs, &out.CIDRs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopyInto is a hand-written deepcopy for AssistantConfigStatus.
+func (in *AssistantConfigStatus) DeepCopyInto(out *AssistantConfigStatus) {
+	*out = *in
+	if in.Providers != nil {
+		in, out := &in.Providers, &out.Providers
+		*out = make([]AssistantProviderStatus, len(*in))
+		copy(*out, *in)
+	}
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]metav1.Condition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}

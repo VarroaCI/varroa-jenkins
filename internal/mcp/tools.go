@@ -127,6 +127,7 @@ func registerAllTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	registerCatalogItemTools(mcpServer, deps)
 	registerComposedBundleTools(mcpServer, deps)
 	registerProvisioningDefaultsTools(mcpServer, deps)
+	registerAssistantConfigTools(mcpServer, deps)
 	registerVersionCandidateTools(mcpServer, deps)
 	registerUserTools(mcpServer, deps)
 	registerGroupTools(mcpServer, deps)

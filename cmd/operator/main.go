@@ -85,6 +85,7 @@ func main() {
 	oidcGroupClaim := flag.String("oidc-group-claim", envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"), "comma-separated JWT claims for kind:Group bindings inside Jenkins")
 	defaultRead := flag.Bool("default-read", false, "Allow any authenticated user to read controllers without explicit binding")
 	tenantAgents := flag.Bool("tenant-agents", envBool("VARROA_TENANT_AGENTS", false), "Reconcile Tenant agent role bindings (core install only)")
+	assistantConfig := flag.Bool("assistant", envBool("VARROA_ASSISTANT", false), "Serve the AssistantConfig write route and reconcile its keys and egress (core install only)")
 	logLevel := flag.String("log-level", "info", "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", "text", "Log format: text, json")
 	maxConcurrent := flag.Int("max-concurrent-reconciles", envInt("VARROA_MAX_CONCURRENT_RECONCILES", 8), "Max concurrent Controller reconciles")
@@ -821,6 +822,7 @@ func main() {
 		activity:       actPub,
 		beatNow:        func() { hbRunner.BeatNow() },
 		forge:          forgeAnswerer,
+		assistant:      *assistantConfig,
 		logger:         logger,
 	}); err != nil {
 		logger.Error("failed to add operator command runner", "error", err)
@@ -1398,8 +1400,10 @@ type operatorCommandRunner struct {
 	activity       *activity.Publisher
 	beatNow        func()
 	// forge ends the pending commit statuses of a build the recorder ended.
-	forge  commitStatusEnder
-	logger *slog.Logger
+	forge commitStatusEnder
+	// assistant serves the AssistantConfig write route. Set by -assistant.
+	assistant bool
+	logger    *slog.Logger
 }
 
 func (r *operatorCommandRunner) NeedLeaderElection() bool { return true }
@@ -1821,7 +1825,7 @@ func (r *operatorCommandRunner) commandResponders(ctx context.Context) []command
 		}
 	}
 
-	return []commandResponder{
+	responders := []commandResponder{
 		{"reconcile", bus.OperatorReconcileSubject(r.cluster), reconcileAction("reconcile", func(req bus.ReconcileRequest) {
 			r.reconciler.TriggerReconcile(r.cluster, req.Name, req.Namespace)
 		}), serialResponder},
@@ -1993,6 +1997,11 @@ func (r *operatorCommandRunner) commandResponders(ctx context.Context) []command
 		// Namespace discovery (F4 add-cluster-namespace-discovery).
 		{"namespaces.list", bus.OperatorNamespacesSubject(r.cluster), r.crud.HandleNamespacesList, serialResponder},
 	}
+	// The assistant config subject is served only on a core with -assistant.
+	if r.assistant {
+		responders = append(responders, commandResponder{"assistantconfig.update", bus.OperatorAssistantConfigSubject(r.cluster, "update"), r.configCrud.HandleAssistantConfigUpdate, serialResponder})
+	}
+	return responders
 }
 
 // storeItemLookupAdapter adapts crdstore.Backend to bundle.ItemLookup.

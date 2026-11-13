@@ -44,6 +44,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&Runner{}, &RunnerList{},
 		&TenantAgent{}, &TenantAgentList{},
 		&CellPool{}, &CellPoolList{},
+		&AssistantConfig{}, &AssistantConfigList{},
 		&BroodOperation{}, &BroodOperationList{},
 		&BroodSchedule{}, &BroodScheduleList{},
 	)

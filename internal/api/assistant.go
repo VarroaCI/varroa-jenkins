@@ -48,6 +48,9 @@ const (
 type AssistantRuntime struct {
 	Config   provider.Config
 	Registry *provider.Registry
+	// Operator reads and writes the AssistantConfig object. Nil turns the
+	// config routes off.
+	Operator AssistantOperator
 	// Store is the session store. The BFF wraps it with newNotifyingStore.
 	Store store.Store
 	// HostFor returns the tool host that acts as the caller.

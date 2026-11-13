@@ -35,6 +35,12 @@ func OperatorProvisioningDefaultsSubject(cluster, verb string) string {
 	return "operator." + cluster + ".provisioningdefaults." + verb
 }
 
+// OperatorAssistantConfigSubject returns operator.<cluster>.assistantconfig.<verb>.
+// verb is update. The update takes ConfigApplyRequest and answers ConfigApplyResponse.
+func OperatorAssistantConfigSubject(cluster, verb string) string {
+	return "operator." + cluster + ".assistantconfig." + verb
+}
+
 // OperatorVersionProfilesSubject returns operator.<cluster>.versionprofiles.<verb>.
 // verb ∈ list|get|create|update|delete|view.
 func OperatorVersionProfilesSubject(cluster, verb string) string {

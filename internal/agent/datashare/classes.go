@@ -39,6 +39,7 @@ var classes = map[string]DataClass{
 	"validate_composed_bundle":     ClassMetadata,
 	"preview_composed_bundle":      ClassMetadata,
 	"get_provisioning_defaults":    ClassMetadata,
+	"get_assistant_config":         ClassMetadata,
 	"list_jenkins_version_profile": ClassMetadata,
 	"get_jenkins_version_profile":  ClassMetadata,
 	"list_version_candidates":      ClassMetadata,

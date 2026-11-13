@@ -122,6 +122,8 @@ paths:
     $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1approvals~1{id}~1deny'
   /api/v1/assistant/settings:
     $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1settings'
+  /api/v1/assistant/config:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1config'
   /api/v1/assistant/providers:
     $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1providers'
   /api/v1/me/assistant:

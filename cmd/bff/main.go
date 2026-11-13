@@ -598,6 +598,12 @@ func main() {
 	rbacResolver.SetUserDirectory(userInformer.GetIndexer(), operatorNamespace)
 	authorizer := api.NewAuthorizer(rbacResolver, *defaultRead)
 	configBrood := api.NewBusConfigBrood(cluster, busConn, client, clientsetClient, logger)
+	// The assistant reads and writes its AssistantConfig through the same brood.
+	if assistantRT != nil {
+		if op, ok := configBrood.(api.AssistantOperator); ok {
+			assistantRT.Operator = op
+		}
+	}
 	rbacFederation := api.NewRBACFederationReconciler(
 		roleInformer.GetStore(),
 		roleBindingInformer.GetStore(),

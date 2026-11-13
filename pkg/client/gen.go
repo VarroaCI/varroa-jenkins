@@ -51,6 +51,31 @@ const (
 	ComponentsSchemasAssistantApprovalStatePending  ComponentsSchemasAssistantApprovalState = "pending"
 )
 
+// Defines values for ComponentsSchemasAssistantConfigProviderAuth.
+const (
+	ComponentsSchemasAssistantConfigProviderAuthApiKey ComponentsSchemasAssistantConfigProviderAuth = "apiKey"
+	ComponentsSchemasAssistantConfigProviderAuthNone   ComponentsSchemasAssistantConfigProviderAuth = "none"
+)
+
+// Defines values for ComponentsSchemasAssistantConfigProviderKind.
+const (
+	ComponentsSchemasAssistantConfigProviderKindAnthropic        ComponentsSchemasAssistantConfigProviderKind = "anthropic"
+	ComponentsSchemasAssistantConfigProviderKindOpenaiCompatible ComponentsSchemasAssistantConfigProviderKind = "openai-compatible"
+)
+
+// Defines values for ComponentsSchemasAssistantConfigProviderTrust.
+const (
+	ComponentsSchemasAssistantConfigProviderTrustExternal ComponentsSchemasAssistantConfigProviderTrust = "external"
+	ComponentsSchemasAssistantConfigProviderTrustInternal ComponentsSchemasAssistantConfigProviderTrust = "internal"
+)
+
+// Defines values for ComponentsSchemasAssistantConfigSpecExternalDataSharing.
+const (
+	ComponentsSchemasAssistantConfigSpecExternalDataSharingLogs     ComponentsSchemasAssistantConfigSpecExternalDataSharing = "logs"
+	ComponentsSchemasAssistantConfigSpecExternalDataSharingMetadata ComponentsSchemasAssistantConfigSpecExternalDataSharing = "metadata"
+	ComponentsSchemasAssistantConfigSpecExternalDataSharingNone     ComponentsSchemasAssistantConfigSpecExternalDataSharing = "none"
+)
+
 // Defines values for ComponentsSchemasAssistantErrorCode.
 const (
 	ComponentsSchemasAssistantErrorCodeApprovalExpired         ComponentsSchemasAssistantErrorCode = "approval_expired"
@@ -66,8 +91,8 @@ const (
 
 // Defines values for ComponentsSchemasAssistantProviderKind.
 const (
-	Anthropic        ComponentsSchemasAssistantProviderKind = "anthropic"
-	OpenaiCompatible ComponentsSchemasAssistantProviderKind = "openai-compatible"
+	ComponentsSchemasAssistantProviderKindAnthropic        ComponentsSchemasAssistantProviderKind = "anthropic"
+	ComponentsSchemasAssistantProviderKindOpenaiCompatible ComponentsSchemasAssistantProviderKind = "openai-compatible"
 )
 
 // Defines values for ComponentsSchemasAssistantProviderTrust.
@@ -780,10 +805,10 @@ const (
 
 // Defines values for ComponentsSchemasTenantAgentSessionSkipReason.
 const (
-	BudgetDay           ComponentsSchemasTenantAgentSessionSkipReason = "budget_day"
-	DataSharingNone     ComponentsSchemasTenantAgentSessionSkipReason = "data_sharing_none"
-	KillSwitch          ComponentsSchemasTenantAgentSessionSkipReason = "kill_switch"
-	ProviderUnavailable ComponentsSchemasTenantAgentSessionSkipReason = "provider_unavailable"
+	ComponentsSchemasTenantAgentSessionSkipReasonBudgetDay           ComponentsSchemasTenantAgentSessionSkipReason = "budget_day"
+	ComponentsSchemasTenantAgentSessionSkipReasonDataSharingNone     ComponentsSchemasTenantAgentSessionSkipReason = "data_sharing_none"
+	ComponentsSchemasTenantAgentSessionSkipReasonKillSwitch          ComponentsSchemasTenantAgentSessionSkipReason = "kill_switch"
+	ComponentsSchemasTenantAgentSessionSkipReasonProviderUnavailable ComponentsSchemasTenantAgentSessionSkipReason = "provider_unavailable"
 )
 
 // Defines values for ComponentsSchemasTenantAgentSessionState.
@@ -1098,6 +1123,92 @@ type ComponentsSchemasAssistantApprovalOutcome struct {
 	} `json:"result"`
 }
 
+// ComponentsSchemasAssistantConfig The AssistantConfig object (cluster-scoped singleton named varroa-assistant). The stored object carries metadata.resourceVersion.
+type ComponentsSchemasAssistantConfig struct {
+	ApiVersion *string `json:"apiVersion,omitempty"`
+	Kind       *string `json:"kind,omitempty"`
+
+	// Metadata Slim Kubernetes ObjectMeta for CRD-shaped request/response bodies.
+	Metadata *ComponentsSchemasObjectMeta `json:"metadata,omitempty"`
+
+	// Spec The desired assistant setup. An absent field takes its default.
+	Spec   *ComponentsSchemasAssistantConfigSpec   `json:"spec,omitempty"`
+	Status *ComponentsSchemasAssistantConfigStatus `json:"status,omitempty"`
+}
+
+// ComponentsSchemasAssistantConfigBudgets The spend limits. A zero or absent value takes its default.
+type ComponentsSchemasAssistantConfigBudgets struct {
+	Session   *int64 `json:"session,omitempty"`
+	Steps     *int32 `json:"steps,omitempty"`
+	TenantDay *int64 `json:"tenantDay,omitempty"`
+	UserDay   *int64 `json:"userDay,omitempty"`
+}
+
+// ComponentsSchemasAssistantConfigProvider defines model for components_schemas_AssistantConfigProvider.
+type ComponentsSchemasAssistantConfigProvider struct {
+	Auth *ComponentsSchemasAssistantConfigProviderAuth `json:"auth,omitempty"`
+
+	// BaseURL The endpoint root. It is required for openai-compatible.
+	BaseURL *string                                      `json:"baseURL,omitempty"`
+	Cidrs   *[]string                                    `json:"cidrs,omitempty"`
+	Kind    ComponentsSchemasAssistantConfigProviderKind `json:"kind"`
+	Models  []string                                     `json:"models"`
+
+	// Name The DNS label of the provider. It also names the key in the key Secret.
+	Name string `json:"name"`
+
+	// Port The TCP port of the egress rule. Zero takes the port of baseURL.
+	Port  *int                                          `json:"port,omitempty"`
+	Trust ComponentsSchemasAssistantConfigProviderTrust `json:"trust"`
+}
+
+// ComponentsSchemasAssistantConfigProviderAuth defines model for ComponentsSchemasAssistantConfigProvider.Auth.
+type ComponentsSchemasAssistantConfigProviderAuth string
+
+// ComponentsSchemasAssistantConfigProviderKind defines model for ComponentsSchemasAssistantConfigProvider.Kind.
+type ComponentsSchemasAssistantConfigProviderKind string
+
+// ComponentsSchemasAssistantConfigProviderTrust defines model for ComponentsSchemasAssistantConfigProvider.Trust.
+type ComponentsSchemasAssistantConfigProviderTrust string
+
+// ComponentsSchemasAssistantConfigSpec The desired assistant setup. An absent field takes its default.
+type ComponentsSchemasAssistantConfigSpec struct {
+	// ApprovalExpiry How long a pending approval waits for a decision.
+	ApprovalExpiry *string `json:"approvalExpiry,omitempty"`
+
+	// Budgets The spend limits. A zero or absent value takes its default.
+	Budgets *ComponentsSchemasAssistantConfigBudgets `json:"budgets,omitempty"`
+
+	// DefaultModel The model that new sessions use with defaultProvider.
+	DefaultModel *string `json:"defaultModel,omitempty"`
+
+	// DefaultProvider The provider name that new sessions use. It names a listed provider.
+	DefaultProvider *string `json:"defaultProvider,omitempty"`
+
+	// ExternalDataSharing The highest data level that an external provider may receive.
+	ExternalDataSharing *ComponentsSchemasAssistantConfigSpecExternalDataSharing `json:"externalDataSharing,omitempty"`
+
+	// Providers The model providers. The name is the key.
+	Providers *[]ComponentsSchemasAssistantConfigProvider `json:"providers,omitempty"`
+}
+
+// ComponentsSchemasAssistantConfigSpecExternalDataSharing The highest data level that an external provider may receive.
+type ComponentsSchemasAssistantConfigSpecExternalDataSharing string
+
+// ComponentsSchemasAssistantConfigStatus defines model for components_schemas_AssistantConfigStatus.
+type ComponentsSchemasAssistantConfigStatus struct {
+	Conditions *[]struct {
+		LastTransitionTime *time.Time `json:"lastTransitionTime,omitempty"`
+		Message            *string    `json:"message,omitempty"`
+		ObservedGeneration *int64     `json:"observedGeneration,omitempty"`
+		Reason             *string    `json:"reason,omitempty"`
+		Status             string     `json:"status"`
+		Type               string     `json:"type"`
+	} `json:"conditions,omitempty"`
+	ObservedGeneration *int64                                      `json:"observedGeneration,omitempty"`
+	Providers          *[]ComponentsSchemasAssistantProviderStatus `json:"providers,omitempty"`
+}
+
 // ComponentsSchemasAssistantDenyRequest defines model for components_schemas_AssistantDenyRequest.
 type ComponentsSchemasAssistantDenyRequest struct {
 	Reason *string `json:"reason,omitempty"`
@@ -1152,6 +1263,13 @@ type ComponentsSchemasAssistantProviderTrust string
 // ComponentsSchemasAssistantProviderList defines model for components_schemas_AssistantProviderList.
 type ComponentsSchemasAssistantProviderList struct {
 	Items []ComponentsSchemasAssistantProvider `json:"items"`
+}
+
+// ComponentsSchemasAssistantProviderStatus defines model for components_schemas_AssistantProviderStatus.
+type ComponentsSchemasAssistantProviderStatus struct {
+	// KeySet True when the key Secret holds the key of the provider.
+	KeySet bool   `json:"keySet"`
+	Name   string `json:"name"`
 }
 
 // ComponentsSchemasAssistantSession defines model for components_schemas_AssistantSession.
@@ -6644,6 +6762,9 @@ type PutAgentUnattendedJSONRequestBody = ComponentsSchemasTenantAgentUnattendedR
 // DenyAssistantApprovalJSONRequestBody defines body for DenyAssistantApproval for application/json ContentType.
 type DenyAssistantApprovalJSONRequestBody = ComponentsSchemasAssistantDenyRequest
 
+// PutAssistantConfigJSONRequestBody defines body for PutAssistantConfig for application/json ContentType.
+type PutAssistantConfigJSONRequestBody = ComponentsSchemasAssistantConfig
+
 // CreateAssistantSessionJSONRequestBody defines body for CreateAssistantSession for application/json ContentType.
 type CreateAssistantSessionJSONRequestBody = ComponentsSchemasAssistantSessionCreateRequest
 
@@ -7360,6 +7481,14 @@ type ClientInterface interface {
 	DenyAssistantApprovalWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	DenyAssistantApproval(ctx context.Context, id string, body DenyAssistantApprovalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetAssistantConfig request
+	GetAssistantConfig(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutAssistantConfigWithBody request with any body
+	PutAssistantConfigWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PutAssistantConfig(ctx context.Context, body PutAssistantConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListAssistantProviders request
 	ListAssistantProviders(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -8153,6 +8282,42 @@ func (c *Client) DenyAssistantApprovalWithBody(ctx context.Context, id string, c
 
 func (c *Client) DenyAssistantApproval(ctx context.Context, id string, body DenyAssistantApprovalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDenyAssistantApprovalRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetAssistantConfig(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAssistantConfigRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutAssistantConfigWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutAssistantConfigRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutAssistantConfig(ctx context.Context, body PutAssistantConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutAssistantConfigRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -11758,6 +11923,73 @@ func NewDenyAssistantApprovalRequestWithBody(server string, id string, contentTy
 	}
 
 	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetAssistantConfigRequest generates requests for GetAssistantConfig
+func NewGetAssistantConfigRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/config")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPutAssistantConfigRequest calls the generic PutAssistantConfig builder with application/json body
+func NewPutAssistantConfigRequest(server string, body PutAssistantConfigJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPutAssistantConfigRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPutAssistantConfigRequestWithBody generates requests for PutAssistantConfig with any type of body
+func NewPutAssistantConfigRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/config")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
@@ -20850,6 +21082,14 @@ type ClientWithResponsesInterface interface {
 
 	DenyAssistantApprovalWithResponse(ctx context.Context, id string, body DenyAssistantApprovalJSONRequestBody, reqEditors ...RequestEditorFn) (*DenyAssistantApprovalResponse, error)
 
+	// GetAssistantConfigWithResponse request
+	GetAssistantConfigWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetAssistantConfigResponse, error)
+
+	// PutAssistantConfigWithBodyWithResponse request with any body
+	PutAssistantConfigWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutAssistantConfigResponse, error)
+
+	PutAssistantConfigWithResponse(ctx context.Context, body PutAssistantConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*PutAssistantConfigResponse, error)
+
 	// ListAssistantProvidersWithResponse request
 	ListAssistantProvidersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAssistantProvidersResponse, error)
 
@@ -21713,6 +21953,60 @@ func (r DenyAssistantApprovalResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r DenyAssistantApprovalResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetAssistantConfigResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasAssistantConfig
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAssistantConfigResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAssistantConfigResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PutAssistantConfigResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasAssistantConfig
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON409      *ComponentsSchemasAssistantError
+	JSON413      *ComponentsResponsesPayloadTooLarge
+	JSON503      *ComponentsSchemasAssistantError
+	JSON504      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r PutAssistantConfigResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutAssistantConfigResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -26808,6 +27102,32 @@ func (c *ClientWithResponses) DenyAssistantApprovalWithResponse(ctx context.Cont
 	return ParseDenyAssistantApprovalResponse(rsp)
 }
 
+// GetAssistantConfigWithResponse request returning *GetAssistantConfigResponse
+func (c *ClientWithResponses) GetAssistantConfigWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetAssistantConfigResponse, error) {
+	rsp, err := c.GetAssistantConfig(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAssistantConfigResponse(rsp)
+}
+
+// PutAssistantConfigWithBodyWithResponse request with arbitrary body returning *PutAssistantConfigResponse
+func (c *ClientWithResponses) PutAssistantConfigWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutAssistantConfigResponse, error) {
+	rsp, err := c.PutAssistantConfigWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutAssistantConfigResponse(rsp)
+}
+
+func (c *ClientWithResponses) PutAssistantConfigWithResponse(ctx context.Context, body PutAssistantConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*PutAssistantConfigResponse, error) {
+	rsp, err := c.PutAssistantConfig(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutAssistantConfigResponse(rsp)
+}
+
 // ListAssistantProvidersWithResponse request returning *ListAssistantProvidersResponse
 func (c *ClientWithResponses) ListAssistantProvidersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAssistantProvidersResponse, error) {
 	rsp, err := c.ListAssistantProviders(ctx, reqEditors...)
@@ -29373,6 +29693,128 @@ func ParseDenyAssistantApprovalResponse(rsp *http.Response) (*DenyAssistantAppro
 			return nil, err
 		}
 		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetAssistantConfigResponse parses an HTTP response from a GetAssistantConfigWithResponse call
+func ParseGetAssistantConfigResponse(rsp *http.Response) (*GetAssistantConfigResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAssistantConfigResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasAssistantConfig
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePutAssistantConfigResponse parses an HTTP response from a PutAssistantConfigWithResponse call
+func ParsePutAssistantConfigResponse(rsp *http.Response) (*PutAssistantConfigResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutAssistantConfigResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasAssistantConfig
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest ComponentsResponsesPayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 504:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON504 = &dest
 
 	}
 

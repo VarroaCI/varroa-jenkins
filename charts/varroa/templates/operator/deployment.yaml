@@ -36,6 +36,9 @@ spec:
 {{- if and .Values.agentRunner.enabled (not (include "varroa.isHive" .)) }}
             - "-tenant-agents"
 {{- end }}
+{{- if and .Values.assistant.enabled (not (include "varroa.isHive" .)) }}
+            - "-assistant"
+{{- end }}
           ports:
             - name: metrics
               containerPort: {{ .Values.operator.service.port }}
