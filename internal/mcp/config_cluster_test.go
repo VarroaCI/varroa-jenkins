@@ -159,6 +159,28 @@ func (m *memberConfig) UpdateJenkinsRoleBinding(ctx context.Context, cluster, _ 
 	return memberUpdate[v1alpha1.JenkinsRoleBinding](ctx, store, body)
 }
 
+// GetProvisioningDefaults reads core from local and any other cluster from
+// store. The real config brood reads the local cluster directly, so a down
+// local operator does not fail this read.
+func (m *memberConfig) GetProvisioningDefaults(ctx context.Context, cluster, name string) (json.RawMessage, error) {
+	if cluster == "core" {
+		return memberGet[v1alpha1.ProvisioningDefaults](ctx, m.local, name, "")
+	}
+	if m.unreachable {
+		return nil, errMemberDown
+	}
+	return memberGet[v1alpha1.ProvisioningDefaults](ctx, m.store, name, "")
+}
+
+func (m *memberConfig) UpdateProvisioningDefaults(ctx context.Context, cluster, _ string, body json.RawMessage) (json.RawMessage, error) {
+	store, writes, err := m.on(cluster)
+	if err != nil {
+		return nil, err
+	}
+	*writes = append(*writes, "provisioningdefaults")
+	return memberUpdate[v1alpha1.ProvisioningDefaults](ctx, store, body)
+}
+
 // memberDeps starts from the admin deps. Its local store is core; the member
 // store is empty and reached only through memberConfig.
 func memberDeps(t *testing.T) (*api.Dependencies, *crdstore.Fake, *memberConfig, *recordingSink) {
