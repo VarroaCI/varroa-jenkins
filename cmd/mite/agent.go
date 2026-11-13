@@ -1237,6 +1237,8 @@ type commandWork struct {
 	mailbox *commandMailbox
 }
 
+// The gateway sends at most 8 imperatives that have no result. The cap must
+// stay at or above that limit. A full queue ends the stream session.
 const imperativeQueueCap = 16
 const defaultCommandDeadline = 20 * time.Minute
 
@@ -1470,7 +1472,8 @@ func (a *Agent) processCommands(ctx context.Context) {
 			w := commandWork{imperativeCmd: m.Imperative, ctx: ctx, mailbox: mb}
 			ok, duplicate := mb.putImperative(w)
 			if !ok {
-				a.Logger.Error("imperative queue full, ending stream session")
+				a.Logger.Error("imperative queue full, ending stream session",
+					"cap", imperativeQueueCap, "command_id", m.Imperative.CommandId)
 				return
 			}
 			if duplicate {

@@ -1,11 +1,13 @@
 package mite
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -276,6 +278,12 @@ type BusHandler struct {
 	// imperativeProgressEvery overrides the in-progress interval. Zero means
 	// a quarter of the ack wait. It must stay well below the ack wait.
 	imperativeProgressEvery time.Duration
+
+	// imperativeInFlightMax overrides imperativeInFlightLimitDefault. Zero
+	// means the default; tests shrink it. imperativeSlotRecheck overrides
+	// the recheck interval of a pump at the limit. Zero means the default.
+	imperativeInFlightMax int
+	imperativeSlotRecheck time.Duration
 
 	// logMu guards logRuns and the gateway-wide pending-bytes counter,
 	// kept separate from mu so a log append never contends with the
@@ -1164,6 +1172,8 @@ func (h *BusHandler) IsCurrentConnection(name, ns string, token int64) bool {
 // wait out the JetStream ack timeout, and an operator sees a trigger vanish
 // for the length of that timeout.
 //
+// The naks go out in stream order, so the redelivery keeps the publish order.
+//
 // The token scope is what makes the early release safe: pendingAcks is keyed by
 // controller, so an unscoped nak from a superseded stream would also redeliver
 // a command the replacement connection already runs. A zero token releases
@@ -1203,9 +1213,25 @@ func (h *BusHandler) releasePendingImperatives(ns, name string, token int64) {
 	}
 	h.mu.Unlock()
 
+	sortByStreamSequence(release)
 	for _, msg := range release {
 		_ = msg.Nak()
 	}
+}
+
+// sortByStreamSequence orders msgs by JetStream stream sequence. The server
+// redelivers naked messages in nak order and before new ones, so naking in
+// stream order keeps the publish order. A message without JetStream metadata
+// sorts first and keeps its place, which is what the fake messages in unit
+// tests need.
+func sortByStreamSequence(msgs []*nats.Msg) {
+	seq := make(map[*nats.Msg]uint64, len(msgs))
+	for _, m := range msgs {
+		if md, err := m.Metadata(); err == nil {
+			seq[m] = md.Sequence.Stream
+		}
+	}
+	slices.SortStableFunc(msgs, func(a, b *nats.Msg) int { return cmp.Compare(seq[a], seq[b]) })
 }
 
 // OnDisconnect stops the watch goroutines and clears volatile state.
@@ -1557,6 +1583,11 @@ func (h *BusHandler) pumpImperative(ctx context.Context, sub *nats.Subscription,
 		case <-ctx.Done():
 			return false
 		default:
+			// The mite ends its stream on a full queue, so a fetch past the
+			// limit ends every new session while a backlog lasts.
+			if !h.waitImperativeSlot(ctx, ns, name, token) {
+				return false
+			}
 			msgs, err := h.conn.DrainConsumer(sub, 1)
 			if err != nil {
 				// A fetch timeout is the normal idle case. Anything else means
