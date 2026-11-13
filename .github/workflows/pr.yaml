@@ -204,8 +204,10 @@ jobs:
         # (varroa.dev/v1alpha1) use -ignore-missing-schemas because deriving
         # JSON schemas from charts/varroa/crds/ in CI is brittle — CR field
         # correctness is covered by the live localdev e2e instead.
+        # The kubeconform version is pinned. A new release can fail this step on code that did not change.
+        # Bump it on purpose, in its own pull request.
         run: |
-          go install github.com/yannh/kubeconform/cmd/kubeconform@latest
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
           export LOCALDEV_BUNDLE_HASH=ci LOCALDEV_MITE_IMAGE=ci-check LOCALDEV_GIT_IMAGE=ci-check
           for f in hack/localdev/manifests/*.yaml; do
             envsubst '$LOCALDEV_BUNDLE_HASH $LOCALDEV_MITE_IMAGE $LOCALDEV_GIT_IMAGE' < "$f"

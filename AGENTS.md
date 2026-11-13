@@ -66,6 +66,7 @@ Set `VITE_VARROA_BFF_URL=http://localhost:8080/api/v1` in `frontend/.env` to poi
 - **Only audit-worthy events go on `activity.*`.** Heartbeat and snapshot telemetry rides `events.brood.>`. It must never enter the bounded activity stream.
 - **golangci-lint is pinned in three places.** They are `.github/workflows/pr.yaml`, `.github/workflows/release.yaml`, and `GOLANGCI_LINT_VERSION` in the `Makefile`. Bump all three in one pull request and fix the resulting findings in the same change.
 - **govulncheck is pinned in one place.** It is the Vulncheck job of `.github/workflows/pr.yaml`. Bump it on purpose, in its own pull request. The pin does not freeze the vulnerability database. govulncheck reads the database on each run, so a new advisory still fails a pull request.
+- **kubeconform is pinned in one place.** It is the `Validate localdev manifests` step of the Checks job in `.github/workflows/pr.yaml`. Bump it on purpose, in its own pull request. The pin does not freeze the schemas. kubeconform downloads the Kubernetes schemas on each run.
 - **Import order.** The local prefix `github.com/varroaci/varroa-jenkins` goes last in import groups. Lint excludes the proto-generated code under `internal/mite/proto/mitev1/`.
 - **Frontend commands run from `frontend/`.** Do not assume the shell is already there.
 - **Wait on cluster state with a bounded poll**, not a fixed sleep: `for i in $(seq 1 30); do <check> && break; sleep 5; done`.
