@@ -6693,6 +6693,213 @@
         ],
         "type": "object"
       },
+      "components_schemas_AssistantConfig": {
+        "description": "The AssistantConfig object (cluster-scoped singleton named varroa-assistant). The stored object carries metadata.resourceVersion.",
+        "properties": {
+          "apiVersion": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/components_schemas_ObjectMeta"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/components_schemas_AssistantConfigSpec"
+          },
+          "status": {
+            "$ref": "#/components/schemas/components_schemas_AssistantConfigStatus"
+          }
+        },
+        "type": "object"
+      },
+      "components_schemas_AssistantConfigBudgets": {
+        "description": "The spend limits. A zero or absent value takes its default.",
+        "properties": {
+          "session": {
+            "default": 200000,
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "steps": {
+            "default": 32,
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tenantDay": {
+            "default": 2000000,
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "userDay": {
+            "default": 1000000,
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "components_schemas_AssistantConfigProvider": {
+        "properties": {
+          "auth": {
+            "default": "apiKey",
+            "enum": [
+              "apiKey",
+              "none"
+            ],
+            "type": "string"
+          },
+          "baseURL": {
+            "description": "The endpoint root. It is required for openai-compatible.",
+            "pattern": "^https?://",
+            "type": "string"
+          },
+          "cidrs": {
+            "items": {
+              "maxLength": 43,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "anthropic",
+              "openai-compatible"
+            ],
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "name": {
+            "description": "The DNS label of the provider. It also names the key in the key Secret.",
+            "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$",
+            "type": "string"
+          },
+          "port": {
+            "description": "The TCP port of the egress rule. Zero takes the port of baseURL.",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "trust": {
+            "enum": [
+              "internal",
+              "external"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "trust",
+          "models"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantConfigSpec": {
+        "description": "The desired assistant setup. An absent field takes its default.",
+        "properties": {
+          "approvalExpiry": {
+            "default": "24h",
+            "description": "How long a pending approval waits for a decision.",
+            "pattern": "^[1-9][0-9]*(m|h)$",
+            "type": "string"
+          },
+          "budgets": {
+            "$ref": "#/components/schemas/components_schemas_AssistantConfigBudgets"
+          },
+          "defaultModel": {
+            "description": "The model that new sessions use with defaultProvider.",
+            "type": "string"
+          },
+          "defaultProvider": {
+            "description": "The provider name that new sessions use. It names a listed provider.",
+            "type": "string"
+          },
+          "externalDataSharing": {
+            "default": "metadata",
+            "description": "The highest data level that an external provider may receive.",
+            "enum": [
+              "none",
+              "metadata",
+              "logs"
+            ],
+            "type": "string"
+          },
+          "providers": {
+            "description": "The model providers. The name is the key.",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_AssistantConfigProvider"
+            },
+            "maxItems": 16,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "components_schemas_AssistantConfigStatus": {
+        "properties": {
+          "conditions": {
+            "items": {
+              "description": "A status condition. EgressReady reports whether every provider with a network path has CIDRs.",
+              "properties": {
+                "lastTransitionTime": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "observedGeneration": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "status"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "observedGeneration": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_AssistantProviderStatus"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "components_schemas_AssistantDenyRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6837,6 +7044,22 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantProviderStatus": {
+        "properties": {
+          "keySet": {
+            "description": "True when the key Secret holds the key of the provider.",
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "keySet"
         ],
         "type": "object"
       },
@@ -19377,6 +19600,114 @@
           }
         },
         "summary": "Denies one write tool call. Nothing runs.",
+        "tags": [
+          "Assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/config": {
+      "get": {
+        "operationId": "getAssistantConfig",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantConfig"
+                }
+              }
+            },
+            "description": "The AssistantConfig object."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled, or the operator is unavailable."
+          }
+        },
+        "summary": "Reads the AssistantConfig object. An absent object answers the default spec with no resourceVersion. Admin only.",
+        "tags": [
+          "Assistant"
+        ]
+      },
+      "put": {
+        "operationId": "putAssistantConfig",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/components_schemas_AssistantConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantConfig"
+                }
+              }
+            },
+            "description": "The stored AssistantConfig object."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The object changed after it was read, or it exists and the write carried no resourceVersion."
+          },
+          "413": {
+            "$ref": "#/components/responses/components_responses_PayloadTooLarge"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled, or the operator is unavailable."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The operator did not answer in time."
+          }
+        },
+        "summary": "Writes the AssistantConfig object. A metadata.resourceVersion fences the write. Without one, the write only creates the object. Admin only.",
         "tags": [
           "Assistant"
         ]

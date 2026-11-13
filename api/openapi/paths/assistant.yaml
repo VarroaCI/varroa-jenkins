@@ -519,3 +519,69 @@
           application/json:
             schema:
               $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/assistant/config:
+  get:
+    operationId: getAssistantConfig
+    tags: [Assistant]
+    summary: Reads the AssistantConfig object. An absent object answers the default spec with no resourceVersion. Admin only.
+    responses:
+      "200":
+        description: The AssistantConfig object.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantConfig'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "503":
+        description: The assistant is not enabled, or the operator is unavailable.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+  put:
+    operationId: putAssistantConfig
+    tags: [Assistant]
+    summary: Writes the AssistantConfig object. A metadata.resourceVersion fences the write. Without one, the write only creates the object. Admin only.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/AssistantConfig'
+    responses:
+      "200":
+        description: The stored AssistantConfig object.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantConfig'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "413":
+        $ref: '../components/responses.yaml#/PayloadTooLarge'
+      "409":
+        description: The object changed after it was read, or it exists and the write carried no resourceVersion.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+      "503":
+        description: The assistant is not enabled, or the operator is unavailable.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+      "504":
+        description: The operator did not answer in time.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'

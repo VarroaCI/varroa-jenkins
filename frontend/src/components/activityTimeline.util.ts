@@ -366,6 +366,7 @@ export const ACTIVITY_TYPE_MAP: Record<string, { icon: string; style: string }> 
   "tenant.moved": { icon: "⇄", style: "softInfo" },
   "tenant.purge_failed": { icon: "✘", style: "softBad" },
   "cellpool.updated": { icon: "✏", style: "softInfo" },
+  "assistantconfig.updated": { icon: "✏", style: "softInfo" },
   // ── Cluster drain ────────────────────────────────────────────────────────
   "cluster.drain.started": { icon: "▼", style: "softWarn" },
   "cluster.drain.completed": { icon: "✔", style: "softOk" },

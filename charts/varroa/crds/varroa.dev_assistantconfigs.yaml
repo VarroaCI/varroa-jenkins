@@ -1,0 +1,294 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: assistantconfigs.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: AssistantConfig
+    listKind: AssistantConfigList
+    plural: assistantconfigs
+    shortNames:
+    - asc
+    singular: assistantconfig
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.defaultProvider
+      name: DEFAULT
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          AssistantConfig is the cluster-wide assistant setup: the providers, the
+          default provider and model, the limits, and the data ceiling.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AssistantConfigSpec is the desired assistant setup.
+            properties:
+              approvalExpiry:
+                default: 24h
+                description: ApprovalExpiry is how long a pending approval waits for
+                  a decision.
+                pattern: ^[1-9][0-9]*(m|h)$
+                type: string
+              budgets:
+                default: {}
+                description: Budgets are the token and step limits of the assistant.
+                properties:
+                  session:
+                    default: 200000
+                    description: Session is the token limit of one session.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  steps:
+                    default: 32
+                    description: Steps is the model step limit of one run.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  tenantDay:
+                    default: 2000000
+                    description: TenantDay is the token limit of one tenant in one
+                      day.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  userDay:
+                    default: 1000000
+                    description: UserDay is the token limit of one user in one day.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                type: object
+              defaultModel:
+                description: DefaultModel is the model that new sessions use with
+                  DefaultProvider.
+                maxLength: 128
+                type: string
+              defaultProvider:
+                description: DefaultProvider is the provider name that new sessions
+                  use. It names a listed provider.
+                maxLength: 63
+                type: string
+              externalDataSharing:
+                default: metadata
+                description: ExternalDataSharing is the highest data level that an
+                  external provider may receive.
+                enum:
+                - none
+                - metadata
+                - logs
+                type: string
+              providers:
+                description: Providers lists the model providers of the assistant.
+                  The name is the key.
+                items:
+                  description: AssistantProvider is one model provider of the assistant.
+                  properties:
+                    auth:
+                      default: apiKey
+                      description: Auth is apiKey when the provider needs a key in
+                        the key Secret, and none otherwise.
+                      enum:
+                      - apiKey
+                      - none
+                      type: string
+                    baseURL:
+                      description: BaseURL is the endpoint root. It is required for
+                        openai-compatible.
+                      maxLength: 2048
+                      pattern: ^https?://
+                      type: string
+                    cidrs:
+                      description: CIDRs lists the address ranges that the egress
+                        policy allows for this provider.
+                      items:
+                        maxLength: 43
+                        type: string
+                      maxItems: 16
+                      type: array
+                      x-kubernetes-list-type: set
+                    kind:
+                      description: Kind is the wire protocol of the provider.
+                      enum:
+                      - anthropic
+                      - openai-compatible
+                      type: string
+                    models:
+                      description: Models lists the model names that the provider
+                        offers to the assistant.
+                      items:
+                        maxLength: 128
+                        minLength: 1
+                        type: string
+                      maxItems: 32
+                      minItems: 1
+                      type: array
+                      x-kubernetes-list-type: set
+                    name:
+                      description: Name is the DNS label that identifies the provider.
+                        It also names the key in the key Secret.
+                      pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                      type: string
+                    port:
+                      description: Port is the TCP port of the egress rule. Zero takes
+                        the port of BaseURL.
+                      format: int32
+                      maximum: 65535
+                      minimum: 0
+                      type: integer
+                    trust:
+                      description: Trust is internal for a provider in the cluster
+                        network and external for any other.
+                      enum:
+                      - internal
+                      - external
+                      type: string
+                  required:
+                  - kind
+                  - models
+                  - name
+                  - trust
+                  type: object
+                  x-kubernetes-validations:
+                  - message: baseURL is required for openai-compatible
+                    rule: self.kind != 'openai-compatible' || (has(self.baseURL) &&
+                      size(self.baseURL) > 0)
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+            type: object
+            x-kubernetes-validations:
+            - message: defaultProvider must name a listed provider, and it is empty
+                when no provider is listed
+              rule: '(has(self.providers) ? size(self.providers) : 0) == 0 ? (!has(self.defaultProvider)
+                || size(self.defaultProvider) == 0) : (has(self.defaultProvider) &&
+                size(self.defaultProvider) > 0 && self.providers.exists(p, p.name
+                == self.defaultProvider))'
+            - message: defaultModel must be one of the models of defaultProvider
+              rule: '!has(self.defaultModel) || size(self.defaultModel) == 0 || (has(self.defaultProvider)
+                && has(self.providers) && self.providers.exists(p, p.name == self.defaultProvider
+                && p.models.exists(m, m == self.defaultModel)))'
+          status:
+            description: AssistantConfigStatus is the observed assistant setup.
+            properties:
+              conditions:
+                description: Conditions holds EgressReady.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                description: ObservedGeneration is the generation that the status
+                  reflects.
+                format: int64
+                type: integer
+              providers:
+                description: Providers reports, per provider, whether its key is set.
+                items:
+                  description: AssistantProviderStatus reports the key state of one
+                    provider.
+                  properties:
+                    keySet:
+                      type: boolean
+                    name:
+                      type: string
+                  required:
+                  - keySet
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+            type: object
+        type: object
+        x-kubernetes-validations:
+        - message: the only AssistantConfig name is varroa-assistant
+          rule: self.metadata.name == 'varroa-assistant'
+    served: true
+    storage: true
+    subresources:
+      status: {}

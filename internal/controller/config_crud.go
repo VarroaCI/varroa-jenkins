@@ -42,6 +42,9 @@ type ConfigCRUD struct {
 	Grants TenantGrantReader
 	// Linter answers cells.lint on this cluster's own cells.
 	Linter CellLinter
+	// OnAssistantConfigChange runs after an AssistantConfig write is stored. Nil
+	// means no hook.
+	OnAssistantConfigChange func()
 }
 
 // NewConfigCRUD creates a new ConfigCRUD.

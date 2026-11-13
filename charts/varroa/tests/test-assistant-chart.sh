@@ -88,6 +88,33 @@ check "the key mount has no subPath" "$rc"
 rc=0; grep 'VARROA_ASSISTANT_CONFIG' -A1 <<< "$RENDER_KEY" | grep -q 'smoke-key' && rc=1 || true
 check "the Secret name never reaches the config env" "$rc"
 
+# (f) The AssistantConfig write route: the operator flag and its RBAC render
+# only with the assistant on. Section (g) checks the hive member.
+echo ""
+echo "--- (f) AssistantConfig route ---"
+rc=0; grep -q -- '- "-assistant"' <<< "$RENDER_DEFAULT" && rc=1 || true
+check "the operator carries no -assistant flag by default" "$rc"
+rc=0; grep -q -- '- "-assistant"' <<< "$RENDER_ON" || rc=1
+check "the operator carries -assistant when the assistant is on" "$rc"
+rc=0; grep -q 'assistantconfigs' <<< "$RENDER_DEFAULT" && rc=1 || true
+check "no assistantconfigs RBAC in the default render" "$rc"
+rc=0; grep -q 'assistantconfigs' <<< "$RENDER_ON" || rc=1
+check "assistantconfigs RBAC renders when the assistant is on" "$rc"
+
+# (g) Hive member: the operator gets no -assistant flag and no AssistantConfig
+# write rule. The hive render needs the same guard inputs as test-nats-server-ping.sh.
+echo ""
+echo "--- (g) Hive member ---"
+RENDER_HIVE=$(helm template varroa "$ROOT" -f "$ROOT/values-hive.yaml" \
+  --set cluster.name=member-b --set bus.url=nats://h:4222 $COMMON \
+  --set recordStore.enabled=true --set recordStore.postgres.mode=external \
+  --set recordStore.postgres.external.existingSecret=rs-dsn \
+  --set assistant.enabled=true 2>/dev/null) || { echo "FAIL: helm template (hive) failed"; exit 1; }
+rc=0; grep -q -- '- "-assistant"' <<< "$RENDER_HIVE" && rc=1 || true
+check "a hive member carries no -assistant flag" "$rc"
+rc=0; grep -q 'operator applies the AssistantConfig singleton' <<< "$RENDER_HIVE" && rc=1 || true
+check "a hive member carries no operator AssistantConfig write rule" "$rc"
+
 echo ""
 if [[ "$failures" -gt 0 ]]; then
   echo "FAILED: $failures assertion(s)"

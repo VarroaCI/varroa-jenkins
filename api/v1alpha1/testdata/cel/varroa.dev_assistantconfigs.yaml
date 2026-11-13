@@ -1,0 +1,87 @@
+# CEL cases for charts/varroa/crds/varroa.dev_assistantconfigs.yaml.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: AssistantConfig
+  metadata:
+    name: varroa-assistant
+  spec:
+    providers:
+      - name: lab
+        kind: anthropic
+        trust: internal
+        models: [model-a, model-b]
+    defaultProvider: lab
+    defaultModel: model-a
+cases:
+  - name: singleton name accepted
+    rule: |-
+      self.metadata.name == 'varroa-assistant'
+    field: ""
+    new: {}
+    want: accept
+  - name: second name refused
+    rule: |-
+      self.metadata.name == 'varroa-assistant'
+    field: ""
+    new: {metadata: {name: other}}
+    want: reject
+  - name: default provider naming a listed provider accepted
+    rule: |-
+      (has(self.providers) ? size(self.providers) : 0) == 0 ? (!has(self.defaultProvider) || size(self.defaultProvider) == 0) : (has(self.defaultProvider) && size(self.defaultProvider) > 0 && self.providers.exists(p, p.name == self.defaultProvider))
+    field: spec
+    new: {spec: {defaultProvider: lab}}
+    want: accept
+  - name: default provider removed while providers are listed refused
+    rule: |-
+      (has(self.providers) ? size(self.providers) : 0) == 0 ? (!has(self.defaultProvider) || size(self.defaultProvider) == 0) : (has(self.defaultProvider) && size(self.defaultProvider) > 0 && self.providers.exists(p, p.name == self.defaultProvider))
+    field: spec
+    new: {spec: {defaultProvider: null}}
+    want: reject
+  - name: default provider naming no listed provider refused
+    rule: |-
+      (has(self.providers) ? size(self.providers) : 0) == 0 ? (!has(self.defaultProvider) || size(self.defaultProvider) == 0) : (has(self.defaultProvider) && size(self.defaultProvider) > 0 && self.providers.exists(p, p.name == self.defaultProvider))
+    field: spec
+    new: {spec: {defaultProvider: ghost}}
+    want: reject
+  - name: default provider with an empty provider list refused
+    rule: |-
+      (has(self.providers) ? size(self.providers) : 0) == 0 ? (!has(self.defaultProvider) || size(self.defaultProvider) == 0) : (has(self.defaultProvider) && size(self.defaultProvider) > 0 && self.providers.exists(p, p.name == self.defaultProvider))
+    field: spec
+    new: {spec: {providers: null}}
+    want: reject
+  - name: no provider and no default provider accepted
+    rule: |-
+      (has(self.providers) ? size(self.providers) : 0) == 0 ? (!has(self.defaultProvider) || size(self.defaultProvider) == 0) : (has(self.defaultProvider) && size(self.defaultProvider) > 0 && self.providers.exists(p, p.name == self.defaultProvider))
+    field: spec
+    new: {spec: {providers: null, defaultProvider: null, defaultModel: null}}
+    want: accept
+  - name: default model listed by the default provider accepted
+    rule: |-
+      !has(self.defaultModel) || size(self.defaultModel) == 0 || (has(self.defaultProvider) && has(self.providers) && self.providers.exists(p, p.name == self.defaultProvider && p.models.exists(m, m == self.defaultModel)))
+    field: spec
+    new: {spec: {defaultModel: model-b}}
+    want: accept
+  - name: default model not listed by the default provider refused
+    rule: |-
+      !has(self.defaultModel) || size(self.defaultModel) == 0 || (has(self.defaultProvider) && has(self.providers) && self.providers.exists(p, p.name == self.defaultProvider && p.models.exists(m, m == self.defaultModel)))
+    field: spec
+    new: {spec: {defaultModel: model-z}}
+    want: reject
+  - name: openai-compatible provider without a base URL refused
+    rule: |-
+      self.kind != 'openai-compatible' || (has(self.baseURL) && size(self.baseURL) > 0)
+    field: spec.providers[0]
+    new: {spec: {providers: [{name: lab, kind: openai-compatible, trust: external, models: [model-a]}]}}
+    want: reject
+  - name: openai-compatible provider with a base URL accepted
+    rule: |-
+      self.kind != 'openai-compatible' || (has(self.baseURL) && size(self.baseURL) > 0)
+    field: spec.providers[0]
+    new: {spec: {providers: [{name: lab, kind: openai-compatible, baseURL: 'https://llm.test/v1', trust: external, models: [model-a]}]}}
+    want: accept
+  - name: anthropic provider without a base URL accepted
+    rule: |-
+      self.kind != 'openai-compatible' || (has(self.baseURL) && size(self.baseURL) > 0)
+    field: spec.providers[0]
+    new: {spec: {providers: [{name: lab, kind: anthropic, trust: external, models: [model-a]}]}}
+    want: accept

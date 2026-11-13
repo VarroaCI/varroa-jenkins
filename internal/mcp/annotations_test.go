@@ -86,6 +86,8 @@ var expectedToolKinds = map[string]toolKind{
 	// ProvisioningDefaults + JenkinsVersionProfiles
 	"get_provisioning_defaults":      kindRead,
 	"update_provisioning_defaults":   kindUpdate,
+	"get_assistant_config":           kindRead,
+	"update_assistant_config":        kindUpdate,
 	"list_jenkins_version_profile":   kindRead,
 	"get_jenkins_version_profile":    kindRead,
 	"create_jenkins_version_profile": kindCreateStrict,

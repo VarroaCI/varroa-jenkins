@@ -23,6 +23,12 @@ rules:
   - apiGroups: ["varroa.dev"]
     resources: ["tenants", "tenants/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+{{- if .Values.assistant.enabled }}
+  # The assistant config routes read the AssistantConfig singleton. A write goes through the operator.
+  - apiGroups: ["varroa.dev"]
+    resources: ["assistantconfigs"]
+    verbs: ["get", "list", "watch"]
+{{- end }}
 {{- if .Values.agentRunner.enabled }}
   # The Tenant agent endpoints read TenantAgent objects for the tenant pages.
   - apiGroups: ["varroa.dev"]

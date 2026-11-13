@@ -148,6 +148,20 @@ func expectedSourceFor(name string) string {
 // nil-panics, which the per-tool subtest isolates to one row.
 type guardConfigBrood struct{ api.ConfigBrood }
 
+// guardAssistantOperator answers an absent AssistantConfig and stores nothing,
+// so update_assistant_config reaches its emit call.
+type guardAssistantOperator struct{}
+
+func (guardAssistantOperator) GetAssistantConfig(context.Context, string) (*v1alpha1.AssistantConfig, error) {
+	return nil, nil
+}
+
+func (guardAssistantOperator) UpdateAssistantConfig(_ context.Context, _ string, obj *v1alpha1.AssistantConfig) (*v1alpha1.AssistantConfig, error) {
+	out := obj.DeepCopy()
+	out.ResourceVersion = "1"
+	return out, nil
+}
+
 func (g *guardConfigBrood) SyncCatalogSource(_ context.Context, _, _, _ string) error { return nil }
 
 // The config write tools of the four writable kinds send every write, the local
@@ -254,6 +268,7 @@ func guardEmitDeps(t *testing.T, sink activity.EventSink) *api.Dependencies {
 		VersionProfileReconciler: controller.NewJenkinsVersionProfileReconciler(
 			stub, stub, "varroa-system", slog.New(slog.DiscardHandler)),
 		ActivityPublisher: sink,
+		Assistant:         &api.AssistantRuntime{Operator: guardAssistantOperator{}, Cluster: "core"},
 		OperatorNamespace: "varroa-system",
 		// run_pipeline's dependencies: a non-nil RecordStore (checked but
 		// never called), a fixed tenant, and a transport that accepts the
@@ -448,6 +463,7 @@ func guardArgsFor(name string) map[string]interface{} {
 		"delete_composed_bundle": {"namespace": ns, "name": obj},
 		// ProvisioningDefaults + JenkinsVersionProfiles (cluster-scoped, config brood)
 		"update_provisioning_defaults":   {"name": obj},
+		"update_assistant_config":        {"object": `{"spec":{"approvalExpiry":"24h"}}`},
 		"create_jenkins_version_profile": {"name": obj},
 		"update_jenkins_version_profile": {"name": obj, "object": `{"spec":{"recommended":true}}`},
 		"delete_jenkins_version_profile": {"name": obj},

@@ -6,6 +6,21 @@ state waits for a person to approve it.
 
 The assistant is off by default. An operator turns it on with the chart.
 
+## The AssistantConfig object
+
+The provider list, the default provider and model, the budgets, the approval
+expiry, and the external data ceiling are fields of one cluster-scoped object,
+`AssistantConfig` named `varroa-assistant`. An `assistant:admin` holder reads it
+with `GET /api/v1/assistant/config` and writes it with `PUT /api/v1/assistant/config`.
+The MCP tools `get_assistant_config` and `update_assistant_config` do the same.
+
+A write sends the whole object, with its `metadata.resourceVersion`. A stale
+version answers `409`. A write with no version only creates the object. An object
+that does not exist reads as the default spec: no provider and the default limits.
+
+This release stores the object. The assistant runtime still reads its providers and
+limits from the chart values until the runtime change ships.
+
 ## Configure the assistant
 
 The assistant needs the record store. Its session tables live in the record

@@ -56,6 +56,8 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("POST /assistant/approvals/{id}/deny", srv.handleDenyAssistantApproval)
 	mux.HandleFunc("GET /assistant/settings", srv.handleGetAssistantSettings)
 	mux.HandleFunc("PUT /assistant/settings", srv.handlePutAssistantSettings)
+	mux.HandleFunc("GET /assistant/config", srv.handleGetAssistantConfig)
+	mux.HandleFunc("PUT /assistant/config", srv.handlePutAssistantConfig)
 	mux.HandleFunc("GET /assistant/providers", srv.handleListAssistantProviders)
 	mux.HandleFunc("GET /me/assistant", srv.handleGetMyAssistant)
 	mux.HandleFunc("PUT /me/assistant", srv.handlePutMyAssistant)

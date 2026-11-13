@@ -82,6 +82,12 @@ rules:
     resources: ["tenantagents"]
     verbs: ["get", "list", "watch"]
 {{- end }}
+{{- if and .Values.assistant.enabled (not (include "varroa.isHive" .)) }}
+  # The operator applies the AssistantConfig singleton for the BFF write route.
+  - apiGroups: ["varroa.dev"]
+    resources: ["assistantconfigs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+{{- end }}
   - apiGroups: ["varroa.dev"]
     resources: ["runners"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

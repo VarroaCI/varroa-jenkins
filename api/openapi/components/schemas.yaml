@@ -8422,3 +8422,151 @@ PipelinesOverview:
       items:
         $ref: '#/PipelinesOverviewTenant'
   additionalProperties: false
+
+AssistantConfig:
+  type: object
+  description: The AssistantConfig object (cluster-scoped singleton named varroa-assistant). The stored object carries metadata.resourceVersion.
+  properties:
+    apiVersion:
+      type: string
+    kind:
+      type: string
+    metadata:
+      $ref: '#/ObjectMeta'
+    spec:
+      $ref: '#/AssistantConfigSpec'
+    status:
+      $ref: '#/AssistantConfigStatus'
+AssistantConfigSpec:
+  type: object
+  description: The desired assistant setup. An absent field takes its default.
+  properties:
+    providers:
+      type: array
+      maxItems: 16
+      description: The model providers. The name is the key.
+      items:
+        $ref: '#/AssistantConfigProvider'
+    defaultProvider:
+      type: string
+      description: The provider name that new sessions use. It names a listed provider.
+    defaultModel:
+      type: string
+      description: The model that new sessions use with defaultProvider.
+    externalDataSharing:
+      type: string
+      enum: [none, metadata, logs]
+      default: metadata
+      description: The highest data level that an external provider may receive.
+    budgets:
+      $ref: '#/AssistantConfigBudgets'
+    approvalExpiry:
+      type: string
+      default: 24h
+      pattern: '^[1-9][0-9]*(m|h)$'
+      description: How long a pending approval waits for a decision.
+AssistantConfigProvider:
+  type: object
+  required: [name, kind, trust, models]
+  properties:
+    name:
+      type: string
+      pattern: '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'
+      description: The DNS label of the provider. It also names the key in the key Secret.
+    kind:
+      type: string
+      enum: [anthropic, openai-compatible]
+    baseURL:
+      type: string
+      pattern: '^https?://'
+      description: The endpoint root. It is required for openai-compatible.
+    models:
+      type: array
+      minItems: 1
+      maxItems: 32
+      items:
+        type: string
+        minLength: 1
+        maxLength: 128
+    trust:
+      type: string
+      enum: [internal, external]
+    auth:
+      type: string
+      enum: [apiKey, none]
+      default: apiKey
+    cidrs:
+      type: array
+      maxItems: 16
+      items:
+        type: string
+        maxLength: 43
+    port:
+      type: integer
+      minimum: 0
+      maximum: 65535
+      description: The TCP port of the egress rule. Zero takes the port of baseURL.
+AssistantConfigBudgets:
+  type: object
+  description: The spend limits. A zero or absent value takes its default.
+  properties:
+    session:
+      type: integer
+      format: int64
+      minimum: 0
+      default: 200000
+    userDay:
+      type: integer
+      format: int64
+      minimum: 0
+      default: 1000000
+    tenantDay:
+      type: integer
+      format: int64
+      minimum: 0
+      default: 2000000
+    steps:
+      type: integer
+      format: int32
+      minimum: 0
+      default: 32
+AssistantConfigStatus:
+  type: object
+  properties:
+    observedGeneration:
+      type: integer
+      format: int64
+    providers:
+      type: array
+      items:
+        $ref: '#/AssistantProviderStatus'
+    conditions:
+      type: array
+      items:
+        type: object
+        required: [type, status]
+        description: A status condition. EgressReady reports whether every provider with a network path has CIDRs.
+        properties:
+          type:
+            type: string
+          status:
+            type: string
+          reason:
+            type: string
+          message:
+            type: string
+          lastTransitionTime:
+            type: string
+            format: date-time
+          observedGeneration:
+            type: integer
+            format: int64
+AssistantProviderStatus:
+  type: object
+  required: [name, keySet]
+  properties:
+    name:
+      type: string
+    keySet:
+      type: boolean
+      description: True when the key Secret holds the key of the provider.
