@@ -17,4 +17,9 @@ type AssistantOperator interface {
 	// object with a resourceVersion updates only that version. An object
 	// without one only creates it.
 	UpdateAssistantConfig(ctx context.Context, cluster string, obj *v1alpha1.AssistantConfig) (*v1alpha1.AssistantConfig, error)
+	// SetAssistantKey sends a provider key to the operator of cluster, which
+	// writes it into the key Secret. The key is never returned.
+	SetAssistantKey(ctx context.Context, cluster, provider string, key []byte) error
+	// ClearAssistantKey removes the key of a provider from the key Secret.
+	ClearAssistantKey(ctx context.Context, cluster, provider string) error
 }

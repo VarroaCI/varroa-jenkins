@@ -15,8 +15,6 @@ ENABLED=(
   --set assistant.enabled=true
   --set recordStore.enabled=true
   --set agentRunner.enabled=true
-  --set networkPolicy.assistantEgress.cidrs[0]=192.0.2.10/32
-  --set networkPolicy.assistantEgress.ports[0]=8082
 )
 
 failures=0

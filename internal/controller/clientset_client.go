@@ -1450,6 +1450,61 @@ func (c *ClientsetClient) PatchSecretData(ctx context.Context, name, namespace s
 	return err
 }
 
+// ReadSecretMeta returns the labels and data of a Secret. found is false when
+// the Secret does not exist, and that answer is not an error.
+func (c *ClientsetClient) ReadSecretMeta(ctx context.Context, name, namespace string) (labels map[string]string, data map[string][]byte, found bool, err error) {
+	secret, err := c.clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return secret.Labels, secret.Data, true, nil
+}
+
+// WriteSecretKeys changes only the named data keys of a Secret and the given
+// labels. An absent Secret is created with the set keys. An existing Secret
+// takes a JSON merge patch: each set key takes its value, each removed key is
+// deleted, and the other keys and labels stay as they are.
+func (c *ClientsetClient) WriteSecretKeys(ctx context.Context, name, namespace string, labels map[string]string, set map[string][]byte, remove []string) error {
+	secrets := c.clientset.CoreV1().Secrets(namespace)
+	_, err := secrets.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
+			Data:       set,
+		}
+		_, err = secrets.Create(ctx, secret, metav1.CreateOptions{})
+		if apierrors.IsAlreadyExists(err) {
+			// A concurrent write created the Secret first. The patch path now
+			// applies this write to it.
+			return c.WriteSecretKeys(ctx, name, namespace, labels, set, remove)
+		}
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	data := make(map[string]any, len(set)+len(remove))
+	for k, v := range set {
+		data[k] = v
+	}
+	for _, k := range remove {
+		data[k] = nil
+	}
+	patch := map[string]any{"data": data}
+	if len(labels) > 0 {
+		patch["metadata"] = map[string]any{"labels": labels}
+	}
+	raw, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("marshal secret merge patch: %w", err)
+	}
+	_, err = secrets.Patch(ctx, name, types.MergePatchType, raw, metav1.PatchOptions{})
+	return err
+}
+
 // CopyImagePullSecret copies a docker-registry-type Secret from one namespace
 // to another, preserving Type and Data. An equality guard skips the write when
 // the destination is already converged, so repeated calls (which run on every
@@ -1506,6 +1561,12 @@ func (c *ClientsetClient) DeleteSecret(ctx context.Context, name, namespace stri
 // DeleteCellNetworkPolicy deletes a cell's NetworkPolicy by name. A missing
 // policy is not an error: cell isolation may never have been enabled.
 func (c *ClientsetClient) DeleteCellNetworkPolicy(ctx context.Context, name, namespace string) error {
+	return c.DeleteNetworkPolicy(ctx, name, namespace)
+}
+
+// DeleteNetworkPolicy deletes a NetworkPolicy by name. A missing policy is not
+// an error.
+func (c *ClientsetClient) DeleteNetworkPolicy(ctx context.Context, name, namespace string) error {
 	err := c.clientset.NetworkingV1().NetworkPolicies(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
@@ -1517,7 +1578,13 @@ func (c *ClientsetClient) DeleteCellNetworkPolicy(ctx context.Context, name, nam
 // D2). This runs on every Running/Connected tick fleet-wide, so a write
 // that would not change the live spec is skipped.
 func (c *ClientsetClient) CreateCellNetworkPolicy(ctx context.Context, spec CellPolicySpec) error {
-	np := buildCellNetworkPolicy(spec)
+	return c.ApplyNetworkPolicy(ctx, buildCellNetworkPolicy(spec))
+}
+
+// ApplyNetworkPolicy creates a NetworkPolicy, or updates its spec when it
+// differs from the live one. A write that would not change the live spec is
+// skipped.
+func (c *ClientsetClient) ApplyNetworkPolicy(ctx context.Context, np *networkingv1.NetworkPolicy) error {
 	policies := c.clientset.NetworkingV1().NetworkPolicies(np.Namespace)
 	existing, err := policies.Get(ctx, np.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {

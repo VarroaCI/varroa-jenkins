@@ -21,6 +21,10 @@ type fakeAssistantOperator struct {
 	rv      int
 	lastPut *v1alpha1.AssistantConfig
 	err     error
+	// keys records each key write by provider name. cleared records each clear.
+	keys    map[string][]byte
+	cleared []string
+	keyErr  error
 }
 
 func (f *fakeAssistantOperator) GetAssistantConfig(context.Context, string) (*v1alpha1.AssistantConfig, error) {
@@ -177,3 +181,22 @@ func TestPutAssistantConfigPublishesActivity(t *testing.T) {
 }
 
 var _ activity.EventSink = (*recordingActivitySink)(nil)
+
+func (f *fakeAssistantOperator) SetAssistantKey(_ context.Context, _ string, provider string, key []byte) error {
+	if f.keyErr != nil {
+		return f.keyErr
+	}
+	if f.keys == nil {
+		f.keys = map[string][]byte{}
+	}
+	f.keys[provider] = append([]byte(nil), key...)
+	return nil
+}
+
+func (f *fakeAssistantOperator) ClearAssistantKey(_ context.Context, _ string, provider string) error {
+	if f.keyErr != nil {
+		return f.keyErr
+	}
+	f.cleared = append(f.cleared, provider)
+	return nil
+}

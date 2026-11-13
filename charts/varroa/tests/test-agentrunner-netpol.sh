@@ -14,8 +14,6 @@ ENABLED=(
   --set assistant.enabled=true
   --set recordStore.enabled=true
   --set agentRunner.enabled=true
-  --set networkPolicy.assistantEgress.cidrs[0]=192.0.2.10/32
-  --set networkPolicy.assistantEgress.ports[0]=8082
   --set networkPolicy.enabled=true
   --set networkPolicy.gitEgress.enabled=true
   --set networkPolicy.gitEgress.cidrs[0]=192.0.2.20/32
@@ -50,9 +48,6 @@ check "the policy reaches the BFF" "$rc"
 
 rc=0; grep -q 'cidr: 192.0.2.20/32' <<< "$POLICY" && rc=1 || true
 check "the policy holds no git or forge egress" "$rc"
-
-rc=0; grep -q 'cidr: 192.0.2.10/32' <<< "$POLICY" || rc=1
-check "the policy reaches the assistant provider" "$rc"
 
 BFF_POLICY=$(sed -n '/name: release-name-np-bff/,/^---/p' <<< "$RENDER")
 rc=0; grep -q 'app.kubernetes.io/component: varroa-agent' <<< "$BFF_POLICY" || rc=1

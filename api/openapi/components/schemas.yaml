@@ -7633,6 +7633,16 @@ AssistantSettings:
     updatedAt: {type: string, format: date-time}
     updatedBy: {type: string}
 
+AssistantProviderKeyRequest:
+  type: object
+  required: [apiKey]
+  properties:
+    apiKey:
+      type: string
+      writeOnly: true
+      minLength: 1
+      maxLength: 4096
+      description: The provider key. The server never returns it.
 AssistantSettingsUpdate:
   type: object
   properties:

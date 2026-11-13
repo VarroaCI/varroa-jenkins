@@ -87,6 +87,10 @@ rules:
   - apiGroups: ["varroa.dev"]
     resources: ["assistantconfigs"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # The reconciler writes the provider key state and the EgressReady condition.
+  - apiGroups: ["varroa.dev"]
+    resources: ["assistantconfigs/status"]
+    verbs: ["get", "update", "patch"]
 {{- end }}
   - apiGroups: ["varroa.dev"]
     resources: ["runners"]

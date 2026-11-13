@@ -548,3 +548,9 @@ func TestEveryMutatingToolEmitsActivity(t *testing.T) {
 		})
 	}
 }
+
+func (guardAssistantOperator) SetAssistantKey(context.Context, string, string, []byte) error {
+	return nil
+}
+
+func (guardAssistantOperator) ClearAssistantKey(context.Context, string, string) error { return nil }

@@ -326,3 +326,11 @@ type CatalogSyncResponse struct {
 func OperatorForgeSubject(cluster, verb string) string {
 	return "operator." + cluster + ".forge." + verb
 }
+
+// OperatorAssistantKeysSubject returns operator.<cluster>.assistantkeys.<verb>.
+// verb is set or clear. Both take AssistantKeyRequest and answer
+// AssistantKeyResponse. The subject is core NATS only: no stream and no KV
+// bucket may capture it, because the request carries a provider key.
+func OperatorAssistantKeysSubject(cluster, verb string) string {
+	return "operator." + cluster + ".assistantkeys." + verb
+}

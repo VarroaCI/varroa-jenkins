@@ -58,6 +58,8 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("PUT /assistant/settings", srv.handlePutAssistantSettings)
 	mux.HandleFunc("GET /assistant/config", srv.handleGetAssistantConfig)
 	mux.HandleFunc("PUT /assistant/config", srv.handlePutAssistantConfig)
+	mux.HandleFunc("PUT /assistant/providers/{name}/key", srv.handlePutAssistantProviderKey)
+	mux.HandleFunc("DELETE /assistant/providers/{name}/key", srv.handleDeleteAssistantProviderKey)
 	mux.HandleFunc("GET /assistant/providers", srv.handleListAssistantProviders)
 	mux.HandleFunc("GET /me/assistant", srv.handleGetMyAssistant)
 	mux.HandleFunc("PUT /me/assistant", srv.handlePutMyAssistant)

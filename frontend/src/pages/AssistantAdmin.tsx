@@ -107,6 +107,18 @@ export function AssistantAdmin() {
   const s = settings.data;
   const cfg = config.data;
   const providerList = cfg?.spec.providers ?? [];
+  const keyStateOf = (name: string, auth: string | undefined): string => {
+    if (auth === "none") return "not needed";
+    const state = cfg?.status?.providers?.find((s) => s.name === name);
+    if (state === undefined) return "not reported";
+    return state.keySet ? "set" : "not set";
+  };
+  const egress = cfg?.status?.conditions?.find((c) => c.type === "EgressReady");
+  const egressSummary = egress === undefined
+    ? "The egress rule has not been reported yet."
+    : egress.status === "True"
+      ? (egress.message ?? "Every provider has an egress rule.")
+      : `Some providers have no egress rule. ${egress.message ?? ""}`.trim();
   const tenants = Object.entries(s?.tenantDataSharing ?? {});
   const shownProvider = defaultProvider ?? cfg?.spec.defaultProvider ?? "";
   const shownModel = defaultModel ?? cfg?.spec.defaultModel ?? "";
@@ -170,7 +182,7 @@ export function AssistantAdmin() {
             <div className={styles.tableScroll}>
               <table className={styles.table}>
                 <thead>
-                  <tr><th>Name</th><th>Kind</th><th>Models</th><th>Trust</th><th>Auth</th><th>Base URL</th><th>CIDRs</th><th>Port</th></tr>
+                  <tr><th>Name</th><th>Kind</th><th>Models</th><th>Trust</th><th>Auth</th><th>Key</th><th>Base URL</th><th>CIDRs</th><th>Port</th></tr>
                 </thead>
                 <tbody>
                   {providerList.map((p) => (
@@ -180,6 +192,7 @@ export function AssistantAdmin() {
                       <td>{p.models.join(", ")}</td>
                       <td>{p.trust}</td>
                       <td>{p.auth ?? "apiKey"}</td>
+                      <td>{keyStateOf(p.name, p.auth)}</td>
                       <td className={styles.mono}>{p.baseURL ?? ""}</td>
                       <td className={styles.mono}>{(p.cidrs ?? []).join(", ")}</td>
                       <td>{p.port ?? ""}</td>
@@ -189,6 +202,19 @@ export function AssistantAdmin() {
               </table>
             </div>
             <p className={styles.note}>Edit the AssistantConfig object varroa-assistant to change this list.</p>
+          </Card>
+        )}
+
+        {cfg && (
+          <Card title="Egress">
+            <p className={styles.note}>{egressSummary}</p>
+            <ul className={styles.note}>
+              {providerList.map((p) => (
+                <li key={p.name} className={styles.mono}>
+                  {`${p.name}: ${(p.cidrs ?? []).join(", ") || "no CIDRs"}, port ${p.port ?? "from the base URL"}`}
+                </li>
+              ))}
+            </ul>
           </Card>
         )}
 

@@ -6948,6 +6948,21 @@
         ],
         "type": "object"
       },
+      "components_schemas_AssistantProviderKeyRequest": {
+        "properties": {
+          "apiKey": {
+            "description": "The provider key. The server never returns it.",
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "apiKey"
+        ],
+        "type": "object"
+      },
       "components_schemas_AssistantProviderList": {
         "properties": {
           "items": {
@@ -19645,6 +19660,117 @@
           }
         },
         "summary": "Lists the configured model providers and whether each can be called.",
+        "tags": [
+          "Assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/providers/{name}/key": {
+      "delete": {
+        "operationId": "deleteAssistantProviderKey",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The key is removed. The reply has no body."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The provider is not listed or takes no key."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled, or the operator is unavailable."
+          }
+        },
+        "summary": "Removes the key of a listed provider from the key Secret. Admin only.",
+        "tags": [
+          "Assistant"
+        ]
+      },
+      "put": {
+        "operationId": "putAssistantProviderKey",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/components_schemas_AssistantProviderKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The key is stored. The reply has no body."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The provider is not listed, takes no key, or the key is empty, whitespace, or longer than 4096 bytes."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/components_responses_PayloadTooLarge"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled, or the operator is unavailable."
+          }
+        },
+        "summary": "Stores the key of a listed provider. The operator writes it into the key Secret. The key is never read back. Admin only.",
         "tags": [
           "Assistant"
         ]

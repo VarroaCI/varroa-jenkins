@@ -36,10 +36,10 @@ assistant:
   enabled: true
 networkPolicy:
   enabled: true
-  assistantEgress:
-    cidrs: [10.20.30.0/24]
-    ports: [443, 8000]
 ```
+
+Then set the providers in the object. Each provider with `cidrs` gets an egress
+rule. See "Egress" below.
 
 Then write the object `varroa-assistant`:
 
@@ -76,8 +76,9 @@ Each provider has these fields:
 - `models` lists the model ids that a user may choose. It needs at least one.
 - `trust` is `internal` when the endpoint runs inside your network, and `external` otherwise.
 - `auth` is `apiKey` (the default) when the provider needs a key, and `none` when it does not.
-- `cidrs` and `port` describe the network path of the provider. The chart's
-  `networkPolicy.assistantEgress` still sets the egress rules in this release.
+- `cidrs` lists the address ranges of the provider. The operator opens egress to
+  these ranges only.
+- `port` is the TCP port of the egress rule. Zero takes the port of `baseURL`.
 
 Exactly one provider is the default. `defaultProvider` names it, and
 `defaultModel` must be one of its models. A new session uses your saved
@@ -88,23 +89,22 @@ The API refuses a write that removes the default provider without naming a new o
 
 ### Provider keys
 
-A provider with `auth: apiKey` reads its key from the Secret
-`varroa-assistant-keys`. The Secret holds one data key for each provider name.
-The BFF and the Tenant agent runner read the mounted file on each call.
+Send a key to the API. A key write needs `assistant:admin`:
 
-```bash
-kubectl -n varroa-system create secret generic varroa-assistant-keys \
-  --from-literal=primary=<key>
-kubectl -n varroa-system patch secret varroa-assistant-keys --type merge \
-  -p '{"stringData":{"local":"<key>"}}'
-```
+- `PUT /api/v1/assistant/providers/{name}/key` with the body `{"apiKey": "<key>"}`
+  stores the key. The reply is 204 and has no body.
+- `DELETE /api/v1/assistant/providers/{name}/key` removes the key.
 
-The first command creates the Secret. The second adds or rotates one key. The
-mounted file updates within about one minute. A key file that is empty makes the
-provider unavailable.
+The provider must be listed in the object and must have `auth: apiKey`. The
+BFF sends the key to the operator as a core NATS request. The operator writes
+the key into the Secret `varroa-assistant-keys`, one data key for each provider
+name. No stream, log, event, or reply holds the key. The BFF and the Tenant
+agent runner read the mounted file on each call, so a new key takes effect
+within about one minute.
 
-`networkPolicy.assistantEgress.cidrs` must name the provider addresses when
-`networkPolicy.enabled` is true. The render fails when it is empty.
+The operator owns the Secret. It removes each key whose provider is not listed,
+or whose provider has `auth: none`. A Secret that you create by hand is adopted
+on the next pass. Its keys for listed providers stay.
 
 ### External Postgres
 
@@ -123,8 +123,21 @@ GRANT INSERT, UPDATE ON varroa.agent_sessions, varroa.agent_session_events,
 | `assistant.enabled` | `false` | Turns the runtime on. |
 
 The chart fails the render when `assistant.providers`, `assistant.budgets`,
-`assistant.approvalExpiry`, or `assistant.externalDataSharing` is set. Set those
-fields in the `AssistantConfig` object instead.
+`assistant.approvalExpiry`, `assistant.externalDataSharing`, or
+`networkPolicy.assistantEgress` is set. Set those fields in the `AssistantConfig`
+object instead.
+
+### Egress
+
+With `networkPolicy.enabled` true, the operator renders the policy
+`varroa-assistant-egress` in the release namespace. The policy selects the BFF
+and the Tenant agent runner. It allows egress to each provider `cidrs` on the
+provider port, and nothing else. It holds no rule for a provider with no
+`cidrs`.
+
+The condition `EgressReady` on the object shows the result. It is `False` with
+the reason `ProviderEgressMissing` when a provider has no `cidrs`. The
+Administration page shows each provider's rule and the condition.
 
 The defaults of the object are: `externalDataSharing` `metadata`, `budgets.session`
 `200000`, `budgets.userDay` `1000000`, `budgets.tenantDay` `2000000`,

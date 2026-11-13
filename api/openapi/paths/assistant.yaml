@@ -585,3 +585,63 @@
           application/json:
             schema:
               $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/assistant/providers/{name}/key:
+  put:
+    operationId: putAssistantProviderKey
+    tags: [Assistant]
+    summary: Stores the key of a listed provider. The operator writes it into the key Secret. The key is never read back. Admin only.
+    parameters:
+      - {name: name, in: path, required: true, schema: {type: string}}
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/AssistantProviderKeyRequest'
+    responses:
+      "204":
+        description: The key is stored. The reply has no body.
+      "400":
+        description: The provider is not listed, takes no key, or the key is empty, whitespace, or longer than 4096 bytes.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "413":
+        $ref: '../components/responses.yaml#/PayloadTooLarge'
+      "503":
+        description: The assistant is not enabled, or the operator is unavailable.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+  delete:
+    operationId: deleteAssistantProviderKey
+    tags: [Assistant]
+    summary: Removes the key of a listed provider from the key Secret. Admin only.
+    parameters:
+      - {name: name, in: path, required: true, schema: {type: string}}
+    responses:
+      "204":
+        description: The key is removed. The reply has no body.
+      "400":
+        description: The provider is not listed or takes no key.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "503":
+        description: The assistant is not enabled, or the operator is unavailable.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
