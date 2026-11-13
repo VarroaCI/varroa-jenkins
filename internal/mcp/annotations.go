@@ -116,10 +116,9 @@ func (k toolKind) mutates() bool {
 // precisely so it cannot be forgotten: a new tool does not compile until its
 // author has classified it. Register every tool through this helper rather than
 // calling mcpServer.AddTool directly — annotationsCoverageTest enforces it.
-// It also wraps h in refuseUndeclaredArgs.
 func addTool(s *server.MCPServer, kind toolKind, t mcp.Tool, h server.ToolHandlerFunc) {
 	title := t.Annotations.Title
 	t.Annotations = annotationsFor(kind)
 	t.Annotations.Title = title
-	s.AddTool(t, refuseUndeclaredArgs(t, h))
+	s.AddTool(t, h)
 }

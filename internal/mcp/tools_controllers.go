@@ -641,10 +641,6 @@ func controllerSpecPatch(args map[string]any) (map[string]interface{}, error) {
 const noSpecFields = "nothing to update: supply version, composedBundleRef, " +
 	"powerState, hibernation, or a spec merge patch"
 
-// controllerSpecFieldsHint follows the refusal of an undeclared argument by
-// create_controller and update_controller.
-const controllerSpecFieldsHint = "Put every other Controller spec field inside spec."
-
 // mergeControllerSpec applies a spec merge patch to a Controller in-process,
 // for the local-direct paths that have no brood to send a patch to. It
 // round-trips through JSON so nested objects merge key by key, exactly as
