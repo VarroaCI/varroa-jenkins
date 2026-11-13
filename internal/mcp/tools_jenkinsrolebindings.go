@@ -3,17 +3,16 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
-	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
 
@@ -27,11 +26,12 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 			"summary per binding (name, roleRef, subjectCount, controllerScope, scopeType, scopeFolder) \u2014 enough to "+
 			"survey a fleet and see who is bound to which role and how broadly. A row without "+
 			"controllerScope binds on every controller. Use "+
-			"get_jenkins_role_binding for the full resource."),
+			"get_jenkins_role_binding for the full resource. With cluster, the tool lists the bindings of that cluster only."),
 		mcp.WithBoolean("verbose", mcp.Description("Return full JenkinsRoleBinding resources instead "+
 			"of summaries. Expensive: full resources carry spec.subjects and the controllerScope "+
 			"selector map, so a fleet-sized listing can exhaust the context window. Prefer "+
 			"get_jenkins_role_binding for detail on specific bindings.")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 		withListOutput(jenkinsRoleBindingListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listJRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -46,9 +46,15 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 			return mcp.NewToolResultError("access denied: missing jenkinsrolebindings:read permission"), nil
 		}
 		args := getArgs(req)
-		bindings, err := crdstore.List[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, "", "")
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		bindings, err := listOnCluster[v1alpha1.JenkinsRoleBinding](ctx, deps, cl, "", func(ctx context.Context) ([]json.RawMessage, error) {
+			return deps.ConfigBrood.ListJenkinsRoleBindings(ctx, cl.name)
+		})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list Jenkins role bindings: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list Jenkins role bindings%s: %v", cl.onCluster(), err)), nil
 		}
 		if verbose, _ := args["verbose"].(bool); verbose {
 			return resultJSON(bindings)
@@ -90,7 +96,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 	})
 
 	createJRB := mcp.NewTool("create_jenkins_role_binding",
-		mcp.WithDescription("Create a new Jenkins role binding"),
+		mcp.WithDescription("Create a new Jenkins role binding. With cluster, the tool creates the binding on that cluster only."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Binding name (DNS-1123)")),
 		mcp.WithString("roleRef", mcp.Required(), mcp.Description("JenkinsRole name to bind")),
 		mcp.WithArray("subjects", mcp.Required(), mcp.Description("Subject references, e.g. [{\"kind\":\"User\",\"name\":\"alice\"}]")),
@@ -98,6 +104,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 			"controllerSelector is a Kubernetes label selector with matchLabels and matchExpressions, e.g. "+
 			"{\"namespaces\":[\"prod-a\"],\"controllerSelector\":{\"matchLabels\":{\"env\":\"prod\"}}}. "+
 			"A Jenkins role binding takes no tenants. Omit the argument to bind on every controller.")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 		mcp.WithObject("jenkinsScope", mcp.Description("Jenkins item limits. type is Global, Folder, or Pattern. "+
 			"A Folder scope needs folder and takes an optional propagate: None, Children, or Subtree. "+
 			"A Pattern scope needs pattern, a regular expression over item full names. "+
@@ -115,6 +122,10 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if !deps.Authorizer.CanCreateJenkinsRoleBinding(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsrolebindings:create permission"), nil
 		}
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
 		controllerScope, err := buildControllerScope(args["controllerScope"])
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -123,8 +134,9 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		name := strArg(args, "name")
 		binding := &v1alpha1.JenkinsRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: strArg(args, "name")},
+			ObjectMeta: metav1.ObjectMeta{Name: name},
 			Spec: v1alpha1.JenkinsRoleBindingSpec{
 				RoleRef:         strArg(args, "roleRef"),
 				Subjects:        buildSubjectRefs(args["subjects"]),
@@ -132,14 +144,17 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 				JenkinsScope:    jenkinsScope,
 			},
 		}
-		if err := crdstore.Create[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, binding); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				return mcp.NewToolResultError(fmt.Sprintf("Jenkins role binding %s already exists; use update_jenkins_role_binding to change it", strArg(args, "name"))), nil
+		created, err := createOnCluster(ctx, deps, cl, binding, func(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
+			return deps.ConfigBrood.CreateJenkinsRoleBinding(ctx, cl.name, name, body)
+		})
+		if err != nil {
+			if isAlreadyExistsErr(err) {
+				return mcp.NewToolResultError(alreadyExistsText("Jenkins role binding "+name, "update_jenkins_role_binding", cl)), nil
 			}
-			return mcp.NewToolResultError(fmt.Sprintf("failed to create Jenkins role binding: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to create Jenkins role binding%s: %v", cl.onCluster(), err)), nil
 		}
-		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRoleBinding, api.AccessCreated, strArg(args, "name")))
-		return resultJSON(binding)
+		emitConfigActivity(ctx, deps, claims, cl, api.AccessActivityEvent(api.AccessJenkinsRoleBinding, api.AccessCreated, name))
+		return resultJSON(created)
 	})
 
 	updateJRB := mcp.NewTool("update_jenkins_role_binding",
@@ -212,8 +227,9 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 	})
 
 	deleteJRB := mcp.NewTool("delete_jenkins_role_binding",
-		mcp.WithDescription("Delete a Jenkins role binding"),
+		mcp.WithDescription("Delete a Jenkins role binding. With cluster, the tool deletes the binding on that cluster only."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Binding name")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindDelete, deleteJRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -223,15 +239,22 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if err != nil {
 			return mcp.NewToolResultError("authentication required"), nil
 		}
-		name := strArg(getArgs(req), "name")
+		args := getArgs(req)
+		name := strArg(args, "name")
 		if !deps.Authorizer.CanDeleteJenkinsRoleBinding(claims) {
 			return mcp.NewToolResultError("access denied: missing jenkinsrolebindings:delete permission"), nil
 		}
-		if err := crdstore.Delete[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, name, ""); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to delete Jenkins role binding: %v", err)), nil
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
 		}
-		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRoleBinding, api.AccessDeleted, name))
-		return mcp.NewToolResultText("Jenkins role binding " + name + " deleted"), nil
+		if err := deleteOnCluster[v1alpha1.JenkinsRoleBinding](ctx, deps, cl, name, "", func(ctx context.Context) error {
+			return deps.ConfigBrood.DeleteJenkinsRoleBinding(ctx, cl.name, name)
+		}); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to delete Jenkins role binding%s: %v", cl.onCluster(), err)), nil
+		}
+		emitConfigActivity(ctx, deps, claims, cl, api.AccessActivityEvent(api.AccessJenkinsRoleBinding, api.AccessDeleted, name))
+		return deletedResult("Jenkins role binding "+name, cl), nil
 	})
 }
 

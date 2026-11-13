@@ -72,6 +72,9 @@ func broodObject[T any](get func(ctx context.Context) (json.RawMessage, error), 
 			return &obj, nil
 		},
 		write: func(ctx context.Context, obj *T) (*T, error) {
+			if update == nil {
+				return nil, errors.New("the object is read-only on this cluster")
+			}
 			body, err := json.Marshal(obj)
 			if err != nil {
 				return nil, fmt.Errorf("encode the object: %w", err)

@@ -56,7 +56,8 @@ func TestEveryListToolDeclaresOutputSchema(t *testing.T) {
 // registration.
 func TestNoToolBypassesResultJSON(t *testing.T) {
 	allowed := map[string]bool{
-		"buf.String()": true, // get_controller_logs: raw pod logs, not an API object.
+		"buf.String()":                          true, // get_controller_logs: raw pod logs, not an API object.
+		"object + c.onCluster() + \" deleted\"": true, // deletedResult: a fixed sentence that names the object, never its body.
 	}
 	for _, file := range packageFiles(t) {
 		fset := token.NewFileSet()

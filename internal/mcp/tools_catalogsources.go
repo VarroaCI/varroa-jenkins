@@ -2,9 +2,8 @@
 package mcp
 
 import (
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,7 +14,6 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
-	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // =============================================================================
@@ -28,12 +26,13 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 			"summary per source (name, namespace, repoURL, ociRef, revision, phase, "+
 			"itemCount, trusted, lastSyncTime, observedRevision) \u2014 enough to survey a "+
 			"fleet and spot sources that failed to sync. Use get_catalog_source for the "+
-			"full resource."),
+			"full resource. With cluster, the tool lists the sources of that cluster only."),
 		mcp.WithString("namespace", mcp.Description("Optional namespace to filter by")),
 		mcp.WithBoolean("verbose", mcp.Description("Return full CatalogSource resources instead "+
 			"of summaries. Expensive: full resources carry status.conditions and spec "+
 			"internals, so a fleet-sized listing can exhaust the context window. Prefer "+
 			"get_catalog_source for detail on a specific source.")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 		withListOutput(catalogSourceListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listCS, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -49,11 +48,17 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		}
 		args := getArgs(req)
 		ns := namespaceOrDefault(args)
-		sources, err := crdstore.List[v1alpha1.CatalogSource](ctx, deps.Store, ns, "")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list catalog sources: %v", err)), nil
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
 		}
-		keep := deps.Authorizer.ConfigReadFilter(claims, "catalogsources", deps.OperatorNamespace)
+		sources, err := listOnCluster[v1alpha1.CatalogSource](ctx, deps, cl, ns, func(ctx context.Context) ([]json.RawMessage, error) {
+			return deps.ConfigBrood.ListCatalogSources(ctx, cl.name, ns)
+		})
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list catalog sources%s: %v", cl.onCluster(), err)), nil
+		}
+		keep := deps.Authorizer.ConfigReadFilter(claims, "catalogsources", cl.operatorNamespace(ctx, deps))
 		visible := sources[:0]
 		for _, s := range sources {
 			if keep(s.Namespace) {
@@ -112,6 +117,7 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		mcp.WithString("secretRef", mcp.Description("Auth secret name (git credentials or registry pull secret)")),
 		mcp.WithBoolean("trusted", mcp.Description("Mark the source trusted")),
 		mcp.WithNumber("syncIntervalSeconds", mcp.Description("Sync interval in seconds: 0 (use the default, 300) or 30 to 31536000")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindCreateStrict, createCS, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -125,6 +131,10 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		ns := strArg(args, "namespace")
 		if !deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "create", ns) {
 			return mcp.NewToolResultError("access denied: missing catalogsources:create permission"), nil
+		}
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
 		}
 		spec := v1alpha1.CatalogSourceSpec{
 			RepoURL:   strArg(args, "repoURL"),
@@ -160,18 +170,22 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 			Spec:       spec,
 		}
 		source.Namespace = ns
-		if err := crdstore.Create[v1alpha1.CatalogSource](ctx, deps.Store, source); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				return mcp.NewToolResultError(fmt.Sprintf("catalog source %s/%s already exists; use update_catalog_source to change it", ns, strArg(args, "name"))), nil
+		name := strArg(args, "name")
+		created, err := createOnCluster(ctx, deps, cl, source, func(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
+			return deps.ConfigBrood.CreateCatalogSource(ctx, cl.name, ns, name, body)
+		})
+		if err != nil {
+			if isAlreadyExistsErr(err) {
+				return mcp.NewToolResultError(alreadyExistsText("catalog source "+ns+"/"+name, "update_catalog_source", cl)), nil
 			}
-			return mcp.NewToolResultError(fmt.Sprintf("failed to create catalog source: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to create catalog source%s: %v", cl.onCluster(), err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
+		emitConfigActivity(ctx, deps, claims, cl, activity.Event{
 			Type:      "catalogsource.created",
-			Message:   "CatalogSource " + strArg(args, "name") + " created in " + ns,
+			Message:   "CatalogSource " + name + " created in " + ns,
 			Namespace: ns,
 		})
-		return resultJSON(source)
+		return resultJSON(created)
 	})
 
 	updateCS := mcp.NewTool("update_catalog_source",
@@ -274,9 +288,10 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 	})
 
 	deleteCS := mcp.NewTool("delete_catalog_source",
-		mcp.WithDescription("Delete a catalog source"),
+		mcp.WithDescription("Delete a catalog source. With cluster, the tool deletes the source on that cluster only."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Source namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Source name")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindDelete, deleteCS, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -294,21 +309,28 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if err := v1alpha1.CheckCatalogSourceWritable(name); err != nil {
 			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
 		}
-		if err := crdstore.Delete[v1alpha1.CatalogSource](ctx, deps.Store, name, ns); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to delete catalog source: %v", err)), nil
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
+		if err := deleteOnCluster[v1alpha1.CatalogSource](ctx, deps, cl, name, ns, func(ctx context.Context) error {
+			return deps.ConfigBrood.DeleteCatalogSource(ctx, cl.name, ns, name)
+		}); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to delete catalog source%s: %v", cl.onCluster(), err)), nil
+		}
+		emitConfigActivity(ctx, deps, claims, cl, activity.Event{
 			Type:      "catalogsource.deleted",
 			Message:   "CatalogSource " + name + " deleted in " + ns,
 			Namespace: ns,
 		})
-		return mcp.NewToolResultText("catalog source " + ns + "/" + name + " deleted"), nil
+		return deletedResult("catalog source "+ns+"/"+name, cl), nil
 	})
 
 	syncCS := mcp.NewTool("sync_catalog_source",
-		mcp.WithDescription("Trigger sync of a catalog source via operator reconciler"),
+		mcp.WithDescription("Ask the operator to sync a catalog source now. With cluster, the operator of that cluster syncs the source."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Source namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Source name")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindAction, syncCS, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -326,15 +348,15 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if deps.ConfigBrood == nil {
 			return mcp.NewToolResultError("config brood not configured"), nil
 		}
-		cluster := "core"
-		if deps.Brood != nil {
-			cluster = deps.Brood.LocalCluster()
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
 		}
 		name := strArg(args, "name")
-		if err := deps.ConfigBrood.SyncCatalogSource(ctx, cluster, ns, name); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to sync catalog source: %v", err)), nil
+		if err := deps.ConfigBrood.SyncCatalogSource(ctx, cl.name, ns, name); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to sync catalog source%s: %v", cl.onCluster(), err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
+		emitConfigActivity(ctx, deps, claims, cl, activity.Event{
 			Type:      "catalogsource.synced",
 			Message:   "CatalogSource " + name + " synced in " + ns,
 			Namespace: ns,
