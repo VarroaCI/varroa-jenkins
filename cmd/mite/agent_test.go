@@ -1068,6 +1068,20 @@ func TestCommandMailboxImperativeFIFO(t *testing.T) {
 	}
 }
 
+// gatewayImperativeInFlightLimit mirrors imperativeInFlightLimitDefault in
+// internal/mite. The gateway sends no more imperatives than this without a
+// result, so the queue cap must hold at least this many.
+const gatewayImperativeInFlightLimit = 8
+
+// TestImperativeQueueCapHoldsGatewayInFlightLimit pins the rule that a full
+// queue means a gateway broke its in-flight limit.
+func TestImperativeQueueCapHoldsGatewayInFlightLimit(t *testing.T) {
+	if imperativeQueueCap < gatewayImperativeInFlightLimit {
+		t.Fatalf("imperativeQueueCap = %d, below the gateway in-flight limit %d",
+			imperativeQueueCap, gatewayImperativeInFlightLimit)
+	}
+}
+
 // TestCommandMailboxImperativeCap verifies putImperative returns false at capacity.
 func TestCommandMailboxImperativeCap(t *testing.T) {
 	mb := newCommandMailbox()

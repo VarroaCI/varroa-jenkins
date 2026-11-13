@@ -38,6 +38,8 @@ Each desired-state command has a deadline. The default is 20 minutes. Set `Provi
 
 The gateway extends the 60-second ack wait of a running one-shot command every 15 seconds, so a slow command does not repeat.
 
+The gateway sends a mite at most 8 one-shot commands that have no result. The other commands stay in JetStream in publish order. The gateway sends the next command when the mite returns a result. When the stream ends, the gateway releases the unanswered commands in publish order. A token grant uses the same JetStream subject. It waits behind the one-shot commands that the operator published before it.
+
 The effective reconciliation policy controls termination draining. The default drain timeout is 900 seconds. During termination the mite places Jenkins in quiet-down mode, waits for running builds, then exits when builds finish or the timeout expires.
 
 ## Credential Delivery

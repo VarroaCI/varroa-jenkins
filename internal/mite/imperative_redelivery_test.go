@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"google.golang.org/grpc"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -55,36 +54,11 @@ func connectRedeliveryMite(t *testing.T, addr string, certAuth *ca.CA) (*grpc.Cl
 	return gconn, imps
 }
 
-// publishTriggerBuild publishes one TRIGGER_BUILD imperative on the cell's out
-// subject. It retries until the gateway's own stream exists.
+// publishTriggerBuild publishes one TRIGGER_BUILD imperative with the
+// redelivery command id.
 func publishTriggerBuild(t *testing.T, conn *bus.Conn) {
 	t.Helper()
-	data, err := json.Marshal(&mitev1.OperatorMessage{
-		Message: &mitev1.OperatorMessage_Imperative{Imperative: &mitev1.ImperativeCommand{
-			CommandId: redeliveryCommandID,
-			Type:      mitev1.CommandTypeTriggerBuild,
-			TriggerBuild: &mitev1.TriggerBuildPayload{
-				RunId:     "run-1",
-				IntentKey: "intent-1",
-				JobPath:   "team-a/build",
-			},
-		}},
-	})
-	if err != nil {
-		t.Fatalf("marshal imperative: %v", err)
-	}
-	subject := bus.MiteOutSubject(bus.DefaultCluster, redeliveryNS, redeliveryCell)
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		_, err := conn.JetStream().Publish(subject, data, nats.MsgId(redeliveryCommandID))
-		if err == nil {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("publish imperative: %v", err)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	publishTriggerBuildID(t, conn, redeliveryCommandID)
 }
 
 // awaitImperative waits for one imperative with the wanted command id.
