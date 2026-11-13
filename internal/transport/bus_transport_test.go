@@ -193,6 +193,63 @@ func TestBusTransport_InfoDecodeError(t *testing.T) {
 	}
 }
 
+// TestBusTransport_InfoReadsFromStreamLeader asserts that Info reads the
+// presence record through the stream leader, not a direct get, so a stale
+// replica never answers it.
+func TestBusTransport_InfoReadsFromStreamLeader(t *testing.T) {
+	s := startNATS(t)
+	tr := newBusTransport(t, s)
+	key := bus.PresenceKey(bus.DefaultCluster, "ns", "c1")
+	if err := tr.presenceKV.Put(key, []byte(`{"version":"2.4"}`)); err != nil {
+		t.Fatalf("put presence: %v", err)
+	}
+
+	mon, err := nats.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("monitor connect: %v", err)
+	}
+	t.Cleanup(mon.Close)
+	leader, err := mon.SubscribeSync("$JS.API.STREAM.MSG.GET.KV_mite_presence")
+	if err != nil {
+		t.Fatalf("subscribe leader: %v", err)
+	}
+	direct, err := mon.SubscribeSync("$JS.API.DIRECT.GET.KV_mite_presence.>")
+	if err != nil {
+		t.Fatalf("subscribe direct: %v", err)
+	}
+	if err := mon.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	info, ok, err := tr.Info("ns", "c1")
+	if err != nil || !ok || info.Version != "2.4" {
+		t.Fatalf("Info = %+v ok=%v err=%v, want version 2.4", info, ok, err)
+	}
+	if _, err := leader.NextMsg(2 * time.Second); err != nil {
+		t.Fatalf("Info sent no leader request: %v", err)
+	}
+	if _, err := direct.NextMsg(200 * time.Millisecond); err == nil {
+		t.Fatal("Info sent a direct get")
+	}
+}
+
+// TestBusTransport_InfoDeletedRecordIsMissing asserts that a record the
+// gateway deleted on disconnect reads as a clean miss.
+func TestBusTransport_InfoDeletedRecordIsMissing(t *testing.T) {
+	tr := newBusTransport(t, startNATS(t))
+	key := bus.PresenceKey(bus.DefaultCluster, "ns", "c1")
+	if err := tr.presenceKV.Put(key, []byte(`{"version":"2.4"}`)); err != nil {
+		t.Fatalf("put presence: %v", err)
+	}
+	if err := tr.presenceKV.Delete(key); err != nil {
+		t.Fatalf("delete presence: %v", err)
+	}
+	_, ok, err := tr.Info("ns", "c1")
+	if ok || err != nil {
+		t.Fatalf("Info after delete = ok %v err %v, want false and nil", ok, err)
+	}
+}
+
 // TestBusTransport_TokenRefreshGrant verifies that in bus mode a mite's
 // TokenRefreshRequest (published on the mite→operator subject) is answered
 // with a freshly minted TokenGrant published on the operator→mite subject.

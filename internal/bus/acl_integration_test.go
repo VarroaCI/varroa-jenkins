@@ -462,6 +462,14 @@ func TestACLIntegration(t *testing.T) {
 		if val3 == nil {
 			t.Fatal("expected non-nil presence value for operator")
 		}
+		// Operator can read from the stream leader, which Info uses.
+		leaderVal, err := opKV.GetFromLeader("ns1/ctrl1")
+		if err != nil {
+			t.Fatalf("operator GetFromLeader from mite_presence: %v", err)
+		}
+		if leaderVal == nil {
+			t.Fatal("expected non-nil presence value from the stream leader for operator")
+		}
 	})
 
 	// -----------------------------------------------------------------------
