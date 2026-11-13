@@ -1124,7 +1124,9 @@ func TestCommandMailboxDropsActiveRedelivery(t *testing.T) {
 	}
 }
 
-// TestCommandMailboxImperativePriority verifies take drains imperatives before desired.
+// TestCommandMailboxImperativePriority verifies take answers a short imperative
+// queue before the desired slot. TestCommandMailboxDesiredWaitsAtMostSkipLimit
+// covers the bound.
 func TestCommandMailboxImperativePriority(t *testing.T) {
 	mb := newCommandMailbox()
 
