@@ -28,7 +28,8 @@ type activityOutbox struct {
 }
 
 // insertActivityForPublish writes one activity row through db and queues the
-// event for publish when the row is new. The timestamp is truncated to the
+// event for publish when the row is new. Every recorder path that writes its
+// own activity row uses this helper. The timestamp is truncated to the
 // microsecond that the table stores, so the event key of a re-ingested copy
 // matches the key of the row. A duplicate writes nothing and queues nothing.
 func insertActivityForPublish(ctx context.Context, db activityExecer, e activity.Event, out *activityOutbox) error {

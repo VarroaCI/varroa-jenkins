@@ -11,12 +11,14 @@ import (
 // SetVetoMarking wires the veto mark: after a permanent veto of a
 // Varroa-dispatched run, the claim responder marks that run
 // TRIGGER_FAILED at once. notifier publishes the change and may be nil.
-// cmd/recorder calls this once, after NewLedger. A Ledger this method
-// never touches marks nothing, which every test that only exercises
+// activityPub publishes the build.claim_vetoed row after the commit and
+// may be nil. cmd/recorder calls this once, after NewLedger. A Ledger this
+// method never touches marks nothing, which every test that only exercises
 // Claim relies on.
-func (l *Ledger) SetVetoMarking(notifier *RunNotifier) {
+func (l *Ledger) SetVetoMarking(notifier *RunNotifier, activityPub *activity.Publisher) {
 	l.vetoMarking = true
 	l.vetoNotifier = notifier
+	l.vetoActivityPub = activityPub
 }
 
 // vetoedRunMessage is the trigger_error text of a veto that carries no
@@ -116,13 +118,15 @@ func (l *Ledger) markVetoedRun(ctx context.Context, req ClaimRequest, resp Claim
 		ItemPath: req.JobPath,
 		Result:   ResultTriggerFailed,
 	}
-	if err := insertRunActivityTx(ctx, tx, event); err != nil {
+	var out activityOutbox
+	if err := insertActivityForPublish(ctx, tx, event, &out); err != nil {
 		return false, fmt.Errorf("veto activity row: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit veto marking: %w", err)
 	}
+	publishActivityAfterCommit(l.vetoActivityPub, &out)
 
 	l.vetoNotifier.Notify(RunNotification{
 		Kind:    "run",

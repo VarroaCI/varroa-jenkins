@@ -100,30 +100,31 @@ func newWebhookClient() *http.Client {
 // round leases a batch with FOR UPDATE SKIP LOCKED, so several recorder
 // replicas never send one delivery twice.
 type WebhookDispatcher struct {
-	pool     *pgxpool.Pool
-	client   *http.Client
-	activity *ActivityIngester
-	metrics  *WebhookMetrics
-	logger   *slog.Logger
-	now      func() time.Time
-	nudges   chan struct{}
+	pool        *pgxpool.Pool
+	client      *http.Client
+	activityPub *activity.Publisher
+	metrics     *WebhookMetrics
+	logger      *slog.Logger
+	now         func() time.Time
+	nudges      chan struct{}
 }
 
 // NewWebhookDispatcher returns a dispatcher over pool. It writes a failed
-// delivery to activity and counts outcomes on metrics. A nil metrics
-// value counts nothing.
-func NewWebhookDispatcher(pool *pgxpool.Pool, activityIngester *ActivityIngester, metrics *WebhookMetrics, logger *slog.Logger) *WebhookDispatcher {
+// delivery to activity, then publishes that row through activityPub after
+// the write. A nil activityPub writes the row and publishes nothing. A nil
+// metrics value counts nothing.
+func NewWebhookDispatcher(pool *pgxpool.Pool, activityPub *activity.Publisher, metrics *WebhookMetrics, logger *slog.Logger) *WebhookDispatcher {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &WebhookDispatcher{
-		pool:     pool,
-		client:   newWebhookClient(),
-		activity: activityIngester,
-		metrics:  metrics,
-		logger:   logger,
-		now:      time.Now,
-		nudges:   make(chan struct{}, 1),
+		pool:        pool,
+		client:      newWebhookClient(),
+		activityPub: activityPub,
+		metrics:     metrics,
+		logger:      logger,
+		now:         time.Now,
+		nudges:      make(chan struct{}, 1),
 	}
 }
 
@@ -405,9 +406,6 @@ func (d *WebhookDispatcher) setState(ctx context.Context, row webhookRow, state 
 // delivery that ran out of attempts. The event names the run's cell and
 // job. A missing partition is created once, and the insert is retried.
 func (d *WebhookDispatcher) recordFailure(ctx context.Context, row webhookRow, attempts int, errText string) {
-	if d.activity == nil {
-		return
-	}
 	var (
 		namespace, cell, jobPath, result string
 		buildNumber                      *int64
@@ -437,19 +435,20 @@ func (d *WebhookDispatcher) recordFailure(ctx context.Context, row webhookRow, a
 	if buildNumber != nil {
 		e.BuildNumber = *buildNumber
 	}
-	e.Normalize()
-	key := activity.EventKey(e)
-	_, insertErr := d.activity.Insert(ctx, e, key)
+	var out activityOutbox
+	insertErr := insertActivityForPublish(ctx, d.pool, e, &out)
 	if isNoActivityPartition(insertErr) {
 		if perr := ensureActivityPartitionForTime(ctx, d.pool, e.Timestamp); perr != nil {
 			d.logger.Warn("create activity partition failed", "error", perr)
 			return
 		}
-		_, insertErr = d.activity.Insert(ctx, e, key)
+		insertErr = insertActivityForPublish(ctx, d.pool, e, &out)
 	}
 	if insertErr != nil {
 		d.logger.Warn("webhook failure activity insert failed", "delivery", row.deliveryID, "error", insertErr)
+		return
 	}
+	publishActivityAfterCommit(d.activityPub, &out)
 }
 
 // nullableStatus returns nil for a zero HTTP status, so the column stores

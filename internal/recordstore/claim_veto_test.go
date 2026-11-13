@@ -18,7 +18,7 @@ import (
 // mark wired to notifier.
 func newVetoMarkingLedger(pool *pgxpool.Pool, fence Fence, notifier *RunNotifier) *Ledger {
 	l := NewLedger(pool, fence)
-	l.SetVetoMarking(notifier)
+	l.SetVetoMarking(notifier, nil)
 	return l
 }
 
@@ -465,7 +465,7 @@ func TestClaimExpirySkipsAVetoedRun(t *testing.T) {
 		t.Fatalf("age the vetoed row: %v", err)
 	}
 
-	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
+	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, nil, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("expire unclaimed runs: %v", err)
 	}
@@ -489,8 +489,27 @@ func TestUnwiredLedgerMarksNothing(t *testing.T) {
 	}
 
 	wired := NewLedger(nil, nil)
-	wired.SetVetoMarking(nil)
+	wired.SetVetoMarking(nil, nil)
 	if marked, err := wired.markVetoedRun(context.Background(), req, resp); marked || err != nil {
 		t.Fatalf("markVetoedRun with no pool = %v, %v, want false, nil", marked, err)
 	}
+}
+
+// TestVetoMarkPublishesTheActivityRow proves that a veto mark's
+// build.claim_vetoed row reaches the live stream after its commit.
+func TestVetoMarkPublishesTheActivityRow(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	pub, conn := newActivityStreamPublisher(t)
+
+	runID := newTestUUIDv7String()
+	acceptRun(t, pool, runID)
+
+	l := NewLedger(pool, denyingFence{reasonCode: ReasonCrossTenant})
+	l.SetVetoMarking(nil, pub)
+	claimThroughResponder(t, l, nil, newVarroaClaim(runID))
+	claimThroughResponder(t, l, nil, newVarroaClaim(runID))
+
+	assertStoredRowEvent(t, pool, db, storedActivityEvents(t, pub, conn), "build.claim_vetoed")
 }

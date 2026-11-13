@@ -1634,3 +1634,20 @@ func TestAfterMarkPublishesNoCancelForResumeFailed(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 	}
 }
+
+// TestMarkInterruptedPublishesTheActivityRow proves that the build.interrupted
+// row reaches the live stream after the marking transaction commits.
+func TestMarkInterruptedPublishesTheActivityRow(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	pub, conn := newActivityStreamPublisher(t)
+	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
+	c := fetchRunningCandidate(t, pool, runID)
+
+	changed, err := markInterruptedAndPublish(context.Background(), pool, pub, c, ReasonNoHeartbeat, time.Now(), "")
+	if err != nil || !changed {
+		t.Fatalf("markInterruptedAndPublish changed=%v err=%v, want true and nil", changed, err)
+	}
+	assertStoredRowEvent(t, pool, db, storedActivityEvents(t, pub, conn), "build.interrupted")
+}

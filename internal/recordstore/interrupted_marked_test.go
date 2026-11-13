@@ -337,7 +337,7 @@ func TestExpireUnclaimedRunsSkipsAMarkedIntent(t *testing.T) {
 	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-a", accepted)
 	seedMarkedIntent(t, db, runID, accepted, "pod-a", "", true)
 
-	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
+	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, nil, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("expire unclaimed runs: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestExpireUnclaimedRunsSkipsAMarkedIntent(t *testing.T) {
 	if _, err := db.Exec(`UPDATE varroa.run_intents SET start_marked_at = NULL WHERE run_id = $1`, runID); err != nil {
 		t.Fatalf("clear the start mark: %v", err)
 	}
-	n, err = ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
+	n, err = ExpireUnclaimedRuns(context.Background(), pool, nil, nil, nil, claimExpiryNow, nil)
 	if err != nil {
 		t.Fatalf("expire unclaimed runs: %v", err)
 	}
