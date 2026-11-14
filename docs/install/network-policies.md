@@ -82,6 +82,8 @@ Each egress group renders a rule only when its gate is on and its `cidrs` list i
 
 Every group except `coreNatsEgress` also requires a non-empty `ports` list. An empty `ports` list fails the render, because Kubernetes reads it as every port.
 
+An empty `coreNatsEgress` `ports` list takes the port at the end of `bus.url`, or 4222 when `bus.url` names no port. A `bus.url` list with more than one port needs an explicit `ports` list.
+
 | Group | Default | Renders when | Empty `cidrs` |
 | --- | --- | --- | --- |
 | `apiServerEgress` | `["0.0.0.0/0"]` on 443 and 6443 | Always | Fails the render. |

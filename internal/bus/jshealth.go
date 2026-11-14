@@ -3,6 +3,9 @@ package bus
 import (
 	"context"
 	"log/slog"
+	"net"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -13,7 +16,8 @@ import (
 // see it. Every JSProbeInterval, the Conn asks for the JetStream account
 // status ($JS.API.INFO). Only a server in contact with the JetStream meta
 // leader answers it. At each JSProbeFailures-th failed probe in a row, the
-// Conn opens a second connection to the bus URL and probes there. It
+// Conn opens a second connection to another bus URL entry (probeServers) and
+// probes there. It
 // reconnects only when that connection reaches another server and the
 // probe passes there. A JetStream outage of the whole cluster thus causes
 // no reconnect. A cut-off meta leader keeps its role for up to
@@ -51,8 +55,9 @@ func (e connJSEnv) server() (string, string) {
 func (e connJSEnv) probe() error { return probeJetStream(e.ctx, e.c.js) }
 
 // probeOther opens a second connection with the identity of the Conn and
-// probes JetStream there. A Service or a server list can send it to
-// another server. A failed dial gives an empty id.
+// probes JetStream there. The dialProbe closure chooses the addresses with
+// probeServers. A Service or a DNS name can still send a dial to another
+// server. A failed dial gives an empty id.
 func (e connJSEnv) probeOther() (string, string, error) {
 	// nats.Connect takes no context, so the dial runs aside. A cancelled loop
 	// returns at once. A dial that finishes later closes its own connection.
@@ -184,12 +189,58 @@ func (c *Conn) runJSHealth(ctx context.Context, interval time.Duration, env jsEn
 	}
 }
 
-// stopJSHealth stops the loop and waits for it. A probe connection that is
-// still dialing can delay the return by up to JSProbeTimeout.
+// stopJSHealth stops the loop and waits for it. The loop does not wait for
+// a probe dial in flight.
 func (c *Conn) stopJSHealth() {
 	if c.jsCancel == nil {
 		return
 	}
 	c.jsCancel()
 	<-c.jsDone
+}
+
+// probeServers gives the bus URL entries that the probe connection dials, in
+// order. A URL with one entry gives that entry: a Service or a DNS name can
+// still lead to another server. A URL with more entries gives every entry
+// except the connected server, in the configured order.
+func probeServers(busURL, connected string) []string {
+	var entries []string
+	for _, e := range strings.Split(busURL, ",") {
+		if e = strings.TrimSuffix(strings.TrimSpace(e), "/"); e != "" {
+			entries = append(entries, e)
+		}
+	}
+	if len(entries) < 2 {
+		return entries
+	}
+	cur := serverHost(connected)
+	var others []string
+	for _, e := range entries {
+		if serverHost(e) != cur {
+			others = append(others, e)
+		}
+	}
+	if len(others) == 0 {
+		return entries
+	}
+	return others
+}
+
+// serverHost gives host:port of one bus URL entry. An entry without a port
+// gets the NATS default port 4222, as nats.go adds it.
+func serverHost(entry string) string {
+	if entry == "" {
+		return ""
+	}
+	if !strings.Contains(entry, "://") {
+		entry = "nats://" + entry
+	}
+	u, err := url.Parse(entry)
+	if err != nil {
+		return ""
+	}
+	if u.Port() == "" {
+		return net.JoinHostPort(u.Hostname(), "4222")
+	}
+	return u.Host
 }

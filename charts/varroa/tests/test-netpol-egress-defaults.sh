@@ -232,6 +232,22 @@ OP=$(sed_extract 'np-operator' "$OUT")
 grep -q 'port: 7422' <<< "$OP" && rc=0 || rc=1
 check "hive: core NATS rule uses port 7422 from bus.url" "$rc"
 
+# A list whose entries share one port keeps that port for each CIDR.
+cat > "$TMP/bus-list.yaml" <<'EOF'
+bus:
+  url: "tls://192.0.2.10:30422,tls://192.0.2.11:30422"
+networkPolicy:
+  coreNatsEgress:
+    cidrs: ["192.0.2.10/32", "192.0.2.11/32"]
+EOF
+render "${HIVE[@]}" -f "$TMP/bus-list.yaml"
+check "hive with a same-port bus.url list renders" "$RC"
+OP=$(sed_extract 'np-operator' "$OUT")
+grep -q 'cidr: 192.0.2.11/32' <<< "$OP" && rc=0 || rc=1
+check "hive: np-operator carries the second list CIDR" "$rc"
+grep -q 'port: 30422' <<< "$OP" && rc=0 || rc=1
+check "hive: core NATS rule uses port 30422 from the list" "$rc"
+
 # ---------------------------------------------------------------------------
 # (6) Record store on s3 blobs: the blob CIDR is required.
 # ---------------------------------------------------------------------------

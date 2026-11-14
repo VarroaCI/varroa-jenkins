@@ -3,6 +3,7 @@
 # Golden render test: hive-mode assertions
 # =============================================================================
 # Verifies that `helm template` with values-hive.yaml produces:
+#   6. A comma-separated bus.url list reaches the operator and the gateway unchanged
 #   1. Hive render → operator+gateway resources only (no bff/frontend/dex etc.)
 #   2. Missing cluster.name or bus.url → failure with appropriate message
 #   3. mode=hive with nats.enabled=true → failure mentioning nats.enabled=false
@@ -166,6 +167,21 @@ elif grep -q "nats.external.externalTrafficPolicy must be Cluster or Local" <<< 
 else
   check "Bogus externalTrafficPolicy fails the render" 1
 fi
+
+# --- 6. A bus.url server list reaches every bus client unchanged ---
+echo ""
+echo "=== 6. bus.url server list ==="
+LIST_URL="tls://192.0.2.10:30422,tls://192.0.2.11:30422"
+LIST_RENDER=$(helm template "$ROOT" \
+  -f "$ROOT/values-hive.yaml" \
+  --set cluster.name=x \
+  --set-literal "bus.url=$LIST_URL" \
+  --set auth.oidc.clientSecret=s --set auth.dashboardUrl=https://example.com 2>/dev/null) || {
+  echo "FAIL: helm template (hive, bus.url list) failed"
+  exit 1
+}
+n=$(grep -c "value: \"$LIST_URL\"" <<< "$LIST_RENDER" || true)
+if [[ "$n" == 2 ]]; then check "bus.url list renders unchanged for operator and gateway" 0; else check "bus.url list renders unchanged for operator and gateway" 1; fi
 
 echo ""
 if [[ "$failures" -eq 0 ]]; then

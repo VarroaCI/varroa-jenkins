@@ -37,7 +37,9 @@ mode: full
 
 # Global NATS bus URL. Empty = per-tier busURL or the in-cluster default
 # nats://<release>-nats:4222. REQUIRED in hive mode (the core's external
-# NATS endpoint, e.g. tls://nats.core.example.com:4222).
+# NATS endpoint, e.g. tls://nats.core.example.com:4222). A comma-separated
+# list names more than one core NATS server. With a core NodePort and
+# externalTrafficPolicy Local, list each node that runs a NATS pod.
 bus:
   url: ""
 
