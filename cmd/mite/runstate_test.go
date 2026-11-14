@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -106,17 +105,12 @@ func startAdoptAndReloadStub(t *testing.T) *resumeStub {
 	return startAdoptAndReloadStubFor(t, stubJobPath)
 }
 
-// startAdoptAndReloadStubFor starts a stub Jenkins on localhost:8080 (the
-// adopt-node route is hard-coded there, matching every other loopback
-// route's own test in this package) serving the crumb issuer as
-// disabled, the adopt-node route, and the reload route of jobPath. It
-// skips the test when the port is unavailable.
+// startAdoptAndReloadStubFor starts a stub Jenkins serving the crumb
+// issuer as disabled, the adopt-node route, the load-build route, and the
+// reload route of jobPath. An agent reaches it through stub.url, set as
+// both Config.JenkinsURL and Agent.localJenkinsURL.
 func startAdoptAndReloadStubFor(t *testing.T, jobPath string) *resumeStub {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:8080")
-	if err != nil {
-		t.Skip("skipping: localhost:8080 not available:", err)
-	}
 	stub := &resumeStub{loadStatus: http.StatusOK, loadBuilding: true, jobPath: jobPath}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/crumbIssuer/api/json", func(w http.ResponseWriter, r *http.Request) {
@@ -171,10 +165,7 @@ func startAdoptAndReloadStubFor(t *testing.T, jobPath string) *resumeStub {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(loadBuildAnswer{Building: building, Registered: building})
 	})
-	srv := &http.Server{Handler: mux}
-	go func() { _ = srv.Serve(l) }()
-	t.Cleanup(func() { _ = srv.Close() })
-	time.Sleep(10 * time.Millisecond)
+	stub.url = startLocalJenkins(t, mux)
 	return stub
 }
 
@@ -192,6 +183,8 @@ const stubJobPath = "tenant/pipeline"
 // resumeStub records what the resume called on the Jenkins side, and
 // scripts the load route's answer.
 type resumeStub struct {
+	// url is the base URL of the stub server.
+	url string
 	// jobPath is the one job whose reload route answers.
 	jobPath     string
 	adoptedName atomic.Value
@@ -286,7 +279,8 @@ func TestApplyResumeBuild_ExistingNodeConfigNotOverwrittenButAdopted(t *testing.
 		t.Fatal(err)
 	}
 
-	agent := mustNewAgent(t, Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent := mustNewAgent(t, Config{JenkinsURL: stub.url, CellInstance: "pod-live"})
+	agent.localJenkinsURL = stub.url
 	agent.Logger = slog.Default()
 	agent.jenkinsHomeDir = home
 	agent.jenkinsTokenMu.Lock()
@@ -324,7 +318,8 @@ func TestApplyResumeBuild_FetchErrorFailsBeforeReload(t *testing.T) {
 	const jobPath = stubJobPath
 	stub := startAdoptAndReloadStub(t)
 
-	agent := mustNewAgent(t, Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent := mustNewAgent(t, Config{JenkinsURL: stub.url, CellInstance: "pod-live"})
+	agent.localJenkinsURL = stub.url
 	agent.Logger = slog.Default()
 	agent.jenkinsHomeDir = t.TempDir()
 	agent.jenkinsTokenMu.Lock()
@@ -392,6 +387,7 @@ func TestApplyResumeBuild_OwnInstanceIsAccepted(t *testing.T) {
 		jenkinsHomeDir:  t.TempDir(),
 		Logger:          slog.Default(),
 		runStateWaiters: newRunStateWaiterMap(),
+		localJenkinsURL: "http://localhost:1",
 	}
 	agent.cfg.CellInstance = "pod-live"
 
@@ -478,6 +474,7 @@ func TestApplyResumeBuild_AFutureDeadlineIsAccepted(t *testing.T) {
 		jenkinsHomeDir:  t.TempDir(),
 		Logger:          slog.Default(),
 		runStateWaiters: newRunStateWaiterMap(),
+		localJenkinsURL: "http://localhost:1",
 	}
 	agent.cfg.CellInstance = "pod-live"
 
@@ -499,11 +496,12 @@ func TestApplyResumeBuild_AFutureDeadlineIsAccepted(t *testing.T) {
 
 // --- Live finding L3: the restored build must load ---
 
-// newResumeAgent builds an agent wired for one resume of jobPath, whose
+// newResumeAgent builds an agent wired for one resume against stub, whose
 // fetch answers data for every file.
-func newResumeAgent(t *testing.T, home string, data []byte) *Agent {
+func newResumeAgent(t *testing.T, stub *resumeStub, home string, data []byte) *Agent {
 	t.Helper()
-	agent := mustNewAgent(t, Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent := mustNewAgent(t, Config{JenkinsURL: stub.url, CellInstance: "pod-live"})
+	agent.localJenkinsURL = stub.url
 	agent.Logger = slog.Default()
 	agent.jenkinsHomeDir = home
 	agent.jenkinsTokenMu.Lock()
@@ -521,7 +519,7 @@ func TestApplyResumeBuild_LoadsTheBuildAfterTheReload(t *testing.T) {
 	const jobPath = stubJobPath
 	stub := startAdoptAndReloadStub(t)
 
-	agent := newResumeAgent(t, t.TempDir(), []byte("<build/>"))
+	agent := newResumeAgent(t, stub, t.TempDir(), []byte("<build/>"))
 	payload := &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: jobPath, BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
@@ -550,7 +548,7 @@ func TestApplyResumeBuild_ABuildThatDoesNotRunFailsTheCommand(t *testing.T) {
 	stub := startAdoptAndReloadStub(t)
 	stub.answerLoad(http.StatusOK, false)
 
-	agent := newResumeAgent(t, t.TempDir(), []byte("<build/>"))
+	agent := newResumeAgent(t, stub, t.TempDir(), []byte("<build/>"))
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: jobPath, BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
@@ -571,7 +569,7 @@ func TestApplyResumeBuild_ALoadFailureFailsTheCommand(t *testing.T) {
 	stub := startAdoptAndReloadStub(t)
 	stub.answerLoad(http.StatusNotFound, false)
 
-	agent := newResumeAgent(t, t.TempDir(), []byte("<build/>"))
+	agent := newResumeAgent(t, stub, t.TempDir(), []byte("<build/>"))
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: jobPath, BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
@@ -596,7 +594,8 @@ func TestApplyResumeBuild_ARedeliveredCommandTouchesNothing(t *testing.T) {
 	stub.answerProbe(true, false)
 
 	home := t.TempDir()
-	agent := mustNewAgent(t, Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent := mustNewAgent(t, Config{JenkinsURL: stub.url, CellInstance: "pod-live"})
+	agent.localJenkinsURL = stub.url
 	agent.Logger = slog.Default()
 	agent.jenkinsHomeDir = home
 	agent.jenkinsTokenMu.Lock()
@@ -631,7 +630,8 @@ func TestApplyResumeBuild_ARedeliveredCommandTouchesNothing(t *testing.T) {
 func TestApplyResumeBuild_TheAbsoluteDeadlineBoundsEveryStep(t *testing.T) {
 	stub := startAdoptAndReloadStub(t)
 
-	agent := mustNewAgent(t, Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent := mustNewAgent(t, Config{JenkinsURL: stub.url, CellInstance: "pod-live"})
+	agent.localJenkinsURL = stub.url
 	agent.Logger = slog.Default()
 	agent.jenkinsHomeDir = t.TempDir()
 	agent.jenkinsTokenMu.Lock()
@@ -672,7 +672,7 @@ func TestApplyResumeBuild_AProbeThatNeverAnswersFailsClosed(t *testing.T) {
 	stub.failProbes(resumeProbeAttempts)
 
 	home := t.TempDir()
-	agent := newResumeAgent(t, home, []byte("<build/>"))
+	agent := newResumeAgent(t, stub, home, []byte("<build/>"))
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
@@ -700,7 +700,7 @@ func TestApplyResumeBuild_ATransientProbeFailureStillResumes(t *testing.T) {
 	stub := startAdoptAndReloadStub(t)
 	stub.failProbes(1)
 
-	agent := newResumeAgent(t, t.TempDir(), []byte("<build/>"))
+	agent := newResumeAgent(t, stub, t.TempDir(), []byte("<build/>"))
 	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
@@ -749,7 +749,7 @@ func TestApplyResumeBuild_AFinishedBuildIsNotRestored(t *testing.T) {
 				}
 			}
 
-			agent := newResumeAgent(t, home, []byte("<from-the-gateway/>"))
+			agent := newResumeAgent(t, stub, home, []byte("<from-the-gateway/>"))
 			if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 				RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
 				StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
@@ -781,7 +781,7 @@ func TestApplyResumeBuild_FetchesEachFileAtItsEpoch(t *testing.T) {
 	stub := startAdoptAndReloadStub(t)
 	_ = stub
 
-	agent := newResumeAgent(t, t.TempDir(), []byte("<build/>"))
+	agent := newResumeAgent(t, stub, t.TempDir(), []byte("<build/>"))
 
 	var mu sync.Mutex
 	var seen []*mitev1.RunStateRequest
@@ -847,7 +847,7 @@ func TestApplyResumeBuild_WritesTheLogNextSeqBeforeTheReload(t *testing.T) {
 	}
 	stub.onReload.Store(&hook)
 
-	agent := newResumeAgent(t, home, []byte("<build/>"))
+	agent := newResumeAgent(t, stub, home, []byte("<build/>"))
 	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
@@ -864,9 +864,9 @@ func TestApplyResumeBuild_WritesTheLogNextSeqBeforeTheReload(t *testing.T) {
 // TestApplyResumeBuild_ZeroLogNextSeqWritesNoFile proves a command with
 // no log sequence leaves no file. The plugin then starts the log at 0.
 func TestApplyResumeBuild_ZeroLogNextSeqWritesNoFile(t *testing.T) {
-	startAdoptAndReloadStub(t)
+	stub := startAdoptAndReloadStub(t)
 	home := t.TempDir()
-	agent := newResumeAgent(t, home, []byte("<build/>"))
+	agent := newResumeAgent(t, stub, home, []byte("<build/>"))
 	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/tenant/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
@@ -905,7 +905,7 @@ func TestApplyResumeBuild_WritesBranchJobFilesUnderBranches(t *testing.T) {
 	home := t.TempDir()
 	writeBranchFixture(t, home)
 
-	agent := newResumeAgent(t, home, []byte("<build/>"))
+	agent := newResumeAgent(t, stub, home, []byte("<build/>"))
 	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: "mb/main", BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{
@@ -933,14 +933,14 @@ func TestApplyResumeBuild_WritesBranchJobFilesUnderBranches(t *testing.T) {
 // branch under an organization folder, whose repository directory is
 // mangled, writes under the resolved repository and branch directories.
 func TestApplyResumeBuild_WritesOrgFolderBranchFilesUnderResolvedDirs(t *testing.T) {
-	startAdoptAndReloadStubFor(t, "org/my.repo/main")
+	stub := startAdoptAndReloadStubFor(t, "org/my.repo/main")
 	home := t.TempDir()
 	writeJobConfig(t, home, "org", orgFolderConfig)
 	repoDir := filepath.Join(home, "jobs", "org", "jobs", "my-repo.k3j2a1")
 	writeConfigAt(t, repoDir, fmt.Sprintf(repoProjectConfig, "my.repo"))
 	writeConfigAt(t, filepath.Join(repoDir, "branches", "main"), fmt.Sprintf(branchJobConfig, "main"))
 
-	agent := newResumeAgent(t, home, []byte("<build/>"))
+	agent := newResumeAgent(t, stub, home, []byte("<build/>"))
 	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: "org/my.repo/main", BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{
@@ -961,11 +961,11 @@ func TestApplyResumeBuild_WritesOrgFolderBranchFilesUnderResolvedDirs(t *testing
 // TestApplyResumeBuild_PlainJobWritesUnderJobs proves a plain job keeps its
 // logical directory.
 func TestApplyResumeBuild_PlainJobWritesUnderJobs(t *testing.T) {
-	startAdoptAndReloadStubFor(t, "tenant/pipeline")
+	stub := startAdoptAndReloadStubFor(t, "tenant/pipeline")
 	home := t.TempDir()
 	writeJobConfig(t, home, "tenant/pipeline", folderConfig)
 
-	agent := newResumeAgent(t, home, []byte("<build/>"))
+	agent := newResumeAgent(t, stub, home, []byte("<build/>"))
 	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: "tenant/pipeline", BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{
@@ -983,11 +983,11 @@ func TestApplyResumeBuild_PlainJobWritesUnderJobs(t *testing.T) {
 // TestApplyResumeBuild_WritesBranchLogNextSeqUnderBranches proves the log
 // sequence file of a branch build lands beside the branch build's files.
 func TestApplyResumeBuild_WritesBranchLogNextSeqUnderBranches(t *testing.T) {
-	startAdoptAndReloadStubFor(t, "mb/main")
+	stub := startAdoptAndReloadStubFor(t, "mb/main")
 	home := t.TempDir()
 	writeBranchFixture(t, home)
 
-	agent := newResumeAgent(t, home, []byte("<build/>"))
+	agent := newResumeAgent(t, stub, home, []byte("<build/>"))
 	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: "mb/main", BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{
@@ -1021,7 +1021,7 @@ func TestApplyResumeBuild_AFinishedBranchBuildIsNotRestored(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	agent := newResumeAgent(t, home, []byte("<from-the-gateway/>"))
+	agent := newResumeAgent(t, stub, home, []byte("<from-the-gateway/>"))
 	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: "mb/main", BuildNumber: 7,
 		StateFiles: []*mitev1.ResumeStateFile{

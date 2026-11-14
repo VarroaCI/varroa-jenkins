@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -200,43 +199,55 @@ func testReplayStream(t *testing.T) (*concurrentSendStream, *atomic.Pointer[mite
 	return stream, &captured
 }
 
+// startLocalJenkins serves h as the local Jenkins of one test and returns
+// its base URL. Set that URL on Agent.localJenkinsURL. The server listens
+// on a free port, so no other test or process can reach it. Its Close
+// also closes the idle connections of http.DefaultTransport, so a later
+// test cannot reuse a connection to this closed server.
+func startLocalJenkins(t *testing.T, h http.Handler) string {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// TestLocalJenkinsBaseDefaultsToTheLocalJenkins proves that an agent with
+// no override posts its loopback calls to the Jenkins in its own pod.
+func TestLocalJenkinsBaseDefaultsToTheLocalJenkins(t *testing.T) {
+	agent := mustNewAgent(t, Config{})
+	if got := agent.localJenkinsBase(); got != "http://localhost:8080" {
+		t.Errorf("localJenkinsBase() = %q, want http://localhost:8080", got)
+	}
+	agent.localJenkinsURL = "http://127.0.0.1:1234"
+	if got := agent.localJenkinsBase(); got != "http://127.0.0.1:1234" {
+		t.Errorf("localJenkinsBase() = %q, want the override http://127.0.0.1:1234", got)
+	}
+}
+
 const replayCmdID = "replay-test-001"
 
 // TestReplayWebhook200 verifies that replaying to a listening upstream
 // returns a success result carrying the HTTP status code.
 func TestReplayWebhook200(t *testing.T) {
-	// Start a test server on localhost:8080 if possible. In CI there is
-	// no real Jenkins listening there, so this is safe. If the port is
-	// already in use we skip the test gracefully.
-	l, err := net.Listen("tcp", "127.0.0.1:8080")
-	if err != nil {
-		t.Skip("skipping: localhost:8080 not available:", err)
-	}
-	srv := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Verify the request structure.
-			if r.Method != http.MethodPost {
-				t.Errorf("expected POST, got %s", r.Method)
-			}
-			if r.URL.Path != "/github-webhook/" {
-				t.Errorf("expected /github-webhook/, got %s", r.URL.Path)
-			}
-			if r.URL.RawQuery != "test=1" {
-				t.Errorf("expected query test=1, got %s", r.URL.RawQuery)
-			}
-			if r.Header.Get("Authorization") != "Bearer test-token" {
-				t.Errorf("Authorization = %q, want Bearer test-token", r.Header.Get("Authorization"))
-			}
-			if r.Header.Get("X-Custom") != "val" {
-				t.Errorf("X-Custom = %q, want val", r.Header.Get("X-Custom"))
-			}
-			w.WriteHeader(http.StatusOK)
-		}),
-	}
-	go func() { _ = srv.Serve(l) }()
-	t.Cleanup(func() { srv.Close() })
-	// Give the server a moment to start.
-	time.Sleep(10 * time.Millisecond)
+	jenkinsURL := startLocalJenkins(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify the request structure.
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/github-webhook/" {
+			t.Errorf("expected /github-webhook/, got %s", r.URL.Path)
+		}
+		if r.URL.RawQuery != "test=1" {
+			t.Errorf("expected query test=1, got %s", r.URL.RawQuery)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want Bearer test-token", r.Header.Get("Authorization"))
+		}
+		if r.Header.Get("X-Custom") != "val" {
+			t.Errorf("X-Custom = %q, want val", r.Header.Get("X-Custom"))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
 
 	stream, captured := testReplayStream(t)
 	agent := mustNewAgent(t, Config{
@@ -245,6 +256,7 @@ func TestReplayWebhook200(t *testing.T) {
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
+	agent.localJenkinsURL = jenkinsURL
 	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
@@ -287,20 +299,11 @@ func TestReplayWebhook200(t *testing.T) {
 // copies the envelope's own headers, so a forged inbound X-Varroa-Delivery
 // header inside payload.Headers cannot survive the replay.
 func TestReplayWebhookSetsDeliveryHeaderAfterOverwritingForgery(t *testing.T) {
-	l, err := net.Listen("tcp", "127.0.0.1:8080")
-	if err != nil {
-		t.Skip("skipping: localhost:8080 not available:", err)
-	}
 	var gotDelivery string
-	srv := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			gotDelivery = r.Header.Get("X-Varroa-Delivery")
-			w.WriteHeader(http.StatusOK)
-		}),
-	}
-	go func() { _ = srv.Serve(l) }()
-	t.Cleanup(func() { srv.Close() })
-	time.Sleep(10 * time.Millisecond)
+	jenkinsURL := startLocalJenkins(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotDelivery = r.Header.Get("X-Varroa-Delivery")
+		w.WriteHeader(http.StatusOK)
+	}))
 
 	stream, captured := testReplayStream(t)
 	agent := mustNewAgent(t, Config{
@@ -309,6 +312,7 @@ func TestReplayWebhookSetsDeliveryHeaderAfterOverwritingForgery(t *testing.T) {
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
+	agent.localJenkinsURL = jenkinsURL
 	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
@@ -345,20 +349,11 @@ func TestReplayWebhookSetsDeliveryHeaderAfterOverwritingForgery(t *testing.T) {
 // half: an empty payload.DeliveryId sets no X-Varroa-Delivery header at
 // all.
 func TestReplayWebhookSkipsDeliveryHeaderWhenEmpty(t *testing.T) {
-	l, err := net.Listen("tcp", "127.0.0.1:8080")
-	if err != nil {
-		t.Skip("skipping: localhost:8080 not available:", err)
-	}
 	var sawHeader bool
-	srv := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, sawHeader = r.Header["X-Varroa-Delivery"]
-			w.WriteHeader(http.StatusOK)
-		}),
-	}
-	go func() { _ = srv.Serve(l) }()
-	t.Cleanup(func() { srv.Close() })
-	time.Sleep(10 * time.Millisecond)
+	jenkinsURL := startLocalJenkins(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, sawHeader = r.Header["X-Varroa-Delivery"]
+		w.WriteHeader(http.StatusOK)
+	}))
 
 	stream, captured := testReplayStream(t)
 	agent := mustNewAgent(t, Config{
@@ -367,6 +362,7 @@ func TestReplayWebhookSkipsDeliveryHeaderWhenEmpty(t *testing.T) {
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
+	agent.localJenkinsURL = jenkinsURL
 	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
@@ -423,6 +419,7 @@ func TestReplayWebhookAllowlist(t *testing.T) {
 				JenkinsURL:     "http://localhost:1",
 			})
 			agent.Logger = slog.Default()
+			agent.localJenkinsURL = "http://localhost:1"
 			setTestStream(agent, stream)
 			// Token is required for allowlisted paths to avoid
 			// connection-refused masking the allowlist check.
@@ -625,26 +622,16 @@ func TestIsGenericTriggerPath(t *testing.T) {
 }
 
 // replayGenericTrigger replays a generic-webhook-trigger payload to a stub
-// upstream on localhost:8080 and returns the headers and query Jenkins saw.
-// It skips the test when the port is busy.
+// upstream and returns the headers and query Jenkins saw.
 func replayGenericTrigger(t *testing.T, headers map[string]string) (http.Header, string, *mitev1.CommandResult) {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:8080")
-	if err != nil {
-		t.Skip("skipping: localhost:8080 not available:", err)
-	}
 	var gotHeader http.Header
 	var gotQuery string
-	srv := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			gotHeader = r.Header.Clone()
-			gotQuery = r.URL.RawQuery
-			w.WriteHeader(http.StatusOK)
-		}),
-	}
-	go func() { _ = srv.Serve(l) }()
-	t.Cleanup(func() { srv.Close() })
-	time.Sleep(10 * time.Millisecond)
+	jenkinsURL := startLocalJenkins(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Clone()
+		gotQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+	}))
 
 	stream, captured := testReplayStream(t)
 	agent := mustNewAgent(t, Config{
@@ -653,6 +640,7 @@ func replayGenericTrigger(t *testing.T, headers map[string]string) (http.Header,
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
+	agent.localJenkinsURL = jenkinsURL
 	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"

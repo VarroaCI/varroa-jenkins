@@ -931,7 +931,7 @@ func (a *Agent) handleTailControl(ctx context.Context, tc *mitev1.TailControl) {
 	} else {
 		reqCtx, cancel := context.WithTimeout(ctx, tailHTTPRequestTimeout)
 		defer cancel()
-		req, reqErr := http.NewRequestWithContext(reqCtx, http.MethodPost, "http://localhost:8080"+varroaLogTailPath, bytes.NewReader(body))
+		req, reqErr := http.NewRequestWithContext(reqCtx, http.MethodPost, a.localJenkinsBase()+varroaLogTailPath, bytes.NewReader(body))
 		if reqErr != nil {
 			errStr = reqErr.Error()
 		} else {

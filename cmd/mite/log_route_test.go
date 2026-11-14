@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -649,32 +648,22 @@ func TestLogReplayAfterReconnectOrderedPerRun(t *testing.T) {
 
 // --- 2.4: tail_control handling ---
 
-// TestHandleTailControlCallsJenkinsAndAcks starts a stub Jenkins on
-// localhost:8080 (skipped when the port is unavailable, matching the
-// REPLAY_WEBHOOK tests' pattern), calls handleTailControl, and asserts
-// the call it made and the TailAck it sent.
+// TestHandleTailControlCallsJenkinsAndAcks starts a stub Jenkins, calls
+// handleTailControl, and asserts the call it made and the TailAck it sent.
 func TestHandleTailControlCallsJenkinsAndAcks(t *testing.T) {
-	l, err := net.Listen("tcp", "127.0.0.1:8080")
-	if err != nil {
-		t.Skip("skipping: localhost:8080 not available:", err)
-	}
 	var gotPath, gotAuth string
 	var gotBody tailControlRequest
-	srv := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			gotPath = r.URL.Path
-			gotAuth = r.Header.Get("Authorization")
-			_ = json.NewDecoder(r.Body).Decode(&gotBody)
-			w.WriteHeader(http.StatusOK)
-		}),
-	}
-	go func() { _ = srv.Serve(l) }()
-	t.Cleanup(func() { srv.Close() })
-	time.Sleep(10 * time.Millisecond)
+	jenkinsURL := startLocalJenkins(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+	}))
 
 	var acked *mitev1.TailAck
 	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
+	agent.localJenkinsURL = jenkinsURL
 	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		acked = m.GetTailAck()
 		return nil
