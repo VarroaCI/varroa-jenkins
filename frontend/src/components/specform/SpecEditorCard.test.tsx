@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "../Toast";
@@ -94,7 +94,7 @@ vi.mock("../../api/client", async () => {
 import SpecEditorCard from "./SpecEditorCard";
 import { ControllerConflictError } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
-import type { ControllerSpec } from "../../types";
+import type { ControllerSpec, PreviewResponse } from "../../types";
 
 type CardProps = React.ComponentProps<typeof SpecEditorCard>;
 
@@ -1285,5 +1285,155 @@ describe("SpecEditorCard section 7 request-body tests", () => {
     await waitFor(() => expect(mockUpdateController).toHaveBeenCalledTimes(1));
     const [, , , patch] = mockUpdateController.mock.calls[0];
     expect(patch.spec).toEqual({ className: "b" });
+  });
+});
+
+describe("SpecEditorCard live preview", () => {
+  // Fake timers drive the 600 ms preview delay, so a loaded runner cannot
+  // reorder the reads. shouldAdvanceTime keeps any Testing Library wait alive.
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function passPreviewDelay() {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+    });
+  }
+
+  function previewNamed(message: string): PreviewResponse {
+    return {
+      merged: {},
+      diff: {},
+      warnings: [{ resource: "statefulSet", path: "", message }],
+      baselineUsed: "live",
+    };
+  }
+
+  type PreviewBody = { podOverrides?: { jvmOpts?: string } };
+
+  it("previews the edited text, not the text the editor mounted with", async () => {
+    renderCard({ initialPodOverrides: { jvmOpts: "-Xmx1g" } });
+    fireEvent.click(screen.getByText("Pod overrides"));
+    await passPreviewDelay();
+    mockPreviewControllerOverlay.mockClear();
+
+    typeYaml("jvmOpts: -Xmx2g");
+    await passPreviewDelay();
+
+    expect(mockPreviewControllerOverlay).toHaveBeenCalledTimes(1);
+    expect(mockPreviewControllerOverlay.mock.calls[0][3]).toMatchObject({
+      podOverrides: { jvmOpts: "-Xmx2g" },
+    });
+  });
+
+  it("keeps the newer preview when a read for older text answers later", async () => {
+    let answerOlder!: (res: PreviewResponse) => void;
+    mockPreviewControllerOverlay.mockImplementation(
+      (_cluster: string, _ns: string, _name: string, body: PreviewBody) =>
+        body.podOverrides?.jvmOpts === "-Xmx1g"
+          ? new Promise<PreviewResponse>((resolve) => {
+              answerOlder = resolve;
+            })
+          : Promise.resolve(previewNamed("newer preview")),
+    );
+    renderCard();
+    fireEvent.click(screen.getByText("Pod overrides"));
+
+    typeYaml("jvmOpts: -Xmx1g");
+    await passPreviewDelay();
+    typeYaml("jvmOpts: -Xmx2g");
+    await passPreviewDelay();
+    expect(mockPreviewControllerOverlay).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(/newer preview/)).toBeInTheDocument();
+
+    await act(async () => {
+      answerOlder(previewNamed("older preview"));
+    });
+
+    expect(screen.queryByText(/older preview/)).not.toBeInTheDocument();
+    expect(screen.getByText(/newer preview/)).toBeInTheDocument();
+  });
+
+  it("keeps the newer preview when a read for older text fails later", async () => {
+    let failOlder!: (e: Error) => void;
+    mockPreviewControllerOverlay.mockImplementation(
+      (_cluster: string, _ns: string, _name: string, body: PreviewBody) =>
+        body.podOverrides?.jvmOpts === "-Xmx1g"
+          ? new Promise<PreviewResponse>((_resolve, reject) => {
+              failOlder = reject;
+            })
+          : Promise.resolve(previewNamed("newer preview")),
+    );
+    renderCard();
+    fireEvent.click(screen.getByText("Pod overrides"));
+
+    typeYaml("jvmOpts: -Xmx1g");
+    await passPreviewDelay();
+    typeYaml("jvmOpts: -Xmx2g");
+    await passPreviewDelay();
+    expect(screen.getByText(/newer preview/)).toBeInTheDocument();
+
+    await act(async () => {
+      failOlder(new Error("older read failed"));
+    });
+
+    expect(screen.queryByText("older read failed")).not.toBeInTheDocument();
+    expect(screen.getByText(/newer preview/)).toBeInTheDocument();
+  });
+
+  it("drops a preview answer for the previous controller", async () => {
+    let answerFirst!: (res: PreviewResponse) => void;
+    mockPreviewControllerOverlay.mockImplementation(
+      (_cluster: string, _ns: string, name: string) =>
+        name === "ci"
+          ? new Promise<PreviewResponse>((resolve) => {
+              answerFirst = resolve;
+            })
+          : Promise.resolve(previewNamed("second controller preview")),
+    );
+    const { rerender } = renderCard({ initialPodOverrides: { jvmOpts: "-Xmx1g" } });
+    fireEvent.click(screen.getByText("Pod overrides"));
+    await passPreviewDelay();
+
+    rerender({ name: "ci-2", initialPodOverrides: { jvmOpts: "-Xmx1g" } });
+    await passPreviewDelay();
+    expect(screen.getByText(/second controller preview/)).toBeInTheDocument();
+
+    await act(async () => {
+      answerFirst(previewNamed("first controller preview"));
+    });
+
+    expect(screen.queryByText(/first controller preview/)).not.toBeInTheDocument();
+    expect(screen.getByText(/second controller preview/)).toBeInTheDocument();
+  });
+
+  it("clears the previewing mark when unparseable text replaces a pending read", async () => {
+    mockPreviewControllerOverlay.mockImplementation(() => new Promise<PreviewResponse>(() => {}));
+    renderCard();
+    fireEvent.click(screen.getByText("Pod overrides"));
+
+    typeYaml("jvmOpts: -Xmx1g");
+    await passPreviewDelay();
+    expect(screen.getByText(/previewing/)).toBeInTheDocument();
+
+    typeYaml("jvmOpts: __INVALID__");
+    await passPreviewDelay();
+
+    expect(screen.queryByText(/previewing/)).not.toBeInTheDocument();
+  });
+
+  it("starts no preview read after unmount", async () => {
+    const { unmount } = renderCard();
+    fireEvent.click(screen.getByText("Pod overrides"));
+    typeYaml("jvmOpts: -Xmx1g");
+    unmount();
+
+    await passPreviewDelay();
+
+    expect(mockPreviewControllerOverlay).not.toHaveBeenCalled();
   });
 });
