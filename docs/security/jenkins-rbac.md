@@ -55,9 +55,12 @@ Connected controllers get role changes without reprovisioning.
 | `jenkinsScope.propagate` | `None`, `Children`, `Subtree` | Controls folder inheritance |
 
 The API server refuses a `type` or `propagate` value outside the table. The match is case-sensitive.
-A binding stored with another type grants nothing.
-Set `folder` to the full folder name, such as `payments/backend`, with no leading slash.
-Set `propagate` only on a `Folder` scope. Without it, the scope covers the folder alone, as `None` does.
+A `Folder` scope needs `folder`: the full folder name, such as `payments/backend`, with no leading slash.
+A `Pattern` scope needs `pattern`.
+The API server refuses a scope without the field that its type needs.
+It also refuses a field that the type does not use, such as `propagate` on a `Global` scope.
+A stored binding that breaks these rules grants nothing.
+Without `propagate`, a `Folder` scope covers the folder alone, as `None` does.
 
 Pattern scope matches item names with a regular expression:
 

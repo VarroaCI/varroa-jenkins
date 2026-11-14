@@ -1,12 +1,61 @@
 package v1alpha1_test
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	apiservervalidation "k8s.io/apiextensions-apiserver/pkg/apiserver/validation"
+
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
+
+// TestJenkinsScopeGoValidationMatchesCRD runs one table through the Go
+// ValidateJenkinsScope and the CRD admission harness, so the two copies of
+// the rules cannot drift. Every entry uses a type and propagate value that
+// the enums accept, so only the field rules decide the result.
+func TestJenkinsScopeGoValidationMatchesCRD(t *testing.T) {
+	crdFile := filepath.Join(crdDir, "varroa.dev_jenkinsrolebindings.yaml")
+	cases := []struct {
+		name      string
+		scope     v1alpha1.JenkinsScope
+		wantValid bool
+	}{
+		{name: "Global", scope: v1alpha1.JenkinsScope{Type: "Global"}, wantValid: true},
+		{name: "Folder", scope: v1alpha1.JenkinsScope{Type: "Folder", Folder: "payments"}, wantValid: true},
+		{name: "Folder with Subtree", scope: v1alpha1.JenkinsScope{Type: "Folder", Folder: "payments", Propagate: "Subtree"}, wantValid: true},
+		{name: "Pattern", scope: v1alpha1.JenkinsScope{Type: "Pattern", Pattern: "payments/.*"}, wantValid: true},
+		{name: "Folder without folder", scope: v1alpha1.JenkinsScope{Type: "Folder"}},
+		{name: "Folder with leading slash", scope: v1alpha1.JenkinsScope{Type: "Folder", Folder: "/payments"}},
+		{name: "Pattern without pattern", scope: v1alpha1.JenkinsScope{Type: "Pattern"}},
+		{name: "Global with propagate", scope: v1alpha1.JenkinsScope{Type: "Global", Propagate: "None"}},
+		{name: "Global with folder", scope: v1alpha1.JenkinsScope{Type: "Global", Folder: "payments"}},
+		{name: "Pattern with folder", scope: v1alpha1.JenkinsScope{Type: "Pattern", Pattern: "x", Folder: "payments"}},
+		{name: "Folder with pattern", scope: v1alpha1.JenkinsScope{Type: "Folder", Folder: "payments", Pattern: "x"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m map[string]interface{}
+			if err := json.Unmarshal(raw, &m); err != nil {
+				t.Fatal(err)
+			}
+			errs := newHarness(t, crdFile).admit(t, jenkinsRoleBindingObject(m), nil)
+			crdValid := len(errs) == 0
+			goValid := v1alpha1.ValidateJenkinsScope(&tc.scope) == nil
+			if crdValid != tc.wantValid {
+				t.Errorf("CRD valid = %v, want %v: %v", crdValid, tc.wantValid, errs)
+			}
+			if goValid != tc.wantValid {
+				t.Errorf("Go valid = %v, want %v", goValid, tc.wantValid)
+			}
+		})
+	}
+}
 
 // jenkinsRoleBindingObject returns a valid JenkinsRoleBinding with the given
 // jenkinsScope merged in. A nil scope omits the field.

@@ -41,6 +41,14 @@ function formatMatchExpression(req: MatchExpression): string {
   return `${req.key} ${req.operator}${values}`;
 }
 
+// jenkinsScopeError returns the refusal for a scope the CRD refuses, or "".
+function jenkinsScopeError(type: JenkinsScope["type"] | "", folder: string, pattern: string): string {
+  if (type === "Folder" && folder === "") return "A Folder scope needs a folder name.";
+  if (type === "Folder" && folder.startsWith("/")) return "Enter the folder name with no leading slash.";
+  if (type === "Pattern" && pattern === "") return "A Pattern scope needs a pattern.";
+  return "";
+}
+
 export default function JenkinsRoleBindingForm() {
   const { name } = useParams();
   const navigate = useNavigate();
@@ -122,6 +130,12 @@ export default function JenkinsRoleBindingForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (readOnly) return;
+    const scopeError = jenkinsScopeError(jenkinsScopeType, jenkinsScopeFolder, jenkinsScopePattern);
+    if (scopeError) {
+      setError(scopeError);
+      setJenkinsScopeOpen(true);
+      return;
+    }
     setLoading(true);
     setError("");
 

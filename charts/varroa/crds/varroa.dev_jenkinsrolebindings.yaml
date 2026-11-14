@@ -133,10 +133,12 @@ spec:
                   folder:
                     description: |-
                       Folder is the full Jenkins folder name, with no leading slash, e.g.
-                      "tenant-a/project-x". Only for Type=Folder.
+                      "tenant-a/project-x". Required for Type=Folder, and only for it.
                     type: string
                   pattern:
-                    description: Pattern is the raw regex pattern. Only for Type=Pattern.
+                    description: |-
+                      Pattern is the raw regex over item full names. Required for Type=Pattern,
+                      and only for it.
                     type: string
                   propagate:
                     description: Propagate is "None", "Children", or "Subtree". Only
@@ -156,6 +158,19 @@ spec:
                 required:
                 - type
                 type: object
+                x-kubernetes-validations:
+                - message: a Folder scope needs folder
+                  rule: self.type != 'Folder' || (has(self.folder) && size(self.folder)
+                    > 0)
+                - message: folder must not start with /
+                  rule: '!has(self.folder) || !self.folder.startsWith(''/'')'
+                - message: a Pattern scope needs pattern
+                  rule: self.type != 'Pattern' || (has(self.pattern) && size(self.pattern)
+                    > 0)
+                - message: folder and propagate are only for a Folder scope
+                  rule: self.type == 'Folder' || !(has(self.folder) || has(self.propagate))
+                - message: pattern is only for a Pattern scope
+                  rule: self.type == 'Pattern' || !has(self.pattern)
               roleRef:
                 description: RoleRef is the name of the JenkinsRole to bind.
                 type: string

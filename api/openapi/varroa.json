@@ -3102,12 +3102,16 @@
       },
       "JenkinsScope": {
         "additionalProperties": false,
-        "description": "Jenkins-level scope for a binding.",
+        "description": "Jenkins-level scope for a binding. A Folder scope needs folder and takes an optional propagate. A Pattern scope needs pattern. A Global scope takes no folder, propagate, or pattern.",
         "properties": {
           "folder": {
+            "description": "Full Jenkins folder name, such as payments/backend. It must not start with /.",
+            "minLength": 1,
+            "pattern": "^[^/]",
             "type": "string"
           },
           "pattern": {
+            "minLength": 1,
             "type": "string"
           },
           "propagate": {
@@ -12046,12 +12050,16 @@
       },
       "components_schemas_JenkinsScope": {
         "additionalProperties": false,
-        "description": "Jenkins-level scope for a binding.",
+        "description": "Jenkins-level scope for a binding. A Folder scope needs folder and takes an optional propagate. A Pattern scope needs pattern. A Global scope takes no folder, propagate, or pattern.",
         "properties": {
           "folder": {
+            "description": "Full Jenkins folder name, such as payments/backend. It must not start with /.",
+            "minLength": 1,
+            "pattern": "^[^/]",
             "type": "string"
           },
           "pattern": {
+            "minLength": 1,
             "type": "string"
           },
           "propagate": {

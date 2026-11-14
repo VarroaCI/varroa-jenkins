@@ -3270,20 +3270,28 @@ type JenkinsRoleBindingSpec struct {
 	JenkinsScope *JenkinsScope `json:"jenkinsScope,omitempty"`
 }
 
-// JenkinsScope defines the in-Jenkins scope for a binding.
+// JenkinsScope defines the in-Jenkins scope for a binding. Each type takes only
+// its own fields: Folder takes folder and propagate, and Pattern takes pattern.
+// ValidateJenkinsScope states the same rules; change both together.
+// +kubebuilder:validation:XValidation:rule="self.type != 'Folder' || (has(self.folder) && size(self.folder) > 0)",message="a Folder scope needs folder"
+// +kubebuilder:validation:XValidation:rule="!has(self.folder) || !self.folder.startsWith('/')",message="folder must not start with /"
+// +kubebuilder:validation:XValidation:rule="self.type != 'Pattern' || (has(self.pattern) && size(self.pattern) > 0)",message="a Pattern scope needs pattern"
+// +kubebuilder:validation:XValidation:rule="self.type == 'Folder' || !(has(self.folder) || has(self.propagate))",message="folder and propagate are only for a Folder scope"
+// +kubebuilder:validation:XValidation:rule="self.type == 'Pattern' || !has(self.pattern)",message="pattern is only for a Pattern scope"
 type JenkinsScope struct {
 	// Type is "Global", "Folder", or "Pattern".
 	// +kubebuilder:validation:Enum=Global;Folder;Pattern
 	Type string `json:"type"`
 	// Folder is the full Jenkins folder name, with no leading slash, e.g.
-	// "tenant-a/project-x". Only for Type=Folder.
+	// "tenant-a/project-x". Required for Type=Folder, and only for it.
 	// +optional
 	Folder string `json:"folder,omitempty"`
 	// Propagate is "None", "Children", or "Subtree". Only for Type=Folder.
 	// +kubebuilder:validation:Enum=None;Children;Subtree
 	// +optional
 	Propagate string `json:"propagate,omitempty"`
-	// Pattern is the raw regex pattern. Only for Type=Pattern.
+	// Pattern is the raw regex over item full names. Required for Type=Pattern,
+	// and only for it.
 	// +optional
 	Pattern string `json:"pattern,omitempty"`
 }

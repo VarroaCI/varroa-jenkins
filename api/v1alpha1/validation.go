@@ -48,6 +48,40 @@ func IsJenkinsScopeType(t string) bool {
 	return false
 }
 
+// ValidateJenkinsScope checks a JenkinsScope with the CEL rules of the CRD. A
+// nil scope is Global and valid. Change both together.
+func ValidateJenkinsScope(js *JenkinsScope) error {
+	if js == nil {
+		return nil
+	}
+	if !IsJenkinsScopeType(js.Type) {
+		return fmt.Errorf("spec.jenkinsScope.type must be Global, Folder, or Pattern (got %q)", js.Type)
+	}
+	switch js.Propagate {
+	case "", "None", "Children", "Subtree":
+	default:
+		return fmt.Errorf("spec.jenkinsScope.propagate must be None, Children, or Subtree (got %q)", js.Propagate)
+	}
+	if js.Type != JenkinsScopeFolder && (js.Folder != "" || js.Propagate != "") {
+		return fmt.Errorf("spec.jenkinsScope.folder and propagate are only for a Folder scope")
+	}
+	if js.Type != JenkinsScopePattern && js.Pattern != "" {
+		return fmt.Errorf("spec.jenkinsScope.pattern is only for a Pattern scope")
+	}
+	if js.Type == JenkinsScopeFolder {
+		if js.Folder == "" {
+			return fmt.Errorf("spec.jenkinsScope.folder is required for a Folder scope")
+		}
+		if strings.HasPrefix(js.Folder, "/") {
+			return fmt.Errorf("spec.jenkinsScope.folder must not start with /")
+		}
+	}
+	if js.Type == JenkinsScopePattern && js.Pattern == "" {
+		return fmt.Errorf("spec.jenkinsScope.pattern is required for a Pattern scope")
+	}
+	return nil
+}
+
 // ValidateJenkinsRoleBinding validates a JenkinsRoleBinding spec.
 func ValidateJenkinsRoleBinding(b *JenkinsRoleBinding) error {
 	if b == nil {
@@ -74,17 +108,5 @@ func ValidateJenkinsRoleBinding(b *JenkinsRoleBinding) error {
 		}
 	}
 
-	// Validate JenkinsScope if present.
-	if js := b.Spec.JenkinsScope; js != nil {
-		if !IsJenkinsScopeType(js.Type) {
-			return fmt.Errorf("spec.jenkinsScope.type must be Global, Folder, or Pattern (got %q)", js.Type)
-		}
-		switch js.Propagate {
-		case "", "None", "Children", "Subtree":
-		default:
-			return fmt.Errorf("spec.jenkinsScope.propagate must be None, Children, or Subtree (got %q)", js.Propagate)
-		}
-	}
-
-	return nil
+	return ValidateJenkinsScope(b.Spec.JenkinsScope)
 }

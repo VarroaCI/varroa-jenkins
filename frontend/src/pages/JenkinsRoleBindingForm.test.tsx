@@ -645,6 +645,36 @@ describe("JenkinsRoleBindingForm — Jenkins scope fields", () => {
     return body.spec.jenkinsScope;
   }
 
+  it("refuses a Folder scope with no folder before a save", async () => {
+    const user = userEvent.setup();
+    await fillCreateForm(user);
+    await user.selectOptions(screen.getAllByRole("combobox")[2], "Folder");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("A Folder scope needs a folder name.")).toBeInTheDocument();
+    expect(mockCreateJenkinsRoleBinding).not.toHaveBeenCalled();
+  });
+
+  it("refuses a folder with a leading slash before a save", async () => {
+    const user = userEvent.setup();
+    await fillCreateForm(user);
+    await user.selectOptions(screen.getAllByRole("combobox")[2], "Folder");
+    await user.type(screen.getByPlaceholderText("e.g. payments/backend"), "/payments");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      await screen.findByText("Enter the folder name with no leading slash."),
+    ).toBeInTheDocument();
+    expect(mockCreateJenkinsRoleBinding).not.toHaveBeenCalled();
+  });
+
+  it("refuses a Pattern scope with no pattern before a save", async () => {
+    const user = userEvent.setup();
+    await fillCreateForm(user);
+    await user.selectOptions(screen.getAllByRole("combobox")[2], "Pattern");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("A Pattern scope needs a pattern.")).toBeInTheDocument();
+    expect(mockCreateJenkinsRoleBinding).not.toHaveBeenCalled();
+  });
+
   it("shows a Folder placeholder and hint with no leading slash", async () => {
     const user = userEvent.setup();
     await fillCreateForm(user);

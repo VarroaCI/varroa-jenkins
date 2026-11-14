@@ -101,6 +101,10 @@ func (b *RoleStrategyBackend) Render(assignments []RoleAssignment) (string, erro
 		case "Agent":
 			bucket = "agents"
 		}
+		if bucket == "items" && a.Pattern == "" {
+			// role-strategy reads an item role with no pattern as ".*", which covers every item.
+			continue
+		}
 		var entries []map[string]string
 		for _, s := range a.Subjects {
 			if s.Kind == "Group" {
