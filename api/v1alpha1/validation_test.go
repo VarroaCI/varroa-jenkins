@@ -118,6 +118,45 @@ func TestValidateJenkinsRole(t *testing.T) {
 	}
 }
 
+func TestValidateJenkinsScope(t *testing.T) {
+	tests := []struct {
+		name    string
+		scope   *JenkinsScope
+		wantErr string
+	}{
+		{name: "nil scope is Global", scope: nil},
+		{name: "Global", scope: &JenkinsScope{Type: "Global"}},
+		{name: "Folder", scope: &JenkinsScope{Type: "Folder", Folder: "payments"}},
+		{name: "Folder with Subtree", scope: &JenkinsScope{Type: "Folder", Folder: "payments", Propagate: "Subtree"}},
+		{name: "Pattern", scope: &JenkinsScope{Type: "Pattern", Pattern: "payments/.*"}},
+		{name: "Folder without folder", scope: &JenkinsScope{Type: "Folder"}, wantErr: "folder is required"},
+		{name: "Folder with leading slash", scope: &JenkinsScope{Type: "Folder", Folder: "/payments"}, wantErr: "must not start with /"},
+		{name: "Pattern without pattern", scope: &JenkinsScope{Type: "Pattern"}, wantErr: "pattern is required"},
+		{name: "Global with propagate None", scope: &JenkinsScope{Type: "Global", Propagate: "None"}, wantErr: "only for a Folder scope"},
+		{name: "Global with folder", scope: &JenkinsScope{Type: "Global", Folder: "payments"}, wantErr: "only for a Folder scope"},
+		{name: "Pattern with folder", scope: &JenkinsScope{Type: "Pattern", Pattern: "x", Folder: "payments"}, wantErr: "only for a Folder scope"},
+		{name: "Pattern with propagate", scope: &JenkinsScope{Type: "Pattern", Pattern: "x", Propagate: "Children"}, wantErr: "only for a Folder scope"},
+		{name: "Folder with pattern", scope: &JenkinsScope{Type: "Folder", Folder: "payments", Pattern: "x"}, wantErr: "only for a Pattern scope"},
+		{name: "Global with pattern", scope: &JenkinsScope{Type: "Global", Pattern: "x"}, wantErr: "only for a Pattern scope"},
+		{name: "Cluster type", scope: &JenkinsScope{Type: "Cluster"}, wantErr: "jenkinsScope.type"},
+		{name: "Folder with subtree lowercase", scope: &JenkinsScope{Type: "Folder", Folder: "payments", Propagate: "subtree"}, wantErr: "propagate"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateJenkinsScope(tt.scope)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want one containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateJenkinsRoleBinding(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -214,6 +253,30 @@ func TestValidateJenkinsRoleBinding(t *testing.T) {
 				},
 			},
 			wantErr: "jenkinsScope",
+		},
+		{
+			name: "Folder scope without folder refused",
+			binding: &JenkinsRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: "no-folder"},
+				Spec: JenkinsRoleBindingSpec{
+					RoleRef:      "varroa:viewer",
+					Subjects:     []SubjectRef{{Kind: "Group", Name: "devs"}},
+					JenkinsScope: &JenkinsScope{Type: "Folder"},
+				},
+			},
+			wantErr: "folder is required",
+		},
+		{
+			name: "Pattern scope without pattern refused",
+			binding: &JenkinsRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: "no-pattern"},
+				Spec: JenkinsRoleBindingSpec{
+					RoleRef:      "varroa:viewer",
+					Subjects:     []SubjectRef{{Kind: "Group", Name: "devs"}},
+					JenkinsScope: &JenkinsScope{Type: "Pattern"},
+				},
+			},
+			wantErr: "pattern is required",
 		},
 		{
 			name: "empty scope type refused",

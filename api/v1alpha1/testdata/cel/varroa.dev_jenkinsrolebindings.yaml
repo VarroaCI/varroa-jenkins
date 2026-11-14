@@ -24,3 +24,82 @@ cases:
     field: spec.controllerScope
     new: {spec: {controllerScope: {namespaces: [ns-a]}}}
     want: accept
+  - name: folder scope without folder refused
+    rule: |-
+      self.type != 'Folder' || (has(self.folder) && size(self.folder) > 0)
+    field: spec.jenkinsScope
+    new: {spec: {jenkinsScope: {type: Folder}}}
+    want: reject
+  - name: folder scope with empty folder refused
+    rule: |-
+      self.type != 'Folder' || (has(self.folder) && size(self.folder) > 0)
+    field: spec.jenkinsScope
+    new: {spec: {jenkinsScope: {type: Folder, folder: ''}}}
+    want: reject
+  - name: folder scope with folder accepted
+    rule: |-
+      self.type != 'Folder' || (has(self.folder) && size(self.folder) > 0)
+    field: spec.jenkinsScope
+    new: {spec: {jenkinsScope: {type: Folder, folder: payments}}}
+    want: accept
+  - name: unchanged folder scope without folder ratchets on update
+    rule: |-
+      self.type != 'Folder' || (has(self.folder) && size(self.folder) > 0)
+    field: spec.jenkinsScope
+    old: {spec: {jenkinsScope: {type: Folder}}}
+    new: {spec: {roleRef: builder, jenkinsScope: {type: Folder}}}
+    want: accept
+  - name: folder with leading slash refused
+    rule: |-
+      !has(self.folder) || !self.folder.startsWith('/')
+    field: spec.jenkinsScope
+    new: {spec: {jenkinsScope: {type: Folder, folder: /payments}}}
+    want: reject
+  - name: folder with nested path accepted
+    rule: |-
+      !has(self.folder) || !self.folder.startsWith('/')
+    field: spec.jenkinsScope
+    new: {spec: {jenkinsScope: {type: Folder, folder: payments/backend}}}
+    want: accept
+  - name: pattern scope without pattern refused
+    rule: |-
+      self.type != 'Pattern' || (has(self.pattern) && size(self.pattern) > 0)
+    field: spec.jenkinsScope
+    new: {spec: {jenkinsScope: {type: Pattern}}}
+    want: reject
+  - name: pattern scope with pattern accepted
+    rule: |-
+      self.type != 'Pattern' || (has(self.pattern) && size(self.pattern) > 0)
+    field: spec.jenkinsScope
+    new: {spec: {jenkinsScope: {type: Pattern, pattern: payments/.*}}}
+    want: accept
+  - name: propagate on global scope refused
+    rule: |-
+      self.type == 'Folder' || !(has(self.folder) || has(self.propagate))
+    field: spec.jenkinsScope
+    new: {spec: {jenkinsScope: {propagate: Subtree}}}
+    want: reject
+  - name: folder on pattern scope refused
+    rule: |-
+      self.type == 'Folder' || !(has(self.folder) || has(self.propagate))
+    field: spec.jenkinsScope
+    new: {spec: {jenkinsScope: {type: Pattern, pattern: x, folder: a}}}
+    want: reject
+  - name: folder scope with propagate accepted
+    rule: |-
+      self.type == 'Folder' || !(has(self.folder) || has(self.propagate))
+    field: spec.jenkinsScope
+    new: {spec: {jenkinsScope: {type: Folder, folder: payments, propagate: Subtree}}}
+    want: accept
+  - name: folder scope with pattern refused
+    rule: |-
+      self.type == 'Pattern' || !has(self.pattern)
+    field: spec.jenkinsScope
+    new: {spec: {jenkinsScope: {type: Folder, folder: payments, pattern: x}}}
+    want: reject
+  - name: pattern scope with pattern accepted by pattern-only rule
+    rule: |-
+      self.type == 'Pattern' || !has(self.pattern)
+    field: spec.jenkinsScope
+    new: {spec: {jenkinsScope: {type: Pattern, pattern: payments/.*}}}
+    want: accept

@@ -107,7 +107,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 			"A Jenkins role binding takes no tenants. Omit the argument to bind on every controller.")),
 		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 		mcp.WithObject("jenkinsScope", mcp.Description("Jenkins item limits. type is Global, Folder, or Pattern. "+
-			"A Folder scope needs folder and takes an optional propagate: None, Children, or Subtree. "+
+			"A Folder scope needs folder, the full folder name with no leading slash, and takes an optional propagate: None, Children, or Subtree. "+
 			"A Pattern scope needs pattern, a regular expression over item full names. "+
 			"e.g. {\"type\":\"Folder\",\"folder\":\"payments\",\"propagate\":\"Subtree\"}. Omit the argument for Global scope.")),
 	)
@@ -338,8 +338,9 @@ func buildControllerScope(raw interface{}) (*v1alpha1.VarroaRoleBindingScope, er
 
 // buildJenkinsScope parses a "jenkinsScope" argument into a JenkinsScope.
 // The parse refuses an unknown key, a value that is not a
-// string, an unknown type, and a field that the type does not use. An absent
-// argument returns nil.
+// string, an unknown type, and a field that the type does not use. It then
+// runs v1alpha1.ValidateJenkinsScope, which refuses a folder that starts with
+// "/". An absent argument returns nil.
 func buildJenkinsScope(raw interface{}) (*v1alpha1.JenkinsScope, error) {
 	if raw == nil {
 		return nil, nil
@@ -398,6 +399,9 @@ func buildJenkinsScope(raw interface{}) (*v1alpha1.JenkinsScope, error) {
 		}
 	default:
 		return nil, fmt.Errorf("invalid jenkinsScope: unknown jenkinsScope.type %q; allowed types are Global, Folder, Pattern", js.Type)
+	}
+	if err := v1alpha1.ValidateJenkinsScope(js); err != nil {
+		return nil, fmt.Errorf("invalid jenkinsScope: %w", err)
 	}
 	return js, nil
 }

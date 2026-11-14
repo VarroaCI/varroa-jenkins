@@ -1474,12 +1474,13 @@ func controllerScopeMatches(scope *v1alpha1.VarroaRoleBindingScope, controller *
 
 // lowerScope converts a JenkinsRole.RoleType and a JenkinsScope into the
 // role-strategy (roleType, pattern) pair. A nil scope is Global. ok is false
-// for a type other than Global, Folder, or Pattern, and the caller then grants
-// nothing: a wrong type must never widen a binding to every item. The CRD enum
-// refuses such a type on a write. A stored object can still hold one, because
-// the apiserver keeps an unchanged invalid value.
+// for a scope that v1alpha1.ValidateJenkinsScope refuses, and the caller then
+// grants nothing. An item role with no pattern must never reach role-strategy,
+// because it reads a missing pattern as ".*". The CRD rules refuse such a scope
+// on a write. A stored object can still hold one, because the apiserver keeps
+// an unchanged invalid value.
 func lowerScope(roleType string, js *v1alpha1.JenkinsScope) (string, string, bool) {
-	if js != nil && !v1alpha1.IsJenkinsScopeType(js.Type) {
+	if v1alpha1.ValidateJenkinsScope(js) != nil {
 		return "", "", false
 	}
 	// Agent roles go into the "agents" bucket regardless of scope.

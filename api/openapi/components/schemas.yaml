@@ -2190,7 +2190,10 @@ JenkinsRoleSpec:
 
 JenkinsScope:
   type: object
-  description: Jenkins-level scope for a binding.
+  description: >-
+    Jenkins-level scope for a binding. A Folder scope needs folder and takes an
+    optional propagate. A Pattern scope needs pattern. A Global scope takes no
+    folder, propagate, or pattern.
   required: [type]
   properties:
     type:
@@ -2198,11 +2201,15 @@ JenkinsScope:
       enum: [Global, Folder, Pattern]
     folder:
       type: string
+      minLength: 1
+      pattern: '^[^/]'
+      description: Full Jenkins folder name, such as payments/backend. It must not start with /.
     propagate:
       type: string
       enum: [None, Children, Subtree]
     pattern:
       type: string
+      minLength: 1
   additionalProperties: false
 
 JenkinsRoleBindingSpec:

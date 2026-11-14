@@ -470,6 +470,30 @@ func TestHasHumanAdmin_NonGlobalWithAdminister(t *testing.T) {
 	}
 }
 
+// TestRoleStrategyBackendRender_DropsItemRoleWithoutPattern checks that an item
+// role with no pattern never reaches the rendered file, because role-strategy
+// would read it as ".*". A scoped item role and an agent role stay.
+func TestRoleStrategyBackendRender_DropsItemRoleWithoutPattern(t *testing.T) {
+	subject := []SubjectAssignment{{Kind: "User", Name: "alice"}}
+	out, err := (&RoleStrategyBackend{}).Render([]RoleAssignment{
+		{RoleName: "varroa:nopattern", RoleType: "Item", Pattern: "", Permissions: []string{"hudson.model.Item.Build"}, Subjects: subject},
+		{RoleName: "varroa:scoped", RoleType: "Item", Pattern: "^payments$", Permissions: []string{"hudson.model.Item.Build"}, Subjects: subject},
+		{RoleName: "varroa:agent", RoleType: "Agent", Pattern: "", Permissions: []string{"hudson.model.Computer.Build"}, Subjects: subject},
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(out, "varroa:nopattern") {
+		t.Errorf("item role without a pattern was rendered:\n%s", out)
+	}
+	if !strings.Contains(out, "varroa:scoped") {
+		t.Errorf("scoped item role missing from output:\n%s", out)
+	}
+	if !strings.Contains(out, "varroa:agent") {
+		t.Errorf("agent role missing from output:\n%s", out)
+	}
+}
+
 func TestHasHumanAdmin_EmptySlice(t *testing.T) {
 	if HasHumanAdmin(nil) {
 		t.Error("expected false for empty/nil slice")

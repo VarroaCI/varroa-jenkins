@@ -507,6 +507,7 @@ func TestCreateJenkinsRoleBinding_InvalidJenkinsScopeRejected(t *testing.T) {
 		{"pattern with folder", map[string]interface{}{"type": "Pattern", "pattern": "x", "folder": "a"}, "takes no folder or propagate"},
 		{"pattern with propagate", map[string]interface{}{"type": "Pattern", "pattern": "x", "propagate": "None"}, "takes no folder or propagate"},
 		{"global with folder", map[string]interface{}{"type": "Global", "folder": "a"}, "a Global jenkinsScope takes no folder"},
+		{"folder leading slash", map[string]interface{}{"type": "Folder", "folder": "/payments"}, "must not start with /"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -729,6 +730,7 @@ func TestBuildJenkinsScope_Messages(t *testing.T) {
 	}{
 		{map[string]interface{}{"type": "Cluster"}, `invalid jenkinsScope: unknown jenkinsScope.type "Cluster"; allowed types are Global, Folder, Pattern`},
 		{map[string]interface{}{"type": "Folder"}, "invalid jenkinsScope: a Folder jenkinsScope needs a non-empty folder"},
+		{map[string]interface{}{"type": "Folder", "folder": "/payments"}, "invalid jenkinsScope: spec.jenkinsScope.folder must not start with /"},
 	}
 	for _, c := range cases {
 		_, err := buildJenkinsScope(c.raw)
