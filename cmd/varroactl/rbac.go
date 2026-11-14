@@ -32,7 +32,7 @@ func addRBACNouns(v *verbCommands) {
 		Path:         "/rolebindings",
 		Namespaced:   false,
 		DescribeFrom: true,
-		Headers:      []string{"NAME", "ROLE", "SUBJECTS", "SCOPE"},
+		Headers:      []string{"NAME", "ROLE", "SUBJECTS", "SCOPE", "OWNER"},
 		Columns:      roleBindingColumns,
 	})
 
@@ -141,7 +141,40 @@ func roleBindingColumns(item map[string]any) []string {
 		}
 	}
 
-	return []string{itemName(item), roleRef, subjects, scope}
+	return []string{itemName(item), roleRef, subjects, scope, roleBindingOwner(item)}
+}
+
+// roleBindingOwner returns "<kind>/<namespace>/<name>" of the object whose
+// reconciler writes the binding, or "-" for every other binding.
+// v1alpha1.VarroaRoleBindingOwner is the one rule. Do not test the name here.
+func roleBindingOwner(item map[string]any) string {
+	b := &v1alpha1.VarroaRoleBinding{}
+	b.Name = itemName(item)
+	if meta, ok := item["metadata"].(map[string]any); ok {
+		b.Labels = stringMap(meta["labels"])
+		b.Annotations = stringMap(meta["annotations"])
+	}
+	o, ok := v1alpha1.VarroaRoleBindingOwner(b)
+	if !ok {
+		return "-"
+	}
+	return o.Kind + "/" + o.Namespace + "/" + o.Name
+}
+
+// stringMap returns the string values of v, a JSON object, or nil when v is
+// not an object.
+func stringMap(v any) map[string]string {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, val := range m {
+		if s, ok := val.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
 }
 
 func jenkinsRoleColumns(item map[string]any) []string {
@@ -216,14 +249,7 @@ func jenkinsRoleBindingController(item map[string]any) string {
 	b := &v1alpha1.JenkinsRoleBinding{}
 	b.Name = itemName(item)
 	if meta, ok := item["metadata"].(map[string]any); ok {
-		if labels, ok := meta["labels"].(map[string]any); ok {
-			b.Labels = make(map[string]string, len(labels))
-			for k, v := range labels {
-				if s, ok := v.(string); ok {
-					b.Labels[k] = s
-				}
-			}
-		}
+		b.Labels = stringMap(meta["labels"])
 	}
 	ns, name, ok := v1alpha1.RBACSpecBindingOwner(b)
 	if !ok {

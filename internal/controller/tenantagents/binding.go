@@ -5,8 +5,6 @@ package tenantagents
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 
@@ -28,19 +26,12 @@ type Reconciler struct {
 	Logger           *slog.Logger
 }
 
-// BindingName returns the name of the binding of one TenantAgent. The hash keeps
-// the name short and valid for any namespace and name.
-func BindingName(ns, name string) string {
-	sum := sha256.Sum256([]byte(ns + "/" + name))
-	return "tenantagent-" + hex.EncodeToString(sum[:])[:16]
-}
-
 // DesiredBinding returns the binding that one accepted TenantAgent needs.
 func DesiredBinding(ta *v1alpha1.TenantAgent) *v1alpha1.VarroaRoleBinding {
 	return &v1alpha1.VarroaRoleBinding{
 		TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.SchemeGroupVersion.String(), Kind: "VarroaRoleBinding"},
 		ObjectMeta: metav1.ObjectMeta{
-			Name: BindingName(ta.Namespace, ta.Name),
+			Name: v1alpha1.TenantAgentBindingName(ta.Namespace, ta.Name),
 			Labels: map[string]string{
 				v1alpha1.LabelTenantAgent:          "true",
 				v1alpha1.LabelTenantAgentNamespace: ta.Namespace,

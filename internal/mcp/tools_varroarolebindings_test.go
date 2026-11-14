@@ -187,7 +187,7 @@ func TestListVarroaRoleBindings_DefaultsToSummary(t *testing.T) {
 
 	for _, item := range []map[string]any{scoped, clusterWide} {
 		allowed := map[string]bool{
-			"name": true, "roleRef": true, "subjectCount": true, "scopeNamespaces": true,
+			"name": true, "roleRef": true, "subjectCount": true, "scopeNamespaces": true, "owner": true,
 			"hivesFederated": true, "hivesSkipped": true, "hivesFailed": true,
 		}
 		for k := range item {

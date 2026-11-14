@@ -49,7 +49,7 @@ func TestTickAppliesBinding(t *testing.T) {
 		t.Fatalf("bindings = %d, want 1", len(got))
 	}
 	b := got[0]
-	if want := BindingName("ns-a", "agent-a"); b.Name != want {
+	if want := v1alpha1.TenantAgentBindingName("ns-a", "agent-a"); b.Name != want {
 		t.Errorf("name = %q, want %q", b.Name, want)
 	}
 	wantLabels := map[string]string{
@@ -64,6 +64,9 @@ func TestTickAppliesBinding(t *testing.T) {
 	}
 	if len(b.Spec.Subjects) != 1 || b.Spec.Subjects[0].Kind != "User" || b.Spec.Subjects[0].Name != "agent:ns-a/team-a/agent-a" {
 		t.Errorf("subjects = %+v", b.Spec.Subjects)
+	}
+	if o, ok := v1alpha1.VarroaRoleBindingOwner(b); !ok || o != (v1alpha1.BindingOwner{Kind: v1alpha1.BindingOwnerTenantAgent, Namespace: "ns-a", Name: "agent-a"}) {
+		t.Errorf("owner = %+v, %v; want the TenantAgent ns-a/agent-a", o, ok)
 	}
 	if b.Spec.RoleRef != "developer" {
 		t.Errorf("roleRef = %q, want developer", b.Spec.RoleRef)

@@ -123,6 +123,9 @@ varroactl locks release tenant-a/deploy-prod --run <run id> --reason "<why>"
 
 # List the Jenkins role bindings and the controller of each rbacSpec binding.
 varroactl get jenkinsrolebindings
+
+# List the Varroa role bindings and the owner of each operator-made binding.
+varroactl get rolebindings
 ```
 
 Use [Controller lifecycle operations](operations/lifecycle.md) for state changes, [Brood operations](operations/brood-operations.md) for fleet actions, [Brood schedules](operations/brood-schedules.md) for recurring work, and the [pipelines tutorial](tutorials/pipelines.md) to trigger a run, read a log, and download an artifact.
@@ -134,6 +137,8 @@ Use [Controller lifecycle operations](operations/lifecycle.md) for state changes
 `lint jenkinsfile` reads a Jenkinsfile and sends it to the tenant's cell. The cell runs the Jenkins declarative linter, and a cell-hosted tenant also runs the Varroa cell rules. It prints each error's source, line, column, and message. `--file` defaults to `Jenkinsfile`. The lint writes nothing and never wakes a hibernated cell, so a hibernated or stopped cell answers a refusal. The command exits non-zero when the file has any error or the server refuses the request.
 
 `get jenkinsrolebindings` prints `NAME`, `ROLE`, `SUBJECTS`, `JENKINS-SCOPE`, and `CONTROLLER`. The operator writes one binding for each role in the `spec.rbacSpec` of a controller. `CONTROLLER` shows that controller as `<namespace>/<name>`. It shows `-` for every other binding. See [Configure Varroa RBAC](security/varroa-rbac.md#create-a-custom-role).
+
+`get rolebindings` prints `NAME`, `ROLE`, `SUBJECTS`, `SCOPE`, and `OWNER`. `OWNER` shows the `TenantAgent` or `BroodSchedule` that writes the binding, as `<kind>/<namespace>/<name>`. It shows `-` for every other binding. See [Read a role binding that the operator writes](security/varroa-rbac.md#read-a-role-binding-that-the-operator-writes).
 
 ## Work across clusters
 

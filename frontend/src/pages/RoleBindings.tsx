@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { listRoleBindings, deleteRoleBinding } from "../api/client";
 import type { VarroaRoleBinding } from "../types";
 import { Button } from "../components/Button";
@@ -7,6 +7,12 @@ import { Card } from "../components/Card";
 import { FederationSummary } from "../components/FederationStatus";
 import { useAuth } from "../context/AuthContext";
 import { canDoGlobal } from "../hooks/usePermissions";
+import {
+  roleBindingOwner,
+  roleBindingOwnerLabel,
+  roleBindingOwnerRoute,
+  roleBindingOwnerSummary,
+} from "../lib/roleBindingOwner";
 import styles from "./RoleBindings.module.css";
 
 const SCOPE_FILTERS = ["All", "Cluster-wide", "Scoped"] as const;
@@ -75,7 +81,12 @@ export default function RoleBindings() {
   const filtered = useMemo(() => {
     return bindings.filter((b) => {
       if (filter !== "All" && scopeCategory(b) !== filter) return false;
-      if (search && !b.metadata.name.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search) {
+        const term = search.toLowerCase();
+        const owner = roleBindingOwner(b.metadata);
+        const ownerText = owner ? roleBindingOwnerLabel(owner).toLowerCase() : "";
+        if (!b.metadata.name.toLowerCase().includes(term) && !ownerText.includes(term)) return false;
+      }
       return true;
     });
   }, [bindings, filter, search]);
@@ -123,7 +134,7 @@ export default function RoleBindings() {
         <div className={styles.searchBox}>
           <span>⌕</span>
           <input
-            placeholder="Filter by name..."
+            placeholder="Filter by name or owner..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -150,31 +161,46 @@ export default function RoleBindings() {
             <span>Hive federation</span>
             <span />
           </div>
-          {filtered.map((binding) => (
+          {filtered.map((binding) => {
+            const owner = roleBindingOwner(binding.metadata);
+            const route = owner ? roleBindingOwnerRoute(owner, binding.spec) : null;
+            return (
             <div key={binding.metadata.name} className={styles.bindingRow}>
-              <span className={styles.bindingName}>{binding.metadata.name}</span>
-              <span className={styles.cellMuted}>{formatSubjects(binding)}</span>
-              <span>{binding.spec.roleRef}</span>
-              <span className={styles.cellMuted}>{formatScope(binding)}</span>
-              <span><FederationSummary status={binding.status} /></span>
-              <div className={styles.actions}>
-                {canDoGlobal(permissions, "rolebindings", "update") && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => navigate(`/access/role-bindings/${binding.metadata.name}/edit`)}
-                  >
-                    Edit
-                  </Button>
-                )}
-                {canDoGlobal(permissions, "rolebindings", "delete") && (
-                  <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(binding.metadata.name)}>
-                    Delete
-                  </Button>
-                )}
+                <span className={styles.bindingName}>
+                  {binding.metadata.name}
+                  {owner && (route ? (
+                    <Link className={styles.ownerBadge} to={route} title={roleBindingOwnerSummary(owner)}>
+                      {roleBindingOwnerLabel(owner)}
+                    </Link>
+                  ) : (
+                    <span className={styles.ownerBadge} title={roleBindingOwnerSummary(owner)}>
+                      {roleBindingOwnerLabel(owner)}
+                    </span>
+                  ))}
+                </span>
+                <span className={styles.cellMuted}>{formatSubjects(binding)}</span>
+                <span>{binding.spec.roleRef}</span>
+                <span className={styles.cellMuted}>{formatScope(binding)}</span>
+                <span><FederationSummary status={binding.status} /></span>
+                <div className={styles.actions}>
+                  {canDoGlobal(permissions, "rolebindings", "update") && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => navigate(`/access/role-bindings/${binding.metadata.name}/edit`)}
+                    >
+                      {owner ? "View" : "Edit"}
+                    </Button>
+                  )}
+                  {canDoGlobal(permissions, "rolebindings", "delete") && (
+                    <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(binding.metadata.name)}>
+                      Delete
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           {filtered.length === 0 && (
             <div className={styles.empty}>
               {bindings.length === 0

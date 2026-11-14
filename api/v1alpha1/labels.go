@@ -59,4 +59,13 @@ const (
 
 	// LabelTenantName marks a resource as belonging to a specific Tenant.
 	LabelTenantName = "varroa.dev/tenant-name"
+
+	// AnnotationBroodScheduleNamespace names the namespace of the BroodSchedule
+	// whose VarroaRoleBinding carries it. A BroodSchedule name can be longer
+	// than a label value, so the operator writes annotations, not labels.
+	AnnotationBroodScheduleNamespace = "varroa.dev/broodschedule-namespace"
+
+	// AnnotationBroodScheduleName names the BroodSchedule whose
+	// VarroaRoleBinding carries it.
+	AnnotationBroodScheduleName = "varroa.dev/broodschedule-name"
 )

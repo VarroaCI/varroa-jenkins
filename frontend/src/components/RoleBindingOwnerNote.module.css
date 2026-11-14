@@ -1,0 +1,13 @@
+.note {
+  background: var(--info-soft);
+  color: var(--info-text);
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.note a {
+  color: inherit;
+  text-decoration: underline;
+}
