@@ -50,7 +50,7 @@ type pendingImperative struct {
 }
 
 // BusHandler implements StreamHandler by bridging the mite gRPC stream to the
-// NATS bus. It replaces the in-memory Registry for the gateway tier.
+// NATS bus.
 //
 // Desired-state delivery (operator→mite) is a core NATS request on
 // bus.MiteDesiredSubject: the gateway that holds the stream forwards each
@@ -461,7 +461,7 @@ func (h *BusHandler) putPresence(ns, name, version string) {
 
 // OnConnect caches cert expiry, writes initial presence, and starts the
 // desired-state goroutine that forwards commands to the mite stream.
-func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{}, send Sender, _ interface{}) int64 {
+func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{}, send Sender) int64 {
 	key := ns + "/" + name
 	h.log().Info("mite connected", "controller", key, "version", version)
 
@@ -1852,8 +1852,7 @@ func (h *BusHandler) pumpContent(ctx context.Context, sub *nats.Subscription, de
 	}
 }
 
-// OnContentResponse resolves a pending content-fetch request. Only active in
-// the gateway process (BusHandler); other StreamHandler implementations stub it.
+// OnContentResponse resolves a pending content-fetch request.
 func (h *BusHandler) OnContentResponse(requestID string, resp *mitev1.ContentResponse) {
 	h.mu.Lock()
 	msg, ok := h.pendingContent[requestID]

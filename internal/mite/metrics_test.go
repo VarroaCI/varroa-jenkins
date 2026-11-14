@@ -164,7 +164,7 @@ func TestBusHandlerCountsStreamConnectionsOnItsProvider(t *testing.T) {
 	h.metrics = m
 
 	send := func(*mitev1.OperatorMessage) error { return nil }
-	token := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+	token := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 	waitForGatewaySum(t, reader, "varroa.mite.stream.connections", 1)
 
 	h.OnDisconnect("ctl", "varroa", token)

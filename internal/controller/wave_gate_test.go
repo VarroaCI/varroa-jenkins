@@ -17,27 +17,25 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/mite"
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
-	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
 
-// newTestReconcilerForGate creates a reconciler with a pre-registered mite
-// connection so handleConnected does not bail out on the disconnected check.
-// Returns the reconciler and the registry so callers can register additional mites.
-func newTestReconcilerForGate(client *testClient) (*Reconciler, *mite.Registry) {
+// newTestReconcilerForGate creates a reconciler on a memTransport. It returns
+// the transport so a test can connect a mite before handleConnected runs.
+func newTestReconcilerForGate(client *testClient) (*Reconciler, *memTransport) {
 	seedClientCRDs(client)
-	registry := mite.NewRegistry()
+	mites := newMemTransport()
 	rec := NewReconciler(
 		noop.NewMeterProvider(),
 		bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"),
 		client,
 		client.store,
-		transport.NewLocalRegistry(registry),
+		mites,
 		mite.NewTokenSigner(testKey),
 		rbac.NewGenerator(rbac.NewTestResolver()),
 		nil, // composer not needed
 	)
 	rec.Logger = slog.Default()
-	return rec, registry
+	return rec, mites
 }
 
 func TestBundleIdentOf(t *testing.T) {
@@ -649,12 +647,12 @@ func freshSib(name string, wave int, appliedHash string, succeeded bool) *v1alph
 
 func TestGate_BypassWaveZero(t *testing.T) {
 	client := newTestClientWithGateBundle()
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl", 0, "", nil)
 	cr.Status.AppliedBundleHash = "" // first provision so no gate
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	// Gate bypass: Push attempts Send which fails (no real gRPC stream in test);
 	// the important assertion is that the gate did NOT block.
@@ -673,7 +671,7 @@ func TestGate_BypassWaveZero(t *testing.T) {
 
 func TestGate_BypassOverrideAnnotation(t *testing.T) {
 	client := newTestClientWithGateBundle()
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	// Wave-2 controller with override annotation and old applied bundle hash.
 	cr := newGateCtrl("ctl-over", 2, "old-hash", map[string]string{
@@ -688,7 +686,7 @@ func TestGate_BypassOverrideAnnotation(t *testing.T) {
 		crdstore.MustSeed(client.store, c)
 	}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream); gate assertion below
 	if cr.Status.Rollout != nil {
 		t.Fatal("override annotation should bypass gate")
@@ -701,7 +699,7 @@ func TestGate_BypassOverrideAnnotation(t *testing.T) {
 
 func TestGate_BypassOverrideAnnotationMixedCase(t *testing.T) {
 	client := newTestClientWithGateBundle()
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl-case", 2, "old-hash", map[string]string{
 		v1alpha1.AnnotationRolloutOverride: " TRUE ",
@@ -711,7 +709,7 @@ func TestGate_BypassOverrideAnnotationMixedCase(t *testing.T) {
 		crdstore.MustSeed(client.store, c)
 	}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream); gate assertion below
 	if cr.Status.Rollout != nil {
 		t.Fatal("override annotation (mixed case) should bypass gate")
@@ -720,7 +718,7 @@ func TestGate_BypassOverrideAnnotationMixedCase(t *testing.T) {
 
 func TestGate_NonTrueOverrideIsNotHonored(t *testing.T) {
 	client := newTestClientWithGateBundle()
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl-noluck", 2, "old-hash", map[string]string{
 		v1alpha1.AnnotationRolloutOverride: "yes",
@@ -730,7 +728,7 @@ func TestGate_NonTrueOverrideIsNotHonored(t *testing.T) {
 		crdstore.MustSeed(client.store, c)
 	}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -742,7 +740,7 @@ func TestGate_NonTrueOverrideIsNotHonored(t *testing.T) {
 
 func TestGate_AlreadyOnTarget(t *testing.T) {
 	client := newTestClientWithGateBundle()
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl-on-target", 2, "hash-match", nil)
 	// Set the ComposedBundle's ResolvedHash to match.
@@ -756,7 +754,7 @@ func TestGate_AlreadyOnTarget(t *testing.T) {
 		crdstore.MustSeed(client.store, c)
 	}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream); gate assertion below
 	if cr.Status.Rollout != nil {
 		t.Fatal("already on target should bypass gate")
@@ -765,7 +763,7 @@ func TestGate_AlreadyOnTarget(t *testing.T) {
 
 func TestGate_FirstProvisionEmptyAppliedHash(t *testing.T) {
 	client := newTestClientWithGateBundle()
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl-first", 5, "", nil)
 	// Set a blocking earlier-wave sibling.
@@ -774,7 +772,7 @@ func TestGate_FirstProvisionEmptyAppliedHash(t *testing.T) {
 		crdstore.MustSeed(client.store, c)
 	}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream); gate assertion below
 	if cr.Status.Rollout != nil {
 		t.Fatal("first provision should bypass gate")
@@ -785,7 +783,7 @@ func TestGate_BlockedSetsRolloutAndCondition(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	bndl := client.composedBundles["gate-bundle"]
 	bndl.Status.ResolvedHash = "hash-new"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl-blocked", 2, "hash-old", nil)
 	// Add a wave-0 canary that is healthy but on the OLD hash.
@@ -794,7 +792,7 @@ func TestGate_BlockedSetsRolloutAndCondition(t *testing.T) {
 		crdstore.MustSeed(client.store, c)
 	}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -853,7 +851,7 @@ func TestGate_ClearedClearsRolloutAndCondition(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	bndl := client.composedBundles["gate-bundle"]
 	bndl.Status.ResolvedHash = "hash-new"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl-cleared", 2, "hash-old", nil)
 	// Earlier-wave canary is healthy on the new hash.
@@ -862,7 +860,7 @@ func TestGate_ClearedClearsRolloutAndCondition(t *testing.T) {
 		crdstore.MustSeed(client.store, c)
 	}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream); gate assertion below
 	if cr.Status.Rollout != nil {
 		t.Fatal("expected rollout cleared")
@@ -889,7 +887,7 @@ func TestGate_CascadeBlockedWave(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	bndl := client.composedBundles["gate-bundle"]
 	bndl.Status.ResolvedHash = "hash-new"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	// Wave-2 controller, wave-1 controller is still on old hash (blocked itself).
 	cr := newGateCtrl("ctl-wave2", 2, "hash-old", nil)
@@ -901,7 +899,7 @@ func TestGate_CascadeBlockedWave(t *testing.T) {
 		crdstore.MustSeed(client.store, c)
 	}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -919,7 +917,7 @@ func TestGate_BlockedSincePreservedAndReset(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	bndl := client.composedBundles["gate-bundle"]
 	bndl.Status.ResolvedHash = "hash-new"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl-preserve", 2, "hash-old", nil)
 	client.controllers = []*v1alpha1.Controller{cr, freshSib("canary", 0, "hash-old", true)}
@@ -928,7 +926,7 @@ func TestGate_BlockedSincePreservedAndReset(t *testing.T) {
 	}
 
 	// First tick: block.
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -936,7 +934,7 @@ func TestGate_BlockedSincePreservedAndReset(t *testing.T) {
 	firstBlockedSince := cr.Status.Rollout.BlockedSince
 
 	// Second tick: same target hash.
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	err = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -948,7 +946,7 @@ func TestGate_BlockedSincePreservedAndReset(t *testing.T) {
 	// Change target hash.
 	bndl.Status.ResolvedHash = "hash-newer"
 	seedClientCRDs(client)
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	err = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -962,7 +960,7 @@ func TestGate_DrainingCanaryHoldsLaterWaves(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	bndl := client.composedBundles["gate-bundle"]
 	bndl.Status.ResolvedHash = "hash-new"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl-wave1", 1, "hash-old", nil)
 	// Wave-0 canary: pushed the new hash, AppliedBundleHash matches target,
@@ -973,7 +971,7 @@ func TestGate_DrainingCanaryHoldsLaterWaves(t *testing.T) {
 		crdstore.MustSeed(client.store, c)
 	}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -989,7 +987,7 @@ func TestGate_MiteStatusNilBlocksLaterWave(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	bndl := client.composedBundles["gate-bundle"]
 	bndl.Status.ResolvedHash = "hash-new"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl-nilsib", 1, "hash-old", nil)
 	nilSib := &v1alpha1.Controller{
@@ -1014,7 +1012,7 @@ func TestGate_MiteStatusNilBlocksLaterWave(t *testing.T) {
 		crdstore.MustSeed(client.store, c)
 	}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1028,7 +1026,7 @@ func TestGate_RolloutBlockedNeverFlipsPhase(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	bndl := client.composedBundles["gate-bundle"]
 	bndl.Status.ResolvedHash = "hash-new"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl-phase", 2, "hash-old", nil)
 	cr.Status.Phase = v1alpha1.ControllerPhaseConnected
@@ -1037,7 +1035,7 @@ func TestGate_RolloutBlockedNeverFlipsPhase(t *testing.T) {
 		crdstore.MustSeed(client.store, c)
 	}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1051,7 +1049,7 @@ func TestGate_AppliedBundleHashAdvanceOnSuccessMatch(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	bndl := client.composedBundles["gate-bundle"]
 	bndl.Status.ResolvedHash = "hash-xyz"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl-hash", 0, "", nil)
 	cr.Status.AppliedBundleHash = ""
@@ -1060,7 +1058,7 @@ func TestGate_AppliedBundleHashAdvanceOnSuccessMatch(t *testing.T) {
 	rec.miteTransport = &scriptedSendTransport{Transport: rec.miteTransport}
 
 	// Tick 1: first push stamps DesiredStateHash.
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	desiredAfterTick1 := cr.Status.DesiredStateHash
 	if desiredAfterTick1 == "" {
@@ -1097,7 +1095,7 @@ func TestGate_WaitingOnCappedAt10(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	bndl := client.composedBundles["gate-bundle"]
 	bndl.Status.ResolvedHash = "hash-new"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := newGateCtrl("ctl-cap", 1, "hash-old", nil)
 	var sibs []*v1alpha1.Controller
@@ -1110,7 +1108,7 @@ func TestGate_WaitingOnCappedAt10(t *testing.T) {
 		crdstore.MustSeed(client.store, c)
 	}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

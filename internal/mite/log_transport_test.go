@@ -29,9 +29,8 @@ func startRecordingGateway(t *testing.T) (*recordingHandler, net.Listener, *ca.C
 		tailAckCh:  make(chan recordedTailAck, 4),
 	}
 
-	srv := NewServer(certAuth, tokenSigner, "localhost")
+	srv := NewServer(certAuth, tokenSigner, rec, "localhost")
 	srv.ServerEndpoint = "127.0.0.1:0"
-	srv.SetStreamHandler(rec)
 	srv.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")

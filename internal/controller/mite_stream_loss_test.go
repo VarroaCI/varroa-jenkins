@@ -30,7 +30,7 @@ func TestHandleConnected_StreamLossHoldsRunning(t *testing.T) {
 	cr.Status.MiteStatus = &v1alpha1.MiteStatus{Connected: true, LastSeen: &seen, JenkinsHealth: "healthy"}
 	rec.miteTokens["ns/ctl"] = miteTokenEntry{}
 
-	// No registry entry: the mite is disconnected. Ticks 1 and 2 are grace.
+	// No presence record: the mite is disconnected. Ticks 1 and 2 are grace.
 	for i := 1; i <= 2; i++ {
 		_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 		if cr.Status.Phase != v1alpha1.ControllerPhaseConnected {

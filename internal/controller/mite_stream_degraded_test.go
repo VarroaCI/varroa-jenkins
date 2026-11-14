@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"testing"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -31,7 +30,7 @@ func (d *degradedTransport) StreamDegraded(_, _ string) (string, bool) {
 // gateway log line.
 func TestConnected_MiteStreamDegradedConditionSet(t *testing.T) {
 	client := newTestClientWithGateBundle()
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 	rec.miteTransport = &degradedTransport{
 		Transport: rec.miteTransport,
 		reason:    "desired watch setup failing: context deadline exceeded",
@@ -39,7 +38,7 @@ func TestConnected_MiteStreamDegradedConditionSet(t *testing.T) {
 	}
 
 	cr := newGateCtrl("ctl", 0, "", nil)
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 
@@ -59,7 +58,7 @@ func TestConnected_MiteStreamDegradedConditionSet(t *testing.T) {
 // self-healing once the gateway re-establishes its watch.
 func TestConnected_MiteStreamDegradedConditionCleared(t *testing.T) {
 	client := newTestClientWithGateBundle()
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 	rec.miteTransport = &degradedTransport{Transport: rec.miteTransport, degraded: false}
 
 	cr := newGateCtrl("ctl", 0, "", nil)
@@ -68,7 +67,7 @@ func TestConnected_MiteStreamDegradedConditionCleared(t *testing.T) {
 		Status: metav1.ConditionTrue,
 		Reason: "BusWatchFailed",
 	})
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 
@@ -99,7 +98,7 @@ func TestDisconnected_MiteStreamDegradedConditionRemoved(t *testing.T) {
 		Message: "desired watch setup failing",
 	})
 
-	// No registry entry: the mite is disconnected.
+	// No presence record: the mite is disconnected.
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 
 	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteStreamDegraded); c != nil {

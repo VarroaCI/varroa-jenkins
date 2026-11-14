@@ -197,12 +197,12 @@ func TestHandleRunning_TimeoutCreditsPluginDownload(t *testing.T) {
 // reconnect returns the controller to Connected and records StreamRestored.
 func TestHandleRunning_ReconnectAfterStreamLostSetsRestored(t *testing.T) {
 	client := newTestClientWithGateBundle()
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := runningCtrl("flap")
 	cr.Status.Conditions = []v1alpha1.ControllerCondition{streamLostCond(time.Now().Add(-time.Minute))}
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	if err := rec.handleRunning(context.Background(), cr); err != nil {
 		t.Fatalf("connected tick: %v", err)
 	}
@@ -220,10 +220,10 @@ func TestHandleRunning_ReconnectAfterStreamLostSetsRestored(t *testing.T) {
 // after a loss.
 func TestHandleRunning_FirstConnectWritesNoMiteConnected(t *testing.T) {
 	client := newTestClientWithGateBundle()
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 
 	cr := runningCtrl("first")
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	if err := rec.handleRunning(context.Background(), cr); err != nil {
 		t.Fatalf("connected tick: %v", err)
 	}
@@ -314,12 +314,12 @@ func reconnectingCtrl(t *testing.T, name string) *v1alpha1.Controller {
 func TestReconcileRunning_ReconnectPushesInSamePass(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 	tr := &scriptedSendTransport{Transport: rec.miteTransport, epoch: 1}
 	rec.miteTransport = tr
 
 	cr := reconnectingCtrl(t, "reconnect-push")
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 
 	if err := rec.reconcileController(context.Background(), cr); err != nil {
 		t.Fatalf("reconcileController: %v", err)
@@ -358,13 +358,13 @@ func TestReconcileRunning_ReconnectPushesInSamePass(t *testing.T) {
 func TestReconcileRunning_ForceReprovisionWaitsForConnectedPass(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 	tr := &scriptedSendTransport{Transport: rec.miteTransport, epoch: 1}
 	rec.miteTransport = tr
 
 	cr := reconnectingCtrl(t, "reconnect-force")
 	cr.Annotations = map[string]string{annotationForceReprovision: time.Now().Format(time.RFC3339Nano)}
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 
 	if err := rec.reconcileController(context.Background(), cr); err != nil {
 		t.Fatalf("reconcileController: %v", err)
@@ -383,12 +383,12 @@ func TestReconcileRunning_ForceReprovisionWaitsForConnectedPass(t *testing.T) {
 func TestReconcileRunning_ChainedPushFailureKeepsConnected(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 	tr := &scriptedSendTransport{Transport: rec.miteTransport, sendErr: errors.New("marshal failed"), epoch: 1}
 	rec.miteTransport = tr
 
 	cr := reconnectingCtrl(t, "reconnect-fail")
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 
 	if err := rec.reconcileController(context.Background(), cr); err == nil {
 		t.Fatal("reconcileController returned nil; want the chained push error")

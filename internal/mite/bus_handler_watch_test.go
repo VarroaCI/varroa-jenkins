@@ -524,9 +524,9 @@ func TestOnDisconnectIgnoresSupersededStream(t *testing.T) {
 
 	send := func(*mitev1.OperatorMessage) error { return nil }
 
-	oldToken := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+	oldToken := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 	// The mite reconnects on a fresh stream before the old one tears down.
-	newToken := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+	newToken := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 	if oldToken == newToken {
 		t.Fatal("reconnect reused the previous connection token")
 	}
@@ -576,7 +576,7 @@ func TestOnConnectCancelsSupersededConnection(t *testing.T) {
 
 	send := func(*mitev1.OperatorMessage) error { return nil }
 
-	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 	mu.Lock()
 	opened := calls
 	mu.Unlock()
@@ -585,7 +585,7 @@ func TestOnConnectCancelsSupersededConnection(t *testing.T) {
 	}
 
 	// The mite reconnects before the old stream tore down.
-	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 
 	waitFor(t, func() bool {
 		first.mu.Lock()
@@ -628,7 +628,7 @@ func TestOnConnectIssuesStrictlyIncreasingTokens(t *testing.T) {
 	seen := make(map[int64]bool)
 	prev := int64(0)
 	for i := 0; i < 50; i++ {
-		tok := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+		tok := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 		if seen[tok] {
 			t.Fatalf("connect %d reissued token %d", i, tok)
 		}
@@ -651,14 +651,14 @@ func TestOnConnectDropsSupersededDegradedMarks(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 	h.markWatchDegraded(ctx, "varroa", "ctl", "desired", "old connection's failure")
 	if _, degraded := h.streamDegraded("varroa/ctl"); !degraded {
 		t.Fatal("setup failed: mark was not recorded")
 	}
 
 	// The mite reconnects.
-	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 
 	if reason, degraded := h.streamDegraded("varroa/ctl"); degraded {
 		t.Fatalf("new connection inherited the superseded connection's mark: %q", reason)
@@ -673,7 +673,7 @@ func TestPresenceLocksRetiredOnDisconnect(t *testing.T) {
 	h := newTestBusHandler()
 	send := func(*mitev1.OperatorMessage) error { return nil }
 
-	token := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+	token := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 	h.mu.Lock()
 	_, installed := h.presenceLocks["varroa/ctl"]
 	h.mu.Unlock()
@@ -709,13 +709,13 @@ func TestPresenceLockReusedAcrossReconnect(t *testing.T) {
 	h := newTestBusHandler()
 	send := func(*mitev1.OperatorMessage) error { return nil }
 
-	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 	first, ok := h.presenceLock("varroa/ctl")
 	if !ok {
 		t.Fatal("OnConnect did not install a presence lock")
 	}
 
-	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 	second, ok := h.presenceLock("varroa/ctl")
 	if !ok {
 		t.Fatal("reconnect dropped the presence lock")

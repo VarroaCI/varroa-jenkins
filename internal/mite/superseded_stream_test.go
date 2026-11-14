@@ -149,12 +149,12 @@ func TestBusHandler_IsCurrentConnection(t *testing.T) {
 		t.Error("unclaimed key: want current")
 	}
 
-	oldToken := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+	oldToken := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 	if !h.IsCurrentConnection("ctl", "varroa", oldToken) {
 		t.Error("only connection: want current")
 	}
 
-	newToken := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
+	newToken := h.OnConnect("ctl", "varroa", "v1", time.Time{}, send)
 	if h.IsCurrentConnection("ctl", "varroa", oldToken) {
 		t.Error("superseded token: want not current")
 	}
@@ -170,34 +170,5 @@ func TestBusHandler_IsCurrentConnection(t *testing.T) {
 	// A different controller is unaffected by this key's supersede.
 	if !h.IsCurrentConnection("other", "varroa", oldToken) {
 		t.Error("unrelated controller: want current")
-	}
-}
-
-// TestRegistry_IsCurrentEpoch covers the same gate for the in-process
-// RegistryHandler path used by the BFF.
-func TestRegistry_IsCurrentEpoch(t *testing.T) {
-	reg := NewRegistry()
-
-	if !reg.IsCurrentEpoch("ctl", "varroa", 99) {
-		t.Error("unregistered controller: want current")
-	}
-
-	oldConn := reg.Register("ctl", "varroa", nil, nil, "v1", time.Time{})
-	if !reg.IsCurrentEpoch("ctl", "varroa", oldConn.Epoch) {
-		t.Error("only connection: want current")
-	}
-
-	newConn := reg.Register("ctl", "varroa", nil, nil, "v1", time.Time{})
-	if oldConn.Epoch == newConn.Epoch {
-		t.Fatalf("Register did not bump the epoch (%d)", newConn.Epoch)
-	}
-	if reg.IsCurrentEpoch("ctl", "varroa", oldConn.Epoch) {
-		t.Error("superseded epoch: want not current")
-	}
-	if !reg.IsCurrentEpoch("ctl", "varroa", newConn.Epoch) {
-		t.Error("newest epoch: want current")
-	}
-	if !reg.IsCurrentEpoch("ctl", "varroa", 0) {
-		t.Error("zero epoch: want current")
 	}
 }

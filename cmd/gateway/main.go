@@ -160,9 +160,6 @@ func main() {
 		}
 	}
 
-	srv := mitesrv.NewServer(certAuth, tokenSigner, extraSANs...)
-	srv.ServerEndpoint = endpoint
-
 	// --- Bus handler ---
 	snapshotKV, err := busConn.EnsureKV(bus.KVSnapshotBucket, 5*time.Minute)
 	if err != nil {
@@ -174,6 +171,20 @@ func main() {
 		logger.Error("failed to create presence KV", "error", err)
 		os.Exit(1)
 	}
+	// --- Activity publisher (mode-agnostic, publishes to activity.* subjects) ---
+	actPub := activity.NewPublisherFromEnv(os.Getenv, cluster, busConn, activity.AckedOptions{
+		Logger: logger, Meter: meterProvider.Meter("varroa-gateway"), Component: "gateway"})
+	defer actPub.Close(activity.CloseTimeout)
+
+	handler, err := mitesrv.NewBusHandler(meterProvider, cluster, busConn, snapshotKV, presenceKV, actPub)
+	if err != nil {
+		logger.Error("failed to create the mite stream handler", "error", err)
+		os.Exit(1)
+	}
+	defer handler.Close()
+
+	srv := mitesrv.NewServer(certAuth, tokenSigner, handler, extraSANs...)
+	srv.ServerEndpoint = endpoint
 	// Cross-replica bootstrap-token single-use. Bucket TTL must be >= the 15m
 	// token TTL (minted in controller_controller.go) so consumed entries outlive
 	// their token before evicting. EnsureKV does not retro-update the TTL of a
@@ -186,18 +197,6 @@ func main() {
 	} else {
 		srv.SetConsumedTokenStore(mitesrv.NewKVConsumedStore(consumedKV, logger))
 	}
-	// --- Activity publisher (mode-agnostic, publishes to activity.* subjects) ---
-	actPub := activity.NewPublisherFromEnv(os.Getenv, cluster, busConn, activity.AckedOptions{
-		Logger: logger, Meter: meterProvider.Meter("varroa-gateway"), Component: "gateway"})
-	defer actPub.Close(activity.CloseTimeout)
-
-	handler, err := mitesrv.NewBusHandler(meterProvider, cluster, busConn, snapshotKV, presenceKV, actPub)
-	if err != nil {
-		logger.Error("failed to create the mite stream handler", "error", err)
-		os.Exit(1)
-	}
-	srv.SetStreamHandler(handler)
-	defer handler.Close()
 	logger.Info("gateway using bus transport for mite streams", "endpoint", endpoint)
 
 	// --- Blob store (build-log externalization) ---
