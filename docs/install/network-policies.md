@@ -82,7 +82,7 @@ Each egress group renders a rule only when its gate is on and its `cidrs` list i
 
 Every group except `coreNatsEgress` also requires a non-empty `ports` list. An empty `ports` list fails the render, because Kubernetes reads it as every port.
 
-An empty `coreNatsEgress` `ports` list takes the port at the end of `bus.url`, or 4222 when `bus.url` names no port. A `bus.url` list with more than one port needs an explicit `ports` list.
+An empty `coreNatsEgress` `ports` list takes the port of each `bus.url` entry. An entry without a port uses 4222. When the entries name more than one port, the render fails. Set an explicit `ports` list that names each port.
 
 | Group | Default | Renders when | Empty `cidrs` |
 | --- | --- | --- | --- |
@@ -156,7 +156,7 @@ With `networkPolicy.enabled: true`, an upgrade fails the render until you set th
 4. `nats.external.enabled` in full mode: set `nats.external.allowedCIDRs`.
 5. `networkPolicy.dexConnectorEgress.extraCIDRs` is removed. Move its entries to `networkPolicy.dexConnectorEgress.cidrs`.
 6. Update center with `updateCenter.storage.type: oci`: set `networkPolicy.updateCenterRegistryEgress.cidrs`.
-7. Hive mode: set `networkPolicy.coreNatsEgress.cidrs`.
+7. Hive mode: set `networkPolicy.coreNatsEgress.cidrs`. When the `bus.url` entries name more than one port, also set `networkPolicy.coreNatsEgress.ports`.
 8. Record store with `recordStore.blobs.mode: s3`: set `networkPolicy.recordStoreBlobEgress.cidrs`.
 9. `networkPolicy.recorderWebhookEgress.enabled: true`: set `cidrs`, or set `["0.0.0.0/0"]` to allow every address.
 10. `pullThroughEgress`: no change.

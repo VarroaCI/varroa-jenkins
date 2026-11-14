@@ -8,6 +8,8 @@
 # checks that an empty ports list fails the render, that the default egress
 # groups render their wide explicit defaults, and that the NATS external
 # allow-list is required in full mode.
+# In hive mode, a bus.url whose entries name more than one port fails until
+# networkPolicy.coreNatsEgress.ports is set.
 # Empty lists come from a values file, because --set cannot write an empty list.
 # Guard: charts/varroa/templates/networkpolicy-guard.yaml.
 # =============================================================================
@@ -247,6 +249,80 @@ grep -q 'cidr: 192.0.2.11/32' <<< "$OP" && rc=0 || rc=1
 check "hive: np-operator carries the second list CIDR" "$rc"
 grep -q 'port: 30422' <<< "$OP" && rc=0 || rc=1
 check "hive: core NATS rule uses port 30422 from the list" "$rc"
+GW=$(sed_extract 'np-gateway' "$OUT")
+grep -q 'port: 30422' <<< "$GW" && rc=0 || rc=1
+check "hive: np-gateway core NATS rule uses port 30422 from the list" "$rc"
+
+# Spaces, a trailing slash, and an empty entry do not change the port.
+cat > "$TMP/bus-list-spaces.yaml" <<'EOF'
+bus:
+  url: "tls://192.0.2.10:30422/, tls://192.0.2.11:30422,"
+networkPolicy:
+  coreNatsEgress:
+    cidrs: ["192.0.2.10/32", "192.0.2.11/32"]
+EOF
+render "${HIVE[@]}" -f "$TMP/bus-list-spaces.yaml"
+check "hive with spaces and a trailing comma in bus.url renders" "$RC"
+OP=$(sed_extract 'np-operator' "$OUT")
+grep -q 'port: 30422' <<< "$OP" && rc=0 || rc=1
+check "hive: spaced list keeps port 30422" "$rc"
+grep -q 'port: 4222' <<< "$OP" && rc=1 || rc=0
+check "hive: spaced list adds no port 4222" "$rc"
+
+# Entries with different ports fail until coreNatsEgress.ports is set.
+cat > "$TMP/bus-list-mixed.yaml" <<'EOF'
+bus:
+  url: "tls://192.0.2.10:30422,tls://192.0.2.11:4222"
+networkPolicy:
+  coreNatsEgress:
+    cidrs: ["192.0.2.10/32", "192.0.2.11/32"]
+EOF
+render "${HIVE[@]}" -f "$TMP/bus-list-mixed.yaml"
+check "hive with a mixed-port bus.url list fails" "$([[ "$RC" -ne 0 ]] && echo 0 || echo 1)"
+grep -q 'bus.url names more than one NATS port (30422, 4222)' <<< "$OUT" && rc=0 || rc=1
+check "mixed-port failure lists each port" "$rc"
+grep -q 'Set networkPolicy.coreNatsEgress.ports' <<< "$OUT" && rc=0 || rc=1
+check "mixed-port failure names coreNatsEgress.ports" "$rc"
+
+# An entry without a port counts as 4222.
+cat > "$TMP/bus-list-noport.yaml" <<'EOF'
+bus:
+  url: "tls://192.0.2.10:30422,tls://192.0.2.11"
+networkPolicy:
+  coreNatsEgress:
+    cidrs: ["192.0.2.10/32", "192.0.2.11/32"]
+EOF
+render "${HIVE[@]}" -f "$TMP/bus-list-noport.yaml"
+check "hive with a port-less entry beside port 30422 fails" "$([[ "$RC" -ne 0 ]] && echo 0 || echo 1)"
+grep -q 'bus.url names more than one NATS port (30422, 4222)' <<< "$OUT" && rc=0 || rc=1
+check "port-less entry failure lists 4222" "$rc"
+
+cat > "$TMP/bus-list-noport-4222.yaml" <<'EOF'
+bus:
+  url: "tls://192.0.2.10:4222,tls://192.0.2.11"
+networkPolicy:
+  coreNatsEgress:
+    cidrs: ["192.0.2.10/32", "192.0.2.11/32"]
+EOF
+render "${HIVE[@]}" -f "$TMP/bus-list-noport-4222.yaml"
+check "hive with a port-less entry beside port 4222 renders" "$RC"
+OP=$(sed_extract 'np-operator' "$OUT")
+grep -q 'port: 4222' <<< "$OP" && rc=0 || rc=1
+check "hive: port-less entry beside 4222 uses port 4222" "$rc"
+
+# An explicit ports list wins over bus.url.
+cat > "$TMP/corenats-ports.yaml" <<'EOF'
+networkPolicy:
+  coreNatsEgress:
+    ports: [30422, 4222]
+EOF
+render "${HIVE[@]}" -f "$TMP/bus-list-mixed.yaml" -f "$TMP/corenats-ports.yaml"
+check "hive with a mixed-port list and explicit ports renders" "$RC"
+for policy in np-operator np-gateway; do
+  DOC=$(sed_extract "$policy" "$OUT")
+  grep -q 'port: 30422' <<< "$DOC" && grep -q 'port: 4222' <<< "$DOC" && rc=0 || rc=1
+  check "$policy carries both explicit core NATS ports" "$rc"
+done
 
 # ---------------------------------------------------------------------------
 # (6) Record store on s3 blobs: the blob CIDR is required.
