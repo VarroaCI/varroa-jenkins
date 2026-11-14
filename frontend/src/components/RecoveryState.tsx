@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { AlertTriangle, Ban, Info, SearchX } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import styles from "./RecoveryState.module.css";
@@ -7,17 +8,32 @@ export interface RecoveryStateProps {
   title: string;
   message: string;
   onRetry?: () => void;
+  /** An inline block for a section of a page. It has no mark and no Back or Home. */
+  compact?: boolean;
 }
 
-export function RecoveryState({ kind, title, message, onRetry }: RecoveryStateProps) {
+export function RecoveryState({ kind, title, message, onRetry, compact = false }: RecoveryStateProps) {
   const navigate = useNavigate();
+  const id = useId();
   const Icon = kind === "403" ? Ban : kind === "404" ? SearchX : kind === "disabled" ? Info : AlertTriangle;
   const goBack = () => window.history.length > 1 ? navigate(-1) : navigate("/");
+  if (compact) {
+    return (
+      <section className={styles.compact} aria-labelledby={id}>
+        <Icon aria-hidden="true" size={20} strokeWidth={1.5} />
+        <div className={styles.compactText}>
+          <p id={id} className={styles.compactTitle}>{title}</p>
+          <p className={styles.compactMessage}>{message}</p>
+        </div>
+        {onRetry && <div className={styles.actions}><button type="button" onClick={onRetry}>Retry</button></div>}
+      </section>
+    );
+  }
   return (
-    <section className={styles.state} aria-labelledby="recovery-title">
+    <section className={styles.state} aria-labelledby={id}>
       <div className={styles.mark} aria-hidden="true">V</div>
       <Icon aria-hidden="true" size={42} strokeWidth={1.5} />
-      <h1 id="recovery-title">{title}</h1>
+      <h1 id={id}>{title}</h1>
       <p>{message}</p>
       <div className={styles.actions}>
         {onRetry && <button type="button" onClick={onRetry}>Retry</button>}
@@ -41,10 +57,10 @@ export const GenericErrorPage =({ onRetry }: { onRetry?: () => void }) => <Recov
  * Explains a 503 caused by an unconfigured record store, per design D12: the
  * page states that pipeline data is off rather than reading as a failure.
  */
-export const RecordStoreDisabledPage = () => <RecoveryState kind="disabled" title="Pipeline data is off" message="The record store is not configured for this cluster, so build history is not available." />;
+export const RecordStoreDisabledPage = ({ compact = false }: { compact?: boolean }) => <RecoveryState kind="disabled" title="Pipeline data is off" message="The record store is not configured for this cluster, so build history is not available." compact={compact} />;
 
 /**
  * Explains a 503 with the record_store_unreachable code: the store is
  * configured but did not answer. Retry asks again once it returns.
  */
-export const RecordStoreUnreachablePage = ({ onRetry }: { onRetry?: () => void }) => <RecoveryState kind="error" title="Pipeline data is unreachable" message="Varroa cannot reach the record store. Build history returns when the database is back." onRetry={onRetry} />;
+export const RecordStoreUnreachablePage = ({ onRetry, compact = false }: { onRetry?: () => void; compact?: boolean }) => <RecoveryState kind="error" title="Pipeline data is unreachable" message="Varroa cannot reach the record store. Build history returns when the database is back." onRetry={onRetry} compact={compact} />;

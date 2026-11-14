@@ -103,7 +103,7 @@ function buildCrumbs(pathname: string, match: ReturnType<typeof useMatch>): Crum
   }
 
   const segments = pathname.split("/").filter(Boolean);
-  if (segments.length === 0) return [{ label: "Dashboard", bold: true }];
+  if (segments.length === 0) return [{ label: "Overview", bold: true }];
 
   const label = areaLabel(segments[0]);
   return [{ label, bold: true }];

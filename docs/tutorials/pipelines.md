@@ -25,6 +25,8 @@ Consecutive finished runs of one job fold into one row, such as **cron-probe × 
 
 On a phone, the rail becomes a row of chips.
 
+The **Overview** page opens first. Its **Pipelines** section shows the run counters of the last 24 hours and a count of the items that need attention. Below the counters, it lists at most eight tenants and the five newest runs. Select a tenant or a run to open it. The section shows only when you have pipelines access.
+
 ## Open a tenant
 
 Sign in and select **Pipelines** in the sidebar. You see the pipelines of every [Tenant](../security/varroa-rbac.md#grant-pipelines-access) that grants you a `pipelines`

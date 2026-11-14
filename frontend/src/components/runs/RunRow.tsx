@@ -12,8 +12,9 @@ export interface RunRowProps {
   now: number;
   /** The cluster of the caller's own controller. A run on another cluster shows its cluster. */
   localCluster?: string;
-  onRerun: (r: FleetRunRow) => void;
-  onCancel: (r: FleetRunRow) => void;
+  /** Omitted by a caller with no write actions, such as the Overview. The menu then shows only Open. */
+  onRerun?: (r: FleetRunRow) => void;
+  onCancel?: (r: FleetRunRow) => void;
   /** True for a run that a fold row holds. The row indents its run cell. */
   nested?: boolean;
 }
@@ -26,8 +27,8 @@ export function RunRow({ run, now, localCluster, onRerun, onCancel, nested = fal
   const [menuOpen, setMenuOpen] = useState(false);
   const href = runHref(run.tenant, run.jobPath ?? "", run.runId);
   const started = run.startedAt ?? run.queuedAt ?? run.createdAt;
-  const canRerun = run.canWrite && run.status === "COMPLETED";
-  const canCancel = run.canWrite && (run.status === "QUEUED" || run.status === "RUNNING");
+  const canRerun = onRerun !== undefined && run.canWrite && run.status === "COMPLETED";
+  const canCancel = onCancel !== undefined && run.canWrite && (run.status === "QUEUED" || run.status === "RUNNING");
 
   const closeMenu = () => setMenuOpen(false);
   const onMenuKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -79,7 +80,7 @@ export function RunRow({ run, now, localCluster, onRerun, onCancel, nested = fal
                   className={styles.menuItem}
                   onClick={() => {
                     closeMenu();
-                    onRerun(run);
+                    onRerun?.(run);
                   }}
                 >
                   Re-run
@@ -92,7 +93,7 @@ export function RunRow({ run, now, localCluster, onRerun, onCancel, nested = fal
                   className={styles.menuItem}
                   onClick={() => {
                     closeMenu();
-                    onCancel(run);
+                    onCancel?.(run);
                   }}
                 >
                   Cancel

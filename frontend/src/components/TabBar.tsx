@@ -21,9 +21,9 @@ export function TabBar() {
   return (
     <>
       <nav className={styles.tabBar} aria-label="Primary">
-        <NavLink to="/" end aria-label="Dashboard" className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ""}`}>
+        <NavLink to="/" end aria-label="Overview" className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ""}`}>
           <span className={styles.tabIcon}><NavIcon icon={LayoutDashboard} /></span>
-          <span className={styles.tabLabel}>Dashboard</span>
+          <span className={styles.tabLabel}>Overview</span>
         </NavLink>
         <NavLink to="/controllers" aria-label="Controllers" className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ""}`}>
           <span className={styles.tabIcon}><NavIcon icon={Server} /></span>

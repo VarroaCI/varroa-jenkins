@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { cancelRun, listFleetRuns, rerunRun } from "../../api/client";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { cancelRun, rerunRun } from "../../api/client";
 import { FilterBar, FilterSelect, SearchBox, type FilterOption } from "../../components/FilterBar";
 import { SortableHeader, nextSort, type SortOrder } from "../../components/SortableHeader";
 import { RunRow } from "../../components/runs/RunRow";
@@ -17,12 +17,12 @@ import {
   applyStatusSelect,
   feedQueryIsDefault,
   statusSelectValue,
-  writeFeedQuery,
   type FeedQuery,
 } from "./feedQuery";
-import { feedParams, isDefaultSort } from "./feedLive";
+import { isDefaultSort } from "./feedLive";
+import { useFleetRuns } from "./useFleetRuns";
+import { RunTable } from "./RunTable";
 import styles from "./RunFeed.module.css";
-import tableStyles from "../tables.module.css";
 
 /** FeedLive is the live state the page hands the feed. */
 export interface FeedLive {
@@ -107,12 +107,7 @@ export function RunFeed({ query, onQuery, tenants, localCluster, live, onNewPipe
     return () => clearInterval(t);
   }, []);
 
-  const feed = useInfiniteQuery({
-    queryKey: ["fleet-runs", writeFeedQuery(query).toString()],
-    queryFn: ({ pageParam }) => listFleetRuns({ ...feedParams(query), cursor: pageParam }),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.nextCursor,
-  });
+  const feed = useFleetRuns(query);
 
   const rows = useMemo<FleetRunRow[]>(() => feed.data?.pages.flatMap((p) => p.items) ?? [], [feed.data]);
 
@@ -302,57 +297,54 @@ export function RunFeed({ query, onQuery, tenants, localCluster, live, onNewPipe
           </div>
         )
       ) : (
-        <div className={tableStyles.tableScroll}>
-          <table className={`${tableStyles.dataTable} ${styles.table}`}>
-            <thead>
-              <tr>
-                <SortableHeader<FleetRunSort> label="Status" sortKey="status" activeKey={query.sort} order={query.order} onSort={onHeader} />
-                <SortableHeader<FleetRunSort> label="Run" sortKey="job" activeKey={query.sort} order={query.order} onSort={onHeader} />
-                <SortableHeader<FleetRunSort> label="Tenant" sortKey="tenant" activeKey={query.sort} order={query.order} onSort={onHeader} />
-                <SortableHeader<FleetRunSort> label="Actor" sortKey="actor" activeKey={query.sort} order={query.order} onSort={onHeader} />
-                <th scope="col">Branch</th>
-                <SortableHeader<FleetRunSort> label="Started" sortKey="started" activeKey={query.sort} order={query.order} onSort={onHeader} />
-                <SortableHeader<FleetRunSort> label="Duration" sortKey="duration" activeKey={query.sort} order={query.order} onSort={onHeader} />
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) =>
-                item.kind === "run" ? (
-                  <RunRow
-                    key={item.run.runId}
-                    run={item.run}
-                    now={now}
-                    localCluster={localCluster}
-                    onRerun={(run) => rerun.mutate(run)}
-                    onCancel={(run) => cancel.mutate(run)}
-                  />
-                ) : (
-                  <Fragment key={item.id}>
-                    <RunFoldRow
-                      runs={item.runs}
+        <RunTable
+          head={
+            <>
+              <SortableHeader<FleetRunSort> label="Status" sortKey="status" activeKey={query.sort} order={query.order} onSort={onHeader} />
+              <SortableHeader<FleetRunSort> label="Run" sortKey="job" activeKey={query.sort} order={query.order} onSort={onHeader} />
+              <SortableHeader<FleetRunSort> label="Tenant" sortKey="tenant" activeKey={query.sort} order={query.order} onSort={onHeader} />
+              <SortableHeader<FleetRunSort> label="Actor" sortKey="actor" activeKey={query.sort} order={query.order} onSort={onHeader} />
+              <th scope="col">Branch</th>
+              <SortableHeader<FleetRunSort> label="Started" sortKey="started" activeKey={query.sort} order={query.order} onSort={onHeader} />
+              <SortableHeader<FleetRunSort> label="Duration" sortKey="duration" activeKey={query.sort} order={query.order} onSort={onHeader} />
+            </>
+          }
+        >
+          {items.map((item) =>
+            item.kind === "run" ? (
+              <RunRow
+                key={item.run.runId}
+                run={item.run}
+                now={now}
+                localCluster={localCluster}
+                onRerun={(run) => rerun.mutate(run)}
+                onCancel={(run) => cancel.mutate(run)}
+              />
+            ) : (
+              <Fragment key={item.id}>
+                <RunFoldRow
+                  runs={item.runs}
+                  now={now}
+                  localCluster={localCluster}
+                  expanded={expanded.has(item.id)}
+                  onToggle={() => toggleFold(item.id)}
+                />
+                {expanded.has(item.id) &&
+                  item.runs.map((run) => (
+                    <RunRow
+                      key={run.runId}
+                      run={run}
                       now={now}
                       localCluster={localCluster}
-                      expanded={expanded.has(item.id)}
-                      onToggle={() => toggleFold(item.id)}
+                      nested
+                      onRerun={(r) => rerun.mutate(r)}
+                      onCancel={(r) => cancel.mutate(r)}
                     />
-                    {expanded.has(item.id) &&
-                      item.runs.map((run) => (
-                        <RunRow
-                          key={run.runId}
-                          run={run}
-                          now={now}
-                          localCluster={localCluster}
-                          nested
-                          onRerun={(r) => rerun.mutate(r)}
-                          onCancel={(r) => cancel.mutate(r)}
-                        />
-                      ))}
-                  </Fragment>
-                ),
-              )}
-            </tbody>
-          </table>
-        </div>
+                  ))}
+              </Fragment>
+            ),
+          )}
+        </RunTable>
       )}
 
       {feed.hasNextPage && (

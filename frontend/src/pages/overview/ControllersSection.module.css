@@ -1,0 +1,273 @@
+.grid { display: grid; gap: 16px; }
+
+.metrics {
+  grid-template-columns: repeat(4, 1fr);
+  margin-bottom: 18px;
+}
+
+.twoCol {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.muted {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.healthGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.healthLabel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.healthMeta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.skeletonMetric {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  height: 130px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .5; }
+}
+
+.btnPrimary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 9px 15px;
+  border-radius: 10px;
+  background: var(--accent-fill);
+  border: 1px solid var(--accent);
+  color: var(--on-accent);
+  transition: .15s;
+  box-shadow: var(--shadow-sm);
+}
+
+.btnPrimary:hover {
+  background: var(--accent-fill-hover);
+  border-color: var(--accent-strong);
+  color: var(--on-accent);
+}
+
+.errorBanner {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font-weight: 600;
+}
+
+.empty {
+  font-size: 13px;
+  color: var(--text-2);
+  padding: 12px 0;
+}
+
+.activityLink {
+  color: var(--accent-strong);
+  font-weight: 600;
+  font-size: 12.5px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.activityLink:hover {
+  text-decoration: underline;
+}
+
+.activityList {
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.activityItem {
+  display: flex;
+  gap: 13px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.activityIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.activityIcon[data-style="softInfo"] { background: var(--info-soft); color: var(--info-text); }
+.activityIcon[data-style="softOk"] { background: var(--ok-soft); color: var(--ok-text); }
+.activityIcon[data-style="softWarn"] { background: var(--warn-soft); color: var(--warn-text); }
+.activityIcon[data-style="softBad"] { background: var(--bad-soft); color: var(--bad-text); }
+.activityIcon[data-style="softMuted"] { background: var(--surface-3); color: var(--text-2); }
+
+.activityContent { min-width: 0; }
+
+.activityTitle { font-size: 13.5px; }
+
+.activityMeta {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-top: 2px;
+}
+
+.activityEmpty {
+  font-size: 13.5px;
+  color: var(--text-2);
+  padding: 20px 0;
+  line-height: 1.6;
+}
+
+.activityUnavailable {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  font-size: 13px;
+}
+
+.activityRetry {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: 1px solid var(--bad);
+  background: transparent;
+  color: var(--bad-text);
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.activityRetry:hover {
+  background: var(--bad);
+  color: #fff;
+}
+
+.healthLink {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.healthLink:hover {
+  cursor: pointer;
+}
+
+.healthLink:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (max-width: 1080px) {
+  .twoCol { grid-template-columns: 1fr; }
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+}
+
+.phaseBar {
+  display: flex;
+  height: 10px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  gap: 2px;
+}
+
+.phaseSeg {
+  min-width: 4px;
+}
+
+.phaseLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.phaseDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+.healthMore {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.phaseSeg[data-phase="Connected"],
+.phaseDot[data-phase="Connected"] { background: var(--ok); }
+.phaseSeg[data-phase="Running"],
+.phaseDot[data-phase="Running"] { background: var(--info); }
+.phaseSeg[data-phase="Provisioning"],
+.phaseDot[data-phase="Provisioning"] { background: var(--warn); }
+.phaseSeg[data-phase="Failed"],
+.phaseDot[data-phase="Failed"] { background: var(--bad); }
+.phaseSeg[data-phase="Hibernated"],
+.phaseDot[data-phase="Hibernated"],
+.phaseSeg[data-phase="Other"],
+.phaseDot[data-phase="Other"] { background: var(--idle); }
+
+.section {
+  margin-bottom: 28px;
+  min-width: 0;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--text-2);
+}

@@ -1,0 +1,22 @@
+.table {
+  min-width: 52rem;
+}
+
+@media (max-width: 639.98px) {
+  .table {
+    min-width: 0;
+  }
+
+  .table thead {
+    display: none;
+  }
+
+  .table tbody {
+    display: block;
+  }
+
+  .table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -81,7 +81,7 @@ export function contextLabel(ctx: AssistantSessionContext): string {
     case "activity":
       return "Activity";
     case "dashboard":
-      return "Dashboard";
+      return "Overview";
     default:
       return ctx.route ?? "";
   }
