@@ -25,9 +25,10 @@ import (
 func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listRB := mcp.NewTool("list_varroa_role_bindings",
 		mcp.WithDescription("List Varroa RBAC role bindings managed by Varroa. Returns a compact "+
-			"summary per binding (name, roleRef, subjectCount, scopeNamespaces, and per-state hive "+
+			"summary per binding (name, roleRef, subjectCount, scopeNamespaces, owner, and per-state hive "+
 			"federation counts) \u2014 enough to "+
-			"survey a fleet and see who is bound to which role and how broadly. Use "+
+			"survey a fleet and see who is bound to which role and how broadly. A row with owner comes "+
+			"from the operator: the reconciler of that TenantAgent or BroodSchedule writes it. Use "+
 			"get_varroa_role_binding for the full resource."),
 		mcp.WithBoolean("verbose", mcp.Description("Return full VarroaRoleBinding resources instead "+
 			"of summaries. Expensive: full resources carry spec.subjects and the scope "+
@@ -392,13 +393,21 @@ func buildTenantScopes(raw interface{}) ([]v1alpha1.TenantScope, error) {
 // hive counts tally status.federation by state, so a caller finds a binding
 // that failed on a hive without a get per binding.
 type varroaRoleBindingSummary struct {
-	Name            string `json:"name"`
-	RoleRef         string `json:"roleRef,omitempty"`
-	SubjectCount    int    `json:"subjectCount"`
-	ScopeNamespaces int    `json:"scopeNamespaces"`
-	HivesFederated  int    `json:"hivesFederated"`
-	HivesSkipped    int    `json:"hivesSkipped"`
-	HivesFailed     int    `json:"hivesFailed"`
+	Name            string                  `json:"name"`
+	RoleRef         string                  `json:"roleRef,omitempty"`
+	SubjectCount    int                     `json:"subjectCount"`
+	ScopeNamespaces int                     `json:"scopeNamespaces"`
+	Owner           *varroaRoleBindingOwner `json:"owner,omitempty"`
+	HivesFederated  int                     `json:"hivesFederated"`
+	HivesSkipped    int                     `json:"hivesSkipped"`
+	HivesFailed     int                     `json:"hivesFailed"`
+}
+
+// varroaRoleBindingOwner names the object whose reconciler writes a binding.
+type varroaRoleBindingOwner struct {
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
 }
 
 func summarizeVarroaRoleBinding(vrb *v1alpha1.VarroaRoleBinding) varroaRoleBindingSummary {
@@ -426,6 +435,9 @@ func summarizeVarroaRoleBinding(vrb *v1alpha1.VarroaRoleBinding) varroaRoleBindi
 			s.HivesFailed++
 		}
 	}
+	if o, ok := v1alpha1.VarroaRoleBindingOwner(vrb); ok {
+		s.Owner = &varroaRoleBindingOwner{Kind: o.Kind, Namespace: o.Namespace, Name: o.Name}
+	}
 	return s
 }
 
@@ -434,6 +446,7 @@ var varroaRoleBindingListOutputSchema = listOutputSchema("Default summary projec
 	{Name: "roleRef", Type: "string", Desc: "VarroaRole name this binding grants."},
 	{Name: "subjectCount", Type: "integer", Desc: "Number of bound subjects."},
 	{Name: "scopeNamespaces", Type: "integer", Desc: "Number of namespaces the binding names; 0 means no namespace limit. A controllerSelector or tenants entry can still narrow the binding."},
+	{Name: "owner", Type: "object", Desc: "The object whose reconciler writes this binding: kind (TenantAgent or BroodSchedule), namespace, and name. Absent for every other binding."},
 	{Name: "hivesFederated", Type: "integer", Desc: "Number of hive clusters that hold the binding's federated Jenkins grant."},
 	{Name: "hivesSkipped", Type: "integer", Desc: "Number of hive clusters where federation skips the binding on purpose."},
 	{Name: "hivesFailed", Type: "integer", Desc: "Number of hive clusters where federation of the binding failed. get_varroa_role_binding gives the reason in status.federation."},

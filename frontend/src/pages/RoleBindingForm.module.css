@@ -32,6 +32,13 @@
   margin-bottom: 18px;
 }
 
+.fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
 .formLabel {
   display: block;
   font-size: 0.85rem;

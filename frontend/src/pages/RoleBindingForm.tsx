@@ -9,6 +9,8 @@ import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import TenantScopeEditor, { validateTenantScope } from "../components/TenantScopeEditor";
 import { FederationStatusTable } from "../components/FederationStatus";
+import RoleBindingOwnerNote from "../components/RoleBindingOwnerNote";
+import { roleBindingOwner, roleBindingOwnerRoute } from "../lib/roleBindingOwner";
 import styles from "./RoleBindingForm.module.css";
 
 interface LabelEntry {
@@ -95,8 +97,14 @@ export default function RoleBindingForm() {
     load();
   }, [name]);
 
+  // An operator-made binding is read-only: the operator replaces each change on its next pass.
+  const owner = loaded ? roleBindingOwner(loaded.metadata) : null;
+  const readOnly = owner !== null;
+  const showScope = scopeOpen || readOnly;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (readOnly) return;
 
     const tenantErrors = validateTenantScope(tenants);
     if (tenantErrors.length > 0) {
@@ -203,173 +211,182 @@ export default function RoleBindingForm() {
     <div className={styles.page}>
       <div className={styles.pageHead}>
         <div>
-          <div className={styles.pageTitle}>{isEdit ? `Edit Role Binding: ${name}` : "Create Role Binding"}</div>
+          <div className={styles.pageTitle}>
+            {readOnly ? `Role Binding: ${name}` : isEdit ? `Edit Role Binding: ${name}` : "Create Role Binding"}
+          </div>
           <div className={styles.pageDesc}>Bind roles to users and groups with optional scope constraints</div>
         </div>
       </div>
 
       {error && <div className={styles.errorBanner}>{error}</div>}
+      {owner && loaded && <RoleBindingOwnerNote owner={owner} route={roleBindingOwnerRoute(owner, loaded.spec)} />}
 
       <form onSubmit={handleSubmit}>
         <Card>
-          <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Name</label>
-            <input
-              className={styles.formInput}
-              value={bindingName}
-              onChange={(e) => setBindingName(e.target.value)}
-              disabled={isEdit}
-              required
-            />
-          </div>
-
-          <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Subjects</label>
-            {subjects.map((subj, idx) => (
-              <div key={idx} className={styles.subjectRow}>
-                <select
-                  className={styles.formSelect}
-                  value={subj.kind}
-                  onChange={(e) => updateSubject(idx, "kind", e.target.value)}
-                >
-                  <option value="Group">Group</option>
-                  <option value="User">User</option>
-                </select>
-                <input
-                  className={styles.formInput}
-                  placeholder="Subject name"
-                  value={subj.name}
-                  onChange={(e) => updateSubject(idx, "name", e.target.value)}
-                />
-                <button type="button" className={styles.removeBtn} onClick={() => removeSubject(idx)}>
-                  &times;
-                </button>
-              </div>
-            ))}
-            <button type="button" className={styles.addBtn} onClick={addSubject}>
-              + Add Subject
-            </button>
-          </div>
-
-          <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Role Ref</label>
-            <select
-              className={styles.formSelect}
-              value={roleRef}
-              onChange={(e) => setRoleRef(e.target.value)}
-              required
-            >
-              <option value="">-- Select a role --</option>
-              {roleOptions.map((r) => (
-                <option key={r.metadata.name} value={r.metadata.name}>
-                  {r.metadata.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className={styles.formGroup}>
-            <button
-              type="button"
-              className={styles.scopeToggle}
-              onClick={() => setScopeOpen(!scopeOpen)}
-            >
-              {scopeOpen ? "▼" : "▶"} Scope {scopeOpen ? "(click to collapse)" : "(click to expand)"}
-            </button>
-
-            {scopeOpen && (
-              <div className={styles.scopeBody}>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Namespaces (comma-separated)</label>
+          <fieldset disabled={readOnly} className={styles.fieldset}>
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>Name</label>
+              <input
+                className={styles.formInput}
+                value={bindingName}
+                onChange={(e) => setBindingName(e.target.value)}
+                disabled={isEdit}
+                required
+              />
+            </div>
+  
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>Subjects</label>
+              {subjects.map((subj, idx) => (
+                <div key={idx} className={styles.subjectRow}>
+                  <select
+                    className={styles.formSelect}
+                    value={subj.kind}
+                    onChange={(e) => updateSubject(idx, "kind", e.target.value)}
+                  >
+                    <option value="Group">Group</option>
+                    <option value="User">User</option>
+                  </select>
                   <input
                     className={styles.formInput}
-                    placeholder="namespace-a, namespace-b"
-                    value={scopeNamespaces}
-                    disabled={hasTenants}
-                    onChange={(e) => setScopeNamespaces(e.target.value)}
+                    placeholder="Subject name"
+                    value={subj.name}
+                    onChange={(e) => updateSubject(idx, "name", e.target.value)}
                   />
-                  <p className={styles.hint}>
-                    {hasTenants
-                      ? OTHERS_DISABLED_REASON
-                      : storedExpressions.length > 0
-                        ? "Leave empty for cluster-wide scope. The stored selector expressions still narrow this binding."
-                        : "Leave empty for cluster-wide scope."}
-                  </p>
-                </div>
-
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Controller Selector Labels</label>
-                  {selectorLabels.map((label, idx) => (
-                    <div key={idx} className={styles.labelRow}>
-                      <input
-                        className={styles.formInput}
-                        placeholder="Key"
-                        value={label.key}
-                        disabled={hasTenants}
-                        onChange={(e) => updateLabel(idx, "key", e.target.value)}
-                      />
-                      <span className={styles.labelEquals}>=</span>
-                      <input
-                        className={styles.formInput}
-                        placeholder="Value"
-                        value={label.value}
-                        disabled={hasTenants}
-                        onChange={(e) => updateLabel(idx, "value", e.target.value)}
-                      />
-                      <button type="button" className={styles.removeBtn} onClick={() => removeLabel(idx)}>
-                        &times;
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    className={styles.addBtn}
-                    disabled={hasTenants}
-                    onClick={addLabel}
-                  >
-                    + Add Label
+                  <button type="button" className={styles.removeBtn} onClick={() => removeSubject(idx)}>
+                    &times;
                   </button>
-                  {hasTenants && <p className={styles.hint}>{OTHERS_DISABLED_REASON}</p>}
                 </div>
-
-                {storedExpressions.length > 0 && (
+              ))}
+              <button type="button" className={styles.addBtn} onClick={addSubject}>
+                + Add Subject
+              </button>
+            </div>
+  
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>Role Ref</label>
+              <select
+                className={styles.formSelect}
+                value={roleRef}
+                onChange={(e) => setRoleRef(e.target.value)}
+                required
+              >
+                <option value="">-- Select a role --</option>
+                {roleOptions.map((r) => (
+                  <option key={r.metadata.name} value={r.metadata.name}>
+                    {r.metadata.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+  
+            <div className={styles.formGroup}>
+              <button
+                type="button"
+                className={styles.scopeToggle}
+                onClick={() => setScopeOpen(!scopeOpen)}
+              >
+                {showScope ? "▼" : "▶"} Scope {readOnly ? "" : showScope ? "(click to collapse)" : "(click to expand)"}
+              </button>
+  
+              {showScope && (
+                <div className={styles.scopeBody}>
                   <div className={styles.formGroup}>
-                    <div className={styles.formLabel}>Controller Selector Expressions</div>
-                    <ul className={styles.exprList}>
-                      {storedExpressions.map((req, idx) => (
-                        <li key={idx}>{formatMatchExpression(req)}</li>
-                      ))}
-                    </ul>
-                    <p className={styles.hint}>{MATCH_EXPRESSIONS_NOTE}</p>
+                    <label className={styles.formLabel}>Namespaces (comma-separated)</label>
+                    <input
+                      className={styles.formInput}
+                      placeholder="namespace-a, namespace-b"
+                      value={scopeNamespaces}
+                      disabled={hasTenants}
+                      onChange={(e) => setScopeNamespaces(e.target.value)}
+                    />
+                    <p className={styles.hint}>
+                      {hasTenants
+                        ? OTHERS_DISABLED_REASON
+                        : storedExpressions.length > 0
+                          ? "Leave empty for cluster-wide scope. The stored selector expressions still narrow this binding."
+                          : "Leave empty for cluster-wide scope."}
+                    </p>
                   </div>
-                )}
-
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Pipelines Tenants</label>
-                  <TenantScopeEditor
-                    value={tenants}
-                    onChange={setTenants}
-                    disabled={hasOtherDimension}
-                    disabledReason={
-                      // The typed values are the actionable blocker. Stored
-                      // expressions name the reason only when they alone block.
-                      storedExpressions.length > 0 &&
-                      scopeNamespaces.trim().length === 0 &&
-                      !selectorLabels.some((l) => l.key.trim().length > 0)
-                        ? TENANTS_EXPRESSIONS_DISABLED_REASON
-                        : TENANTS_DISABLED_REASON
-                    }
-                  />
+  
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel}>Controller Selector Labels</label>
+                    {selectorLabels.map((label, idx) => (
+                      <div key={idx} className={styles.labelRow}>
+                        <input
+                          className={styles.formInput}
+                          placeholder="Key"
+                          value={label.key}
+                          disabled={hasTenants}
+                          onChange={(e) => updateLabel(idx, "key", e.target.value)}
+                        />
+                        <span className={styles.labelEquals}>=</span>
+                        <input
+                          className={styles.formInput}
+                          placeholder="Value"
+                          value={label.value}
+                          disabled={hasTenants}
+                          onChange={(e) => updateLabel(idx, "value", e.target.value)}
+                        />
+                        <button type="button" className={styles.removeBtn} onClick={() => removeLabel(idx)}>
+                          &times;
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className={styles.addBtn}
+                      disabled={hasTenants}
+                      onClick={addLabel}
+                    >
+                      + Add Label
+                    </button>
+                    {hasTenants && <p className={styles.hint}>{OTHERS_DISABLED_REASON}</p>}
+                  </div>
+  
+                  {storedExpressions.length > 0 && (
+                    <div className={styles.formGroup}>
+                      <div className={styles.formLabel}>Controller Selector Expressions</div>
+                      <ul className={styles.exprList}>
+                        {storedExpressions.map((req, idx) => (
+                          <li key={idx}>{formatMatchExpression(req)}</li>
+                        ))}
+                      </ul>
+                      <p className={styles.hint}>{MATCH_EXPRESSIONS_NOTE}</p>
+                    </div>
+                  )}
+  
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel}>Pipelines Tenants</label>
+                    <TenantScopeEditor
+                      value={tenants}
+                      onChange={setTenants}
+                      disabled={hasOtherDimension}
+                      disabledReason={
+                        // The typed values are the actionable blocker. Stored
+                        // expressions name the reason only when they alone block.
+                        storedExpressions.length > 0 &&
+                        scopeNamespaces.trim().length === 0 &&
+                        !selectorLabels.some((l) => l.key.trim().length > 0)
+                          ? TENANTS_EXPRESSIONS_DISABLED_REASON
+                          : TENANTS_DISABLED_REASON
+                      }
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          </fieldset>
 
           <div className={styles.actions}>
-            <Button variant="primary" type="submit" disabled={loading}>
-              {loading ? "Saving..." : "Save"}
+            {!readOnly && (
+              <Button variant="primary" type="submit" disabled={loading}>
+                {loading ? "Saving..." : "Save"}
+              </Button>
+            )}
+            <Button type="button" onClick={() => navigate("/access/role-bindings")}>
+              {readOnly ? "Back" : "Cancel"}
             </Button>
-            <Button type="button" onClick={() => navigate("/access/role-bindings")}>Cancel</Button>
           </div>
         </Card>
       </form>

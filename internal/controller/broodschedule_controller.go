@@ -2,9 +2,7 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -31,11 +29,9 @@ import (
 )
 
 const (
-	scheduleFinalizer   = "varroa.dev/broodschedule-rbac"
-	scheduleRequeue     = 15 * time.Minute
-	tokenSecretSuffix   = "-schedule-token"
-	bindingAnnNamespace = "varroa.dev/broodschedule-namespace"
-	bindingAnnName      = "varroa.dev/broodschedule-name"
+	scheduleFinalizer = "varroa.dev/broodschedule-rbac"
+	scheduleRequeue   = 15 * time.Minute
+	tokenSecretSuffix = "-schedule-token"
 	// These bound each fired Kubernetes Job; the BroodOperation has its own
 	// TTL and garbage-collection policy, which is independent of Job cleanup.
 	scheduleJobActiveDeadlineSeconds int64 = 3600
@@ -304,8 +300,8 @@ func (r *BroodScheduleReconciler) ensureVarroaRoleBinding(ctx context.Context, c
 		ObjectMeta: metav1.ObjectMeta{
 			Name: bindingName,
 			Annotations: map[string]string{
-				bindingAnnNamespace: cr.Namespace,
-				bindingAnnName:      cr.Name,
+				v1alpha1.AnnotationBroodScheduleNamespace: cr.Namespace,
+				v1alpha1.AnnotationBroodScheduleName:      cr.Name,
 			},
 		},
 		Spec: v1alpha1.VarroaRoleBindingSpec{
@@ -557,8 +553,7 @@ func (r *BroodScheduleReconciler) updateStatus(ctx context.Context, cr *v1alpha1
 
 // bindingNameFor returns the deterministic hashed name for the VarroaRoleBinding.
 func bindingNameFor(cr *v1alpha1.BroodSchedule) string {
-	sum := sha256.Sum256([]byte(cr.Namespace + "/" + cr.Name))
-	return "broodschedule-" + hex.EncodeToString(sum[:])[:48]
+	return v1alpha1.BroodScheduleBindingName(cr.Namespace, cr.Name)
 }
 
 // base64Decode decodes a base64url-encoded string (JWT payload) without padding.

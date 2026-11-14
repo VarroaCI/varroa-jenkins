@@ -235,8 +235,11 @@ func TestScheduleReconciler_RoleBindingCreated(t *testing.T) {
 	if binding.Spec.Scope == nil || len(binding.Spec.Scope.Namespaces) != 1 || binding.Spec.Scope.Namespaces[0] != "team-ns" {
 		t.Errorf("scope = %+v", binding.Spec.Scope)
 	}
-	if binding.Annotations[bindingAnnNamespace] != "team-ns" || binding.Annotations[bindingAnnName] != "bnd-sched" {
+	if binding.Annotations[v1alpha1.AnnotationBroodScheduleNamespace] != cr.Namespace || binding.Annotations[v1alpha1.AnnotationBroodScheduleName] != cr.Name {
 		t.Errorf("annotations = %+v", binding.Annotations)
+	}
+	if o, ok := v1alpha1.VarroaRoleBindingOwner(&binding); !ok || o != (v1alpha1.BindingOwner{Kind: v1alpha1.BindingOwnerBroodSchedule, Namespace: cr.Namespace, Name: cr.Name}) {
+		t.Errorf("owner = %+v, %v; want the BroodSchedule %s/%s", o, ok, cr.Namespace, cr.Name)
 	}
 	// No owner reference.
 	if len(binding.OwnerReferences) != 0 {
@@ -337,8 +340,11 @@ func TestScheduleReconciler_RoleBindingLongName(t *testing.T) {
 	if err := r.client.Get(context.Background(), types.NamespacedName{Name: bindingName}, &binding); err != nil {
 		t.Fatalf("get binding for long name: %v", err)
 	}
-	if binding.Annotations[bindingAnnName] != longName {
-		t.Errorf("annotation name = %q, want %q", binding.Annotations[bindingAnnName], longName)
+	if binding.Annotations[v1alpha1.AnnotationBroodScheduleName] != longName {
+		t.Errorf("annotation name = %q, want %q", binding.Annotations[v1alpha1.AnnotationBroodScheduleName], longName)
+	}
+	if o, ok := v1alpha1.VarroaRoleBindingOwner(&binding); !ok || o != (v1alpha1.BindingOwner{Kind: v1alpha1.BindingOwnerBroodSchedule, Namespace: cr.Namespace, Name: cr.Name}) {
+		t.Errorf("owner = %+v, %v; want the BroodSchedule %s/%s", o, ok, cr.Namespace, cr.Name)
 	}
 }
 

@@ -276,6 +276,21 @@ The operator does not remove a binding with the earlier `ctrl-<namespace>-<contr
 
 A binding with another name stays, also when it carries these labels. Do not give your own binding a `ctrl-` name. The operator replaces that binding when the shorthand contains its role.
 
+## Read a role binding that the operator writes
+
+The operator writes two kinds of VarroaRoleBinding. Do not edit them.
+
+| Owner | Binding name | Role | Scope |
+|---|---|---|---|
+| `TenantAgent` | `tenantagent-<hash>` | `developer` | The Tenant of the agent |
+| `BroodSchedule` | `broodschedule-<hash>` | `operator` | The schedule namespace. In the operator namespace: `admin`, no scope. |
+
+The hash is the start of the SHA-256 of `<namespace>/<name>`. The labels `varroa.dev/tenant-agent-*` name a Tenant agent. The annotations `varroa.dev/broodschedule-*` name a schedule.
+
+The dashboard shows a `Tenant agent: <ns>/<name>` or `Brood schedule: <ns>/<name>` badge that links to the owner. The filter matches the binding name or the owner. The row action reads View, and the form is read-only. The operator replaces each change on its next pass. Delete stays.
+
+`varroactl get rolebindings` shows `OWNER` as `<kind>/<namespace>/<name>`, or `-`. `list_varroa_role_bindings` returns `owner`.
+
 ## Change a role or a binding through the API
 
 Change a role with `PUT /api/v1/roles/{name}`. Change a binding with `PUT /api/v1/rolebindings/{name}`. The body replaces the stored object. Start from your read.
