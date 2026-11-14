@@ -713,6 +713,7 @@ func updatePDCall(t *testing.T, deps *api.Dependencies, args map[string]interfac
 // root domain, so a merge that copied the wrong base would show up in the body.
 func TestMCPUpdateProvisioningDefaults_BaseReadFromTargetCluster(t *testing.T) {
 	deps := adminDeps()
+	deps.Brood = memberBrood{}
 	brood := &pdRoutedBrood{stored: map[string]json.RawMessage{
 		"core":     pdSpecRaw(t, "varroa-defaults", "core.example.com"),
 		"member-b": pdSpecRaw(t, "varroa-defaults", "member-b.example.com"),
@@ -747,6 +748,7 @@ func TestMCPUpdateProvisioningDefaults_BaseReadFromTargetCluster(t *testing.T) {
 // spec too, and none of it may reach the target.
 func TestMCPUpdateProvisioningDefaults_NotFoundOnTargetStartsEmpty(t *testing.T) {
 	deps := adminDeps()
+	deps.Brood = memberBrood{}
 	if err := deps.Store.(*crdstore.Fake).Seed(&v1alpha1.ProvisioningDefaults{
 		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
 		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "local.example.com", StorageClass: "local-sc"},
@@ -785,6 +787,7 @@ func TestMCPUpdateProvisioningDefaults_NotFoundOnTargetStartsEmpty(t *testing.T)
 // conflict, and the tool reads the target again and merges onto that object.
 func TestMCPUpdateProvisioningDefaults_CreateConflictReadsAndMergesAgain(t *testing.T) {
 	deps := adminDeps()
+	deps.Brood = memberBrood{}
 	brood := &pdRoutedBrood{
 		stored:        map[string]json.RawMessage{},
 		conflicts:     1,
@@ -861,6 +864,7 @@ func TestMCPUpdateProvisioningDefaults_LocalCreateRaceReadsAndMergesAgain(t *tes
 // an object with only the patch fields over the target's real spec.
 func TestMCPUpdateProvisioningDefaults_TransientReadErrorWritesNothing(t *testing.T) {
 	deps := adminDeps()
+	deps.Brood = memberBrood{}
 	brood := &pdRoutedBrood{readErr: errors.New("bus timeout")}
 	deps.ConfigBrood = brood
 
@@ -869,6 +873,9 @@ func TestMCPUpdateProvisioningDefaults_TransientReadErrorWritesNothing(t *testin
 	})
 	if !tr.IsError {
 		t.Fatalf("want a tool error on a transient read failure, got %v", tr.Content)
+	}
+	if !strings.HasPrefix(toolText(tr), "failed to read provisioning defaults") {
+		t.Errorf("error text = %q, want it to name the failed read", toolText(tr))
 	}
 	if len(brood.updates) != 0 {
 		t.Errorf("got %d updates, want none after a failed read", len(brood.updates))
@@ -879,6 +886,7 @@ func TestMCPUpdateProvisioningDefaults_TransientReadErrorWritesNothing(t *testin
 // arguments onto the newer object. The second write carries the newer version.
 func TestMCPUpdateProvisioningDefaults_ConflictReadsAndMergesAgain(t *testing.T) {
 	deps := adminDeps()
+	deps.Brood = memberBrood{}
 	newer, err := json.Marshal(v1alpha1.ProvisioningDefaults{
 		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults", ResourceVersion: "2"},
 		Spec: v1alpha1.ProvisioningDefaultsSpec{
@@ -930,6 +938,7 @@ func TestMCPUpdateProvisioningDefaults_ConflictReadsAndMergesAgain(t *testing.T)
 // the caller to run the call again.
 func TestMCPUpdateProvisioningDefaults_ConflictOnEveryAttemptAsksForARetry(t *testing.T) {
 	deps := adminDeps()
+	deps.Brood = memberBrood{}
 	newer := pdSpecRawAt(t, "varroa-defaults", "2", "newer.example.com")
 	brood := &pdRoutedBrood{
 		stored:        map[string]json.RawMessage{"member-b": pdSpecRawAt(t, "varroa-defaults", "1", "member-b.example.com")},
@@ -1204,5 +1213,150 @@ func TestUpdateJenkinsVersionProfile_EmptyPatchWritesNothing(t *testing.T) {
 	}
 	if brood.writes != 0 {
 		t.Errorf("writes = %d, want 0 for an empty patch", brood.writes)
+	}
+}
+
+// clusterLogBrood answers the seven provisioning defaults and version profile
+// calls with success and records the cluster of each call.
+type clusterLogBrood struct {
+	api.ConfigBrood
+	clusters []string
+}
+
+func (b *clusterLogBrood) GetProvisioningDefaults(_ context.Context, cluster, name string) (json.RawMessage, error) {
+	b.clusters = append(b.clusters, cluster)
+	return json.Marshal(v1alpha1.ProvisioningDefaults{ObjectMeta: metav1.ObjectMeta{Name: name, ResourceVersion: "1"}})
+}
+
+func (b *clusterLogBrood) UpdateProvisioningDefaults(_ context.Context, cluster, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	b.clusters = append(b.clusters, cluster)
+	return obj, nil
+}
+
+func (b *clusterLogBrood) ListVersionProfiles(_ context.Context, cluster string) ([]json.RawMessage, error) {
+	b.clusters = append(b.clusters, cluster)
+	return []json.RawMessage{}, nil
+}
+
+func (b *clusterLogBrood) GetVersionProfile(_ context.Context, cluster, name string) (json.RawMessage, error) {
+	b.clusters = append(b.clusters, cluster)
+	return json.Marshal(v1alpha1.JenkinsVersionProfile{ObjectMeta: metav1.ObjectMeta{Name: name, ResourceVersion: "1"}})
+}
+
+func (b *clusterLogBrood) CreateVersionProfile(_ context.Context, cluster, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	b.clusters = append(b.clusters, cluster)
+	return obj, nil
+}
+
+func (b *clusterLogBrood) UpdateVersionProfile(_ context.Context, cluster, _ string, obj json.RawMessage) (json.RawMessage, error) {
+	b.clusters = append(b.clusters, cluster)
+	return obj, nil
+}
+
+func (b *clusterLogBrood) DeleteVersionProfile(_ context.Context, cluster, _ string) error {
+	b.clusters = append(b.clusters, cluster)
+	return nil
+}
+
+// pdVPToolCall is one call of a provisioning defaults or version profile tool.
+type pdVPToolCall struct {
+	tool   string
+	args   map[string]any
+	writes bool
+}
+
+func pdVPToolCalls() []pdVPToolCall {
+	return []pdVPToolCall{
+		{"get_provisioning_defaults", map[string]any{"name": "varroa-defaults"}, false},
+		{"update_provisioning_defaults", map[string]any{"name": "varroa-defaults", "storageClass": "fast"}, true},
+		{"list_jenkins_version_profile", map[string]any{}, false},
+		{"get_jenkins_version_profile", map[string]any{"name": "2.479"}, false},
+		{"create_jenkins_version_profile", map[string]any{"name": "2.479"}, true},
+		{"update_jenkins_version_profile", map[string]any{"name": "2.479", "object": `{"spec":{"recommended":true}}`}, true},
+		{"delete_jenkins_version_profile", map[string]any{"name": "2.479"}, true},
+	}
+}
+
+// An unknown cluster is refused before any ConfigBrood call, and it writes no activity event.
+func TestProvisioningDefaultsAndVersionProfileTools_UnknownClusterCallsNothing(t *testing.T) {
+	setups := []struct {
+		name  string
+		brood api.Brood
+		c     string
+	}{
+		{"member name unknown to the brood", memberBrood{}, "member-z"},
+		{"no brood wired", nil, "member-b"},
+	}
+	for _, setup := range setups {
+		for _, call := range pdVPToolCalls() {
+			t.Run(setup.name+"/"+call.tool, func(t *testing.T) {
+				deps := adminDeps()
+				deps.Brood = setup.brood
+				brood := &clusterLogBrood{}
+				deps.ConfigBrood = brood
+				sink := &recordingSink{}
+				deps.ActivityPublisher = sink
+
+				tr := callToolAs(t, deps, mcpAdminClaims, call.tool, withArgs(call.args, map[string]any{"cluster": setup.c}))
+				if !tr.IsError || toolText(tr) != "unknown cluster: "+setup.c {
+					t.Fatalf("got error=%v text=%q, want the unknown cluster refusal", tr.IsError, toolText(tr))
+				}
+				if len(brood.clusters) != 0 {
+					t.Errorf("ConfigBrood saw %v, want no call", brood.clusters)
+				}
+				if len(sink.events) != 0 {
+					t.Errorf("got %d activity events, want none", len(sink.events))
+				}
+			})
+		}
+	}
+}
+
+// A known cluster, or no cluster, routes every call to the resolved cluster.
+func TestProvisioningDefaultsAndVersionProfileTools_CallTheResolvedCluster(t *testing.T) {
+	cases := []struct {
+		cluster string
+		want    string
+	}{
+		{"", "core"},
+		{"core", "core"},
+		{"member-b", "member-b"},
+	}
+	for _, c := range cases {
+		for _, call := range pdVPToolCalls() {
+			t.Run(c.want+"/"+call.tool, func(t *testing.T) {
+				deps := adminDeps()
+				deps.Brood = memberBrood{}
+				brood := &clusterLogBrood{}
+				deps.ConfigBrood = brood
+				sink := &recordingSink{}
+				deps.ActivityPublisher = sink
+
+				args := call.args
+				if c.cluster != "" {
+					args = withArgs(call.args, map[string]any{"cluster": c.cluster})
+				}
+				tr := callToolAs(t, deps, mcpAdminClaims, call.tool, args)
+				if tr.IsError {
+					t.Fatalf("unexpected tool error: %q", toolText(tr))
+				}
+				if len(brood.clusters) == 0 {
+					t.Fatal("ConfigBrood saw no call")
+				}
+				for _, got := range brood.clusters {
+					if got != c.want {
+						t.Errorf("ConfigBrood cluster = %q, want %q", got, c.want)
+					}
+				}
+				if call.writes {
+					if len(sink.events) != 1 {
+						t.Fatalf("got %d activity events, want 1", len(sink.events))
+					}
+					if sink.events[0].Cluster != c.want {
+						t.Errorf("activity cluster = %q, want %q", sink.events[0].Cluster, c.want)
+					}
+				}
+			})
+		}
 	}
 }

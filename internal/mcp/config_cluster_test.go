@@ -479,6 +479,9 @@ func TestConfigClusterArgumentDeclared(t *testing.T) {
 		"get_varroa_role": false, "get_varroa_role_binding": false,
 		"list_varroa_roles": false, "create_varroa_role": false, "delete_varroa_role": false,
 		"list_varroa_role_bindings": false, "create_varroa_role_binding": false, "delete_varroa_role_binding": false,
+		"get_provisioning_defaults": true, "update_provisioning_defaults": true,
+		"list_jenkins_version_profile": true, "get_jenkins_version_profile": true,
+		"create_jenkins_version_profile": true, "update_jenkins_version_profile": true, "delete_jenkins_version_profile": true,
 	}
 	byName := map[string]listedTool{}
 	for _, tool := range liveTools(t) {
