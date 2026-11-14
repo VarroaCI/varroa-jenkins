@@ -13,8 +13,9 @@ const (
 	// AgentSessionNoTenant is the tenant token of a session with no tenant.
 	AgentSessionNoTenant = "_none"
 
-	// AssistantControlSubject carries the global kill-switch change. A
-	// replica reads it to refresh its view of the switch.
+	// AssistantControlSubject carries a notice of a kill switch write or an
+	// unattended grant write. A varroa-agent replica wakes its status ticker on
+	// it. No reader keeps a copy of the settings.
 	AssistantControlSubject = "varroa.assistant.control"
 )
 

@@ -10,7 +10,8 @@ import (
 // assistantPublisher publishes one message on a bus subject.
 type assistantPublisher func(subject string, data []byte) error
 
-// publishControl announces a change of the global kill switch.
+// publishControl publishes the control notice after a kill switch write or an
+// unattended grant write. Each varroa-agent replica wakes its status ticker on it.
 func publishControl(pub assistantPublisher, paused bool, by string, at time.Time) error {
 	if pub == nil {
 		return nil

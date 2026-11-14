@@ -85,9 +85,12 @@ type RunConfig struct {
 	StepBudget     int
 	ApprovalExpiry time.Duration
 	Tenants        datashare.TenantResolver
-	TenantLevels   func(ctx context.Context) (map[string]agent.DataSharing, error)
-	Logger         *slog.Logger
-	Now            func() time.Time
+	// TenantLevels reads the tenant levels of the global settings row. The loop
+	// calls it for each read call. It must not cache, because a level write
+	// publishes no bus message.
+	TenantLevels func(ctx context.Context) (map[string]agent.DataSharing, error)
+	Logger       *slog.Logger
+	Now          func() time.Time
 }
 
 func (c RunConfig) now() time.Time {

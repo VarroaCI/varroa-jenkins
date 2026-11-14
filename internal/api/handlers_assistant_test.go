@@ -25,6 +25,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/agent/store"
 	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
 // scriptedAssistantProvider answers one turn of deltas per call.
@@ -549,5 +550,57 @@ func TestMyAssistant_PairChecked(t *testing.T) {
 	}
 	if got.Provider != "beta" || got.Model != "b2" {
 		t.Errorf("stored pair = %q/%q, want beta/b2 after the last accepted PUT", got.Provider, got.Model)
+	}
+}
+
+// TestAssistantSettings_PublishesOnPauseWriteOnly pins the control notice
+// rule: a write that names paused publishes one notice with the actor, and a
+// tenant level write publishes none.
+func TestAssistantSettings_PublishesOnPauseWriteOnly(t *testing.T) {
+	f := newAssistantFixture(t)
+	pub := &recordedPub{}
+	f.rt.Publish = pub.publish
+	setPayments := map[string]any{"set": map[string]any{"tenant": "payments", "level": "metadata"}}
+	steps := []struct {
+		name   string
+		body   map[string]any
+		want   int
+		paused bool
+	}{
+		{"tenant set", map[string]any{"tenantDataSharing": setPayments}, 0, false},
+		{"tenant remove", map[string]any{"tenantDataSharing": map[string]any{"remove": "payments"}}, 0, false},
+		{"pause", map[string]any{"paused": true}, 1, true},
+		{"resume", map[string]any{"paused": false}, 2, false},
+		{"pause and tenant set", map[string]any{"paused": true, "tenantDataSharing": setPayments}, 3, true},
+	}
+	for _, st := range steps {
+		rec := f.do(t, f.admin, http.MethodPut, "/assistant/settings", st.body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d body = %s", st.name, rec.Code, rec.Body)
+		}
+		if len(pub.subjects) != st.want {
+			t.Fatalf("%s: notices = %d, want %d", st.name, len(pub.subjects), st.want)
+		}
+		if st.want == 0 {
+			continue
+		}
+		var resp struct {
+			UpdatedBy string `json:"updatedBy"`
+		}
+		decodeBody(t, rec, &resp)
+		last := len(pub.subjects) - 1
+		if pub.subjects[last] != bus.AssistantControlSubject {
+			t.Errorf("%s: subject = %q", st.name, pub.subjects[last])
+		}
+		var msg struct {
+			Paused    bool   `json:"paused"`
+			UpdatedBy string `json:"updated_by"`
+		}
+		if err := json.Unmarshal(pub.bodies[last], &msg); err != nil {
+			t.Fatal(err)
+		}
+		if msg.Paused != st.paused || msg.UpdatedBy == "" || msg.UpdatedBy != resp.UpdatedBy {
+			t.Errorf("%s: notice = %+v, want paused %v by %q", st.name, msg, st.paused, resp.UpdatedBy)
+		}
 	}
 }
