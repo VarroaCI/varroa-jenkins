@@ -206,13 +206,15 @@ jobs:
         # correctness is covered by the live localdev e2e instead.
         # The kubeconform version is pinned. A new release can fail this step on code that did not change.
         # Bump it on purpose, in its own pull request.
+        # The schema version is pinned to the chart floor, kubeVersion in charts/varroa/Chart.yaml.
+        # Without the flag, kubeconform reads the master schemas, and those change often.
         run: |
           go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
           export LOCALDEV_BUNDLE_HASH=ci LOCALDEV_MITE_IMAGE=ci-check LOCALDEV_GIT_IMAGE=ci-check
           for f in hack/localdev/manifests/*.yaml; do
             envsubst '$LOCALDEV_BUNDLE_HASH $LOCALDEV_MITE_IMAGE $LOCALDEV_GIT_IMAGE' < "$f"
             echo '---'
-          done | "$(go env GOPATH)/bin/kubeconform" -strict -summary -ignore-missing-schemas
+          done | "$(go env GOPATH)/bin/kubeconform" -strict -summary -ignore-missing-schemas -kubernetes-version 1.30.0
       - name: Validate OCI-layout fixture structure
         if: ${{ !cancelled() }}
         # Structural check: hack/localdev/pluginpack-fixture/ must be a valid
