@@ -2,8 +2,6 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"reflect"
 
@@ -32,50 +30,7 @@ func IsRBACSpecRole(role string) bool {
 	return ok
 }
 
-// rbacBindingName is the name of the JenkinsRoleBinding that the operator
-// writes for one rbacSpec role of the controller namespace/name. A slash occurs
-// in neither part, so the hash gives each controller its own names. The name
-// has at most 31 characters for any input.
-func rbacBindingName(namespace, name, role string) string {
-	sum := sha256.Sum256([]byte(namespace + "/" + name))
-	return "ctrl-" + hex.EncodeToString(sum[:])[:16] + "-" + role
-}
-
-// ownsRBACBinding reports whether b is an rbacSpec binding of the controller
-// namespace/name. The labels alone are not proof, because a copy of a generated
-// binding keeps them. The name must also be the rbacBindingName of an rbacSpec
-// role. The operator never writes the earlier dash-joined name, so a binding at
-// that name is not owned, even when its labels name this controller.
-func ownsRBACBinding(b *v1alpha1.JenkinsRoleBinding, namespace, name string) bool {
-	if b.Labels[v1alpha1.LabelManagedBy] != v1alpha1.ManagedByOperator ||
-		b.Labels[v1alpha1.LabelControllerNamespace] != namespace ||
-		b.Labels[v1alpha1.LabelControllerName] != name {
-		return false
-	}
-	for role := range rbacSpecRoleRefs() {
-		if b.Name == rbacBindingName(namespace, name, role) {
-			return true
-		}
-	}
-	return false
-}
-
-// RBACSpecBindingOwner returns the controller whose spec.rbacSpec writes b.
-// It reads the controller from the labels of b. It returns ok only when
-// ownsRBACBinding accepts b for that controller.
-func RBACSpecBindingOwner(b *v1alpha1.JenkinsRoleBinding) (namespace, name string, ok bool) {
-	if b == nil {
-		return "", "", false
-	}
-	namespace = b.Labels[v1alpha1.LabelControllerNamespace]
-	name = b.Labels[v1alpha1.LabelControllerName]
-	if namespace == "" || name == "" || !ownsRBACBinding(b, namespace, name) {
-		return "", "", false
-	}
-	return namespace, name, true
-}
-
-// ownedRBACBindings lists the JenkinsRoleBindings that ownsRBACBinding accepts for cr.
+// ownedRBACBindings lists the JenkinsRoleBindings whose v1alpha1.RBACSpecBindingOwner is cr.
 func (r *Reconciler) ownedRBACBindings(ctx context.Context, cr *v1alpha1.Controller) ([]*v1alpha1.JenkinsRoleBinding, error) {
 	all, err := crdstore.List[v1alpha1.JenkinsRoleBinding](ctx, r.store, "", "")
 	if err != nil {
@@ -83,7 +38,7 @@ func (r *Reconciler) ownedRBACBindings(ctx context.Context, cr *v1alpha1.Control
 	}
 	var owned []*v1alpha1.JenkinsRoleBinding
 	for _, b := range all {
-		if ownsRBACBinding(b, cr.Namespace, cr.Name) {
+		if ns, n, ok := v1alpha1.RBACSpecBindingOwner(b); ok && ns == cr.Namespace && n == cr.Name {
 			owned = append(owned, b)
 		}
 	}
@@ -139,7 +94,7 @@ func buildDesiredRoleBindings(cr *v1alpha1.Controller) ([]*v1alpha1.JenkinsRoleB
 
 		bindings = append(bindings, &v1alpha1.JenkinsRoleBinding{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: rbacBindingName(cr.Namespace, cr.Name, role),
+				Name: v1alpha1.RBACSpecBindingName(cr.Namespace, cr.Name, role),
 				Labels: map[string]string{
 					v1alpha1.LabelManagedBy:           v1alpha1.ManagedByOperator,
 					v1alpha1.LabelControllerNamespace: cr.Namespace,

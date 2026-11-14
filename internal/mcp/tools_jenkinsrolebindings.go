@@ -13,7 +13,6 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
-	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
 
@@ -323,7 +322,7 @@ func summarizeJenkinsRoleBinding(jrb *v1alpha1.JenkinsRoleBinding) jenkinsRoleBi
 		s.ScopeType = jrb.Spec.JenkinsScope.Type
 		s.ScopeFolder = jrb.Spec.JenkinsScope.Folder
 	}
-	if ns, n, ok := controller.RBACSpecBindingOwner(jrb); ok {
+	if ns, n, ok := v1alpha1.RBACSpecBindingOwner(jrb); ok {
 		s.Controller = &jenkinsRoleBindingController{Namespace: ns, Name: n}
 	}
 	return s

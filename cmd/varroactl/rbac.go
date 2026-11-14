@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
 func init() {
@@ -54,7 +56,7 @@ func addRBACNouns(v *verbCommands) {
 		Namespaced:    false,
 		ClusterScoped: true,
 		DescribeFrom:  true,
-		Headers:       []string{"NAME", "ROLE", "SUBJECTS", "JENKINS-SCOPE"},
+		Headers:       []string{"NAME", "ROLE", "SUBJECTS", "JENKINS-SCOPE", "CONTROLLER"},
 		Columns:       jenkinsRoleBindingColumns,
 	})
 }
@@ -204,5 +206,28 @@ func jenkinsRoleBindingColumns(item map[string]any) []string {
 		}
 	}
 
-	return []string{itemName(item), roleRef, subjects, jenkinsScope}
+	return []string{itemName(item), roleRef, subjects, jenkinsScope, jenkinsRoleBindingController(item)}
+}
+
+// jenkinsRoleBindingController returns "<namespace>/<name>" of the controller
+// whose spec.rbacSpec writes the binding, or "-" for every other binding.
+// v1alpha1.RBACSpecBindingOwner is the one rule. Do not test the name here.
+func jenkinsRoleBindingController(item map[string]any) string {
+	b := &v1alpha1.JenkinsRoleBinding{}
+	b.Name = itemName(item)
+	if meta, ok := item["metadata"].(map[string]any); ok {
+		if labels, ok := meta["labels"].(map[string]any); ok {
+			b.Labels = make(map[string]string, len(labels))
+			for k, v := range labels {
+				if s, ok := v.(string); ok {
+					b.Labels[k] = s
+				}
+			}
+		}
+	}
+	ns, name, ok := v1alpha1.RBACSpecBindingOwner(b)
+	if !ok {
+		return "-"
+	}
+	return ns + "/" + name
 }
