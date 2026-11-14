@@ -10,6 +10,8 @@ The error names each argument that caused it:
 - `input schema validation failed: <root>: additional properties 'scope' not allowed` names an argument that the schema does not declare.
 - `input schema validation failed: <root>: missing property 'name'` names a required argument that the call does not send.
 
+An assistant or Tenant agent session checks a write call against the same schema before it asks for approval. A call that the schema refuses gets this error as its tool result at once. The session creates no approval for it, and the model can send the call again.
+
 ## Interpret annotations
 
 | Annotation | Meaning |

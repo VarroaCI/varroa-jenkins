@@ -32,8 +32,9 @@ type WriteDecision int
 const (
 	// WriteApprove parks the session until a person approves the call.
 	WriteApprove WriteDecision = iota
-	// WriteRunNow runs the call without a person's approval. No caller uses
-	// it yet. The tenant agent decides per tool through this hook.
+	// WriteRunNow runs the call without a person's approval. A Tenant agent
+	// with unattended writes uses it. The tenant agent decides per tool
+	// through this hook.
 	WriteRunNow
 )
 

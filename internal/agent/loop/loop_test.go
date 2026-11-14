@@ -23,7 +23,8 @@ type stubHost struct{ calls []string }
 func (h *stubHost) List(context.Context) ([]agent.ToolDef, error) {
 	return []agent.ToolDef{
 		{Name: "get_run", Class: agent.ClassRead},
-		{Name: "restart_run", Class: agent.ClassWrite},
+		{Name: "restart_run", Class: agent.ClassWrite, Schema: json.RawMessage(
+			`{"additionalProperties":false,"properties":{"run":{"type":"string"}},"required":["run"],"type":"object"}`)},
 		{Name: "call_jenkins_tool", Class: agent.ClassWrite, Hidden: true},
 	}, nil
 }
@@ -186,6 +187,110 @@ func TestRun_HiddenToolIsUnknown(t *testing.T) {
 	}
 	if len(f.host.calls) != 0 {
 		t.Errorf("a hidden tool ran: %v", f.host.calls)
+	}
+}
+
+// TestRun_WriteRefusedBySchemaCreatesNoApproval pins that a write call that its
+// schema refuses creates no approval, never reaches the host, and gives the
+// model the refusal as an error result.
+func TestRun_WriteRefusedBySchemaCreatesNoApproval(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct{ name, args, want string }{
+		{"undeclared argument", `{"run":"r1","scope":1}`,
+			"input schema validation failed: <root>: additional properties 'scope' not allowed"},
+		{"missing argument", `{}`,
+			"input schema validation failed: <root>: missing property 'run'"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			kp := &keepProvider{scriptProvider: scriptProvider{turns: [][]provider.Delta{
+				toolTurn("c1", "restart_run", tc.args),
+				textTurn("ok"),
+			}}}
+			f.cfg.Provider = kp
+			if err := Run(ctx, f.cfg, TriggerStart); err != nil {
+				t.Fatal(err)
+			}
+			if s := f.session(t); s.State != agent.StateCompleted {
+				t.Fatalf("state = %s, want completed", s.State)
+			}
+			page, err := f.st.ListApprovals(ctx, store.ApprovalQuery{Principal: "u", SessionID: f.id})
+			if err != nil || len(page.Items) != 0 {
+				t.Fatalf("approvals = %v, %v; want none", page.Items, err)
+			}
+			if len(f.host.calls) != 0 {
+				t.Errorf("host calls = %v, want none", f.host.calls)
+			}
+			want := []agent.EventType{agent.EventUser, agent.EventAssistant, agent.EventToolCall,
+				agent.EventToolResult, agent.EventAssistant, agent.EventDone}
+			if got := f.types(t); !equalTypes(got, want) {
+				t.Errorf("event types = %v, want %v", got, want)
+			}
+			evs, err := f.st.Events(ctx, f.id, 0, 1000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var res agent.ToolResultPayload
+			for _, e := range evs {
+				if e.Type == agent.EventToolResult {
+					if err := json.Unmarshal(e.Payload, &res); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if !res.IsError || res.Content != tc.want {
+				t.Errorf("tool_result = %+v, want error %q", res, tc.want)
+			}
+			var got *provider.Message
+			for i := range kp.last.Messages {
+				if kp.last.Messages[i].Role == provider.RoleTool {
+					got = &kp.last.Messages[i]
+				}
+			}
+			if got == nil || !got.IsError || got.Text != tc.want {
+				t.Errorf("provider tool message = %+v, want error %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRun_RefusedWriteBesideValidWriteParksOne pins that a refused write in a
+// turn does not stop a valid write in the same turn from parking.
+func TestRun_RefusedWriteBesideValidWriteParksOne(t *testing.T) {
+	ctx := context.Background()
+	turn := []provider.Delta{
+		{ToolCall: &provider.ToolCallDelta{Index: 0, ID: "c1", Name: "restart_run", ArgumentsFragment: `{"run":"r1","scope":1}`}},
+		{ToolCall: &provider.ToolCallDelta{Index: 1, ID: "c2", Name: "restart_run", ArgumentsFragment: `{"run":"r1"}`}},
+		{Usage: &provider.Usage{PromptTokens: 10, CompletionTokens: 5}},
+		{Stop: provider.StopToolUse},
+	}
+	f := newFixture(t, turn)
+	if err := Run(ctx, f.cfg, TriggerStart); err != nil {
+		t.Fatal(err)
+	}
+	if s := f.session(t); s.State != agent.StateWaitingApproval {
+		t.Fatalf("state = %s, want waiting_approval", s.State)
+	}
+	page, err := f.st.ListApprovals(ctx, store.ApprovalQuery{Principal: "u", SessionID: f.id})
+	if err != nil || len(page.Items) != 1 || page.Items[0].CallID != "c2" {
+		t.Fatalf("approvals = %v, %v; want one for c2", page.Items, err)
+	}
+	evs, err := f.st.Events(ctx, f.id, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range evs {
+		if e.Type != agent.EventToolResult {
+			continue
+		}
+		var res agent.ToolResultPayload
+		if err := json.Unmarshal(e.Payload, &res); err != nil {
+			t.Fatal(err)
+		}
+		if res.CallID == "c1" && !res.IsError {
+			t.Errorf("c1 tool_result = %+v, want an error", res)
+		}
 	}
 }
 

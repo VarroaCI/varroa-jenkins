@@ -430,8 +430,10 @@ func errText(err error) string {
 }
 
 // runCalls runs the tool calls of one turn in order. A read call runs now, a
-// write call is queued for approval when the decision says so. It returns the
-// result messages of the calls that ran and the approvals to park for.
+// write call is queued for approval when the decision says so. A write call
+// that its schema refuses gets the refusal as an error result and creates no
+// approval. It returns the result messages of the calls that ran and the
+// approvals to park for.
 func (r *run) runCalls(ctx context.Context, sess agent.Session, visible []agent.ToolDef, calls []provider.ToolCall) ([]provider.Message, []agent.Approval, []agent.EventInput, error) {
 	var results []provider.Message
 	var approvals []agent.Approval
@@ -464,6 +466,14 @@ func (r *run) runCalls(ctx context.Context, sess agent.Session, visible []agent.
 			continue
 		}
 		if class == agent.ClassWrite && r.cfg.DecideWrite(def, call.Arguments) == WriteApprove {
+			if refusal, ok := CheckArguments(def, call.Arguments); !ok {
+				msg, err := r.result(ctx, call, refusal, true, sess.DataSharing)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				results = append(results, msg)
+				continue
+			}
 			ap, ev, err := r.queueApproval(sess, call)
 			if err != nil {
 				return nil, nil, nil, err
