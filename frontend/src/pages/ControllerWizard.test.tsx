@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ControllerWizard from "./ControllerWizard";
+import { ApiError } from "../hooks/useApi";
 
 const mockNavigate = vi.fn();
 vi.mock("react-router-dom", () => ({
@@ -21,15 +22,10 @@ const mockRenderController = vi.fn();
 const mockCreateController = vi.fn();
 
 const mockBffFetch = vi.fn();
-vi.mock("../hooks/useApi", () => ({
-  bffFetch: (...args: unknown[]) => mockBffFetch(...args),
-  ApiError: class ApiError extends Error {
-    constructor(public readonly status: number, message: string, public readonly body?: unknown) {
-      super(message);
-      this.name = "ApiError";
-    }
-  },
-}));
+vi.mock("../hooks/useApi", async () => {
+  const actual = await vi.importActual<typeof import("../hooks/useApi")>("../hooks/useApi");
+  return { ...actual, bffFetch: (...args: unknown[]) => mockBffFetch(...args) };
+});
 
 const mockUseClustersData = { data: [{name:"core",core:true,healthy:true,lastHeartbeat:"2025-01-01T00:00:00Z",operatorVersion:"1.0",k8sVersion:"1.28",controllerCount:5,connectedCount:4,state:"active"}], isLoading: false, isError: false };
 vi.mock("../hooks/useClusters", () => ({ useClusters: () => mockUseClustersData, coreOf: (c: unknown[]) => c?.find((c2: any) => c2.core) }));
@@ -1120,6 +1116,42 @@ describe("ControllerWizard", () => {
     await user.type(screen.getByPlaceholderText("20Gi"), "20Gi");
     await user.click(screen.getByRole("button", { name: /continue.*advanced options/i }));
   }
+
+  async function previewBadStatefulSet(user: ReturnType<typeof userEvent.setup>) {
+    await navigateToAdvancedOptions(user);
+    const sts = await screen.findByLabelText("StatefulSet overlay YAML");
+    fireEvent.change(sts, { target: { value: "spec: [" } });
+    await user.click(screen.getByRole("button", { name: /preview merge/i }));
+    return sts;
+  }
+
+  it("shows a 400 preview reason under the overlay field it names", async () => {
+    mockPreviewControllerOverlay.mockRejectedValueOnce(
+      new ApiError(400, "The request could not be completed.", {
+        error: "resourceOverlay.statefulSet: malformed YAML: yaml: line 1: did not find expected key",
+      }),
+    );
+    const user = userEvent.setup();
+    const sts = await previewBadStatefulSet(user);
+
+    const reason = await screen.findByText(/malformed YAML: yaml: line 1: did not find expected key/);
+    expect(sts.parentElement).toContainElement(reason);
+    expect(screen.queryByText("The request could not be completed.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/resourceOverlay\.statefulSet/)).not.toBeInTheDocument();
+  });
+
+  it("shows the server text when a 400 preview names no overlay field", async () => {
+    mockPreviewControllerOverlay.mockRejectedValueOnce(
+      new ApiError(400, "The request could not be completed.", {
+        error: "invalid body: json: cannot unmarshal string into Go struct field previewRequest.podOverrides.env of type []v1.EnvVar",
+      }),
+    );
+    const user = userEvent.setup();
+    await previewBadStatefulSet(user);
+
+    expect(await screen.findByText(/invalid body: json: cannot unmarshal/)).toBeInTheDocument();
+    expect(screen.queryByText("The request could not be completed.")).not.toBeInTheDocument();
+  });
 
   it("populates miteSpec.image when miteImage is set and omits imagePullPolicy when unset", async () => {
     class MockEventSource {

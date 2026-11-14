@@ -1436,4 +1436,43 @@ describe("SpecEditorCard live preview", () => {
 
     expect(mockPreviewControllerOverlay).not.toHaveBeenCalled();
   });
+
+  it("hides the card when the preview answers 403", async () => {
+    mockPreviewControllerOverlay.mockRejectedValue(
+      new ApiError(403, "You do not have access to this page.", { error: "forbidden" }),
+    );
+    renderCard();
+    fireEvent.click(screen.getByText("Pod overrides"));
+    typeYaml("jvmOpts: -Xmx1g");
+
+    expect(screen.getByText("Spec Editor")).toBeInTheDocument();
+    await passPreviewDelay();
+
+    await waitFor(() => expect(screen.queryByText("Spec Editor")).not.toBeInTheDocument());
+    expect(screen.queryByText("You do not have access to this page.")).not.toBeInTheDocument();
+  });
+
+  it("shows the server reason when the preview answers 400", async () => {
+    mockPreviewControllerOverlay.mockRejectedValue(
+      new ApiError(400, "The request could not be completed.", { error: "podOverrides: invalid patch: boom" }),
+    );
+    renderCard();
+    fireEvent.click(screen.getByText("Pod overrides"));
+    typeYaml("jvmOpts: -Xmx1g");
+    await passPreviewDelay();
+
+    expect(await screen.findByText("podOverrides: invalid patch: boom")).toBeInTheDocument();
+    expect(screen.queryByText("The request could not be completed.")).not.toBeInTheDocument();
+  });
+
+  it("sends no preview read for a caller without update rights", async () => {
+    renderCard({ canUpdate: false });
+    fireEvent.click(screen.getByText("Pod overrides"));
+    typeYaml("jvmOpts: -Xmx1g");
+    await passPreviewDelay();
+
+    expect(mockPreviewControllerOverlay).not.toHaveBeenCalled();
+    expect(screen.getByText("Spec Editor")).toBeInTheDocument();
+    expect(screen.queryByText("Live merge preview")).toBeNull();
+  });
 });

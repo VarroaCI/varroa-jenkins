@@ -52,8 +52,8 @@ edits the typed fields: controller class, resources, persistence, RBAC, plugins,
 backups, cell, headless, ingress, and the mite sidecar. Map fields, such as
 resource limits and ingress annotations, accept any key. The Pod overrides tab
 and the Resource overlay tab edit YAML. The ingress routing mode and the cell role are read-only.
-When the server refuses a save, the card shows the server message and keeps
-your edits.
+When the server refuses a save or a merge preview, the card shows the server message and keeps
+your edits. Only a user who can update the controller sees the merge preview.
 
 ## Tune health probes
 

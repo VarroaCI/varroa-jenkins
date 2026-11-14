@@ -873,7 +873,7 @@ export function getControllerDiff(cluster: string, ns: string, name: string): Pr
 // previewControllerOverlay computes the server-side merge of podOverrides +
 // resourceOverlay against the chosen baseline (defaults to "live"). Returns the
 // merged YAML, per-resource unified diffs, and warn-but-allow guardrail warnings.
-// 400 => malformed overlay (body carries `{"error":"<resource>: <msg>"}`),
+// 400 => malformed overlay (body carries `{"error":"<field>: <msg>"}`, where <field> is resourceOverlay.<kind> or podOverrides),
 // 403 => caller lacks controllers:update.
 export function previewControllerOverlay(
   cluster: string,

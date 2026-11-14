@@ -36,6 +36,7 @@ import {
 } from "../api/client";
 import { useClusters } from "../hooks/useClusters";
 import { ApiError, bffFetch } from "../hooks/useApi";
+import { overlayFieldErrorFrom } from "../lib/overlay";
 import type { GroupEntry, DeployableNamespaces } from "../api/client";
 import { OverlayEditor, DiffView, OVERLAY_RESOURCES, type OverlayFieldError } from "../components/OverlayEditor";
 import VersionPicker from "../components/VersionPicker";
@@ -740,18 +741,21 @@ export default function ControllerWizard() {
       });
       setOverlayPreview(res);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "preview failed";
-      if (msg.startsWith("400")) {
-        const m = msg.match(/"error"\s*:\s*"([^:"]+):\s*([^"]*)"/);
-        if (m) setOverlayFieldError({ field: m[1].trim(), message: m[2].trim() });
-        else setOverlayPreviewError(msg);
+      // A 400 answer names the request field that did not parse. The reason
+      // goes under that field. Any other failure shows the server text.
+      const fieldError =
+        e instanceof ApiError && e.status === 400 ? overlayFieldErrorFrom(e.serverMessage) : null;
+      if (fieldError) {
+        setOverlayFieldError(fieldError);
+      } else if (e instanceof ApiError) {
+        setOverlayPreviewError(e.serverMessage || e.message);
       } else {
-        setOverlayPreviewError(msg);
+        setOverlayPreviewError(e instanceof Error ? e.message : "preview failed");
       }
     } finally {
       setOverlayPreviewing(false);
     }
-  }, [draft.namespace, draft.name, draft.podOverridesText, draft.resourceOverlay]);
+  }, [draft.cluster, draft.namespace, draft.name, draft.podOverridesText, draft.resourceOverlay]);
 
   const handleRunPreflight = useCallback(async () => {
     setPreflightLoading(true);
