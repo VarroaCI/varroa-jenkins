@@ -989,7 +989,7 @@ func (a *Agent) callLoadBuild(ctx context.Context, request loadBuildRequest) (lo
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(callCtx, http.MethodPost,
-		"http://localhost:8080"+varroaLoadBuildPath, bytes.NewReader(body))
+		a.localJenkinsBase()+varroaLoadBuildPath, bytes.NewReader(body))
 	if err != nil {
 		return answer, fmt.Errorf("build load-build request: %w", err)
 	}
@@ -1177,7 +1177,7 @@ func (a *Agent) adoptNode(ctx context.Context, name string) error {
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(callCtx, http.MethodPost,
-		"http://localhost:8080"+varroaAdoptNodePath, bytes.NewReader(body))
+		a.localJenkinsBase()+varroaAdoptNodePath, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build adopt-node request: %w", err)
 	}

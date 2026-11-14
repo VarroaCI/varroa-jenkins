@@ -374,6 +374,10 @@ type Agent struct {
 	// runStateAckWaitOverride replaces the derived run-state ack wait
 	// in tests. Zero means the wait derives from claimTimeout.
 	runStateAckWaitOverride time.Duration
+
+	// localJenkinsURL replaces localJenkinsURLDefault in tests. A test sets
+	// the URL of its own stub server, which listens on a free port.
+	localJenkinsURL string
 }
 
 // runStateAckWaitOrDefault returns how long an acked run-state chunk waits
@@ -383,6 +387,21 @@ func (a *Agent) runStateAckWaitOrDefault() time.Duration {
 		return a.runStateAckWaitOverride
 	}
 	return runStateAckWaitFor(a.claimTimeout)
+}
+
+// localJenkinsURLDefault is the base URL of the Jenkins process in the
+// mite's own pod.
+const localJenkinsURLDefault = "http://localhost:8080"
+
+// localJenkinsBase returns the base URL of the Jenkins process in this pod.
+// The webhook replay, the tail control, the load-build call, and the
+// adopt-node call post to it. An empty localJenkinsURL means
+// localJenkinsURLDefault.
+func (a *Agent) localJenkinsBase() string {
+	if a.localJenkinsURL != "" {
+		return a.localJenkinsURL
+	}
+	return localJenkinsURLDefault
 }
 
 // identityState represents the agent's identity state during the bootstrap
@@ -1807,8 +1826,8 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				break
 			}
 			// Build the upstream URL. The mite always replays to the local
-			// Jenkins process on the standard port.
-			u := fmt.Sprintf("http://localhost:8080/%s", payload.Path)
+			// Jenkins process in its own pod.
+			u := a.localJenkinsBase() + "/" + payload.Path
 			if payload.Query != "" {
 				u += "?" + payload.Query
 			}
