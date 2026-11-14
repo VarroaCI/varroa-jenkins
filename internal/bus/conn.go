@@ -131,9 +131,10 @@ type Conn struct {
 	// out to the holder of the subscription.
 	denied deniedWatchers
 
-	// dialProbe opens a second connection to the bus URL with the identity of
-	// this Conn: TLS, credentials, and inbox prefix. The JetStream health loop
-	// uses it. Connect sets it before the loop starts.
+	// dialProbe opens a second connection with the identity of this Conn: TLS,
+	// credentials, and inbox prefix. It dials the bus URL entries that
+	// probeServers gives and returns the first that answers JetStream. The
+	// JetStream health loop uses it. Connect sets it before the loop starts.
 	dialProbe func() (*nats.Conn, error)
 
 	// jsCancel stops the JetStream health loop. jsDone closes when the loop
@@ -332,7 +333,28 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 			// The default handler writes to stderr. The health loop reports a probe error.
 			nats.ErrorHandler(func(*nats.Conn, *nats.Subscription, error) {}),
 		)
-		return nats.Connect(url, probeOpts...)
+		// Each entry gets its own dial, so nats.go cannot shuffle the
+		// connected server to the front of the list. An entry that connects
+		// but does not answer JetStream is skipped as well, so the probe
+		// reaches the first server that does.
+		lastErr := nats.ErrNoServers
+		for _, s := range probeServers(url, c.nc.ConnectedUrl()) {
+			nc, err := nats.Connect(s, probeOpts...)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			js, err := nc.JetStream()
+			if err == nil {
+				err = probeJetStream(context.Background(), js)
+			}
+			if err == nil {
+				return nc, nil
+			}
+			nc.Close()
+			lastErr = err
+		}
+		return nil, lastErr
 	}
 
 	nc, err := nats.Connect(url, connOpts...)

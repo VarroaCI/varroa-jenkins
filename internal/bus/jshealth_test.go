@@ -2,6 +2,7 @@ package bus
 
 import (
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -137,5 +138,32 @@ func TestJSMonitorSuccessResetsCount(t *testing.T) {
 	m.step(env)
 	if env.others != 0 {
 		t.Fatalf("others = %d, want 0: a success must reset the count", env.others)
+	}
+}
+
+func TestProbeServers(t *testing.T) {
+	tests := []struct {
+		name      string
+		busURL    string
+		connected string
+		want      []string
+	}{
+		{"one entry", "nats://varroa-nats:4222", "nats://varroa-nats:4222", []string{"nats://varroa-nats:4222"}},
+		{"connected first", "tls://a:30422,tls://b:30422", "tls://a:30422", []string{"tls://b:30422"}},
+		{"connected last", "tls://a:30422,tls://b:30422", "tls://b:30422", []string{"tls://a:30422"}},
+		{"three keep order", "tls://a:1,tls://b:1,tls://c:1", "tls://b:1", []string{"tls://a:1", "tls://c:1"}},
+		{"default port", "tls://a,tls://b:4222", "tls://a:4222", []string{"tls://b:4222"}},
+		{"no scheme", "a:4222,b:4222", "tls://a:4222", []string{"b:4222"}},
+		{"spaces and slash", " tls://a:1/ , tls://b:1 ,", "tls://a:1", []string{"tls://b:1"}},
+		{"not connected", "tls://a:1,tls://b:1", "", []string{"tls://a:1", "tls://b:1"}},
+		{"only the connected host", "tls://a:1,tls://a:1", "tls://a:1", []string{"tls://a:1", "tls://a:1"}},
+		{"empty", "", "", nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := probeServers(tc.busURL, tc.connected); !slices.Equal(got, tc.want) {
+				t.Fatalf("probeServers(%q, %q) = %q, want %q", tc.busURL, tc.connected, got, tc.want)
+			}
+		})
 	}
 }

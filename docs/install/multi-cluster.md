@@ -17,11 +17,11 @@ Protect the endpoint with firewall rules and NATS credentials. If network polici
 
 On the core, with network policies enabled, set `nats.external.allowedCIDRs` to the source addresses of each member. The render fails while the list is empty. A member address behind a NodePort or LoadBalancer can change. See [Network Policies](network-policies.md#external-nats-clients).
 
-With `nats.external.externalTrafficPolicy: Local`, each node sends NATS traffic only to a NATS pod on that node. A load balancer checks each node and skips a node without a NATS pod. A NodePort drops the connection on a node without a NATS pod. For a NodePort, set the member `bus.url` to a comma-separated list of node addresses that run NATS pods. Add each address to `nats.external.ipSANs` on the core and to `networkPolicy.coreNatsEgress.cidrs` on the member. Pin the NATS pods to those nodes with `nats.podTemplate.merge.spec.nodeSelector`.
+With `nats.external.externalTrafficPolicy: Local`, each node sends NATS traffic only to a NATS pod on that node. A load balancer checks each node and skips a node without a NATS pod. A NodePort drops the connection on a node without a NATS pod. For a NodePort, set the member `bus.url` to a comma-separated list of node addresses that run NATS pods. A member with one node address stays on the NATS pod of that node. It stays there also when that pod loses its cluster peers. Add each address to `nats.external.ipSANs` on the core and to `networkPolicy.coreNatsEgress.cidrs` on the member. The chart reads `ipSANs` only when it creates the `varroa-nats-creds` Secret. Pin the NATS pods to those nodes with `nats.podTemplate.merge.spec.nodeSelector`.
 
 Each member operator and gateway sends a NATS ping every 20 seconds. The pings add less than 1 MB a day for each connection. The member reconnects when two pings in a row get no answer. A NATS write that waits more than 10 seconds fails, and the blocked ping does not reach the server.
 
-Each member operator and gateway also checks JetStream every 10 seconds. After two failed checks in a row, it reconnects when another core NATS server answers. A core NATS pod without contact to the JetStream meta leader is not ready. A load balancer with `externalTrafficPolicy: Local` then skips its node.
+Each member operator and gateway also checks JetStream every 10 seconds. After two failed checks in a row, it reconnects when another core NATS server answers. With more than one `bus.url` address, the probe dials each other address in the listed order. It does not dial the address of the current connection. A core NATS pod without contact to the JetStream meta leader is not ready. A load balancer with `externalTrafficPolicy: Local` then skips its node.
 
 The core NATS server sends a ping on a connection that sends nothing for 20 seconds. When two pings in a row get no answer, the server closes the connection and removes its subscriptions. A stopped member link thus loses its core connection within 80 seconds. This bound holds only with the chart default values of `nats.config.merge.ping_interval` and `ping_max`. The member leaves a stopped link in the same time, so a healthy link gets no additional reconnects. The member pings every 20 seconds, so the server seldom sends its own ping.
 
@@ -34,6 +34,12 @@ helm upgrade --install varroa charts/varroa \
   -f charts/varroa/values-hive.yaml \
   --set cluster.name=<member-name> \
   --set bus.url=tls://nats.example.com:4222
+```
+
+Helm `--set` splits a value at each comma. For a list of addresses, use `--set-literal` or a values file:
+
+```bash
+  --set-literal bus.url=tls://192.0.2.10:30422,tls://192.0.2.11:30422
 ```
 
 `cluster.name` must be a DNS-1123 label and unique across the deployment. Configure the member with the same authentication issuer and settings used by controllers that connect to the core identity provider.
