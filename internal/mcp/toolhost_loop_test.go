@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/varroaci/varroa-jenkins/internal/agent"
 	"github.com/varroaci/varroa-jenkins/internal/agent/loop"
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
@@ -64,16 +66,25 @@ func (h httpTestHost) Call(ctx context.Context, name string, args json.RawMessag
 	return callTool(ctx, h.send, name, args)
 }
 
-// loopScript answers a read tool call, then a final text turn.
-type loopScript struct{ n int }
+// loopScript answers one tool call, then a final text turn. An empty name and
+// args mean get_run with {"run":"r1"}.
+type loopScript struct {
+	n    int
+	name string
+	args string
+}
 
 func (p *loopScript) Stream(context.Context, provider.Key, provider.Request) (<-chan provider.Delta, error) {
 	ch := make(chan provider.Delta, 8)
 	p.n++
+	name, args := p.name, p.args
+	if name == "" {
+		name, args = "get_run", `{"run":"r1"}`
+	}
 	go func() {
 		defer close(ch)
 		if p.n == 1 {
-			ch <- provider.Delta{ToolCall: &provider.ToolCallDelta{Index: 0, ID: "c1", Name: "get_run", ArgumentsFragment: `{"run":"r1"}`}}
+			ch <- provider.Delta{ToolCall: &provider.ToolCallDelta{Index: 0, ID: "c1", Name: name, ArgumentsFragment: args}}
 			ch <- provider.Delta{Stop: provider.StopToolUse}
 			return
 		}
@@ -90,6 +101,22 @@ func (loopTenants) TenantTenant(context.Context, string) (string, error) { retur
 
 // runLoopOn runs one session through host and returns its event types.
 func runLoopOn(t *testing.T, host loop.ToolHost) []agent.EventType {
+	t.Helper()
+	st, id := runLoopWith(t, host, &loopScript{})
+	evs, err := st.Events(context.Background(), id, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make([]agent.EventType, 0, len(evs))
+	for _, e := range evs {
+		out = append(out, e.Type)
+	}
+	return out
+}
+
+// runLoopWith runs one session through host with the given script and returns
+// its store and session id.
+func runLoopWith(t *testing.T, host loop.ToolHost, script *loopScript) (*store.Memory, uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
 	st := store.NewMemory(store.Options{Now: time.Now})
@@ -114,7 +141,7 @@ func runLoopOn(t *testing.T, host loop.ToolHost) []agent.EventType {
 		Host:          host,
 		DecideWrite:   loop.AlwaysApprove,
 		DaySpend:      func(context.Context) (int64, int64, error) { return 0, 1_000_000, nil },
-		Provider:      &loopScript{},
+		Provider:      script,
 		Model:         "m",
 		Store:         st,
 		SessionID:     id,
@@ -130,15 +157,64 @@ func runLoopOn(t *testing.T, host loop.ToolHost) []agent.EventType {
 	if err := loop.Run(ctx, cfg, loop.TriggerStart); err != nil {
 		t.Fatal(err)
 	}
-	evs, err := st.Events(ctx, id, 0, 1000)
-	if err != nil {
-		t.Fatal(err)
+	return st, id
+}
+
+// TestLoop_RefusedWriteCreatesNoApprovalOnTwoHosts pins that a write with an
+// undeclared argument creates no approval and gives the model the refusal as a
+// tool error, on both hosts.
+func TestLoop_RefusedWriteCreatesNoApprovalOnTwoHosts(t *testing.T) {
+	srv := NewServer(newTestDeps())
+	claims := &auth.Claims{PreferredUsername: "alice", Subject: "alice"}
+	handler := HTTPHandler(srv)
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r.WithContext(auth.ContextWithClaims(r.Context(), claims)))
+	}))
+	defer hs.Close()
+	hosts := map[string]loop.ToolHost{
+		"in-process": NewInProcessHost(srv, claims),
+		"http":       httpTestHost{url: hs.URL, client: hs.Client()},
 	}
-	out := make([]agent.EventType, 0, len(evs))
-	for _, e := range evs {
-		out = append(out, e.Type)
+	want := "input schema validation failed: <root>: " + notAllowedText(undeclaredArg)
+	for name, host := range hosts {
+		t.Run(name, func(t *testing.T) {
+			script := &loopScript{name: "restart_run", args: `{"run":"r1","stage":"Build","` + undeclaredArg + `":1}`}
+			st, id := runLoopWith(t, host, script)
+			ctx := context.Background()
+			page, err := st.ListApprovals(ctx, store.ApprovalQuery{Principal: "alice", SessionID: id})
+			if err != nil || len(page.Items) != 0 {
+				t.Fatalf("approvals = %v, %v; want none", page.Items, err)
+			}
+			sess, err := st.GetSession(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sess.State != agent.StateCompleted {
+				t.Fatalf("state = %s, want completed", sess.State)
+			}
+			evs, err := st.Events(ctx, id, 0, 1000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var found bool
+			for _, e := range evs {
+				if e.Type != agent.EventToolResult {
+					continue
+				}
+				var res agent.ToolResultPayload
+				if err := json.Unmarshal(e.Payload, &res); err != nil {
+					t.Fatal(err)
+				}
+				found = true
+				if !res.IsError || res.Content != want {
+					t.Errorf("tool_result = %+v, want error %q", res, want)
+				}
+			}
+			if !found {
+				t.Error("no tool_result event")
+			}
+		})
 	}
-	return out
 }
 
 // TestLoop_SameOnTwoHosts proves the loop writes the same transcript shape

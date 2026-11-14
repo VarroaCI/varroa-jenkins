@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,6 +12,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/agent"
+	"github.com/varroaci/varroa-jenkins/internal/agent/loop"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
@@ -55,6 +58,59 @@ func TestEveryToolSchemaIsStrict(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestLoopArgumentCheckMatchesServer pins that loop.CheckArguments refuses each
+// call with the same text as the MCP server. The loop checks a call before it
+// parks an approval, so a drift here would park calls the server refuses.
+func TestLoopArgumentCheckMatchesServer(t *testing.T) {
+	const prefix = "input schema validation failed: "
+	for _, tool := range liveTools(t) {
+		t.Run(tool.Name, func(t *testing.T) {
+			var schema struct {
+				Required []string `json:"required"`
+			}
+			if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+				t.Fatalf("decode input schema: %v", err)
+			}
+			undeclared := placeholderArgs(t, tool.InputSchema)
+			undeclared[undeclaredArg] = 1
+			cases := []map[string]interface{}{undeclared}
+			if len(schema.Required) > 0 {
+				cases = append(cases, map[string]interface{}{})
+			}
+			for _, args := range cases {
+				raw, err := json.Marshal(args)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tr := callToolAs(t, adminDeps(), mcpAdminClaims, tool.Name, args)
+				if !tr.IsError {
+					t.Fatalf("server accepted %s with %s", tool.Name, raw)
+				}
+				serverText := toolText(tr)
+				local, ok := loop.CheckArguments(agent.ToolDef{Name: tool.Name, Schema: tool.InputSchema}, raw)
+				if ok {
+					t.Fatalf("CheckArguments accepted %s with %s; server said %q", tool.Name, raw, serverText)
+				}
+				if !strings.HasPrefix(serverText, prefix) || !strings.HasPrefix(local, prefix) {
+					t.Fatalf("prefix differs: server %q, local %q", serverText, local)
+				}
+				if got, want := splitCauses(local), splitCauses(serverText); !slices.Equal(got, want) {
+					t.Errorf("causes differ for %s with %s:\n local  %q\n server %q", tool.Name, raw, got, want)
+				}
+			}
+		})
+	}
+}
+
+// splitCauses returns the causes of one refusal after the prefix, sorted. The
+// validator walks the argument map, so the order of several causes can change.
+func splitCauses(text string) []string {
+	const prefix = "input schema validation failed: "
+	parts := strings.Split(strings.TrimPrefix(text, prefix), "; ")
+	slices.Sort(parts)
+	return parts
 }
 
 // TestMissingRequiredArgumentIsNamed pins that the refusal of a call without a

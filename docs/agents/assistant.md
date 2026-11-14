@@ -236,7 +236,7 @@ is on:
 
 The assistant does not run a write tool on its own. A write tool call parks
 the session in `waiting_approval`. The approval names the tool, its
-arguments, and its target.
+arguments, and its target. Before it parks, the session checks the arguments against the tool schema. A call that the schema refuses gets the error at once and creates no approval.
 
 A person approves or denies the call. An approval runs the tool as that
 person, with that person's grants. A denial writes an error result and runs
