@@ -1,6 +1,7 @@
 package mite
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -151,46 +152,48 @@ func TestBusHandler_OnJenkinsActivity(t *testing.T) {
 	}
 }
 
-// TestDispatchRoutesToOnJenkinsActivity verifies that the server.go type-switch
-// correctly routes a MiteMessage_JenkinsActivity to OnJenkinsActivity.
+// TestDispatchRoutesToOnJenkinsActivity asserts that server.go's CommandStream
+// read loop routes a MiteMessage_JenkinsActivity to OnJenkinsActivity with the
+// stream identity. It sends the message over a real gRPC stream.
 func TestDispatchRoutesToOnJenkinsActivity(t *testing.T) {
-	t.Parallel()
+	rec, lis, certAuth := startRecordingGateway(t)
+	rec.jenkinsActivityCh = make(chan recordedJenkinsActivity, 4)
 
-	// Use a recording handler.
-	rec := &recordingHandler{}
-	evt := &mitev1.JenkinsActivityEvent{
+	name, ns := "actctl", "actns"
+	gconn := dialWithMiteCert(t, lis.Addr().String(), certAuth, name, ns)
+	stream, err := mitev1.NewMiteClient(gconn).CommandStream(context.Background())
+	if err != nil {
+		t.Fatalf("command stream: %v", err)
+	}
+	if err := stream.Send(&mitev1.MiteMessage{
+		Message: &mitev1.MiteMessage_Hello{
+			Hello: &mitev1.Hello{ControllerName: name, Namespace: ns, Version: "test-v1"},
+		},
+	}); err != nil {
+		t.Fatalf("send hello: %v", err)
+	}
+
+	want := &mitev1.JenkinsActivityEvent{
 		Type:    "build.completed",
 		Actor:   "bob",
 		Message: "Build #7 completed",
 	}
-
-	msg := &mitev1.MiteMessage{
-		Message: &mitev1.MiteMessage_JenkinsActivity{
-			JenkinsActivity: evt,
-		},
+	if err := stream.Send(&mitev1.MiteMessage{
+		Message: &mitev1.MiteMessage_JenkinsActivity{JenkinsActivity: want},
+	}); err != nil {
+		t.Fatalf("send jenkins activity: %v", err)
 	}
 
-	// Simulate the dispatch switch from server.go.
-	switch m := msg.Message.(type) {
-	case *mitev1.MiteMessage_JenkinsActivity:
-		if ja := m.JenkinsActivity; ja != nil {
-			rec.OnJenkinsActivity("test-ctrl", "test-ns", ja)
+	select {
+	case got := <-rec.jenkinsActivityCh:
+		if got.name != name || got.ns != ns {
+			t.Errorf("OnJenkinsActivity identity = (%q, %q), want (%q, %q)", got.name, got.ns, name, ns)
 		}
-	default:
-		t.Fatalf("unexpected message type %T", m)
-	}
-
-	if !rec.jenkinsActivityCalled {
-		t.Error("OnJenkinsActivity was not called")
-	}
-	if rec.jenkinsActivityName != "test-ctrl" {
-		t.Errorf("name = %q, want %q", rec.jenkinsActivityName, "test-ctrl")
-	}
-	if rec.jenkinsActivityNS != "test-ns" {
-		t.Errorf("namespace = %q, want %q", rec.jenkinsActivityNS, "test-ns")
-	}
-	if rec.jenkinsActivityEvt != evt {
-		t.Error("event pointer mismatch")
+		if got.evt.Type != want.Type || got.evt.Message != want.Message {
+			t.Errorf("OnJenkinsActivity event = %+v, want %+v", got.evt, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for OnJenkinsActivity")
 	}
 }
 
@@ -210,6 +213,16 @@ type recordingHandler struct {
 	// racing a plain field against the server's read-loop goroutine.
 	logChunkCh chan recordedLogChunk
 	tailAckCh  chan recordedTailAck
+
+	// jenkinsActivityCh carries every OnJenkinsActivity call for the same reason.
+	jenkinsActivityCh chan recordedJenkinsActivity
+}
+
+// recordedJenkinsActivity is one OnJenkinsActivity call captured by recordingHandler.
+type recordedJenkinsActivity struct {
+	name string
+	ns   string
+	evt  *mitev1.JenkinsActivityEvent
 }
 
 // recordedLogChunk is one OnLogChunk call captured by recordingHandler.
@@ -226,7 +239,7 @@ type recordedTailAck struct {
 	ack  *mitev1.TailAck
 }
 
-func (r *recordingHandler) OnConnect(_, _, _ string, _ interface{}, _ Sender, _ interface{}) int64 {
+func (r *recordingHandler) OnConnect(_, _, _ string, _ interface{}, _ Sender) int64 {
 	return 0
 }
 func (r *recordingHandler) OnHeartbeat(_, _ string, _ *mitev1.Heartbeat)                     {}
@@ -240,6 +253,9 @@ func (r *recordingHandler) OnJenkinsActivity(name, ns string, evt *mitev1.Jenkin
 	r.jenkinsActivityName = name
 	r.jenkinsActivityNS = ns
 	r.jenkinsActivityEvt = evt
+	if r.jenkinsActivityCh != nil {
+		r.jenkinsActivityCh <- recordedJenkinsActivity{name: name, ns: ns, evt: evt}
+	}
 }
 func (r *recordingHandler) OnPluginInventory(_, _ string, _ *mitev1.PluginInventory) {}
 func (r *recordingHandler) IsCurrentConnection(_, _ string, _ int64) bool {

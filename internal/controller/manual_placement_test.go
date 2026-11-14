@@ -28,12 +28,12 @@ func manualAfterDeliveredPush(t *testing.T, name string) (*Reconciler, *scripted
 	t.Helper()
 	client := newTestClientWithGateBundle()
 	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 	tr := &scriptedSendTransport{Transport: rec.miteTransport, epoch: 1}
 	rec.miteTransport = tr
 
 	cr := newGateCtrl(name, 0, "", nil)
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if tr.sends != 1 || cr.Status.DesiredStateHash == "" || cr.Status.DesiredContentHash == "" {
 		t.Fatalf("first push: sends=%d hash=%q content=%q, want one delivered push with both hashes",
@@ -195,7 +195,7 @@ func TestReconcileConnected_ManualModeRaisesAContentChange(t *testing.T) {
 func TestReconcileConnected_ManualCellPushesAJobHomeMove(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 	homes := map[string]int32{"build": 0}
 	rec.homesFunc = func(context.Context, cells.HomesRequest) (cells.HomesResult, error) {
 		return cells.HomesResult{JobHomes: homes}, nil
@@ -210,7 +210,7 @@ func TestReconcileConnected_ManualCellPushesAJobHomeMove(t *testing.T) {
 	cr := newGateCtrl("cell-home-move", 0, "", nil)
 	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
 	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"team-a"}}
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if tr.sends != 1 || len(tr.last.TenantHomes) != 1 {
 		t.Fatalf("first push: sends=%d, want one push with one tenant home entry", tr.sends)
@@ -257,7 +257,7 @@ func newRehydrationCell(t *testing.T, name string, records cells.RecordsFunc, co
 	t.Helper()
 	client := newTestClientWithGateBundle()
 	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 	rec.homesFunc = func(context.Context, cells.HomesRequest) (cells.HomesResult, error) {
 		return cells.HomesResult{JobHomes: map[string]int32{"build": 0}}, nil
 	}
@@ -278,7 +278,7 @@ func newRehydrationCell(t *testing.T, name string, records cells.RecordsFunc, co
 	cr := newGateCtrl(name, 0, "", nil)
 	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
 	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"team-a"}, Instance: "uid-1"}
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if tr.sends != 1 || cr.Status.DesiredStateHash == "" || cr.Status.DesiredContentHash == "" {
 		t.Fatalf("first push: sends=%d hash=%q content=%q, want one delivered push with both hashes",

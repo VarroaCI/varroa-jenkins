@@ -68,13 +68,12 @@ func startGatewayWithCA(t *testing.T, natsURL string, opts ...func(*BusHandler))
 	if err != nil {
 		t.Fatalf("ensure presence kv: %v", err)
 	}
-	srv := NewServer(certAuth, tokenSigner, "localhost")
-	srv.ServerEndpoint = "127.0.0.1:0"
 	handler := mustNewBusHandler(t, busConn, snapshotKV, presenceKV)
 	for _, opt := range opts {
 		opt(handler)
 	}
-	srv.SetStreamHandler(handler)
+	srv := NewServer(certAuth, tokenSigner, handler, "localhost")
+	srv.ServerEndpoint = "127.0.0.1:0"
 	srv.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")

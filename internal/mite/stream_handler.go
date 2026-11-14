@@ -9,8 +9,8 @@ import (
 // concurrent calls must be serialized externally.
 type Sender func(msg *mitev1.OperatorMessage) error
 
-// StreamHandler processes events on a mite CommandStream. Implementations
-// replace the in-memory Registry with alternative backends (e.g., a NATS bus).
+// StreamHandler processes events on a mite CommandStream. BusHandler is the
+// production implementation; it bridges each event to the NATS bus.
 //
 // The handler methods are called sequentially from the CommandStream read
 // loop. OnConnect is called first and may start background goroutines; those
@@ -18,13 +18,10 @@ type Sender func(msg *mitev1.OperatorMessage) error
 type StreamHandler interface {
 	// OnConnect is called after the mite's hello has been validated and its
 	// mTLS identity parsed. The send function can be used to push operator
-	// messages to the mite from background goroutines. The stream parameter
-	// is the raw gRPC CommandStream server stream; handlers that need direct
-	// access (e.g. RegistryHandler for Registry.Register) may type-assert it.
-	// It returns a connection token that must be handed back to OnDisconnect,
+	// messages to the mite from background goroutines. It returns a connection token that must be handed back to OnDisconnect,
 	// so a late teardown from a superseded stream cannot tear down the
 	// connection that replaced it.
-	OnConnect(name, ns, version string, certExpiry interface{}, send Sender, stream interface{}) int64
+	OnConnect(name, ns, version string, certExpiry interface{}, send Sender) int64
 
 	// OnHeartbeat is called for each heartbeat message from the mite.
 	OnHeartbeat(name, ns string, hb *mitev1.Heartbeat)
@@ -42,7 +39,6 @@ type StreamHandler interface {
 	OnObservabilityReport(name, ns string, report *mitev1.ObservabilityReport)
 
 	// OnContentResponse is called when the mite replies with its last-applied content.
-	// Only active in the gateway process (BusHandler); other implementations stub it out.
 	OnContentResponse(requestID string, resp *mitev1.ContentResponse)
 
 	// OnJenkinsActivity is called when the mite forwards a Jenkins activity event
@@ -110,36 +106,7 @@ type StreamHandler interface {
 // cellInstanceRecorder is an optional capability of a StreamHandler that
 // tracks the pod unique identifier a mite presents at registration, for
 // stamping onto that mite's later build-event envelopes. BusHandler
-// implements it; RegistryHandler and noopHandler do not.
+// implements it.
 type cellInstanceRecorder interface {
 	RecordCellInstance(name, ns, cellInstance string)
 }
-
-// noopHandler is used when no StreamHandler is set (should not happen in
-// practice since Server defaults to RegistryHandler).
-type noopHandler struct{}
-
-func (noopHandler) OnConnect(_, _, _ string, _ interface{}, _ Sender, _ interface{}) int64 {
-	return 0
-}
-func (noopHandler) OnHeartbeat(_, _ string, _ *mitev1.Heartbeat)                          {}
-func (noopHandler) OnSnapshot(_, _ string, _ *mitev1.StateSnapshot)                       {}
-func (noopHandler) OnCommandResult(_, _ string, _ *mitev1.CommandResult)                  {}
-func (noopHandler) OnTokenRefreshRequest(_, _ string, _ *mitev1.TokenRefreshRequest)      {}
-func (noopHandler) OnObservabilityReport(_, _ string, _ *mitev1.ObservabilityReport)      {}
-func (noopHandler) OnContentResponse(_ string, _ *mitev1.ContentResponse)                 {}
-func (noopHandler) OnJenkinsActivity(_, _ string, _ *mitev1.JenkinsActivityEvent)         {}
-func (noopHandler) OnPluginInventory(_, _ string, _ *mitev1.PluginInventory)              {}
-func (noopHandler) IsCurrentConnection(_, _ string, _ int64) bool                         { return true }
-func (noopHandler) OnDisconnect(_, _ string, _ int64)                                     {}
-func (noopHandler) OnBuildEvent(_, _ string, _ int64, _ *mitev1.BuildEvent) error         { return nil }
-func (noopHandler) OnClaimRequest(_, _ string, _ int64, _ *mitev1.ClaimRequest, _ Sender) {}
-func (noopHandler) OnLogChunk(_, _ string, _ *mitev1.LogChunk)                            {}
-func (noopHandler) OnTailAck(_, _ string, _ *mitev1.TailAck)                              {}
-func (noopHandler) OnCrossTenantRequest(_, _ string, _ int64, _ *mitev1.CrossTenantRequest, _ Sender) {
-}
-func (noopHandler) OnRunStateChunk(_, _ string, _ *mitev1.RunStateChunk)               {}
-func (noopHandler) OnRunStateRequest(_, _ string, _ *mitev1.RunStateRequest, _ Sender) {}
-
-// Ensure noopHandler implements StreamHandler.
-var _ StreamHandler = noopHandler{}

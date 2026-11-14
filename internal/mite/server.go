@@ -22,7 +22,6 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	"github.com/varroaci/varroa-jenkins/internal/api/sse"
 	"github.com/varroaci/varroa-jenkins/internal/ca"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
@@ -33,12 +32,10 @@ import (
 // provides command-and-control over a bidirectional stream.
 type Server struct {
 	ca            *ca.CA
-	reg           *Registry
 	tokens        *TokenSigner
 	consumed      ConsumedTokenStore // single-use enforcement for bootstrap tokens
 	grpcServer    *grpc.Server
-	broadcaster   *sse.Broadcaster
-	streamHandler StreamHandler // pluggable stream backend
+	streamHandler StreamHandler // receives every CommandStream event; never nil
 
 	// ServerEndpoint is the endpoint returned in RegisterResponse so mites
 	// know where to connect their CommandStream. Defaults to the legacy
@@ -49,15 +46,20 @@ type Server struct {
 }
 
 // NewServer creates a new Mite gRPC server with TLS credentials issued by
-// the given CA. Additional DNS SANs (e.g. the operator service hostname) are
+// the given CA. handler receives every CommandStream event. NewServer panics
+// when handler is nil, because a server without a handler drops every mite
+// message. Additional DNS SANs (e.g. the operator service hostname) are
 // included in the server certificate so clients can verify the hostname.
 // It registers the Mite service and installs the mTLS auth interceptor.
-func NewServer(certAuth *ca.CA, tokenSigner *TokenSigner, extraSANs ...string) *Server {
+func NewServer(certAuth *ca.CA, tokenSigner *TokenSigner, handler StreamHandler, extraSANs ...string) *Server {
+	if handler == nil {
+		panic("mite.NewServer: a StreamHandler is required")
+	}
 	s := &Server{
-		ca:       certAuth,
-		reg:      NewRegistry(),
-		tokens:   tokenSigner,
-		consumed: newInMemoryConsumedStore(),
+		ca:            certAuth,
+		tokens:        tokenSigner,
+		consumed:      newInMemoryConsumedStore(),
+		streamHandler: handler,
 	}
 
 	serverCert, err := certAuth.IssueServerCert(extraSANs...)
@@ -101,26 +103,9 @@ func (s *Server) GRPCServer() *grpc.Server {
 	return s.grpcServer
 }
 
-// Registry returns the mite connection registry.
-func (s *Server) Registry() *Registry {
-	return s.reg
-}
-
 // TokenSigner returns the bootstrap token signer.
 func (s *Server) TokenSigner() *TokenSigner {
 	return s.tokens
-}
-
-// SetBroadcaster sets the SSE broadcaster for fan-out of mite events.
-func (s *Server) SetBroadcaster(b *sse.Broadcaster) {
-	s.broadcaster = b
-}
-
-// SetStreamHandler sets the stream handler for CommandStream. If nil
-// (the default), the server uses the default RegistryHandler backed by
-// the internal Registry.
-func (s *Server) SetStreamHandler(h StreamHandler) {
-	s.streamHandler = h
 }
 
 // SetConsumedTokenStore substitutes the bootstrap-token single-use backend (e.g. a
@@ -260,13 +245,7 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 		s.Logger.Info("mite stream connected", "controller", controllerName, "namespace", namespace, "version", hello.Version)
 	}
 
-	// Determine the handler. If none is set, default to RegistryHandler.
 	handler := s.streamHandler
-	if handler == nil {
-		rh := NewRegistryHandler(s.reg, s.broadcaster)
-		rh.Logger = s.Logger
-		handler = rh
-	}
 
 	// The mite's cell instance travels on the verified leaf's URI SAN
 	// (IssueMiteCert stamps it there), not only in the same-replica cache
@@ -294,7 +273,7 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 		return stream.Send(msg)
 	}
 
-	connToken := handler.OnConnect(controllerName, namespace, hello.Version, leaf.NotAfter, send, stream)
+	connToken := handler.OnConnect(controllerName, namespace, hello.Version, leaf.NotAfter, send)
 	defer handler.OnDisconnect(controllerName, namespace, connToken)
 
 	// Read loop: process incoming messages from the mite.

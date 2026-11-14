@@ -17,9 +17,8 @@ import (
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
-// BusTransport implements Transport over NATS. It replaces the in-memory
-// Registry so the operator can reach mites through the bus regardless of
-// which gateway holds the socket.
+// BusTransport implements Transport over NATS. The operator reaches mites
+// through the bus regardless of which gateway holds the socket.
 type BusTransport struct {
 	cluster    string
 	conn       *bus.Conn

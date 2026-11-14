@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -607,7 +606,7 @@ func (b *countingRunnerListBackend) ListObjects(ctx context.Context, gvr schema.
 // there is only one.
 func TestReconcileController_RunnerContributionReadOnceEachTick(t *testing.T) {
 	client := newTestClientWithGateBundle()
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 	rec.cellsConfig = CellsConfig{NetworkPolicyEnabled: true, CellIsolation: CellIsolation{Enabled: true}}
 
 	cr := newGateCtrl("cell-a", 0, "", nil)
@@ -624,7 +623,7 @@ func TestReconcileController_RunnerContributionReadOnceEachTick(t *testing.T) {
 	counting := &countingRunnerListBackend{Backend: client.store, runnerGVR: runnerGVR}
 	rec.store = counting
 
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 
 	// Send fails (no real gRPC stream in test); the read count below is
 	// what this test proves, not a successful push.

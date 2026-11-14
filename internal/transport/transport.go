@@ -1,7 +1,7 @@
 // Package transport defines the interface through which the operator
 // communicates with mite sidecars without knowing where their gRPC sockets
-// live. Implementations: LocalRegistry (today's in-process adapter) and
-// BusTransport (NATS JetStream-backed, for the sharded architecture).
+// live. BusTransport is the operator implementation. BusReadModelTransport is
+// the read-only BFF implementation. Both use NATS JetStream.
 package transport
 
 import (

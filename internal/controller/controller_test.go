@@ -405,7 +405,7 @@ func newTestReconcilerWithMeterProvider(mp metric.MeterProvider, client *testCli
 		bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"),
 		client,
 		client.store,
-		transport.NewLocalRegistry(mite.NewRegistry()),
+		newMemTransport(),
 		mite.NewTokenSigner(testKey),
 		rbac.NewGenerator(rbac.NewTestResolver()),
 		nil, // composer not used in tests
@@ -2171,9 +2171,9 @@ func TestProvisioningCreatesBootstrapTokenWhenSecretIsMissing(t *testing.T) {
 
 func TestConditionsDoNotGrowUnbounded(t *testing.T) {
 	client := newTestClientWithBundle()
-	reg := transport.NewLocalRegistry(mite.NewRegistry())
+	mites := newMemTransport()
 	signer := mite.NewTokenSigner(testKey)
-	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"), client, client.store, mites, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
 	rec.Logger = slog.Default()
 
 	recent := metav1.NewTime(time.Now())
@@ -2191,9 +2191,9 @@ func TestConditionsDoNotGrowUnbounded(t *testing.T) {
 	}
 
 	// Register a connected mite so handleConnected doesn't transition out.
-	reg.Registry().Register(cr.Name, cr.Namespace, nil, nil, "v1.0.0", time.Now().Add(24*time.Hour))
-	// Set snapshot health so GetHealth returns "healthy", not "unreachable".
-	reg.Registry().UpdateHeartbeat(cr.Name, cr.Namespace, "v1.0.0", &mitev1.StateSnapshot{JenkinsHealth: "healthy"}, nil, "")
+	mites.connect(cr.Name, cr.Namespace)
+	// Store a healthy snapshot so Health answers "healthy", not "unreachable".
+	mites.heartbeat(cr.Name, cr.Namespace, &mitev1.StateSnapshot{JenkinsHealth: "healthy"})
 
 	// Reconcile 3 times — each tick currently appends a new ConditionReady.
 	// Send() errors are expected (no real gRPC stream in test); conditions
@@ -2332,9 +2332,9 @@ func TestPowerOnFromStoppedTransitionsToPending(t *testing.T) {
 
 func TestReprovisionFlagSetAndConsumed(t *testing.T) {
 	client := newTestClientWithBundle()
-	reg := transport.NewLocalRegistry(mite.NewRegistry())
+	mites := newMemTransport()
 	signer := mite.NewTokenSigner(testKey)
-	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"), client, client.store, mites, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
 	rec.Logger = slog.Default()
 
 	recent := metav1.NewTime(time.Now())
@@ -2347,8 +2347,8 @@ func TestReprovisionFlagSetAndConsumed(t *testing.T) {
 		},
 	}
 	// Register a connected mite so handleConnected runs to the force-push check.
-	reg.Registry().Register(cr.Name, cr.Namespace, nil, nil, "v1.0.0", time.Now().Add(24*time.Hour))
-	reg.Registry().UpdateHeartbeat(cr.Name, cr.Namespace, "v1.0.0", &mitev1.StateSnapshot{JenkinsHealth: "healthy"}, nil, "")
+	mites.connect(cr.Name, cr.Namespace)
+	mites.heartbeat(cr.Name, cr.Namespace, &mitev1.StateSnapshot{JenkinsHealth: "healthy"})
 
 	rec.Reprovision("core", cr.Namespace, cr.Name)
 	// Reprovision now stamps the force-reprovision annotation — the map is gone.
@@ -3033,9 +3033,9 @@ func TestUpsertAuthEnv_LocalIssuerAlwaysPresent(t *testing.T) {
 func TestHandleConnected_ArtifactSecretReadFaultKeepsLastGood(t *testing.T) {
 	client := newTestClientWithBundle()
 	client.getSecretErrs = map[string]error{"abase-cell-big-0": errors.New("etcd unavailable")}
-	reg := transport.NewLocalRegistry(mite.NewRegistry())
+	mites := newMemTransport()
 	signer := mite.NewTokenSigner(testKey)
-	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"), client, client.store, mites, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
 	rec.Logger = slog.Default()
 	rec.SetArtifactSecretBase("abase")
 	rec.SetBlobstoreURL("s3://my-bucket?region=us-east-1")
@@ -3049,8 +3049,8 @@ func TestHandleConnected_ArtifactSecretReadFaultKeepsLastGood(t *testing.T) {
 
 	// Register a connected mite so handleConnected doesn't transition out
 	// before it ever reaches bundle resolution.
-	reg.Registry().Register(cr.Name, cr.Namespace, nil, nil, "v1.0.0", time.Now().Add(24*time.Hour))
-	reg.Registry().UpdateHeartbeat(cr.Name, cr.Namespace, "v1.0.0", &mitev1.StateSnapshot{JenkinsHealth: "healthy"}, nil, "")
+	mites.connect(cr.Name, cr.Namespace)
+	mites.heartbeat(cr.Name, cr.Namespace, &mitev1.StateSnapshot{JenkinsHealth: "healthy"})
 
 	if err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}); err != nil {
 		t.Fatalf("handleConnected: %v", err)
@@ -3896,12 +3896,12 @@ func (s *scriptedSendTransport) ConnEpoch(ns, name string) (int64, bool) {
 func TestConnectedPush_UnreachableMiteDoesNotStampHashOrBlock(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 	tr := &scriptedSendTransport{Transport: rec.miteTransport, sendErr: transport.ErrMiteUnreachable, epoch: 7}
 	rec.miteTransport = tr
 
 	cr := newGateCtrl("ctl-unreach", 0, "", nil)
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 
 	if err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}); err != nil {
 		t.Fatalf("handleConnected returned %v; an unreachable mite is not a reconcile error", err)
@@ -3942,12 +3942,12 @@ func TestConnectedPush_UnreachableMiteDoesNotStampHashOrBlock(t *testing.T) {
 func TestConnectedPush_ReconnectRedeliversPastManualGate(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 	tr := &scriptedSendTransport{Transport: rec.miteTransport, epoch: 1}
 	rec.miteTransport = tr
 
 	cr := newGateCtrl("ctl-redeliver", 0, "", nil)
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 
 	// Tick 1, automatic mode: the first push is delivered.
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
@@ -3988,11 +3988,11 @@ func TestConnectedPush_ReconnectRedeliversPastManualGate(t *testing.T) {
 func TestConnectedPush_SendFailureBlocksWithoutStamp(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
-	rec, registry := newTestReconcilerForGate(client)
+	rec, mites := newTestReconcilerForGate(client)
 	rec.miteTransport = &scriptedSendTransport{Transport: rec.miteTransport, sendErr: errors.New("marshal failed")}
 
 	cr := newGateCtrl("ctl-fail", 0, "", nil)
-	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	mites.connect(cr.Name, cr.Namespace)
 
 	if err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}); err == nil {
 		t.Fatal("handleConnected returned nil for a failed push")
