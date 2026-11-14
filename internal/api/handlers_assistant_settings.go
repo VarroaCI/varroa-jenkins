@@ -88,8 +88,12 @@ func (s *Server) handlePutAssistantSettings(w http.ResponseWriter, r *http.Reque
 		s.writeSettingsError(w, err)
 		return
 	}
+	// Only a kill switch write publishes the control notice. Each reader reads
+	// the tenant levels from the row on each use, so a level write needs none.
 	if in.Paused != nil {
-		_ = publishControl(rt.Publish, g.Paused, g.PausedBy, g.UpdatedAt)
+		if err := publishControl(rt.Publish, g.Paused, g.UpdatedBy, g.UpdatedAt); err != nil {
+			rt.logger().Error("assistant control notice", "error", err)
+		}
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"paused": g.Paused, "pausedBy": g.PausedBy, "pausedAt": g.PausedAt,

@@ -547,3 +547,64 @@ func equalTypes(a, b []agent.EventType) bool {
 	}
 	return true
 }
+
+// runTenants resolves every run to one tenant.
+type runTenants struct{ tenant string }
+
+func (r runTenants) RunTenant(context.Context, string) (string, error) { return r.tenant, nil }
+
+func (runTenants) TenantTenant(_ context.Context, name string) (string, error) { return name, nil }
+
+// TestRun_ReadsTenantLevelsOnEachReadCall pins that the loop reads the tenant
+// levels for each read call. A level write publishes no bus message, so a
+// level that changes between two calls must apply to the second call.
+func TestRun_ReadsTenantLevelsOnEachReadCall(t *testing.T) {
+	f := newFixture(t,
+		toolTurn("c1", "get_run", `{"run":"r1"}`),
+		toolTurn("c2", "get_run", `{"run":"r1"}`),
+		textTurn("ok"),
+	)
+	f.cfg.Tenants = runTenants{tenant: "payments"}
+	reads := 0
+	f.cfg.TenantLevels = func(context.Context) (map[string]agent.DataSharing, error) {
+		reads++
+		if reads == 1 {
+			return map[string]agent.DataSharing{}, nil
+		}
+		return map[string]agent.DataSharing{"payments": agent.DataNone}, nil
+	}
+	ctx := context.Background()
+	if err := Run(ctx, f.cfg, TriggerStart); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 2 {
+		t.Errorf("tenant level reads = %d, want 2", reads)
+	}
+	if len(f.host.calls) != 1 || f.host.calls[0] != "get_run" {
+		t.Errorf("host calls = %v, want one get_run", f.host.calls)
+	}
+	evs, err := f.st.Events(ctx, f.id, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range evs {
+		if e.Type != agent.EventToolResult {
+			continue
+		}
+		var res agent.ToolResultPayload
+		if err := json.Unmarshal(e.Payload, &res); err != nil {
+			t.Fatal(err)
+		}
+		if res.CallID != "c2" {
+			continue
+		}
+		found = true
+		if !res.IsError || res.DataLevel != agent.DataNone {
+			t.Errorf("c2 tool_result = %+v, want a refusal at level none", res)
+		}
+	}
+	if !found {
+		t.Fatal("no tool_result for call c2")
+	}
+}
