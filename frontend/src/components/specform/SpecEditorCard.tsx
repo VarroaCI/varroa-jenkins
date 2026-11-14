@@ -44,6 +44,9 @@ const OVERLAY_TABS = OVERLAY_RESOURCES.map((r) => ({
 
 const OVERLAY_KEYS = ["statefulSet", "service", "ingress"] as const;
 
+// The time from the last overlay edit to the preview read.
+const PREVIEW_DEBOUNCE_MS = 600;
+
 // Every independently-editable draft carries its own version. A tier's draft is
 // dirty iff its version is > 0. Versions are captured when a save starts and,
 // on success, only tiers whose version is UNCHANGED since then are rebased —
@@ -635,53 +638,46 @@ export default function SpecEditorCard({
     !!statefulSet.trim() || !!service.trim() || !!ingress.trim() || !!podOverridesText.trim();
 
   // ── Debounced live preview (Tier 2/3 only) ──
-  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const debouncedPreview = useCallback(
-    (_text: string) => {
-      if (previewTimer.current) clearTimeout(previewTimer.current);
-      previewTimer.current = setTimeout(async () => {
-        // Re-read the latest state from the callbacks
-        // We always build from current state (setters are stable)
-        if (!hasOverlayContent) {
-          setPreview(null);
-          setPreviewError(null);
-          return;
-        }
-        const body = buildBody();
-        if (!body) return;
-        setPreviewing(true);
-        setPreviewError(null);
-        try {
-          const res = await previewControllerOverlay(cluster, ns, name, body);
-          setPreview(res);
-          setForbidden(false);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : "preview failed";
-          if (msg.startsWith("403")) {
-            setForbidden(true);
-          } else {
-            setPreviewError(msg);
-          }
-        } finally {
-          setPreviewing(false);
-        }
-      }, 600);
-    },
-    [cluster, ns, name, hasOverlayContent, buildBody],
-  );
-
-  // Trigger preview when overlay content changes
+  // The effect owns the timer and the read. The cleanup clears the timer and
+  // drops the answer of a read that newer overlay text replaced. The cleanup
+  // also clears the previewing mark, because a dropped read skips its finally.
   useEffect(() => {
     if (!hasOverlayContent) {
       setPreview(null);
       setPreviewError(null);
       return;
     }
-    debouncedPreview("");
+    const body = buildBody();
+    if (!body) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setPreviewing(true);
+      setPreviewError(null);
+      previewControllerOverlay(cluster, ns, name, body)
+        .then((res) => {
+          if (cancelled) return;
+          setPreview(res);
+          setForbidden(false);
+        })
+        .catch((e: unknown) => {
+          if (cancelled) return;
+          const msg = e instanceof Error ? e.message : "preview failed";
+          if (msg.startsWith("403")) {
+            setForbidden(true);
+          } else {
+            setPreviewError(msg);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setPreviewing(false);
+        });
+    }, PREVIEW_DEBOUNCE_MS);
     return () => {
-      if (previewTimer.current) clearTimeout(previewTimer.current);
+      cancelled = true;
+      clearTimeout(timer);
+      setPreviewing(false);
     };
-  }, [statefulSet, service, ingress, podOverridesText]);
+  }, [cluster, ns, name, hasOverlayContent, buildBody]);
 
   // ── Save path ──────────────────────────────────────────────────────────────
   // Send one patch and handle the response: on success rebase the baseline and
@@ -897,7 +893,6 @@ export default function SpecEditorCard({
                   setDraftVersion((p) => ({ ...p, podOverrides: p.podOverrides + 1 }));
                 }}
                 jsonSchema={podOverridesSchema}
-                onDebouncedChange={debouncedPreview}
                 onValidityChange={(v) => setYamlValidity("podOverrides", v)}
               />
               {podOverridesSchema && (
@@ -932,7 +927,6 @@ export default function SpecEditorCard({
                     overlaySetters[kind](v);
                     setDraftVersion((p) => ({ ...p, [kind]: p[kind] + 1 }));
                   }}
-                  onDebouncedChange={debouncedPreview}
                   onValidityChange={(v) =>
                     setYamlValidity(`resourceOverlay.${overlaySubTab}`, v)
                   }
