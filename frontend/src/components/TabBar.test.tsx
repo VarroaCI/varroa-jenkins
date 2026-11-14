@@ -91,7 +91,7 @@ describe("TabBar", () => {
 
   it("renders four links with correct hrefs and a More button", () => {
     renderTabBar("/");
-    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: "Controllers" })).toHaveAttribute("href", "/controllers");
     expect(screen.getByRole("link", { name: "Clusters" })).toHaveAttribute("href", "/clusters");
     expect(screen.getByRole("link", { name: "Activity" })).toHaveAttribute("href", "/activity");
@@ -160,18 +160,18 @@ describe("TabBar", () => {
   it("sets aria-current on the active tab", () => {
     renderTabBar("/clusters");
     expect(screen.getByRole("link", { name: "Clusters" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "Dashboard" })).not.toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current", "page");
   });
 
-  it("Dashboard uses end prop (not active on /controllers)", () => {
+  it("Overview uses end prop (not active on /controllers)", () => {
     renderTabBar("/controllers");
-    expect(screen.getByRole("link", { name: "Dashboard" })).not.toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current", "page");
   });
 
   it("accessible names resolve uniquely (icons are aria-hidden)", () => {
     renderTabBar("/");
     expect(screen.getByRole("link", { name: "Controllers" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Clusters" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Activity" })).toBeInTheDocument();
   });

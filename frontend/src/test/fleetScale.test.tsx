@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import Dashboard from "../pages/Dashboard";
+import { ControllersSection } from "../pages/overview/ControllersSection";
 import { BroodControllerPicker } from "../components/BroodControllerPicker";
 import { renderWithProviders } from "./render-utils";
 import { createControllerFleet } from "./factories";
@@ -59,14 +59,14 @@ describe("fleet scale", () => {
     mockUseAuth.mockReturnValue(managePermissions);
   });
 
-  it("Dashboard renders a bounded brood health card at 400 and 1000 controllers", () => {
+  it("Overview Controllers section renders a bounded brood health card at 400 and 1000 controllers", () => {
     const counts: Record<number, number> = {};
     for (const n of [400, 1000]) {
       mockUseControllers.mockReturnValue({ data: createControllerFleet(n), isLoading: false, error: null, refetch: vi.fn() });
-      const { container, unmount } = timed(`Dashboard render n=${n}`, () => renderWithProviders(<Dashboard />));
+      const { container, unmount } = timed(`Controllers section render n=${n}`, () => renderWithProviders(<ControllersSection />));
       counts[n] = elementCount(container);
       const healthRows = container.querySelectorAll("[data-testid='health-row']").length;
-      console.info(`[fleet-scale] Dashboard n=${n} elements=${counts[n]} health-rows=${healthRows}`);
+      console.info(`[fleet-scale] Controllers section n=${n} elements=${counts[n]} health-rows=${healthRows}`);
       expect(healthRows).toBe(8);
       expect(screen.getByRole("img", { name: /Phase distribution/ })).toBeInTheDocument();
       if (n === 400) {

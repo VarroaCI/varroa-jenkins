@@ -109,3 +109,20 @@ describe("RunRow", () => {
     expect(handlers.onRerun).toHaveBeenCalledWith(r);
   });
 });
+
+describe("RunRow without row actions", () => {
+  it("shows only Open when the caller passes no row action", async () => {
+    render(
+      <MemoryRouter>
+        <table>
+          <tbody>
+            <RunRow run={row()} now={NOW} localCluster="core" />
+          </tbody>
+        </table>
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /Actions for/ }));
+    const items = screen.getAllByRole("menuitem");
+    expect(items.map((i) => i.textContent)).toEqual(["Open"]);
+  });
+});

@@ -13,7 +13,7 @@ interface NavGroup { label: string; items: NavItem[] }
 
 const GROUPS: NavGroup[] = [
   { label: "Operate", items: [
-    { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
+    { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
     { to: "/pipelines", label: "Pipelines", icon: Waypoints, gate: "pipelines" },
     { to: "/controllers", label: "Controllers", icon: Server },
     { to: "/cells", label: "Cells", icon: Hexagon, gate: "cells" },

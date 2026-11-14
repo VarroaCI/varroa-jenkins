@@ -58,10 +58,6 @@
   display: none;
 }
 
-.table {
-  min-width: 52rem;
-}
-
 .loading,
 .empty {
   padding: 2rem 0;
@@ -102,20 +98,4 @@
     display: block;
   }
 
-  .table {
-    min-width: 0;
-  }
-
-  .table thead {
-    display: none;
-  }
-
-  .table tbody {
-    display: block;
-  }
-
-  .table tr {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-  }
 }

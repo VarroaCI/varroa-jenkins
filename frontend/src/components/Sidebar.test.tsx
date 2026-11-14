@@ -164,7 +164,7 @@ describe("Sidebar", () => {
 
     renderSidebar("/");
     // Exactly the 11 rows
-    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    expect(screen.getByText("Overview")).toBeInTheDocument();
     expect(screen.getByText("Pipelines")).toBeInTheDocument();
     expect(screen.getByText("Controllers")).toBeInTheDocument();
     expect(screen.getByText("Cells")).toBeInTheDocument();
@@ -176,7 +176,7 @@ describe("Sidebar", () => {
     expect(screen.getByText("Catalog")).toBeInTheDocument();
     expect(screen.getByText("Admin & access")).toBeInTheDocument();
 
-    // Pipelines sits between Dashboard and Controllers in Operate
+    // Pipelines sits between Overview and Controllers in Operate
     const pipelinesLink = screen.getByRole("link", { name: "Pipelines" });
     expect(pipelinesLink).toHaveAttribute("href", "/pipelines");
     expect(pipelinesLink.querySelector("svg")).toBeInTheDocument();
@@ -469,7 +469,7 @@ describe("Sidebar", () => {
   it("every non-door link also navigates correctly", () => {
     renderSidebar("/");
     const checks: { name: string; to: string }[] = [
-      { name: "Dashboard", to: "/" },
+      { name: "Overview", to: "/" },
       { name: "Controllers", to: "/controllers" },
       { name: "Clusters", to: "/clusters" },
       { name: "Activity", to: "/activity" },
@@ -482,15 +482,15 @@ describe("Sidebar", () => {
     }
   });
 
-  it("renders the Dashboard link with end prop (exact match only)", () => {
+  it("renders the Overview link with end prop (exact match only)", () => {
     renderSidebar("/controllers");
-    const dashLink = screen.getByRole("link", { name: "Dashboard" });
+    const dashLink = screen.getByRole("link", { name: "Overview" });
     expect(dashLink).not.toHaveAttribute("aria-current", "page");
   });
 
-  it("highlights the Dashboard link as active on root route", () => {
+  it("highlights the Overview link as active on root route", () => {
     renderSidebar("/");
-    const dashLink = screen.getByRole("link", { name: "Dashboard" });
+    const dashLink = screen.getByRole("link", { name: "Overview" });
     expect(dashLink).toHaveAttribute("aria-current", "page");
   });
 
@@ -759,16 +759,16 @@ describe("Sidebar", () => {
 
     it("appears on focus of a nav item in collapsed state", () => {
       const { container } = renderSidebarCollapsed("/");
-      const dashLink = screen.getByRole("link", { name: "Dashboard" });
+      const dashLink = screen.getByRole("link", { name: "Overview" });
       fireEvent.focus(dashLink);
       const flyoutEl = container.querySelector('div[aria-hidden="true"]');
       expect(flyoutEl).toBeInTheDocument();
-      expect(flyoutEl!.textContent).toBe("Dashboard");
+      expect(flyoutEl!.textContent).toBe("Overview");
     });
 
     it("disappears on blur of a nav item", () => {
       const { container } = renderSidebarCollapsed("/");
-      const dashLink = screen.getByRole("link", { name: "Dashboard" });
+      const dashLink = screen.getByRole("link", { name: "Overview" });
       fireEvent.focus(dashLink);
       expect(container.querySelector('div[aria-hidden="true"]')).toBeInTheDocument();
       fireEvent.blur(dashLink);
@@ -784,11 +784,11 @@ describe("Sidebar", () => {
 
     it("flyout element has aria-hidden='true'", () => {
       const { container } = renderSidebarCollapsed("/");
-      const dashLink = screen.getByRole("link", { name: "Dashboard" });
+      const dashLink = screen.getByRole("link", { name: "Overview" });
       fireEvent.focus(dashLink);
       const flyoutEl = container.querySelector('div[aria-hidden="true"]');
       expect(flyoutEl).toBeInTheDocument();
-      expect(flyoutEl!.textContent).toBe("Dashboard");
+      expect(flyoutEl!.textContent).toBe("Overview");
     });
   });
 
@@ -830,7 +830,7 @@ describe("Sidebar", () => {
       });
       renderSidebar("/");
       const labels = [
-        "Dashboard", "Pipelines", "Controllers", "Cells", "Plugins", "Clusters",
+        "Overview", "Pipelines", "Controllers", "Cells", "Plugins", "Clusters",
         "Activity", "Operations", "Schedules", "Catalog", "Admin & access",
       ];
       for (const label of labels) {

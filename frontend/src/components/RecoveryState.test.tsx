@@ -28,3 +28,19 @@ describe("RecordStoreUnreachablePage", () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("RecoveryState compact", () => {
+  it("compact shows Retry and no Back or Home", async () => {
+    const onRetry = vi.fn();
+    render(
+      <MemoryRouter>
+        <RecordStoreUnreachablePage compact onRetry={onRetry} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("Pipeline data is unreachable")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Home" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+});

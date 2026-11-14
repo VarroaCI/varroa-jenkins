@@ -68,18 +68,53 @@ export function railMeta(t: PipelinesOverviewTenant, localCluster: string): stri
 export interface TenantRailProps {
   tenants: PipelinesOverviewTenant[];
   localCluster: string;
-  selected: string[];
-  onSelect: (names: string[]) => void;
+  /** Omitted for a link rail, where each row opens its tenant home. */
+  selected?: string[];
+  onSelect?: (names: string[]) => void;
   /** False when one tenant is the whole view, so "All tenants" would change nothing. */
   showAll?: boolean;
 }
 
+/** RowBody draws the name, the strip, and the meta line of one rail row. */
+function RowBody({ t, localCluster }: { t: PipelinesOverviewTenant; localCluster: string }) {
+  return (
+    <>
+      <span className={styles.head}>
+        <span className={styles.name}>{t.name}</span>
+        {t.failed24h > 0 && <span className={styles.failed}>{t.failed24h}</span>}
+      </span>
+      <span className={styles.strip}>
+        {stripCells(t.recent).map((c, i) => (
+          <span key={i} role="img" aria-label={c.label} className={`${styles.cell} ${CELL_CLASS[c.kind]}`} />
+        ))}
+      </span>
+      <span className={styles.meta}>{railMeta(t, localCluster)}</span>
+    </>
+  );
+}
+
 /**
- * TenantRail lists the tenants in the order the BFF sends. It selects one
- * tenant for the feed, or every tenant. Each row names a failed badge, a
- * strip of its last results, and a meta line.
+ * TenantRail lists the tenants in the order the BFF sends. With onSelect, it
+ * selects one tenant for the feed, or every tenant. Without it, each row is a
+ * link to the tenant home. Each row names a failed badge, a strip of its last
+ * results, and a meta line.
  */
-export function TenantRail({ tenants, localCluster, selected, onSelect, showAll = true }: TenantRailProps) {
+export function TenantRail({ tenants, localCluster, selected = [], onSelect, showAll = true }: TenantRailProps) {
+  if (onSelect === undefined) {
+    return (
+      <nav aria-label="Tenants" className={styles.rail}>
+        <ul className={styles.list}>
+          {tenants.map((t) => (
+            <li key={t.name} className={styles.item}>
+              <Link to={`/pipelines/${encodeURIComponent(t.name)}`} className={styles.select}>
+                <RowBody t={t} localCluster={localCluster} />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    );
+  }
   const allPressed = selected.length === 0;
   return (
     <nav aria-label="Tenants" className={styles.rail}>
@@ -107,16 +142,7 @@ export function TenantRail({ tenants, localCluster, selected, onSelect, showAll 
                   className={`${styles.select} ${pressed ? styles.selected : ""}`}
                   onClick={() => onSelect(pressed ? [] : [t.name])}
                 >
-                  <span className={styles.head}>
-                    <span className={styles.name}>{t.name}</span>
-                    {t.failed24h > 0 && <span className={styles.failed}>{t.failed24h}</span>}
-                  </span>
-                  <span className={styles.strip}>
-                    {stripCells(t.recent).map((c, i) => (
-                      <span key={i} role="img" aria-label={c.label} className={`${styles.cell} ${CELL_CLASS[c.kind]}`} />
-                    ))}
-                  </span>
-                  <span className={styles.meta}>{railMeta(t, localCluster)}</span>
+                  <RowBody t={t} localCluster={localCluster} />
                 </button>
                 <Link to={`/pipelines/${encodeURIComponent(t.name)}`} className={styles.open} aria-label={`Open ${t.name}`}>
                   <ExternalLink size={14} aria-hidden="true" />

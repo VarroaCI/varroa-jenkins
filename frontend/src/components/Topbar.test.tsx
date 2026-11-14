@@ -43,9 +43,9 @@ function renderTopbar(route = "/") {
 }
 
 describe("Topbar", () => {
-  it("renders 'Dashboard' breadcrumb on root route", () => {
+  it("renders 'Overview' breadcrumb on root route", () => {
     renderTopbar("/");
-    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    expect(screen.getByText("Overview")).toBeInTheDocument();
   });
 
   it("renders breadcrumb from path segment on /controllers", () => {

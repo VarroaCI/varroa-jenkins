@@ -44,7 +44,7 @@ describe("routeContext", () => {
     expect(contextLabel({ route: "cells" })).toBe("Cells");
     expect(contextLabel({ route: "locks" })).toBe("Locks");
     expect(contextLabel({ route: "activity" })).toBe("Activity");
-    expect(contextLabel({ route: "dashboard" })).toBe("Dashboard");
+    expect(contextLabel({ route: "dashboard" })).toBe("Overview");
     expect(contextLabel({ route: "settings" })).toBe("settings");
     expect(contextLabel({})).toBe("");
   });

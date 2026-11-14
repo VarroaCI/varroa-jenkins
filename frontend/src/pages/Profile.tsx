@@ -178,7 +178,7 @@ export default function Profile() {
               },
               { key: "Email", value: me?.email || "—" },
               { key: "Last login", value: me?.lastLogin ? new Date(me.lastLogin).toLocaleString() : "Never" },
-              { key: "Default landing", value: "Dashboard" },
+              { key: "Default landing", value: "Overview" },
             ]}
           />
         </Card>

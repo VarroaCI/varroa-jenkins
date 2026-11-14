@@ -1,6 +1,4 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { getPipelinesOverview } from "../../api/client";
 import { Button } from "../../components/Button";
 import { RecordStoreDisabledPage, RecordStoreUnreachablePage, RecoveryState } from "../../components/RecoveryState";
 import { useAssistant } from "../../components/assistant/AssistantProvider";
@@ -15,6 +13,7 @@ import { TenantRail } from "./TenantRail";
 import { indexTitle } from "./pageTitles";
 import { useFeedQuery, type FeedQuery } from "./feedQuery";
 import { useFleetLive } from "./useFleetLive";
+import { usePipelinesOverview } from "./usePipelinesOverview";
 import styles from "./PipelinesIndex.module.css";
 
 /**
@@ -24,11 +23,7 @@ import styles from "./PipelinesIndex.module.css";
  * written to the URL, so the page never redirects.
  */
 export default function PipelinesIndex() {
-  const overviewQuery = useQuery({
-    queryKey: ["pipelines-overview"],
-    queryFn: getPipelinesOverview,
-    refetchInterval: 30_000,
-  });
+  const overviewQuery = usePipelinesOverview();
   const overview = overviewQuery.data;
   const perms = usePermissions().data;
   const assistant = useAssistant();
