@@ -270,8 +270,9 @@ networkPolicy:
   # Hive-mode egress to the core's external NATS endpoint (bus.url).
   # Required in hive mode when networkPolicy.enabled is true.
   # cidrs: [] fails the render in hive mode — pin to the core NATS endpoint IP(s).
-  # ports: [] derives the port from bus.url's trailing ":<port>" (fallback 4222);
-  # set explicitly for multi-server or IPv6 bus.url forms.
+  # ports: [] takes the port of each bus.url entry, or 4222 for an entry without
+  # a port. When the entries name more than one port, the render fails until
+  # ports names each port.
   coreNatsEgress:
     cidrs: []
     ports: []

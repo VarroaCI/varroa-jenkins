@@ -47,13 +47,37 @@ namespaceSelector:
 {{ .Values.networkPolicy.ingressControllerNamespaceSelector | toYaml | nindent 4 }}
 {{- end -}}
 
+{{- /*
+varroa.np.busURLPorts gives the distinct ports of the bus.url entries as a
+JSON array, in the order of first use. The split matches the Go bus client:
+split at each comma, trim spaces and a trailing slash, skip an empty entry.
+An entry without a port counts as 4222, because the NATS client dials 4222.
+*/ -}}
+{{- define "varroa.np.busURLPorts" -}}
+{{- $ports := list -}}
+{{- range $e := splitList "," (.Values.bus.url | default "") -}}
+{{- $e = trimSuffix "/" (trim $e) -}}
+{{- if $e -}}
+{{- $m := regexFind ":[0-9]+$" $e -}}
+{{- $ports = append $ports (ternary (trimPrefix ":" $m | atoi) 4222 (ne $m "")) -}}
+{{- end -}}
+{{- end -}}
+{{- $ports = uniq $ports -}}
+{{- if not $ports -}}{{- $ports = list 4222 -}}{{- end -}}
+{{ toJson $ports }}
+{{- end -}}
+
+{{- /*
+varroa.np.coreNatsPorts gives the core NATS egress ports as a JSON array:
+networkPolicy.coreNatsEgress.ports when set, else the bus.url ports.
+networkpolicy-guard.yaml fails a bus.url with more than one port.
+*/ -}}
 {{- define "varroa.np.coreNatsPorts" -}}
 {{- $explicit := .Values.networkPolicy.coreNatsEgress.ports -}}
 {{- if $explicit -}}
 {{ toJson $explicit }}
 {{- else -}}
-{{- $m := regexFind ":[0-9]+$" (trimSuffix "/" .Values.bus.url) -}}
-{{- if $m -}}[{{ trimPrefix ":" $m }}]{{- else -}}[4222]{{- end -}}
+{{ include "varroa.np.busURLPorts" . }}
 {{- end -}}
 {{- end -}}
 
