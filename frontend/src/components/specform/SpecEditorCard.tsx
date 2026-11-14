@@ -263,9 +263,9 @@ function applyPatchToObject(
   return out;
 }
 
-// The text shown for a failed save. A server rejection carries the reason in
-// its body, so that text wins over the fixed status copy in `message`.
-function saveFailureMessage(e: unknown): string {
+// The text shown for a failed save or preview. A server rejection carries the
+// reason in its body, so that text wins over the fixed status copy in `message`.
+function serverFailureMessage(e: unknown): string {
   if (e instanceof ApiError) return e.serverMessage || e.message;
   return e instanceof Error ? e.message : "unknown error";
 }
@@ -641,8 +641,9 @@ export default function SpecEditorCard({
   // The effect owns the timer and the read. The cleanup clears the timer and
   // drops the answer of a read that newer overlay text replaced. The cleanup
   // also clears the previewing mark, because a dropped read skips its finally.
+  // The BFF refuses a preview from a caller without update rights, so the card sends no read for that caller.
   useEffect(() => {
-    if (!hasOverlayContent) {
+    if (!canUpdate || !hasOverlayContent) {
       setPreview(null);
       setPreviewError(null);
       return;
@@ -661,11 +662,10 @@ export default function SpecEditorCard({
         })
         .catch((e: unknown) => {
           if (cancelled) return;
-          const msg = e instanceof Error ? e.message : "preview failed";
-          if (msg.startsWith("403")) {
+          if (e instanceof ApiError && e.status === 403) {
             setForbidden(true);
           } else {
-            setPreviewError(msg);
+            setPreviewError(serverFailureMessage(e));
           }
         })
         .finally(() => {
@@ -677,7 +677,7 @@ export default function SpecEditorCard({
       clearTimeout(timer);
       setPreviewing(false);
     };
-  }, [cluster, ns, name, hasOverlayContent, buildBody]);
+  }, [cluster, ns, name, canUpdate, hasOverlayContent, buildBody]);
 
   // ── Save path ──────────────────────────────────────────────────────────────
   // Send one patch and handle the response: on success rebase the baseline and
@@ -727,7 +727,7 @@ export default function SpecEditorCard({
       } else {
         // Non-conflict failure: baseline and every draft stay unchanged. The
         // banner names the server's reason; the drafts stay in the form.
-        setSaveError(saveFailureMessage(e));
+        setSaveError(serverFailureMessage(e));
       }
     } finally {
       setSaving(false);
@@ -937,7 +937,7 @@ export default function SpecEditorCard({
         </div>
 
         {/* Preview section (overlays only) */}
-        {hasOverlayContent && (activeTab === "podOverrides" || activeTab === "resourceOverlay") && (
+        {canUpdate && hasOverlayContent && (activeTab === "podOverrides" || activeTab === "resourceOverlay") && (
           <div className={styles.previewSection}>
             <div className={styles.previewHeader}>
               <span className={styles.previewLabel}>Live merge preview</span>
