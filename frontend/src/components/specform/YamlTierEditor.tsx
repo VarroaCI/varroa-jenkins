@@ -11,11 +11,8 @@ interface YamlTierEditorProps {
   value: string;
   onChange: (value: string) => void;
   jsonSchema?: Record<string, unknown>;
-  onDebouncedChange?: (value: string) => void;
   onValidityChange?: (valid: boolean) => void;
 }
-
-const DEBOUNCE_MS = 600;
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 
@@ -79,12 +76,10 @@ export default function YamlTierEditor({
   value,
   onChange,
   jsonSchema,
-  onDebouncedChange,
   onValidityChange,
 }: YamlTierEditorProps) {
   const viewRef = useRef<EditorView | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The editor is created once, so the schema reaches its update listener and
   // its linter through this ref rather than a captured value.
   const schemaRef = useRef(jsonSchema);
@@ -120,7 +115,9 @@ export default function YamlTierEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schemaKey]);
 
-  // Create editor view
+  // Create editor view. The editor and its update listener are built once, at
+  // mount, so the listener keeps the onChange and onValidityChange of the first
+  // render. A caller that changes what a callback does keys the editor.
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -130,14 +127,6 @@ export default function YamlTierEditor({
 
         // Sync to parent
         onChange(text);
-
-        // Debounced callback (preview)
-        if (onDebouncedChange) {
-          if (debounceRef.current) clearTimeout(debounceRef.current);
-          debounceRef.current = setTimeout(() => {
-            onDebouncedChange(text);
-          }, DEBOUNCE_MS);
-        }
 
         // Validity check
         const isValid = text.trim() ? checkValidity(text, schemaRef.current) : true;
@@ -186,7 +175,6 @@ export default function YamlTierEditor({
     return () => {
       view.destroy();
       viewRef.current = null;
-      if (debounceRef.current) clearTimeout(debounceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
