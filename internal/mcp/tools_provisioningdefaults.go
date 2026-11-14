@@ -26,30 +26,24 @@ import (
 // =============================================================================
 
 func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
-	clusterOrDefault := func(args map[string]any) string {
-		if c := strArg(args, "cluster"); c != "" {
-			return c
-		}
-		if deps.Brood != nil && deps.Brood.LocalCluster() != "" {
-			return deps.Brood.LocalCluster()
-		}
-		return "core"
-	}
-
 	getPD := mcp.NewTool("get_provisioning_defaults",
 		mcp.WithDescription("Get a provisioning defaults configuration by name"),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Provisioning defaults name (e.g. 'varroa-defaults')")),
-		mcp.WithString("cluster", mcp.Description("Target cluster (default: local cluster)")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindRead, getPD, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.ConfigBrood == nil {
 			return mcp.NewToolResultError("config brood not configured"), nil
 		}
 		args := getArgs(req)
-		name, cluster := strArg(args, "name"), clusterOrDefault(args)
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		name, cluster := strArg(args, "name"), cl.name
 		raw, err := deps.ConfigBrood.GetProvisioningDefaults(ctx, cluster, name)
 		if err != nil {
-			return mcp.NewToolResultError("provisioning defaults not found: " + err.Error()), nil
+			return mcp.NewToolResultError(readErrorText("provisioning defaults not found", "provisioning defaults "+name+" on cluster "+cluster, err)), nil
 		}
 		return resultJSON(raw)
 	})
@@ -63,7 +57,7 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 		mcp.WithString("defaultVersion", mcp.Description("Default Jenkins version")),
 		mcp.WithString("defaultCPU", mcp.Description("Default CPU request")),
 		mcp.WithString("defaultMemory", mcp.Description("Default memory request")),
-		mcp.WithString("cluster", mcp.Description("Target cluster (default: local cluster)")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindUpdate, updatePD, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.ConfigBrood == nil {
@@ -80,7 +74,11 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 			return mcp.NewToolResultError("access denied: missing provisioningdefaults:update permission"), nil
 		}
 		args := getArgs(req)
-		name, cluster := strArg(args, "name"), clusterOrDefault(args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		name, cluster := strArg(args, "name"), cl.name
 		var out json.RawMessage
 		for attempt := 1; ; attempt++ {
 			// Each round reads the target again, so a conflict merges onto the newer object.
@@ -113,19 +111,22 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 			"notReadyReason) \u2014 enough to survey the version catalog and spot profiles "+
 			"whose plugin set has not materialized. Use get_jenkins_version_profile for the "+
 			"full resource."),
-		mcp.WithString("cluster", mcp.Description("Target cluster (default: local cluster)")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 		mcp.WithBoolean("verbose", mcp.Description("Return full JenkinsVersionProfile resources "+
 			"instead of summaries. Prefer get_jenkins_version_profile for detail on a "+
 			"specific profile.")),
 		withListOutput(versionProfileListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listJVP, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := getArgs(req)
-		cluster := clusterOrDefault(args)
 		if deps.ConfigBrood == nil {
 			return mcp.NewToolResultError("config brood not configured"), nil
 		}
-		items, err := deps.ConfigBrood.ListVersionProfiles(ctx, cluster)
+		args := getArgs(req)
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		items, err := deps.ConfigBrood.ListVersionProfiles(ctx, cl.name)
 		if err != nil {
 			return mcp.NewToolResultError("failed to list version profiles: " + err.Error()), nil
 		}
@@ -151,16 +152,20 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 	getJVP := mcp.NewTool("get_jenkins_version_profile",
 		mcp.WithDescription("Get a JenkinsVersionProfile CRD"),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Profile name")),
-		mcp.WithString("cluster", mcp.Description("Target cluster (default: local cluster)")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindRead, getJVP, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.ConfigBrood == nil {
 			return mcp.NewToolResultError("config brood not configured"), nil
 		}
 		args := getArgs(req)
-		raw, err := deps.ConfigBrood.GetVersionProfile(ctx, clusterOrDefault(args), strArg(args, "name"))
+		cl, res := resolveConfigCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		raw, err := deps.ConfigBrood.GetVersionProfile(ctx, cl.name, strArg(args, "name"))
 		if err != nil {
-			return mcp.NewToolResultError("version profile not found: " + err.Error()), nil
+			return mcp.NewToolResultError(versionProfileReadError(err)), nil
 		}
 		return resultJSON(raw)
 	})
@@ -178,6 +183,10 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 				return mcp.NewToolResultError("access denied: missing version-profiles:" + verb + " permission"), nil
 			}
 			args := getArgs(req)
+			cl, res := resolveConfigWriteCluster(ctx, deps, args)
+			if res != nil {
+				return res, nil
+			}
 			name := strArg(args, "name")
 			var obj map[string]any
 			if raw := strArg(args, "object"); raw != "" {
@@ -188,12 +197,11 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 				obj = map[string]any{"apiVersion": "varroa.dev/v1alpha1", "kind": "JenkinsVersionProfile", "metadata": map[string]any{"name": name}, "spec": map[string]any{}}
 			}
 			raw, _ := json.Marshal(obj)
-			cluster := clusterOrDefault(args)
-			out, err := call(ctx, cluster, name, raw)
+			out, err := call(ctx, cl.name, name, raw)
 			if err != nil {
 				return mcp.NewToolResultError("failed to " + verb + " version profile: " + err.Error()), nil
 			}
-			emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
+			emitActivityForCluster(ctx, deps, claims, cl.name, activity.Event{
 				Type:    "versionprofile." + verb + "d",
 				Message: "JenkinsVersionProfile " + name + " " + verb + "d",
 			})
@@ -225,7 +233,7 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 			},
 		},
 	} {
-		tool := mcp.NewTool(spec.name, mcp.WithDescription(spec.desc), mcp.WithString("name", mcp.Required()), mcp.WithString("object"), mcp.WithString("cluster"))
+		tool := mcp.NewTool(spec.name, mcp.WithDescription(spec.desc), mcp.WithString("name", mcp.Required()), mcp.WithString("object"), mcp.WithString("cluster", mcp.Description(clusterArgDescription)))
 		addTool(mcpServer, spec.kind, tool, writeProfile(strings.TrimSuffix(spec.name, "_jenkins_version_profile"), spec.auth, spec.call))
 	}
 
@@ -233,7 +241,7 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 		mcp.WithDescription("Update a JenkinsVersionProfile CRD. The tool merges object onto the stored profile as a JSON merge patch: a key you name replaces the stored value, null removes it, and a key you leave out keeps the stored value. The tool ignores metadata.resourceVersion in object. When another writer changes the profile during the call, the tool reads it again and merges again, up to three times."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Profile name")),
 		mcp.WithString("object", mcp.Description("A JSON merge patch for the profile, for example {\"spec\":{\"recommended\":true}}")),
-		mcp.WithString("cluster", mcp.Description("Target cluster (default: local cluster)")),
+		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 	)
 	addTool(mcpServer, kindUpdate, updateJVP, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.ConfigBrood == nil {
@@ -247,7 +255,11 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 			return mcp.NewToolResultError("access denied: missing version-profiles:update permission"), nil
 		}
 		args := getArgs(req)
-		name, cluster := strArg(args, "name"), clusterOrDefault(args)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
+		name, cluster := strArg(args, "name"), cl.name
 		patch := []byte("{}")
 		noChange := true
 		if raw := strArg(args, "object"); raw != "" {
@@ -298,7 +310,7 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 		return resultJSON(out)
 	})
 
-	deleteJVP := mcp.NewTool("delete_jenkins_version_profile", mcp.WithDescription("Delete a JenkinsVersionProfile CRD"), mcp.WithString("name", mcp.Required()), mcp.WithString("cluster"))
+	deleteJVP := mcp.NewTool("delete_jenkins_version_profile", mcp.WithDescription("Delete a JenkinsVersionProfile CRD"), mcp.WithString("name", mcp.Required()), mcp.WithString("cluster", mcp.Description(clusterArgDescription)))
 	addTool(mcpServer, kindDelete, deleteJVP, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.ConfigBrood == nil {
 			return mcp.NewToolResultError("config brood not configured"), nil
@@ -311,8 +323,12 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 			return mcp.NewToolResultError("access denied: missing version-profiles:delete permission"), nil
 		}
 		args := getArgs(req)
+		cl, res := resolveConfigWriteCluster(ctx, deps, args)
+		if res != nil {
+			return res, nil
+		}
 		name := strArg(args, "name")
-		cluster := clusterOrDefault(args)
+		cluster := cl.name
 		if err := deps.ConfigBrood.DeleteVersionProfile(ctx, cluster, name); err != nil {
 			return mcp.NewToolResultError("failed to delete version profile: " + err.Error()), nil
 		}
