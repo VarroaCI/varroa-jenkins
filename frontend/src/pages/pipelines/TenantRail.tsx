@@ -68,9 +68,8 @@ export function railMeta(t: PipelinesOverviewTenant, localCluster: string): stri
 export interface TenantRailProps {
   tenants: PipelinesOverviewTenant[];
   localCluster: string;
-  /** Omitted for a link rail, where each row opens its tenant home. */
-  selected?: string[];
-  onSelect?: (names: string[]) => void;
+  selected: string[];
+  onSelect: (names: string[]) => void;
   /** False when one tenant is the whole view, so "All tenants" would change nothing. */
   showAll?: boolean;
 }
@@ -94,27 +93,11 @@ function RowBody({ t, localCluster }: { t: PipelinesOverviewTenant; localCluster
 }
 
 /**
- * TenantRail lists the tenants in the order the BFF sends. With onSelect, it
- * selects one tenant for the feed, or every tenant. Without it, each row is a
- * link to the tenant home. Each row names a failed badge, a strip of its last
- * results, and a meta line.
+ * TenantRail lists the tenants in the order the BFF sends. It selects one
+ * tenant for the feed, or every tenant. Each row names a failed badge, a strip
+ * of its last results, and a meta line.
  */
-export function TenantRail({ tenants, localCluster, selected = [], onSelect, showAll = true }: TenantRailProps) {
-  if (onSelect === undefined) {
-    return (
-      <nav aria-label="Tenants" className={styles.rail}>
-        <ul className={styles.list}>
-          {tenants.map((t) => (
-            <li key={t.name} className={styles.item}>
-              <Link to={`/pipelines/${encodeURIComponent(t.name)}`} className={styles.select}>
-                <RowBody t={t} localCluster={localCluster} />
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </nav>
-    );
-  }
+export function TenantRail({ tenants, localCluster, selected, onSelect, showAll = true }: TenantRailProps) {
   const allPressed = selected.length === 0;
   return (
     <nav aria-label="Tenants" className={styles.rail}>

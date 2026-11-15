@@ -2871,6 +2871,62 @@ export interface PipelinesOverviewTenant {
   recent: RecentRunResult[];
 }
 
+/** One hour of the 24-hour window. start is the bucket start, RFC 3339 UTC. */
+export interface PipelinesOverviewHour {
+  start: string;
+  runs: number;
+  failed: number;
+}
+
+/** The first input a waiting run asks for. Its parameters are counted, never listed. */
+export interface PipelinesOverviewInput {
+  id: string;
+  message?: string;
+  ok?: string;
+  submitter?: string;
+  parameterCount: number;
+}
+
+/** One run that waits for input. inputCount is the number of inputs the run waits on. */
+export interface PipelinesOverviewWaitingInput {
+  run: FleetRunRow;
+  input: PipelinesOverviewInput;
+  inputCount: number;
+}
+
+/** The last passed run of a failing job. */
+export interface PipelinesOverviewPassedRun {
+  runId: string;
+  buildNumber?: number;
+  createdAt: string;
+  endedAt?: string;
+}
+
+/** A job whose newest counted run failed. */
+export interface PipelinesOverviewFailingJob {
+  run: FleetRunRow;
+  stage?: string;
+  stageError?: string;
+  testsFailed?: number;
+  lastPassed?: PipelinesOverviewPassedRun;
+  failuresSincePass: number;
+}
+
+/** A run that executes now, with its current stage. */
+export interface PipelinesOverviewRunningRun {
+  run: FleetRunRow;
+  stage?: string;
+}
+
+/** The earliest future cron run of the caller's scopes. */
+export interface PipelinesOverviewScheduledRun {
+  tenant: string;
+  tenantFolder: string;
+  cluster: string;
+  jobPath: string;
+  at: string;
+}
+
 /** The body of GET /pipelines/overview. */
 export interface PipelinesOverview {
   windowStart: string;
@@ -2879,6 +2935,14 @@ export interface PipelinesOverview {
   canReadFleetLocks: boolean;
   totals: PipelinesOverviewTotals;
   attention: PipelinesOverviewAttention;
+  /** Always 24 entries, oldest first. Absent from an older server. */
+  hourly?: PipelinesOverviewHour[];
+  waitingInputs?: PipelinesOverviewWaitingInput[];
+  moreWaitingInputs?: boolean;
+  failingJobs?: PipelinesOverviewFailingJob[];
+  moreFailingJobs?: boolean;
+  running?: PipelinesOverviewRunningRun[];
+  nextScheduled?: PipelinesOverviewScheduledRun;
   tenants: PipelinesOverviewTenant[];
 }
 

@@ -114,24 +114,3 @@ describe("TenantRail", () => {
     expect(screen.getByRole("link", { name: "Open pay" })).toHaveAttribute("href", "/pipelines/pay");
   });
 });
-
-describe("TenantRail link mode", () => {
-  it("links each row to its tenant home when no onSelect is given", () => {
-    render(
-      <MemoryRouter>
-        <TenantRail tenants={[tenant({ name: "pay" }), tenant({ name: "ops" })]} localCluster="core" />
-      </MemoryRouter>,
-    );
-    const links = screen.getAllByRole("link");
-    expect(links.map((l) => l.getAttribute("href"))).toEqual(["/pipelines/pay", "/pipelines/ops"]);
-  });
-
-  it("renders no All tenants row in link mode", () => {
-    render(
-      <MemoryRouter>
-        <TenantRail tenants={[tenant()]} localCluster="core" showAll />
-      </MemoryRouter>,
-    );
-    expect(screen.queryByText("All tenants")).toBeNull();
-  });
-});
