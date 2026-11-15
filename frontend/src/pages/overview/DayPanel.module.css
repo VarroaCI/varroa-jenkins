@@ -1,0 +1,157 @@
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  margin-bottom: 20px;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  padding: 14px 16px 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.hist {
+  padding: 0 16px 12px;
+}
+
+.totals {
+  margin: 4px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.totals b {
+  color: var(--text);
+}
+
+.totals .failCount {
+  color: var(--bad-text);
+}
+
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 56px;
+  max-height: 56px;
+  margin-top: 10px;
+}
+
+.bar {
+  flex: 1;
+  min-width: 3px;
+  background: var(--ok);
+  border-radius: 1.5px 1.5px 0 0;
+  opacity: 0.75;
+}
+
+.bar[data-failed="true"] {
+  background: var(--bad);
+  opacity: 1;
+}
+
+.axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+
+.srow {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) auto;
+  grid-template-areas: "key body link";
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.key {
+  grid-area: key;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.body {
+  grid-area: body;
+  min-width: 0;
+}
+
+.runName {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.muted {
+  display: block;
+  color: var(--text-2);
+}
+
+.pulse {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.6s ease-out infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(194, 97, 28, 0.5); }
+  100% { box-shadow: 0 0 0 8px rgba(194, 97, 28, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+  }
+}
+
+.link {
+  grid-area: link;
+  color: var(--accent-strong);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.retry {
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.note {
+  margin: 0;
+  padding: 16px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+@media (max-width: 639.98px) {
+  .bars {
+    height: 48px;
+    max-height: 48px;
+  }
+
+  .srow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "key link"
+      "body body";
+    row-gap: 6px;
+  }
+}

@@ -25,7 +25,7 @@ Consecutive finished runs of one job fold into one row, such as **cron-probe × 
 
 On a phone, the rail becomes a row of chips.
 
-The **Overview** page opens first. Its **Pipelines** section shows the run counters of the last 24 hours and a count of the items that need attention. Below the counters, it lists at most eight tenants and the five newest runs. Select a tenant or a run to open it. The section shows only when you have pipelines access.
+The **Overview** page opens first. Its **Needs attention** panel lists the runs that wait for approval and the jobs that fail. Below it, **Last 24 hours** shows the runs of each hour and what runs now. A part shows only when you can read it.
 
 ## Open a tenant
 

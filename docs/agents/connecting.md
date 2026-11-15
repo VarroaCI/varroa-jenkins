@@ -150,7 +150,7 @@ Use [Varroa RBAC](../security/varroa-rbac.md) for control-plane access and
 
 ## From the Overview page
 
-The **Overview** page shows a card named "Connect an MCP client" below its sections. It shows the card to a user who has no API key and has not turned on the assistant. The card shows the MCP address with a copy button and a link to the API keys page. It shows the three blocks above, with your dashboard address in place of `<dashboard-host>`. The card never shows or holds a key.
+The **Overview** page shows a card named "Connect an MCP client" below its panels. It shows the card to a user who has no API key and has not turned on the assistant. The card shows the MCP address with a copy button and a link to the API keys page. It shows the three blocks above, with your dashboard address in place of `<dashboard-host>`. The card never shows or holds a key.
 
 ## Hosts that render views
 

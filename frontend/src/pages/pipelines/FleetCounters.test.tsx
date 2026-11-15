@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import type { PipelinesOverview } from "../../types";
-import { FleetCounters, NeedsAttentionTile, attentionSummary } from "./FleetCounters";
+import { FleetCounters } from "./FleetCounters";
 
 function overview(totals: Partial<PipelinesOverview["totals"]>): PipelinesOverview {
   return {
@@ -51,31 +51,5 @@ describe("FleetCounters", () => {
   it("shows the median duration with the p90", () => {
     render(<FleetCounters overview={overview({ medianDurationMs: 60_000, p90DurationMs: 180_000 })} />);
     expect(screen.getByText("p90 3m 0s")).toBeInTheDocument();
-  });
-});
-
-describe("attentionSummary and NeedsAttentionTile", () => {
-  it("attentionSummary sums the four counts and names each non-zero count", () => {
-    expect(attentionSummary({ failed24h: 2, waitingInput: 1, awaitingCell: 3, locksHeld: 1 })).toEqual({
-      total: 7,
-      sub: "2 failed · 1 waiting for input · 3 awaiting a cell · 1 lock held",
-    });
-    expect(attentionSummary({ failed24h: 0, waitingInput: 0, awaitingCell: 0, locksHeld: 2 }).sub).toBe(
-      "2 locks held",
-    );
-  });
-
-  it("attentionSummary answers all clear at zero", () => {
-    expect(attentionSummary({ failed24h: 0, waitingInput: 0, awaitingCell: 0, locksHeld: 0 })).toEqual({
-      total: 0,
-      sub: "all clear",
-    });
-  });
-
-  it("NeedsAttentionTile shows the total", () => {
-    render(<NeedsAttentionTile attention={{ failed24h: 4, waitingInput: 0, awaitingCell: 0, locksHeld: 0 }} />);
-    expect(screen.getByText("Needs attention")).toBeInTheDocument();
-    expect(screen.getByText("4")).toBeInTheDocument();
-    expect(screen.getByText("4 failed")).toBeInTheDocument();
   });
 });

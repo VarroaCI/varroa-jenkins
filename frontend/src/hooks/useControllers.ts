@@ -116,12 +116,14 @@ interface ControllersListBody {
 
 const fetchControllerList = () => bffFetch<ControllersListBody>("/controllers");
 
-export function useControllers() {
+/** useControllers reads GET /controllers on a 15-second refetch. enabled:false sends no read. */
+export function useControllers(enabled = true) {
   return useQuery({
     queryKey: ["controllers"],
     queryFn: fetchControllerList,
     select: (r) => r.items,
     refetchInterval: 15_000,
+    enabled,
   });
 }
 
