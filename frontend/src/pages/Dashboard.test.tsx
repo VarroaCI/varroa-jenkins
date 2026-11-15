@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Dashboard from "./Dashboard";
 import { renderWithProviders } from "../test/render-utils";
@@ -125,6 +125,24 @@ describe("Dashboard", () => {
     mockUseAuth.mockReturnValue(auth({ permissions: CREATOR }));
     renderWithProviders(<Dashboard />);
     expect(screen.getByRole("link", { name: "New controller" })).toHaveAttribute("href", "/controllers/create");
+  });
+
+  it("shows Run a pipeline only with pipelines write on a tenant", async () => {
+    mockUseAuth.mockReturnValue(auth({ permissions: BOTH }));
+    const { unmount } = renderWithProviders(<Dashboard />);
+    await waitFor(() => expect(mockGetPipelinesOverview).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: "Run a pipeline" })).toBeNull();
+    unmount();
+
+    const writer: Permissions = {
+      global: { pipelines: { read: true }, controllers: { read: true } },
+      scopes: [],
+      tenants: [{ tenant: "pay", jobs: [], capabilities: { pipelines: { write: true } } }],
+    } as unknown as Permissions;
+    mockUseAuth.mockReturnValue(auth({ permissions: writer }));
+    renderWithProviders(<Dashboard />);
+    expect(await screen.findByRole("button", { name: "Run a pipeline" })).toBeInTheDocument();
   });
 
   it("renders the connect tile once, after the feed", async () => {

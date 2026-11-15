@@ -25,7 +25,7 @@ Consecutive finished runs of one job fold into one row, such as **cron-probe × 
 
 On a phone, the rail becomes a row of chips.
 
-The **Overview** page opens first. Its **Needs attention** panel lists the runs that wait for approval and the jobs that fail. Below it, **Last 24 hours** shows the runs of each hour and what runs now. A part shows only when you can read it.
+The **Overview** page opens first. Its **Needs attention** panel lists the runs that wait for approval and the jobs that fail. Below it, **Last 24 hours** shows the runs of each hour and what runs now. A part shows only when you can read it. To start a run, select **Run a pipeline** on the Overview, pick a tenant and job, then select **Continue**.
 
 ## Open a tenant
 
