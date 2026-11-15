@@ -2644,6 +2644,13 @@ func parseActivityQuery(r *http.Request) (activity.Query, error) {
 	default:
 		return q, fmt.Errorf("excludeRoutineSignIns must be true or false")
 	}
+	switch v.Get("excludeBuildEvents") {
+	case "", "false":
+	case "true":
+		q.ExcludeBuildEvents = true
+	default:
+		return q, fmt.Errorf("excludeBuildEvents must be true or false")
+	}
 	return q, nil
 }
 

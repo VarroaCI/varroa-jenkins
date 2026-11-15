@@ -65,3 +65,34 @@ const LocalSignInType = "auth.local.login"
 func IsRoutineSignIn(e Event) bool {
 	return e.Type == LocalSignInType && e.Severity != "warning" && e.Severity != "error"
 }
+
+// Build event types. Each one repeats a run row, so a run feed leaves it out.
+// The Jenkins plugin writes BuildStartedType and BuildCompletedType. The
+// record store writes BuildFailedType after each failed run.
+const (
+	BuildStartedType   = "build.started"
+	BuildCompletedType = "build.completed"
+	BuildFailedType    = "build.failed"
+)
+
+// buildRepeatTypes lists the build event types that repeat a run row. The SQL
+// clause of recordstore ListActivity reads this same list.
+var buildRepeatTypes = []string{BuildStartedType, BuildCompletedType, BuildFailedType}
+
+// BuildRepeatTypes returns a copy of the build event types that repeat a run
+// row. A feed of runs leaves out exactly these types. Every other build.* type
+// reports something that no run row shows, so it stays in the feed.
+func BuildRepeatTypes() []string {
+	return append([]string(nil), buildRepeatTypes...)
+}
+
+// IsBuildEvent reports whether e is a build event that repeats a run row. It
+// is true for build.started, build.completed, and build.failed only.
+func IsBuildEvent(e Event) bool {
+	for _, t := range buildRepeatTypes {
+		if e.Type == t {
+			return true
+		}
+	}
+	return false
+}

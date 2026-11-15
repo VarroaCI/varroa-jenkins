@@ -44,6 +44,22 @@ type fakeRecordReader struct {
 	overviewTotals  recordstore.RunsOverviewTotals
 	overviewErr     error
 	overviewQueries []recordstore.RunsOverviewQuery
+	// hourly answers RunsOverview's buckets. Nil answers none, and the BFF fills zeros.
+	hourly []recordstore.HourCount
+
+	// failingJobs and failingMore answer FailingJobs. failingQueries records each call.
+	failingJobs    []recordstore.FailingJob
+	failingMore    bool
+	failingErr     error
+	failingQueries []recordstore.FailingJobsQuery
+	// nextCron answers NextCronRun when nextCronOK is set.
+	nextCron    recordstore.ScheduledRun
+	nextCronOK  bool
+	nextCronErr error
+	// groupsPage answers RunGroups. groupsQueries records each call.
+	groupsPage    recordstore.RunGroupsPage
+	groupsErr     error
+	groupsQueries []recordstore.RunGroupsQuery
 
 	// jobInventory is keyed by tenantKey, "<cluster>/<tenant>".
 	jobInventory    map[string]recordstore.JobInventory
@@ -689,11 +705,37 @@ func (f *fakeRecordReader) RunsOverview(_ context.Context, q recordstore.RunsOve
 	if f.overviewErr != nil {
 		return recordstore.RunsOverview{}, f.overviewErr
 	}
-	out := recordstore.RunsOverview{WindowStart: q.Now.Add(-24 * time.Hour), Totals: f.overviewTotals}
+	out := recordstore.RunsOverview{WindowStart: q.Now.Add(-24 * time.Hour), Totals: f.overviewTotals, Hourly: f.hourly}
 	for _, scope := range q.Scopes {
 		so := f.overviewScopes[f.tenantKey(scope.Cluster, scope.Tenant)]
 		so.Cluster, so.Tenant = scope.Cluster, scope.Tenant
 		out.Scopes = append(out.Scopes, so)
 	}
 	return out, nil
+}
+
+// FailingJobs answers the seeded failing jobs and records the query.
+func (f *fakeRecordReader) FailingJobs(_ context.Context, q recordstore.FailingJobsQuery) (recordstore.FailingJobsPage, error) {
+	f.failingQueries = append(f.failingQueries, q)
+	if f.failingErr != nil {
+		return recordstore.FailingJobsPage{}, f.failingErr
+	}
+	return recordstore.FailingJobsPage{Jobs: f.failingJobs, More: f.failingMore}, nil
+}
+
+// NextCronRun answers the seeded next cron run.
+func (f *fakeRecordReader) NextCronRun(context.Context, []recordstore.RunScope, time.Time) (recordstore.ScheduledRun, bool, error) {
+	if f.nextCronErr != nil {
+		return recordstore.ScheduledRun{}, false, f.nextCronErr
+	}
+	return f.nextCron, f.nextCronOK, nil
+}
+
+// RunGroups answers the seeded groups and records the query.
+func (f *fakeRecordReader) RunGroups(_ context.Context, q recordstore.RunGroupsQuery) (recordstore.RunGroupsPage, error) {
+	f.groupsQueries = append(f.groupsQueries, q)
+	if f.groupsErr != nil {
+		return recordstore.RunGroupsPage{}, f.groupsErr
+	}
+	return f.groupsPage, nil
 }

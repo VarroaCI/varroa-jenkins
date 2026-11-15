@@ -84,3 +84,28 @@ func TestMatches_ClusterAndController(t *testing.T) {
 		})
 	}
 }
+
+// TestMatchesExcludeBuildEvents asserts the exclusion drops the three build
+// events that repeat a run row, and keeps every other build event.
+func TestMatchesExcludeBuildEvents(t *testing.T) {
+	t.Parallel()
+
+	q := Query{ExcludeBuildEvents: true}
+	for _, typ := range []string{BuildStartedType, BuildCompletedType, BuildFailedType} {
+		e := Event{Type: typ, Severity: "info", Source: "recorder", Cluster: "core"}
+		if Matches(e, q) {
+			t.Fatalf("%s matched with ExcludeBuildEvents set", typ)
+		}
+		if !Matches(e, Query{}) {
+			t.Fatalf("%s did not match without the exclusion", typ)
+		}
+	}
+	kept := Event{Type: "build.interrupted", Severity: "warning", Source: "recorder", Cluster: "core"}
+	if !Matches(kept, q) {
+		t.Fatal("build.interrupted did not match with ExcludeBuildEvents set")
+	}
+	other := Event{Type: "settings.updated", Severity: "info", Source: "api", Cluster: "core"}
+	if !Matches(other, q) {
+		t.Fatal("settings.updated did not match with ExcludeBuildEvents set")
+	}
+}

@@ -29,6 +29,8 @@ type Query struct {
 	Cluster, Controller, Namespace, Source, Severity, Actor, Type string
 	// ExcludeRoutineSignIns leaves out each event that IsRoutineSignIn matches.
 	ExcludeRoutineSignIns bool
+	// ExcludeBuildEvents leaves out each event that IsBuildEvent matches.
+	ExcludeBuildEvents bool
 	// Scope is the SQL-pushed-down read scope (D5): a sound superset of the
 	// rows the caller may read. Authorize stays the authoritative per-event
 	// check — a Scope wider than the caller's real grant cannot disclose a
@@ -65,6 +67,9 @@ func Matches(e Event, q Query) bool {
 		return false
 	}
 	if q.ExcludeRoutineSignIns && IsRoutineSignIn(e) {
+		return false
+	}
+	if q.ExcludeBuildEvents && IsBuildEvent(e) {
 		return false
 	}
 	return (q.Cluster == "" || e.Cluster == q.Cluster) && (q.Controller == "" || e.Controller == q.Controller || e.Namespace+"/"+e.Controller == q.Controller) &&

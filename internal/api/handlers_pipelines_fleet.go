@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/auth"
@@ -193,25 +194,7 @@ func (s *Server) ListFleetRuns(ctx context.Context, claims *auth.Claims, p Fleet
 		}
 		lastNext = rp.NextCursor
 		for i, run := range rp.Runs {
-			key := run.Cluster + "/" + run.Tenant
-			tg, seen := grants[key]
-			if !seen {
-				tg = s.fleetTenantGrantsOf(claims, run)
-				grants[key] = tg
-			}
-			railName := run.Tenant
-			if owners := names[key]; len(owners) > 0 {
-				railName = owners[0]
-				// A requested rail name labels its own rows.
-				for _, o := range owners {
-					if wanted[o] {
-						railName = o
-						break
-					}
-				}
-			}
-			row := buildFleetRunRow(run, railName, tg.ok && grantsAllow(tg.grants, tg.folder, run.JobPath, "write"))
-			s.redactFleetUpstream(claims, run, &row)
+			row := s.fleetRowFor(claims, run, names, wanted, grants)
 			if p.Trigger != "" && row.Trigger.Kind != p.Trigger {
 				continue
 			}
@@ -297,6 +280,160 @@ func (s *Server) handleListFleetRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.handleReaderError(w, err, "list fleet runs") {
+		return
+	}
+	s.writeJSON(w, http.StatusOK, page)
+}
+
+// fleetRowFor maps one stored run onto a fleet row for the caller. The rail
+// name is the owner named by wanted when one matches, and the first owner
+// otherwise. The grants map caches the caller's grants per tenant.
+func (s *Server) fleetRowFor(claims *auth.Claims, run recordstore.Run, names map[string][]string, wanted map[string]bool, grants map[string]fleetTenantGrants) FleetRunRow {
+	key := run.Cluster + "/" + run.Tenant
+	tg, seen := grants[key]
+	if !seen {
+		tg = s.fleetTenantGrantsOf(claims, run)
+		grants[key] = tg
+	}
+	railName := railNameFor(names, run.Cluster, run.Tenant)
+	// A requested rail name labels its own rows.
+	for _, o := range names[key] {
+		if wanted[o] {
+			railName = o
+			break
+		}
+	}
+	row := buildFleetRunRow(run, railName, tg.ok && grantsAllow(tg.grants, tg.folder, run.JobPath, "write"))
+	s.redactFleetUpstream(claims, run, &row)
+	return row
+}
+
+// railNameFor answers the rail name of a tenant of the cluster: the first
+// rail name that names it, or the tenant itself when none does.
+func railNameFor(names map[string][]string, cluster, tenant string) string {
+	if owners := names[cluster+"/"+tenant]; len(owners) > 0 {
+		return owners[0]
+	}
+	return tenant
+}
+
+// FleetRunGroupsParams holds the query of GET /pipelines/runs/groups. Since
+// bounds the created_at of the finished runs that the groups count. Limit is
+// the page size of the groups.
+type FleetRunGroupsParams struct {
+	Since time.Time
+	Limit int
+}
+
+// fleetRunGroupsDefaultLimit and fleetRunGroupsMaxLimit bound the group page.
+const (
+	fleetRunGroupsDefaultLimit = 100
+	fleetRunGroupsMaxLimit     = 200
+	// fleetRunGroupsWindow is the longest look-back that the groups accept.
+	fleetRunGroupsWindow = 48 * time.Hour
+	// fleetRunGroupsDefaultWindow is the look-back when since is not set.
+	fleetRunGroupsDefaultWindow = 24 * time.Hour
+)
+
+// ParseFleetRunGroupsQuery reads the query of GET /pipelines/runs/groups. The
+// since value uses the rule of GET /pipelines/runs. It defaults to 24 hours
+// before now, and it must be in the past and within the last 48 hours. The
+// limit is 1 to 200, and it defaults to 100.
+func ParseFleetRunGroupsQuery(q url.Values, now time.Time) (FleetRunGroupsParams, error) {
+	p := FleetRunGroupsParams{Since: now.Add(-fleetRunGroupsDefaultWindow), Limit: fleetRunGroupsDefaultLimit}
+	if raw := q.Get("since"); raw != "" {
+		since, err := parseFleetSince(raw, now)
+		if err != nil {
+			return FleetRunGroupsParams{}, err
+		}
+		if since.After(now) {
+			return FleetRunGroupsParams{}, errors.New("since must be in the past")
+		}
+		if since.Before(now.Add(-fleetRunGroupsWindow)) {
+			return FleetRunGroupsParams{}, errors.New("since must be within the last 48 hours")
+		}
+		p.Since = since
+	}
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > fleetRunGroupsMaxLimit {
+			return FleetRunGroupsParams{}, errors.New("limit must be between 1 and 200")
+		}
+		p.Limit = n
+	}
+	return p, nil
+}
+
+// ListFleetRunGroups answers the finished build runs of the readable tenants
+// since p.Since, grouped by job, for the day feed. The held run of each job is
+// left out. It reads only the scopes of the tenants the caller may read. No
+// scope answers an empty page and reads nothing. A *ServiceError answers 503
+// when no record store is configured. A non-nil error is a store failure.
+func (s *Server) ListFleetRunGroups(ctx context.Context, claims *auth.Claims, p FleetRunGroupsParams, now time.Time) (FleetRunGroupPage, *ServiceError, error) {
+	page := FleetRunGroupPage{Since: p.Since, Groups: []FleetRunGroup{}}
+	if s.deps.RecordStore == nil {
+		return page, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}, nil
+	}
+	walk, err := s.readablePipelineTenants(ctx, claims)
+	if err != nil {
+		return page, nil, err
+	}
+	// A degraded placement read stops the groups here, as the run feed does.
+	if walk.Degraded != nil {
+		return page, nil, walk.Degraded
+	}
+	scopes, names := s.runScopes(claims, walk.Items)
+	if len(scopes) == 0 {
+		return page, nil, nil
+	}
+	rp, err := s.deps.RecordStore.RunGroups(ctx, recordstore.RunGroupsQuery{
+		Scopes: scopes, Since: p.Since, Now: now, Limit: p.Limit,
+	})
+	if err != nil {
+		return page, nil, err
+	}
+	page.Held = rp.Held
+	page.More = rp.More
+	grants := make(map[string]fleetTenantGrants)
+	for _, g := range rp.Groups {
+		folder := ""
+		if parsed, err := rbac.ParseTenant(g.Tenant); err == nil {
+			folder = parsed.Folder
+		}
+		page.Groups = append(page.Groups, FleetRunGroup{
+			Tenant:       railNameFor(names, g.Cluster, g.Tenant),
+			TenantFolder: folder,
+			Cluster:      g.Cluster,
+			JobPath:      g.JobPath,
+			Runs:         g.Runs,
+			Passed:       g.Passed,
+			Failed:       g.Failed,
+			FirstAt:      g.FirstAt,
+			Newest:       s.fleetRowFor(claims, g.Newest, names, nil, grants),
+		})
+	}
+	return page, nil, nil
+}
+
+// handleListFleetRunGroups serves GET /pipelines/runs/groups.
+func (s *Server) handleListFleetRunGroups(w http.ResponseWriter, r *http.Request) {
+	if s.deps.RecordStore == nil {
+		s.pipelinesUnavailable(w)
+		return
+	}
+	claims := auth.ClaimsFromContext(r.Context())
+	now := time.Now().UTC()
+	p, err := ParseFleetRunGroupsQuery(r.URL.Query(), now)
+	if err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	page, serviceErr, err := s.ListFleetRunGroups(r.Context(), claims, p, now)
+	if serviceErr != nil {
+		s.writeJSONError(w, serviceErr.Status, serviceErr.Message)
+		return
+	}
+	if s.handleReaderError(w, err, "list fleet run groups") {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, page)

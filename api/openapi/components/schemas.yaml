@@ -8400,7 +8400,7 @@ PipelinesOverviewTenant:
 PipelinesOverview:
   type: object
   description: The body of GET /pipelines/overview. Tenants is in attention order.
-  required: [windowStart, localCluster, clusters, canReadFleetLocks, totals, attention, tenants]
+  required: [windowStart, localCluster, clusters, canReadFleetLocks, totals, attention, tenants, hourly, waitingInputs, moreWaitingInputs, failingJobs, moreFailingJobs, running]
   properties:
     windowStart:
       type: string
@@ -8416,6 +8416,143 @@ PipelinesOverview:
       type: array
       items:
         $ref: '#/PipelinesOverviewTenant'
+    hourly:
+      type: array
+      description: The 24 hourly buckets of the window, oldest first.
+      items:
+        $ref: '#/PipelinesOverviewHour'
+    waitingInputs:
+      type: array
+      description: The runs that wait for an answer, oldest first, at most 20.
+      items:
+        $ref: '#/PipelinesOverviewWaitingInput'
+    moreWaitingInputs: {type: boolean, description: True when more runs wait than the list holds.}
+    failingJobs:
+      type: array
+      description: The jobs whose newest counted run failed within seven days, newest failure first, at most 20.
+      items:
+        $ref: '#/PipelinesOverviewFailingJob'
+    moreFailingJobs: {type: boolean, description: True when more jobs fail than the list holds.}
+    running:
+      type: array
+      description: Up to three runs in progress that wait for no answer.
+      items:
+        $ref: '#/PipelinesOverviewRunningRun'
+    nextScheduled:
+      $ref: '#/PipelinesOverviewScheduledRun'
+  additionalProperties: false
+
+PipelinesOverviewHour:
+  type: object
+  description: One hourly bucket of the overview window.
+  required: [start, runs, failed]
+  properties:
+    start: {type: string, format: date-time}
+    runs: {type: integer, format: int64}
+    failed: {type: integer, format: int64}
+  additionalProperties: false
+
+PipelinesOverviewInput:
+  type: object
+  description: The first pending input of a run that waits for an answer.
+  required: [id, parameterCount]
+  properties:
+    id: {type: string}
+    message: {type: string}
+    ok: {type: string, description: The label of the proceed button.}
+    submitter: {type: string}
+    parameterCount: {type: integer}
+  additionalProperties: false
+
+PipelinesOverviewWaitingInput:
+  type: object
+  description: One run that waits for an answer, with its first input.
+  required: [run, input, inputCount]
+  properties:
+    run:
+      $ref: '#/FleetRunRow'
+    input:
+      $ref: '#/PipelinesOverviewInput'
+    inputCount: {type: integer}
+  additionalProperties: false
+
+PipelinesOverviewPassedRun:
+  type: object
+  description: The last passed run of a failing job.
+  required: [runId, createdAt]
+  properties:
+    runId: {type: string}
+    buildNumber: {type: integer, format: int64}
+    createdAt: {type: string, format: date-time}
+    endedAt: {type: string, format: date-time}
+  additionalProperties: false
+
+PipelinesOverviewFailingJob:
+  type: object
+  description: A job whose newest counted run failed within seven days.
+  required: [run, failuresSincePass]
+  properties:
+    run:
+      $ref: '#/FleetRunRow'
+    stage: {type: string, description: The name of the failed stage.}
+    stageError: {type: string, description: 'The first line of the stage error, without escapes, capped at 200 runes.'}
+    testsFailed: {type: integer, format: int32}
+    lastPassed:
+      $ref: '#/PipelinesOverviewPassedRun'
+    failuresSincePass: {type: integer, format: int64, description: 'The failed runs after the last pass, the failed run included.'}
+  additionalProperties: false
+
+PipelinesOverviewRunningRun:
+  type: object
+  description: One run in progress.
+  required: [run]
+  properties:
+    run:
+      $ref: '#/FleetRunRow'
+    stage: {type: string, description: 'The top-level stage in progress, when one is known.'}
+  additionalProperties: false
+
+PipelinesOverviewScheduledRun:
+  type: object
+  description: The next cron run in scope.
+  required: [tenant, tenantFolder, cluster, jobPath, at]
+  properties:
+    tenant: {type: string, description: The rail name.}
+    tenantFolder: {type: string}
+    cluster: {type: string}
+    jobPath: {type: string}
+    at: {type: string, format: date-time}
+  additionalProperties: false
+
+FleetRunGroup:
+  type: object
+  description: The finished runs of one job in the window, except the held run.
+  required: [tenant, tenantFolder, cluster, jobPath, runs, passed, failed, firstAt, newest]
+  properties:
+    tenant: {type: string, description: The rail name.}
+    tenantFolder: {type: string}
+    cluster: {type: string}
+    jobPath: {type: string}
+    runs: {type: integer, format: int64}
+    passed: {type: integer, format: int64}
+    failed: {type: integer, format: int64}
+    firstAt: {type: string, format: date-time}
+    newest:
+      $ref: '#/FleetRunRow'
+  additionalProperties: false
+
+FleetRunGroupPage:
+  type: object
+  description: The body of GET /pipelines/runs/groups.
+  required: [since, groups, held, more]
+  properties:
+    since: {type: string, format: date-time}
+    groups:
+      type: array
+      items:
+        $ref: '#/FleetRunGroup'
+    held: {type: integer, format: int64, description: The held runs that the groups leave out.}
+    more: {type: boolean}
   additionalProperties: false
 
 AssistantConfig:

@@ -45,12 +45,25 @@ type ScopeOverview struct {
 	Recent                                    []RecentResult
 }
 
+// OverviewHours is the number of hourly buckets of the overview window.
+const OverviewHours = 24
+
+// HourCount is one hourly bucket of the overview window. Start is the
+// bucket start. Runs counts the runs created in the hour, and Failed the
+// ones with the result FAILURE.
+type HourCount struct {
+	Start        time.Time
+	Runs, Failed int64
+}
+
 // RunsOverview is the answer of the overview read. Scopes keeps the input
-// order of the query, and a scope with no run still has a row.
+// order of the query, and a scope with no run still has a row. Hourly holds
+// OverviewHours buckets, oldest first, and its runs sum to Totals.Runs24h.
 type RunsOverview struct {
 	WindowStart time.Time
 	Totals      RunsOverviewTotals
 	Scopes      []ScopeOverview
+	Hourly      []HourCount
 }
 
 // overviewScopedCTE gives the runs that the overview counts as the relation
@@ -85,7 +98,7 @@ func (r *pgReader) RunsOverview(ctx context.Context, q RunsOverviewQuery) (RunsO
 	}
 	windowStart := now.Add(-24 * time.Hour)
 	priorStart := now.Add(-48 * time.Hour)
-	out := RunsOverview{WindowStart: windowStart}
+	out := RunsOverview{WindowStart: windowStart, Hourly: emptyHours(windowStart)}
 	if len(q.Scopes) == 0 {
 		return out, nil
 	}
@@ -124,6 +137,37 @@ func (r *pgReader) RunsOverview(ctx context.Context, q RunsOverviewQuery) (RunsO
 		return RunsOverview{}, fmt.Errorf("read runs overview totals: %w", err)
 	}
 	out.Totals = t
+
+	hourlySQL := `WITH ` + scopesRelation + `, ` + overviewScopedCTE + `
+	SELECT floor(EXTRACT(EPOCH FROM (runs.created_at - $3)) / 3600)::int,
+		count(*), count(*) FILTER (WHERE runs.result = 'FAILURE')
+	FROM scoped runs
+	WHERE runs.created_at >= $3 AND runs.created_at < $4
+	GROUP BY 1`
+	hourRows, err := r.pool.Query(ctx, hourlySQL, bounds...)
+	if err != nil {
+		return RunsOverview{}, fmt.Errorf("read runs overview hourly counts: %w", err)
+	}
+	for hourRows.Next() {
+		var idx int
+		var runs, failed int64
+		if err := hourRows.Scan(&idx, &runs, &failed); err != nil {
+			hourRows.Close()
+			return RunsOverview{}, fmt.Errorf("scan runs overview hourly counts: %w", err)
+		}
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= OverviewHours {
+			idx = OverviewHours - 1
+		}
+		out.Hourly[idx].Runs += runs
+		out.Hourly[idx].Failed += failed
+	}
+	hourRows.Close()
+	if err := hourRows.Err(); err != nil {
+		return RunsOverview{}, fmt.Errorf("read runs overview hourly counts: %w", err)
+	}
 
 	countsSQL := `WITH ` + scopesRelation + `, ` + overviewScopedCTE + `
 	SELECT runs.cluster, runs.tenant,
@@ -197,4 +241,14 @@ func (r *pgReader) RunsOverview(ctx context.Context, q RunsOverviewQuery) (RunsO
 		out.Scopes = append(out.Scopes, row)
 	}
 	return out, nil
+}
+
+// emptyHours answers the OverviewHours buckets of the window that starts at
+// windowStart, all zero, oldest first.
+func emptyHours(windowStart time.Time) []HourCount {
+	hours := make([]HourCount, OverviewHours)
+	for i := range hours {
+		hours[i].Start = windowStart.Add(time.Duration(i) * time.Hour)
+	}
+	return hours
 }

@@ -26,7 +26,7 @@ func buildFailedEvent(intent *intentRow, payload RunCompletedPayload, env Ingest
 	result := *payload.Result
 	ev := activity.Event{
 		Timestamp: at,
-		Type:      "build.failed",
+		Type:      activity.BuildFailedType,
 		Source:    "recorder",
 		Severity:  "error",
 		Cluster:   intent.cluster,

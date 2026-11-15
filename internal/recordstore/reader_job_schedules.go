@@ -2,7 +2,11 @@ package recordstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // ListJobSchedules lists cluster/tenant's job_schedules rows, ordered by
@@ -42,4 +46,43 @@ func (r *pgReader) ListJobSchedules(ctx context.Context, cluster, tenant string)
 		return nil, fmt.Errorf("list job schedules: %w", err)
 	}
 	return out, nil
+}
+
+// ScheduledRun names the earliest future cron occurrence of a job in scope.
+type ScheduledRun struct {
+	Cluster, Tenant, JobPath string
+	At                       time.Time
+}
+
+// NextCronRun answers the earliest future cron occurrence after now of an
+// enabled cron job in the scopes. A job that matches no scope pattern is left
+// out. It answers false when no such occurrence is listed. It issues no
+// statement for an empty scope list.
+func (r *pgReader) NextCronRun(ctx context.Context, scopes []RunScope, now time.Time) (ScheduledRun, bool, error) {
+	if len(scopes) == 0 {
+		return ScheduledRun{}, false, nil
+	}
+	if err := r.checkSchema(ctx); err != nil {
+		return ScheduledRun{}, false, err
+	}
+	raw, err := scopesJSON(scopes)
+	if err != nil {
+		return ScheduledRun{}, false, fmt.Errorf("encode cron scopes: %w", err)
+	}
+	var out ScheduledRun
+	err = r.pool.QueryRow(ctx, scopesCTE+`
+		SELECT js.cluster, js.tenant, js.job_path, f.at FROM scopes s
+		JOIN varroa.job_schedules js ON js.cluster = s.cluster AND js.tenant = s.tenant
+			AND (s.patterns IS NULL OR js.job_path ~ ANY(s.patterns))
+		CROSS JOIN LATERAL (SELECT min(t) AS at FROM unnest(js.next_fire_times) t WHERE t > $2) f
+		WHERE js.trigger_type = 'cron' AND NOT js.disabled AND f.at IS NOT NULL
+		ORDER BY f.at, js.cluster, js.tenant, js.job_path
+		LIMIT 1`, string(raw), now).Scan(&out.Cluster, &out.Tenant, &out.JobPath, &out.At)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ScheduledRun{}, false, nil
+	}
+	if err != nil {
+		return ScheduledRun{}, false, fmt.Errorf("read next cron run: %w", err)
+	}
+	return out, true, nil
 }

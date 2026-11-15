@@ -18,6 +18,7 @@
       - {name: cursor, in: query, schema: {type: string}}
       - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 250, default: 100}}
       - {name: excludeRoutineSignIns, in: query, description: 'true leaves out each routine local sign-in, an auth.local.login event below warning severity.', schema: {type: boolean, default: false}}
+      - {name: excludeBuildEvents, in: query, description: 'true leaves out each event that only repeats a run: build.started, build.completed, and build.failed. Other build events stay.', schema: {type: boolean, default: false}}
     responses:
       "200":
         description: Activity history page.
@@ -63,6 +64,7 @@
       - {name: start, in: query, description: 'Drops each live event earlier than start.', schema: {type: string, format: date-time}}
       - {name: end, in: query, description: 'Drops each live event at or after end. The server closes the stream at end. When end has passed, the server closes the stream after the headers and sends no event. Do not reconnect a stream whose end has passed. Leave out end to keep the stream open.', schema: {type: string, format: date-time}}
       - {name: excludeRoutineSignIns, in: query, description: 'true leaves out each routine local sign-in, an auth.local.login event below warning severity.', schema: {type: boolean, default: false}}
+      - {name: excludeBuildEvents, in: query, description: 'true leaves out each event that only repeats a run: build.started, build.completed, and build.failed. Other build events stay.', schema: {type: boolean, default: false}}
     responses:
       "200":
         description: 'SSE event stream (event: activity, data = ActivityEvent).'
@@ -70,7 +72,7 @@
           text/event-stream:
             schema: {type: string}
       "400":
-        description: 'Invalid filter or range: a bound is not RFC 3339, start is not before end, or a source, severity, or excludeRoutineSignIns value is unknown.'
+        description: 'Invalid filter or range: a bound is not RFC 3339, start is not before end, or a source, severity, excludeRoutineSignIns, or excludeBuildEvents value is unknown.'
         content:
           application/json:
             schema:

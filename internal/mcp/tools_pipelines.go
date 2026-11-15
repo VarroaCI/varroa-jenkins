@@ -464,7 +464,8 @@ func fleetRunsResult(page api.FleetRunPage, serr *api.ServiceError, err error) (
 
 func registerGetPipelinesOverviewTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	overviewTool := mcp.NewTool("get_pipelines_overview",
-		mcp.WithDescription("Read the pipelines home: the 24-hour counters, the attention counts, and the tenant rail "+
+		mcp.WithDescription("Read the pipelines home: the 24-hour counters, the hourly run counts, the attention counts, "+
+			"the runs that wait for input, the failing jobs, the running runs, the next cron run, and the tenant rail "+
 			"of every tenant you can read. Takes no argument."),
 	)
 	addTool(mcpServer, kindRead, overviewTool, func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {

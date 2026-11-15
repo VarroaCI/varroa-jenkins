@@ -3132,6 +3132,33 @@ type ComponentsSchemasFleetPluginsRollup struct {
 	Items    []ComponentsSchemasFleetPluginRollupItem `json:"items"`
 }
 
+// ComponentsSchemasFleetRunGroup The finished runs of one job in the window, except the held run.
+type ComponentsSchemasFleetRunGroup struct {
+	Cluster string    `json:"cluster"`
+	Failed  int64     `json:"failed"`
+	FirstAt time.Time `json:"firstAt"`
+	JobPath string    `json:"jobPath"`
+
+	// Newest One run of the fleet run feed. It extends RunSummary with the cluster, the tenant, and the trigger.
+	Newest ComponentsSchemasFleetRunRow `json:"newest"`
+	Passed int64                        `json:"passed"`
+	Runs   int64                        `json:"runs"`
+
+	// Tenant The rail name.
+	Tenant       string `json:"tenant"`
+	TenantFolder string `json:"tenantFolder"`
+}
+
+// ComponentsSchemasFleetRunGroupPage The body of GET /pipelines/runs/groups.
+type ComponentsSchemasFleetRunGroupPage struct {
+	Groups []ComponentsSchemasFleetRunGroup `json:"groups"`
+
+	// Held The held runs that the groups leave out.
+	Held  int64     `json:"held"`
+	More  bool      `json:"more"`
+	Since time.Time `json:"since"`
+}
+
 // ComponentsSchemasFleetRunPage One page of the fleet run feed. Items is never null. NextCursor is absent on the last page.
 type ComponentsSchemasFleetRunPage struct {
 	Items      []ComponentsSchemasFleetRunRow `json:"items"`
@@ -4090,13 +4117,34 @@ type ComponentsSchemasPipelinesOverview struct {
 	CanReadFleetLocks bool                                        `json:"canReadFleetLocks"`
 
 	// Clusters The count of distinct clusters over every rail row.
-	Clusters     int                                        `json:"clusters"`
-	LocalCluster string                                     `json:"localCluster"`
-	Tenants      []ComponentsSchemasPipelinesOverviewTenant `json:"tenants"`
+	Clusters int `json:"clusters"`
+
+	// FailingJobs The jobs whose newest counted run failed within seven days, newest failure first, at most 20.
+	FailingJobs []ComponentsSchemasPipelinesOverviewFailingJob `json:"failingJobs"`
+
+	// Hourly The 24 hourly buckets of the window, oldest first.
+	Hourly       []ComponentsSchemasPipelinesOverviewHour `json:"hourly"`
+	LocalCluster string                                   `json:"localCluster"`
+
+	// MoreFailingJobs True when more jobs fail than the list holds.
+	MoreFailingJobs bool `json:"moreFailingJobs"`
+
+	// MoreWaitingInputs True when more runs wait than the list holds.
+	MoreWaitingInputs bool `json:"moreWaitingInputs"`
+
+	// NextScheduled The next cron run in scope.
+	NextScheduled *ComponentsSchemasPipelinesOverviewScheduledRun `json:"nextScheduled,omitempty"`
+
+	// Running Up to three runs in progress that wait for no answer.
+	Running []ComponentsSchemasPipelinesOverviewRunningRun `json:"running"`
+	Tenants []ComponentsSchemasPipelinesOverviewTenant     `json:"tenants"`
 
 	// Totals The counts of the overview window, the 24 hours before the reference time (UTC).
-	Totals      ComponentsSchemasPipelinesOverviewTotals `json:"totals"`
-	WindowStart time.Time                                `json:"windowStart"`
+	Totals ComponentsSchemasPipelinesOverviewTotals `json:"totals"`
+
+	// WaitingInputs The runs that wait for an answer, oldest first, at most 20.
+	WaitingInputs []ComponentsSchemasPipelinesOverviewWaitingInput `json:"waitingInputs"`
+	WindowStart   time.Time                                        `json:"windowStart"`
 }
 
 // ComponentsSchemasPipelinesOverviewAttention The counts that need a look now.
@@ -4105,6 +4153,71 @@ type ComponentsSchemasPipelinesOverviewAttention struct {
 	Failed24h    int64 `json:"failed24h"`
 	LocksHeld    int64 `json:"locksHeld"`
 	WaitingInput int64 `json:"waitingInput"`
+}
+
+// ComponentsSchemasPipelinesOverviewFailingJob A job whose newest counted run failed within seven days.
+type ComponentsSchemasPipelinesOverviewFailingJob struct {
+	// FailuresSincePass The failed runs after the last pass, the failed run included.
+	FailuresSincePass int64 `json:"failuresSincePass"`
+
+	// LastPassed The last passed run of a failing job.
+	LastPassed *ComponentsSchemasPipelinesOverviewPassedRun `json:"lastPassed,omitempty"`
+
+	// Run One run of the fleet run feed. It extends RunSummary with the cluster, the tenant, and the trigger.
+	Run ComponentsSchemasFleetRunRow `json:"run"`
+
+	// Stage The name of the failed stage.
+	Stage *string `json:"stage,omitempty"`
+
+	// StageError The first line of the stage error, without escapes, capped at 200 runes.
+	StageError  *string `json:"stageError,omitempty"`
+	TestsFailed *int32  `json:"testsFailed,omitempty"`
+}
+
+// ComponentsSchemasPipelinesOverviewHour One hourly bucket of the overview window.
+type ComponentsSchemasPipelinesOverviewHour struct {
+	Failed int64     `json:"failed"`
+	Runs   int64     `json:"runs"`
+	Start  time.Time `json:"start"`
+}
+
+// ComponentsSchemasPipelinesOverviewInput The first pending input of a run that waits for an answer.
+type ComponentsSchemasPipelinesOverviewInput struct {
+	Id      string  `json:"id"`
+	Message *string `json:"message,omitempty"`
+
+	// Ok The label of the proceed button.
+	Ok             *string `json:"ok,omitempty"`
+	ParameterCount int     `json:"parameterCount"`
+	Submitter      *string `json:"submitter,omitempty"`
+}
+
+// ComponentsSchemasPipelinesOverviewPassedRun The last passed run of a failing job.
+type ComponentsSchemasPipelinesOverviewPassedRun struct {
+	BuildNumber *int64     `json:"buildNumber,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	EndedAt     *time.Time `json:"endedAt,omitempty"`
+	RunId       string     `json:"runId"`
+}
+
+// ComponentsSchemasPipelinesOverviewRunningRun One run in progress.
+type ComponentsSchemasPipelinesOverviewRunningRun struct {
+	// Run One run of the fleet run feed. It extends RunSummary with the cluster, the tenant, and the trigger.
+	Run ComponentsSchemasFleetRunRow `json:"run"`
+
+	// Stage The top-level stage in progress, when one is known.
+	Stage *string `json:"stage,omitempty"`
+}
+
+// ComponentsSchemasPipelinesOverviewScheduledRun The next cron run in scope.
+type ComponentsSchemasPipelinesOverviewScheduledRun struct {
+	At      time.Time `json:"at"`
+	Cluster string    `json:"cluster"`
+	JobPath string    `json:"jobPath"`
+
+	// Tenant The rail name.
+	Tenant       string `json:"tenant"`
+	TenantFolder string `json:"tenantFolder"`
 }
 
 // ComponentsSchemasPipelinesOverviewTenant One rail row of the overview. Placement is placed when any row of the name is placed.
@@ -4141,6 +4254,16 @@ type ComponentsSchemasPipelinesOverviewTotals struct {
 
 	// RunsPrior24h The runs of the 24 hours before the window.
 	RunsPrior24h int64 `json:"runsPrior24h"`
+}
+
+// ComponentsSchemasPipelinesOverviewWaitingInput One run that waits for an answer, with its first input.
+type ComponentsSchemasPipelinesOverviewWaitingInput struct {
+	// Input The first pending input of a run that waits for an answer.
+	Input      ComponentsSchemasPipelinesOverviewInput `json:"input"`
+	InputCount int                                     `json:"inputCount"`
+
+	// Run One run of the fleet run feed. It extends RunSummary with the cluster, the tenant, and the trigger.
+	Run ComponentsSchemasFleetRunRow `json:"run"`
 }
 
 // ComponentsSchemasPluginAdvisory A non-classification finding (e.g. dependencyMinimumUnsatisfied).
@@ -6346,6 +6469,9 @@ type ListActivityParams struct {
 
 	// ExcludeRoutineSignIns true leaves out each routine local sign-in, an auth.local.login event below warning severity.
 	ExcludeRoutineSignIns *bool `form:"excludeRoutineSignIns,omitempty" json:"excludeRoutineSignIns,omitempty"`
+
+	// ExcludeBuildEvents true leaves out each event that only repeats a run: build.started, build.completed, and build.failed. Other build events stay.
+	ExcludeBuildEvents *bool `form:"excludeBuildEvents,omitempty" json:"excludeBuildEvents,omitempty"`
 }
 
 // ListActivityParamsSource defines parameters for ListActivity.
@@ -6637,6 +6763,13 @@ type ListFleetRunsParamsSort string
 
 // ListFleetRunsParamsOrder defines parameters for ListFleetRuns.
 type ListFleetRunsParamsOrder string
+
+// ListFleetRunGroupsParams defines parameters for ListFleetRunGroups.
+type ListFleetRunGroupsParams struct {
+	// Since A positive Go duration such as 24h, or an RFC 3339 time.
+	Since *string `form:"since,omitempty" json:"since,omitempty"`
+	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
 
 // ListTenantAgentSessionsParams defines parameters for ListTenantAgentSessions.
 type ListTenantAgentSessionsParams struct {
@@ -7928,6 +8061,9 @@ type ClientInterface interface {
 
 	// ListFleetRuns request
 	ListFleetRuns(ctx context.Context, params *ListFleetRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListFleetRunGroups request
+	ListFleetRunGroups(ctx context.Context, params *ListFleetRunGroupsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// StreamFleetRuns request
 	StreamFleetRuns(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -10284,6 +10420,18 @@ func (c *Client) ListFleetRuns(ctx context.Context, params *ListFleetRunsParams,
 	return c.Client.Do(req)
 }
 
+func (c *Client) ListFleetRunGroups(ctx context.Context, params *ListFleetRunGroupsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListFleetRunGroupsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) StreamFleetRuns(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewStreamFleetRunsRequest(c.Server)
 	if err != nil {
@@ -11637,6 +11785,22 @@ func NewListActivityRequest(server string, params *ListActivityParams) (*http.Re
 		if params.ExcludeRoutineSignIns != nil {
 
 			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "excludeRoutineSignIns", runtime.ParamLocationQuery, *params.ExcludeRoutineSignIns); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.ExcludeBuildEvents != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "excludeBuildEvents", runtime.ParamLocationQuery, *params.ExcludeBuildEvents); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
@@ -18003,6 +18167,71 @@ func NewListFleetRunsRequest(server string, params *ListFleetRunsParams) (*http.
 	return req, nil
 }
 
+// NewListFleetRunGroupsRequest generates requests for ListFleetRunGroups
+func NewListFleetRunGroupsRequest(server string, params *ListFleetRunGroupsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/runs/groups")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Since != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "since", runtime.ParamLocationQuery, *params.Since); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewStreamFleetRunsRequest generates requests for StreamFleetRuns
 func NewStreamFleetRunsRequest(server string) (*http.Request, error) {
 	var err error
@@ -21654,6 +21883,9 @@ type ClientWithResponsesInterface interface {
 	// ListFleetRunsWithResponse request
 	ListFleetRunsWithResponse(ctx context.Context, params *ListFleetRunsParams, reqEditors ...RequestEditorFn) (*ListFleetRunsResponse, error)
 
+	// ListFleetRunGroupsWithResponse request
+	ListFleetRunGroupsWithResponse(ctx context.Context, params *ListFleetRunGroupsParams, reqEditors ...RequestEditorFn) (*ListFleetRunGroupsResponse, error)
+
 	// StreamFleetRunsWithResponse request
 	StreamFleetRunsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*StreamFleetRunsResponse, error)
 
@@ -25277,6 +25509,32 @@ func (r ListFleetRunsResponse) StatusCode() int {
 	return 0
 }
 
+type ListFleetRunGroupsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasFleetRunGroupPage
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON500      *ComponentsResponsesInternal
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListFleetRunGroupsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListFleetRunGroupsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type StreamFleetRunsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -28727,6 +28985,15 @@ func (c *ClientWithResponses) ListFleetRunsWithResponse(ctx context.Context, par
 		return nil, err
 	}
 	return ParseListFleetRunsResponse(rsp)
+}
+
+// ListFleetRunGroupsWithResponse request returning *ListFleetRunGroupsResponse
+func (c *ClientWithResponses) ListFleetRunGroupsWithResponse(ctx context.Context, params *ListFleetRunGroupsParams, reqEditors ...RequestEditorFn) (*ListFleetRunGroupsResponse, error) {
+	rsp, err := c.ListFleetRunGroups(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListFleetRunGroupsResponse(rsp)
 }
 
 // StreamFleetRunsWithResponse request returning *StreamFleetRunsResponse
@@ -35866,6 +36133,60 @@ func ParseListFleetRunsResponse(rsp *http.Response) (*ListFleetRunsResponse, err
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest ComponentsSchemasFleetRunPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ComponentsResponsesInternal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListFleetRunGroupsResponse parses an HTTP response from a ListFleetRunGroupsWithResponse call
+func ParseListFleetRunGroupsResponse(rsp *http.Response) (*ListFleetRunGroupsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListFleetRunGroupsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasFleetRunGroupPage
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

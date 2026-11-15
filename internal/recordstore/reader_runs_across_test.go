@@ -15,6 +15,14 @@ type acrossSeed struct {
 	inputs                     string
 	durationMs                 *int64
 	queuedAt, startedAt        *time.Time
+	// payload is the JSON payload column. Empty stores an empty object.
+	payload string
+}
+
+// withPayload sets the payload column. A run that records no build carries
+// the accepted_at key, so withPayload(`{"accepted_at":"..."}`) seeds one.
+func withPayload(payload string) func(*acrossSeed) {
+	return func(s *acrossSeed) { s.payload = payload }
 }
 
 // seedAcrossRun inserts one varroa.runs row for the fleet run read. The
@@ -29,13 +37,17 @@ func seedAcrossRun(t *testing.T, db *sql.DB, tenant, jobPath string, createdAt t
 	if s.inputs != "" {
 		inputs = s.inputs
 	}
+	payload := s.payload
+	if payload == "" {
+		payload = "{}"
+	}
 	runID := uuid.New()
 	if _, err := db.Exec(`
 		INSERT INTO varroa.runs (run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
-			status, result, branch, actor, scm_revision, inputs, duration_ms, queued_at, started_at)
-		VALUES ($1, $2, $3, $4, $5, 'cell-a', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			status, result, branch, actor, scm_revision, inputs, duration_ms, queued_at, started_at, payload)
+		VALUES ($1, $2, $3, $4, $5, 'cell-a', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 	`, runID, createdAt, "manual:across-"+runID.String(), testCluster, testNamespace, tenant, jobPath,
-		status, result, s.branch, s.actor, s.scmRevision, inputs, s.durationMs, s.queuedAt, s.startedAt); err != nil {
+		status, result, s.branch, s.actor, s.scmRevision, inputs, s.durationMs, s.queuedAt, s.startedAt, payload); err != nil {
 		t.Fatalf("seed run for %s: %v", jobPath, err)
 	}
 	return runID
