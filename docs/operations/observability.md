@@ -53,6 +53,8 @@ The **Needs attention** panel lists the items that need a person, in this order:
 
 The **Jenkins** row in **Last 24 hours** counts the controllers, cells included. Its bar shows the phase of each controller. Every value is a reported fact.
 
+**Earlier today** lists runs and events since local midnight. Runs of one job fold into one row. A job's newest failed run appears in the attention panel instead.
+
 ## Diagnose gaps
 
 | Symptom | Check |

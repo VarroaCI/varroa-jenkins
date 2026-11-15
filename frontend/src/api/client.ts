@@ -18,6 +18,7 @@ import type {
   RunNoteList,
 } from "../types/assistant";
 import type {
+  ActivityPage,
   Controller,
   ControllerList,
   ControllerDiff,
@@ -95,6 +96,7 @@ import type {
   FleetLockListResponse,
   FleetLockReleaseRequest,
   FleetLockReleaseResponse,
+  FleetRunGroupPage,
   FleetRunPage,
   FleetRunSort,
   PipelinesOverview,
@@ -1219,6 +1221,34 @@ function fleetRunsQS(p: FleetRunsParams): string {
 /** Reads one page of the run feed over every tenant the caller can read. */
 export function listFleetRuns(p: FleetRunsParams): Promise<FleetRunPage> {
   return bffFetch<FleetRunPage>(`/pipelines/runs${fleetRunsQS(p)}`);
+}
+
+/** Reads the finished runs of the window grouped by job. The held failure of each job is left out. */
+export function listFleetRunGroups(p: { since?: string; limit?: number }): Promise<FleetRunGroupPage> {
+  const qs = new URLSearchParams();
+  if (p.since) qs.set("since", p.since);
+  if (p.limit) qs.set("limit", String(p.limit));
+  const s = qs.toString();
+  return bffFetch<FleetRunGroupPage>(`/pipelines/runs/groups${s ? `?${s}` : ""}`);
+}
+
+/** ActivityParams are the query parameters of GET /activity. */
+export interface ActivityParams {
+  start?: string;
+  limit?: number;
+  excludeRoutineSignIns?: boolean;
+  excludeBuildEvents?: boolean;
+}
+
+/** Reads the newest activity events, optionally without build events or routine sign-ins. */
+export function listActivity(p: ActivityParams): Promise<ActivityPage> {
+  const qs = new URLSearchParams();
+  if (p.start) qs.set("start", p.start);
+  if (p.limit) qs.set("limit", String(p.limit));
+  if (p.excludeRoutineSignIns) qs.set("excludeRoutineSignIns", "true");
+  if (p.excludeBuildEvents) qs.set("excludeBuildEvents", "true");
+  const s = qs.toString();
+  return bffFetch<ActivityPage>(`/activity${s ? `?${s}` : ""}`);
 }
 
 /** Reads the counters, the attention counts, and the tenant rail. */

@@ -7,13 +7,14 @@ import { ClusterFanoutNotice } from "../components/ClusterFanoutNotice";
 import { usePipelinesOverview } from "./pipelines/usePipelinesOverview";
 import { AttentionPanel } from "./overview/AttentionPanel";
 import { DayPanel } from "./overview/DayPanel";
+import { TodayFeed } from "./overview/TodayFeed";
 import { useOverviewLive } from "./overview/useOverviewLive";
 import styles from "./Dashboard.module.css";
 import { ConnectClientTile } from "./ConnectClientTile";
 
 /**
  * Dashboard is the Overview page. It reads top to bottom: the items that need a
- * person, the last 24 hours, and the connect tile. Each part shows only what the
+ * person, the last 24 hours beside the day's feed, and the connect tile. Each part shows only what the
  * caller can read, and sits in its own error boundary, so a failure in one part
  * never hides another.
  */
@@ -56,9 +57,14 @@ export default function Dashboard() {
         <ErrorBoundary>
           <AttentionPanel canPipelines={canPipelines} canControllers={canControllers} isAdmin={isAdmin} />
         </ErrorBoundary>
-        <ErrorBoundary>
-          <DayPanel canPipelines={canPipelines} canControllers={canControllers} />
-        </ErrorBoundary>
+        <div className={styles.day}>
+          <ErrorBoundary>
+            <DayPanel canPipelines={canPipelines} canControllers={canControllers} />
+          </ErrorBoundary>
+          <ErrorBoundary>
+            <TodayFeed canPipelines={canPipelines} />
+          </ErrorBoundary>
+        </div>
       </>
     );
   }

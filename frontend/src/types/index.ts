@@ -2824,6 +2824,30 @@ export interface FleetRunPage {
   nextCursor?: string;
 }
 
+/**
+ * One job of GET /pipelines/runs/groups: its finished runs in the window. The
+ * held run of the job is left out. Newest is the job's newest kept run.
+ */
+export interface FleetRunGroup {
+  tenant: string;
+  tenantFolder: string;
+  cluster: string;
+  jobPath: string;
+  runs: number;
+  passed: number;
+  failed: number;
+  firstAt: string;
+  newest: FleetRunRow;
+}
+
+/** One page of GET /pipelines/runs/groups. Held counts the held failures left out. */
+export interface FleetRunGroupPage {
+  since: string;
+  groups: FleetRunGroup[];
+  held: number;
+  more: boolean;
+}
+
 /** One recent run of a rail tenant, newest first. */
 export interface RecentRunResult {
   runId: string;

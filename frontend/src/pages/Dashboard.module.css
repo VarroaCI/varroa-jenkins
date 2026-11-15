@@ -42,3 +42,21 @@
   font-weight: 600;
   text-decoration: none;
 }
+
+.day {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+
+.day > * {
+  margin-bottom: 0;
+}
+
+@media (min-width: 1080px) {
+  .day {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  }
+}
