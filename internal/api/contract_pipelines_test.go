@@ -32,6 +32,13 @@ func init() {
 			WantStatus: http.StatusServiceUnavailable,
 		},
 		contractCase{
+			Name:       "listFleetRunGroups-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/pipelines/runs/groups",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
 			Name:       "getPipelinesOverview-recordStoreDisabled",
 			Method:     "GET",
 			Path:       "/api/v1/pipelines/overview",

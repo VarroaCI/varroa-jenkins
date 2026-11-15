@@ -126,6 +126,7 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("GET /pipelines/runs", srv.handleListFleetRuns)
 	mux.HandleFunc("GET /pipelines/overview", srv.handlePipelinesOverview)
 	mux.HandleFunc("GET /pipelines/runs/stream", srv.handleFleetRunStream)
+	mux.HandleFunc("GET /pipelines/runs/groups", srv.handleListFleetRunGroups)
 	mux.HandleFunc("GET /pipelines/{tenant}", srv.handleListPipelines)
 	mux.HandleFunc("GET /pipelines/{tenant}/jobs/{job}", srv.handleGetPipelineJob)
 	mux.HandleFunc("GET /pipelines/{tenant}/jobs/{job}/branches", srv.handleListJobBranches)

@@ -606,6 +606,37 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
+/api/v1/pipelines/runs/groups:
+  get:
+    operationId: listFleetRunGroups
+    tags: [Pipelines]
+    summary: Groups the finished runs of every readable pipelines tenant by job, for the day feed.
+    description: >
+      Answers the finished build runs created since `since`, grouped by
+      cluster, tenant, and job path. The held run of each job is left out: the
+      newest counted run of the job, when that run failed. A group with no kept
+      run is absent. The held count reaches the body as held. The window ends
+      at the server's time. A since value must be in the past and within the
+      last 48 hours, and it defaults to 24 hours.
+    parameters:
+      - {name: since, in: query, description: 'A positive Go duration such as 24h, or an RFC 3339 time.', schema: {type: string}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+    responses:
+      "200":
+        description: The groups of the window, newest run first.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FleetRunGroupPage'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "500":
+        $ref: '../components/responses.yaml#/Internal'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
 /api/v1/pipelines/overview:
   get:
     operationId: getPipelinesOverview
@@ -614,7 +645,10 @@
     description: >
       Counts the runs of the 24 hours before the server's UTC time, and the
       prior 24 hours for the delta. The live counts have no time bound. A
-      held fleet lock counts only when the caller may read its job.
+      held fleet lock counts only when the caller may read its job. It also
+      answers 24 hourly buckets, the runs that wait for input, the failing
+      jobs (a newest counted run that failed within seven days), up to three
+      running runs, and the next cron run in scope.
     responses:
       "200":
         description: The overview of the tenants the caller may read.

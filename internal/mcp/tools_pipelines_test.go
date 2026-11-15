@@ -1118,3 +1118,18 @@ func TestGetRunQualityKeptAtMetadataLevel(t *testing.T) {
 		t.Fatalf("filtered quality = %+v, want the jacoco line at 81.2", body.Quality)
 	}
 }
+
+// FailingJobs answers no failing job.
+func (f *fakePipelineReader) FailingJobs(context.Context, recordstore.FailingJobsQuery) (recordstore.FailingJobsPage, error) {
+	return recordstore.FailingJobsPage{}, nil
+}
+
+// RunGroups answers no group.
+func (f *fakePipelineReader) RunGroups(context.Context, recordstore.RunGroupsQuery) (recordstore.RunGroupsPage, error) {
+	return recordstore.RunGroupsPage{}, nil
+}
+
+// NextCronRun answers no scheduled run.
+func (f *fakePipelineReader) NextCronRun(context.Context, []recordstore.RunScope, time.Time) (recordstore.ScheduledRun, bool, error) {
+	return recordstore.ScheduledRun{}, false, nil
+}

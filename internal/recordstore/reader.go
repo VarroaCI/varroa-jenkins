@@ -57,6 +57,15 @@ type Reader interface {
 	// RunsOverview answers the aggregate counts and the recent runs of every
 	// scope in q, for the 24 hours before q.Now.
 	RunsOverview(ctx context.Context, q RunsOverviewQuery) (RunsOverview, error)
+	// FailingJobs answers the jobs of the scopes whose newest counted run
+	// failed within the window, newest failure first.
+	FailingJobs(ctx context.Context, q FailingJobsQuery) (FailingJobsPage, error)
+	// RunGroups answers the finished runs of the scopes in the window,
+	// grouped by job, with each job's held run left out.
+	RunGroups(ctx context.Context, q RunGroupsQuery) (RunGroupsPage, error)
+	// NextCronRun answers the earliest future cron occurrence of an enabled
+	// job in the scopes, after now.
+	NextCronRun(ctx context.Context, scopes []RunScope, now time.Time) (ScheduledRun, bool, error)
 	// ListDownstreamRuns pages the runs whose upstream run id is
 	// q.UpstreamRunID, newest first.
 	ListDownstreamRuns(ctx context.Context, q DownstreamRunQuery) (RunPage, error)

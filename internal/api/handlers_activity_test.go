@@ -30,6 +30,8 @@ import (
 type fakeBackfill struct {
 	events []activity.Event
 	err    error
+	// queries records each Query call, in call order.
+	queries []activity.Query
 }
 
 func (f *fakeBackfill) Recent(_ context.Context, _ string, _ int) ([]activity.Event, error) {
@@ -40,6 +42,7 @@ func (f *fakeBackfill) Retention() (string, int) { return "off", 0 }
 
 // Query mirrors the production contract: filter first, then apply the limit.
 func (f *fakeBackfill) Query(_ context.Context, q activity.Query) (activity.Page, error) {
+	f.queries = append(f.queries, q)
 	if f.err != nil {
 		return activity.Page{}, f.err
 	}
@@ -926,5 +929,56 @@ func TestStreamActivitySpecListsRangeAndErrors(t *testing.T) {
 		if item.Get.Responses.Status(code) == nil {
 			t.Errorf("streamActivity declares no %d response", code)
 		}
+	}
+}
+
+// TestParseActivityQueryExcludeBuildEvents asserts excludeBuildEvents accepts
+// true and false, and refuses any other value.
+func TestParseActivityQueryExcludeBuildEvents(t *testing.T) {
+	t.Parallel()
+
+	q, err := parseActivityQuery(httptest.NewRequest("GET", "/activity?excludeBuildEvents=true", nil))
+	if err != nil || !q.ExcludeBuildEvents {
+		t.Fatalf("excludeBuildEvents=true: query %+v, err %v; want the flag set", q, err)
+	}
+	q, err = parseActivityQuery(httptest.NewRequest("GET", "/activity?excludeBuildEvents=false", nil))
+	if err != nil || q.ExcludeBuildEvents {
+		t.Fatalf("excludeBuildEvents=false: query %+v, err %v; want the flag unset", q, err)
+	}
+	if _, err := parseActivityQuery(httptest.NewRequest("GET", "/activity?excludeBuildEvents=yes", nil)); err == nil {
+		t.Fatal("excludeBuildEvents=yes was accepted; want a refusal")
+	}
+}
+
+// TestActivityExcludeBuildEventsReachesBackfill asserts the HTTP query flag reaches
+// the backfill read, and that an unset flag does not.
+func TestActivityExcludeBuildEventsReachesBackfill(t *testing.T) {
+	backfill := &fakeBackfill{events: []activity.Event{
+		{Namespace: "ns-a", Controller: "ctrl-a", Type: activity.BuildFailedType, Severity: "error", Message: "build"},
+	}}
+	deps := &Dependencies{
+		Backfill:   backfill,
+		Authorizer: testAuthorizer(false, "ns-a"),
+		Logger:     slog.Default(),
+	}
+	srv := NewServer(deps)
+
+	for _, raw := range []string{"/activity?excludeBuildEvents=true", "/activity"} {
+		req := httptest.NewRequest(http.MethodGet, raw, nil)
+		req = req.WithContext(contextWithClaims(req.Context(), &auth.Claims{Subject: "test-user"}))
+		w := httptest.NewRecorder()
+		srv.handleActivity(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: status %d: %s", raw, w.Code, w.Body.String())
+		}
+	}
+	if len(backfill.queries) != 2 {
+		t.Fatalf("backfill queries = %d, want 2", len(backfill.queries))
+	}
+	if !backfill.queries[0].ExcludeBuildEvents {
+		t.Fatal("the flagged request did not reach the backfill read")
+	}
+	if backfill.queries[1].ExcludeBuildEvents {
+		t.Fatal("the unflagged request set the exclusion")
 	}
 }

@@ -30,9 +30,11 @@ type ActivityQuery struct {
 	Cluster, Controller, Namespace, Source, Severity, Actor, Type string
 	Start, End                                                    *time.Time
 	ExcludeRoutineSignIns                                         bool
-	Limit                                                         int
-	Cursor                                                        string
-	Scope                                                         activity.Scope
+	// ExcludeBuildEvents leaves out each build event (activity.IsBuildEvent).
+	ExcludeBuildEvents bool
+	Limit              int
+	Cursor             string
+	Scope              activity.Scope
 }
 
 // ActivityPage is one page of ListActivity. NextCursor is empty on the
@@ -74,6 +76,9 @@ func activityFilterKey(q ActivityQuery) string {
 	}
 	if q.ExcludeRoutineSignIns {
 		parts = append(parts, "excludeRoutineSignIns")
+	}
+	if q.ExcludeBuildEvents {
+		parts = append(parts, "excludeBuildEvents")
 	}
 	return strings.Join(parts, "\x1f")
 }
@@ -154,6 +159,11 @@ func (r *pgReader) ListActivity(ctx context.Context, q ActivityQuery) (ActivityP
 		// the normalized severity, so a warning or error row is never routine.
 		args = append(args, activity.LocalSignInType)
 		clauses = append(clauses, fmt.Sprintf("NOT (type = $%d AND severity NOT IN ('warning', 'error'))", len(args)))
+	}
+	if q.ExcludeBuildEvents {
+		// The SQL form of activity.IsBuildEvent, read from the same list.
+		args = append(args, activity.BuildRepeatTypes())
+		clauses = append(clauses, fmt.Sprintf("NOT (type = ANY($%d::text[]))", len(args)))
 	}
 	lower := q.Start
 	if edge != nil && (lower == nil || lower.Before(*edge)) {

@@ -350,6 +350,10 @@ func (r *pgReader) ListRunsAcross(ctx context.Context, q RunsAcrossQuery) (RunPa
 	case "":
 	case RunStatusWaitingInput:
 		filters = append(filters, "runs.status = 'RUNNING' AND "+waitingInputSQL)
+	// A status written as an SQL literal matches the partial indexes on
+	// runs.status. A bound parameter in a generic plan does not match them.
+	case "QUEUED", "RUNNING", "COMPLETED":
+		filters = append(filters, "runs.status = '"+q.Status+"'")
 	default:
 		filters = append(filters, "runs.status = "+bind(q.Status))
 	}

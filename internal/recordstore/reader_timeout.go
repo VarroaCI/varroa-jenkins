@@ -111,6 +111,30 @@ func (t *timeoutReader) RunsOverview(ctx context.Context, q RunsOverviewQuery) (
 	return v0, t.classify(ctx, err)
 }
 
+// FailingJobs bounds the inner call with the per-read deadline.
+func (t *timeoutReader) FailingJobs(ctx context.Context, q FailingJobsQuery) (FailingJobsPage, error) {
+	ctx, cancel := context.WithTimeoutCause(ctx, t.d, errReadDeadline)
+	defer cancel()
+	v0, err := t.r.FailingJobs(ctx, q)
+	return v0, t.classify(ctx, err)
+}
+
+// RunGroups bounds the inner call with the per-read deadline.
+func (t *timeoutReader) RunGroups(ctx context.Context, q RunGroupsQuery) (RunGroupsPage, error) {
+	ctx, cancel := context.WithTimeoutCause(ctx, t.d, errReadDeadline)
+	defer cancel()
+	v0, err := t.r.RunGroups(ctx, q)
+	return v0, t.classify(ctx, err)
+}
+
+// NextCronRun bounds the inner call with the per-read deadline.
+func (t *timeoutReader) NextCronRun(ctx context.Context, scopes []RunScope, now time.Time) (ScheduledRun, bool, error) {
+	ctx, cancel := context.WithTimeoutCause(ctx, t.d, errReadDeadline)
+	defer cancel()
+	v0, v1, err := t.r.NextCronRun(ctx, scopes, now)
+	return v0, v1, t.classify(ctx, err)
+}
+
 // ListDownstreamRuns bounds the inner call with the per-read deadline.
 func (t *timeoutReader) ListDownstreamRuns(ctx context.Context, q DownstreamRunQuery) (RunPage, error) {
 	ctx, cancel := context.WithTimeoutCause(ctx, t.d, errReadDeadline)

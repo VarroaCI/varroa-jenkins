@@ -1989,6 +1989,67 @@ components:
       required:
       - error
       type: object
+    FleetRunGroup:
+      additionalProperties: false
+      description: The finished runs of one job in the window, except the held run.
+      properties:
+        cluster:
+          type: string
+        failed:
+          format: int64
+          type: integer
+        firstAt:
+          format: date-time
+          type: string
+        jobPath:
+          type: string
+        newest:
+          $ref: '#/components/schemas/components_schemas_FleetRunRow'
+        passed:
+          format: int64
+          type: integer
+        runs:
+          format: int64
+          type: integer
+        tenant:
+          description: The rail name.
+          type: string
+        tenantFolder:
+          type: string
+      required:
+      - tenant
+      - tenantFolder
+      - cluster
+      - jobPath
+      - runs
+      - passed
+      - failed
+      - firstAt
+      - newest
+      type: object
+    FleetRunGroupPage:
+      additionalProperties: false
+      description: The body of GET /pipelines/runs/groups.
+      properties:
+        groups:
+          items:
+            $ref: '#/components/schemas/components_schemas_FleetRunGroup'
+          type: array
+        held:
+          description: The held runs that the groups leave out.
+          format: int64
+          type: integer
+        more:
+          type: boolean
+        since:
+          format: date-time
+          type: string
+      required:
+      - since
+      - groups
+      - held
+      - more
+      type: object
     FleetRunPage:
       additionalProperties: false
       description: One page of the fleet run feed. Items is never null. NextCursor
@@ -2835,14 +2896,43 @@ components:
         clusters:
           description: The count of distinct clusters over every rail row.
           type: integer
+        failingJobs:
+          description: The jobs whose newest counted run failed within seven days,
+            newest failure first, at most 20.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelinesOverviewFailingJob'
+          type: array
+        hourly:
+          description: The 24 hourly buckets of the window, oldest first.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelinesOverviewHour'
+          type: array
         localCluster:
           type: string
+        moreFailingJobs:
+          description: True when more jobs fail than the list holds.
+          type: boolean
+        moreWaitingInputs:
+          description: True when more runs wait than the list holds.
+          type: boolean
+        nextScheduled:
+          $ref: '#/components/schemas/components_schemas_PipelinesOverviewScheduledRun'
+        running:
+          description: Up to three runs in progress that wait for no answer.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelinesOverviewRunningRun'
+          type: array
         tenants:
           items:
             $ref: '#/components/schemas/components_schemas_PipelinesOverviewTenant'
           type: array
         totals:
           $ref: '#/components/schemas/components_schemas_PipelinesOverviewTotals'
+        waitingInputs:
+          description: The runs that wait for an answer, oldest first, at most 20.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelinesOverviewWaitingInput'
+          type: array
         windowStart:
           format: date-time
           type: string
@@ -2854,6 +2944,12 @@ components:
       - totals
       - attention
       - tenants
+      - hourly
+      - waitingInputs
+      - moreWaitingInputs
+      - failingJobs
+      - moreFailingJobs
+      - running
       type: object
     PipelinesOverviewAttention:
       additionalProperties: false
@@ -2876,6 +2972,123 @@ components:
       - waitingInput
       - awaitingCell
       - locksHeld
+      type: object
+    PipelinesOverviewFailingJob:
+      additionalProperties: false
+      description: A job whose newest counted run failed within seven days.
+      properties:
+        failuresSincePass:
+          description: The failed runs after the last pass, the failed run included.
+          format: int64
+          type: integer
+        lastPassed:
+          $ref: '#/components/schemas/components_schemas_PipelinesOverviewPassedRun'
+        run:
+          $ref: '#/components/schemas/components_schemas_FleetRunRow'
+        stage:
+          description: The name of the failed stage.
+          type: string
+        stageError:
+          description: The first line of the stage error, without escapes, capped
+            at 200 runes.
+          type: string
+        testsFailed:
+          format: int32
+          type: integer
+      required:
+      - run
+      - failuresSincePass
+      type: object
+    PipelinesOverviewHour:
+      additionalProperties: false
+      description: One hourly bucket of the overview window.
+      properties:
+        failed:
+          format: int64
+          type: integer
+        runs:
+          format: int64
+          type: integer
+        start:
+          format: date-time
+          type: string
+      required:
+      - start
+      - runs
+      - failed
+      type: object
+    PipelinesOverviewInput:
+      additionalProperties: false
+      description: The first pending input of a run that waits for an answer.
+      properties:
+        id:
+          type: string
+        message:
+          type: string
+        ok:
+          description: The label of the proceed button.
+          type: string
+        parameterCount:
+          type: integer
+        submitter:
+          type: string
+      required:
+      - id
+      - parameterCount
+      type: object
+    PipelinesOverviewPassedRun:
+      additionalProperties: false
+      description: The last passed run of a failing job.
+      properties:
+        buildNumber:
+          format: int64
+          type: integer
+        createdAt:
+          format: date-time
+          type: string
+        endedAt:
+          format: date-time
+          type: string
+        runId:
+          type: string
+      required:
+      - runId
+      - createdAt
+      type: object
+    PipelinesOverviewRunningRun:
+      additionalProperties: false
+      description: One run in progress.
+      properties:
+        run:
+          $ref: '#/components/schemas/components_schemas_FleetRunRow'
+        stage:
+          description: The top-level stage in progress, when one is known.
+          type: string
+      required:
+      - run
+      type: object
+    PipelinesOverviewScheduledRun:
+      additionalProperties: false
+      description: The next cron run in scope.
+      properties:
+        at:
+          format: date-time
+          type: string
+        cluster:
+          type: string
+        jobPath:
+          type: string
+        tenant:
+          description: The rail name.
+          type: string
+        tenantFolder:
+          type: string
+      required:
+      - tenant
+      - tenantFolder
+      - cluster
+      - jobPath
+      - at
       type: object
     PipelinesOverviewTenant:
       additionalProperties: false
@@ -2977,6 +3190,21 @@ components:
       - finished
       - running
       - queued
+      type: object
+    PipelinesOverviewWaitingInput:
+      additionalProperties: false
+      description: One run that waits for an answer, with its first input.
+      properties:
+        input:
+          $ref: '#/components/schemas/components_schemas_PipelinesOverviewInput'
+        inputCount:
+          type: integer
+        run:
+          $ref: '#/components/schemas/components_schemas_FleetRunRow'
+      required:
+      - run
+      - input
+      - inputCount
       type: object
     PluginAdvisory:
       additionalProperties: false
@@ -8683,6 +8911,67 @@ components:
       - coverage
       - clusters
       type: object
+    components_schemas_FleetRunGroup:
+      additionalProperties: false
+      description: The finished runs of one job in the window, except the held run.
+      properties:
+        cluster:
+          type: string
+        failed:
+          format: int64
+          type: integer
+        firstAt:
+          format: date-time
+          type: string
+        jobPath:
+          type: string
+        newest:
+          $ref: '#/components/schemas/components_schemas_FleetRunRow'
+        passed:
+          format: int64
+          type: integer
+        runs:
+          format: int64
+          type: integer
+        tenant:
+          description: The rail name.
+          type: string
+        tenantFolder:
+          type: string
+      required:
+      - tenant
+      - tenantFolder
+      - cluster
+      - jobPath
+      - runs
+      - passed
+      - failed
+      - firstAt
+      - newest
+      type: object
+    components_schemas_FleetRunGroupPage:
+      additionalProperties: false
+      description: The body of GET /pipelines/runs/groups.
+      properties:
+        groups:
+          items:
+            $ref: '#/components/schemas/components_schemas_FleetRunGroup'
+          type: array
+        held:
+          description: The held runs that the groups leave out.
+          format: int64
+          type: integer
+        more:
+          type: boolean
+        since:
+          format: date-time
+          type: string
+      required:
+      - since
+      - groups
+      - held
+      - more
+      type: object
     components_schemas_FleetRunPage:
       additionalProperties: false
       description: One page of the fleet run feed. Items is never null. NextCursor
@@ -10339,14 +10628,43 @@ components:
         clusters:
           description: The count of distinct clusters over every rail row.
           type: integer
+        failingJobs:
+          description: The jobs whose newest counted run failed within seven days,
+            newest failure first, at most 20.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelinesOverviewFailingJob'
+          type: array
+        hourly:
+          description: The 24 hourly buckets of the window, oldest first.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelinesOverviewHour'
+          type: array
         localCluster:
           type: string
+        moreFailingJobs:
+          description: True when more jobs fail than the list holds.
+          type: boolean
+        moreWaitingInputs:
+          description: True when more runs wait than the list holds.
+          type: boolean
+        nextScheduled:
+          $ref: '#/components/schemas/components_schemas_PipelinesOverviewScheduledRun'
+        running:
+          description: Up to three runs in progress that wait for no answer.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelinesOverviewRunningRun'
+          type: array
         tenants:
           items:
             $ref: '#/components/schemas/components_schemas_PipelinesOverviewTenant'
           type: array
         totals:
           $ref: '#/components/schemas/components_schemas_PipelinesOverviewTotals'
+        waitingInputs:
+          description: The runs that wait for an answer, oldest first, at most 20.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelinesOverviewWaitingInput'
+          type: array
         windowStart:
           format: date-time
           type: string
@@ -10358,6 +10676,12 @@ components:
       - totals
       - attention
       - tenants
+      - hourly
+      - waitingInputs
+      - moreWaitingInputs
+      - failingJobs
+      - moreFailingJobs
+      - running
       type: object
     components_schemas_PipelinesOverviewAttention:
       additionalProperties: false
@@ -10380,6 +10704,123 @@ components:
       - waitingInput
       - awaitingCell
       - locksHeld
+      type: object
+    components_schemas_PipelinesOverviewFailingJob:
+      additionalProperties: false
+      description: A job whose newest counted run failed within seven days.
+      properties:
+        failuresSincePass:
+          description: The failed runs after the last pass, the failed run included.
+          format: int64
+          type: integer
+        lastPassed:
+          $ref: '#/components/schemas/components_schemas_PipelinesOverviewPassedRun'
+        run:
+          $ref: '#/components/schemas/components_schemas_FleetRunRow'
+        stage:
+          description: The name of the failed stage.
+          type: string
+        stageError:
+          description: The first line of the stage error, without escapes, capped
+            at 200 runes.
+          type: string
+        testsFailed:
+          format: int32
+          type: integer
+      required:
+      - run
+      - failuresSincePass
+      type: object
+    components_schemas_PipelinesOverviewHour:
+      additionalProperties: false
+      description: One hourly bucket of the overview window.
+      properties:
+        failed:
+          format: int64
+          type: integer
+        runs:
+          format: int64
+          type: integer
+        start:
+          format: date-time
+          type: string
+      required:
+      - start
+      - runs
+      - failed
+      type: object
+    components_schemas_PipelinesOverviewInput:
+      additionalProperties: false
+      description: The first pending input of a run that waits for an answer.
+      properties:
+        id:
+          type: string
+        message:
+          type: string
+        ok:
+          description: The label of the proceed button.
+          type: string
+        parameterCount:
+          type: integer
+        submitter:
+          type: string
+      required:
+      - id
+      - parameterCount
+      type: object
+    components_schemas_PipelinesOverviewPassedRun:
+      additionalProperties: false
+      description: The last passed run of a failing job.
+      properties:
+        buildNumber:
+          format: int64
+          type: integer
+        createdAt:
+          format: date-time
+          type: string
+        endedAt:
+          format: date-time
+          type: string
+        runId:
+          type: string
+      required:
+      - runId
+      - createdAt
+      type: object
+    components_schemas_PipelinesOverviewRunningRun:
+      additionalProperties: false
+      description: One run in progress.
+      properties:
+        run:
+          $ref: '#/components/schemas/components_schemas_FleetRunRow'
+        stage:
+          description: The top-level stage in progress, when one is known.
+          type: string
+      required:
+      - run
+      type: object
+    components_schemas_PipelinesOverviewScheduledRun:
+      additionalProperties: false
+      description: The next cron run in scope.
+      properties:
+        at:
+          format: date-time
+          type: string
+        cluster:
+          type: string
+        jobPath:
+          type: string
+        tenant:
+          description: The rail name.
+          type: string
+        tenantFolder:
+          type: string
+      required:
+      - tenant
+      - tenantFolder
+      - cluster
+      - jobPath
+      - at
       type: object
     components_schemas_PipelinesOverviewTenant:
       additionalProperties: false
@@ -10481,6 +10922,21 @@ components:
       - finished
       - running
       - queued
+      type: object
+    components_schemas_PipelinesOverviewWaitingInput:
+      additionalProperties: false
+      description: One run that waits for an answer, with its first input.
+      properties:
+        input:
+          $ref: '#/components/schemas/components_schemas_PipelinesOverviewInput'
+        inputCount:
+          type: integer
+        run:
+          $ref: '#/components/schemas/components_schemas_FleetRunRow'
+      required:
+      - run
+      - input
+      - inputCount
       type: object
     components_schemas_PluginAdvisory:
       additionalProperties: false
@@ -14395,6 +14851,13 @@ paths:
         schema:
           default: false
           type: boolean
+      - description: 'true leaves out each event that only repeats a run: build.started,
+          build.completed, and build.failed. Other build events stay.'
+        in: query
+        name: excludeBuildEvents
+        schema:
+          default: false
+          type: boolean
       responses:
         "200":
           content:
@@ -14503,6 +14966,13 @@ paths:
         schema:
           default: false
           type: boolean
+      - description: 'true leaves out each event that only repeats a run: build.started,
+          build.completed, and build.failed. Other build events stay.'
+        in: query
+        name: excludeBuildEvents
+        schema:
+          default: false
+          type: boolean
       responses:
         "200":
           content:
@@ -14516,8 +14986,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/components_schemas_Error'
           description: 'Invalid filter or range: a bound is not RFC 3339, start is
-            not before end, or a source, severity, or excludeRoutineSignIns value
-            is unknown.'
+            not before end, or a source, severity, excludeRoutineSignIns, or excludeBuildEvents
+            value is unknown.'
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
         "503":
@@ -19346,7 +19816,7 @@ paths:
   /api/v1/pipelines/overview:
     get:
       description: |
-        Counts the runs of the 24 hours before the server's UTC time, and the prior 24 hours for the delta. The live counts have no time bound. A held fleet lock counts only when the caller may read its job.
+        Counts the runs of the 24 hours before the server's UTC time, and the prior 24 hours for the delta. The live counts have no time bound. A held fleet lock counts only when the caller may read its job. It also answers 24 hourly buckets, the runs that wait for input, the failing jobs (a newest counted run that failed within seven days), up to three running runs, and the next cron run in scope.
       operationId: getPipelinesOverview
       responses:
         "200":
@@ -19477,6 +19947,43 @@ paths:
         "503":
           $ref: '#/components/responses/components_responses_ServiceUnavailable'
       summary: Lists the runs of every pipelines tenant the caller may read.
+      tags:
+      - Pipelines
+  /api/v1/pipelines/runs/groups:
+    get:
+      description: |
+        Answers the finished build runs created since `since`, grouped by cluster, tenant, and job path. The held run of each job is left out: the newest counted run of the job, when that run failed. A group with no kept run is absent. The held count reaches the body as held. The window ends at the server's time. A since value must be in the past and within the last 48 hours, and it defaults to 24 hours.
+      operationId: listFleetRunGroups
+      parameters:
+      - description: A positive Go duration such as 24h, or an RFC 3339 time.
+        in: query
+        name: since
+        schema:
+          type: string
+      - in: query
+        name: limit
+        schema:
+          default: 100
+          maximum: 200
+          minimum: 1
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_FleetRunGroupPage'
+          description: The groups of the window, newest run first.
+        "400":
+          $ref: '#/components/responses/components_responses_BadRequest'
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "500":
+          $ref: '#/components/responses/components_responses_Internal'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Groups the finished runs of every readable pipelines tenant by job,
+        for the day feed.
       tags:
       - Pipelines
   /api/v1/pipelines/runs/stream:

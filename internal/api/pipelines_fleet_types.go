@@ -113,4 +113,103 @@ type PipelinesOverview struct {
 	Totals            PipelinesOverviewTotals    `json:"totals"`
 	Attention         PipelinesOverviewAttention `json:"attention"`
 	Tenants           []PipelinesOverviewTenant  `json:"tenants"`
+	// Hourly holds the 24 hourly buckets of the window, oldest first.
+	Hourly []PipelinesOverviewHour `json:"hourly"`
+	// WaitingInputs lists the runs that wait for an answer, oldest first.
+	WaitingInputs     []PipelinesOverviewWaitingInput `json:"waitingInputs"`
+	MoreWaitingInputs bool                            `json:"moreWaitingInputs"`
+	// FailingJobs lists the jobs whose newest counted run failed, newest first.
+	FailingJobs     []PipelinesOverviewFailingJob `json:"failingJobs"`
+	MoreFailingJobs bool                          `json:"moreFailingJobs"`
+	// Running lists up to three runs in progress that wait for no answer.
+	Running []PipelinesOverviewRunningRun `json:"running"`
+	// NextScheduled is the earliest future cron run in scope, when one exists.
+	NextScheduled *PipelinesOverviewScheduledRun `json:"nextScheduled,omitempty"`
+}
+
+// PipelinesOverviewHour is one hourly bucket of the overview window. Start is
+// the bucket start. Runs and Failed count the runs created in the hour.
+type PipelinesOverviewHour struct {
+	Start  time.Time `json:"start"`
+	Runs   int64     `json:"runs"`
+	Failed int64     `json:"failed"`
+}
+
+// PipelinesOverviewInput is the first pending input of a run that waits for
+// an answer. ParameterCount counts its parameters.
+type PipelinesOverviewInput struct {
+	ID             string `json:"id"`
+	Message        string `json:"message,omitempty"`
+	OK             string `json:"ok,omitempty"`
+	Submitter      string `json:"submitter,omitempty"`
+	ParameterCount int    `json:"parameterCount"`
+}
+
+// PipelinesOverviewWaitingInput is one run that waits for an answer. Input is
+// its first pending input, and InputCount counts all of them.
+type PipelinesOverviewWaitingInput struct {
+	Run        FleetRunRow            `json:"run"`
+	Input      PipelinesOverviewInput `json:"input"`
+	InputCount int                    `json:"inputCount"`
+}
+
+// PipelinesOverviewPassedRun is the last passed run of a failing job.
+type PipelinesOverviewPassedRun struct {
+	RunID       string     `json:"runId"`
+	BuildNumber int64      `json:"buildNumber,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	EndedAt     *time.Time `json:"endedAt,omitempty"`
+}
+
+// PipelinesOverviewFailingJob is one job whose newest counted run failed.
+// Stage and StageError name the failing stage. TestsFailed counts the failed
+// tests of the run. LastPassed is the last passed run, and FailuresSincePass
+// counts the failed runs after it.
+type PipelinesOverviewFailingJob struct {
+	Run               FleetRunRow                 `json:"run"`
+	Stage             string                      `json:"stage,omitempty"`
+	StageError        string                      `json:"stageError,omitempty"`
+	TestsFailed       int32                       `json:"testsFailed,omitempty"`
+	LastPassed        *PipelinesOverviewPassedRun `json:"lastPassed,omitempty"`
+	FailuresSincePass int64                       `json:"failuresSincePass"`
+}
+
+// PipelinesOverviewRunningRun is one run in progress. Stage names its top-level
+// stage in progress, when one is known.
+type PipelinesOverviewRunningRun struct {
+	Run   FleetRunRow `json:"run"`
+	Stage string      `json:"stage,omitempty"`
+}
+
+// PipelinesOverviewScheduledRun is the next cron run in scope. Tenant is the
+// rail name, and At is the scheduled time.
+type PipelinesOverviewScheduledRun struct {
+	Tenant       string    `json:"tenant"`
+	TenantFolder string    `json:"tenantFolder"`
+	Cluster      string    `json:"cluster"`
+	JobPath      string    `json:"jobPath"`
+	At           time.Time `json:"at"`
+}
+
+// FleetRunGroup holds the finished runs of one job in the day window, except
+// the held run. Newest is the newest of them.
+type FleetRunGroup struct {
+	Tenant       string      `json:"tenant"`
+	TenantFolder string      `json:"tenantFolder"`
+	Cluster      string      `json:"cluster"`
+	JobPath      string      `json:"jobPath"`
+	Runs         int64       `json:"runs"`
+	Passed       int64       `json:"passed"`
+	Failed       int64       `json:"failed"`
+	FirstAt      time.Time   `json:"firstAt"`
+	Newest       FleetRunRow `json:"newest"`
+}
+
+// FleetRunGroupPage is the body of GET /pipelines/runs/groups. Held counts the
+// held runs that the groups leave out. More is true when the page is cut.
+type FleetRunGroupPage struct {
+	Since  time.Time       `json:"since"`
+	Groups []FleetRunGroup `json:"groups"`
+	Held   int64           `json:"held"`
+	More   bool            `json:"more"`
 }

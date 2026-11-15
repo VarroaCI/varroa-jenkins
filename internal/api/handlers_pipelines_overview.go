@@ -2,11 +2,15 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/rbac"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
@@ -38,6 +42,10 @@ func (s *Server) PipelinesOverview(ctx context.Context, claims *auth.Claims, now
 	readable := walk.Items
 	scopes, names := s.runScopes(claims, readable)
 	ov, err := s.deps.RecordStore.RunsOverview(ctx, recordstore.RunsOverviewQuery{Scopes: scopes, Now: now})
+	if err != nil {
+		return PipelinesOverview{}, nil, err
+	}
+	attn, err := s.overviewAttention(ctx, claims, scopes, names, now)
 	if err != nil {
 		return PipelinesOverview{}, nil, err
 	}
@@ -124,6 +132,13 @@ func (s *Server) PipelinesOverview(ctx context.Context, claims *auth.Claims, now
 		Totals:            overviewTotals(ov.Totals),
 		Attention:         attention,
 		Tenants:           tenants,
+		Hourly:            overviewHours(ov.WindowStart, ov.Hourly),
+		WaitingInputs:     attn.waitingInputs,
+		MoreWaitingInputs: attn.moreWaitingInputs,
+		FailingJobs:       attn.failingJobs,
+		MoreFailingJobs:   attn.moreFailingJobs,
+		Running:           attn.running,
+		NextScheduled:     attn.nextScheduled,
 	}
 	if s.deps.Brood != nil {
 		out.LocalCluster = s.deps.Brood.LocalCluster()
@@ -201,4 +216,202 @@ func (s *Server) handlePipelinesOverview(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.writeJSON(w, http.StatusOK, body)
+}
+
+// Caps of the attention reads. The overview lists at most this many runs
+// waiting for input and this many failing jobs, and it sends a more flag when
+// the store has more.
+const (
+	overviewWaitingInputLimit = 20
+	overviewFailingJobLimit   = 20
+	overviewRunningLimit      = 10
+	overviewRunningShown      = 3
+	overviewStageErrorRunes   = 200
+)
+
+// overviewAttention holds the attention reads of the overview: the runs that
+// wait for input, the failing jobs, the runs in progress, and the next cron run.
+type overviewAttention struct {
+	waitingInputs     []PipelinesOverviewWaitingInput
+	moreWaitingInputs bool
+	failingJobs       []PipelinesOverviewFailingJob
+	moreFailingJobs   bool
+	running           []PipelinesOverviewRunningRun
+	nextScheduled     *PipelinesOverviewScheduledRun
+}
+
+// overviewAttention runs the attention reads in order: the waiting inputs, the
+// running runs, the failing jobs, and the next cron run. An error from any of
+// them fails the overview, because a silently dropped item would mislead the
+// reader. With no scope it reads nothing and answers empty lists.
+func (s *Server) overviewAttention(ctx context.Context, claims *auth.Claims, scopes []recordstore.RunScope, names map[string][]string, now time.Time) (overviewAttention, error) {
+	out := overviewAttention{
+		waitingInputs: []PipelinesOverviewWaitingInput{},
+		failingJobs:   []PipelinesOverviewFailingJob{},
+		running:       []PipelinesOverviewRunningRun{},
+	}
+	if len(scopes) == 0 {
+		return out, nil
+	}
+	grants := make(map[string]fleetTenantGrants)
+
+	waiting, err := s.deps.RecordStore.ListRunsAcross(ctx, recordstore.RunsAcrossQuery{
+		Scopes: scopes, Status: recordstore.RunStatusWaitingInput,
+		Sort: recordstore.RunSortStarted, Ascending: true, Limit: overviewWaitingInputLimit,
+	})
+	if err != nil {
+		return overviewAttention{}, err
+	}
+	for _, run := range waiting.Runs {
+		if run.Status != "RUNNING" {
+			continue
+		}
+		var inputs []recordstore.StoredRunInput
+		if json.Unmarshal(run.Inputs, &inputs) != nil || len(inputs) == 0 {
+			continue
+		}
+		first := inputs[0]
+		out.waitingInputs = append(out.waitingInputs, PipelinesOverviewWaitingInput{
+			Run: s.fleetRowFor(claims, run, names, nil, grants),
+			Input: PipelinesOverviewInput{
+				ID: first.ID, Message: first.Message, OK: first.OK, Submitter: first.Submitter,
+				ParameterCount: len(first.Parameters),
+			},
+			InputCount: len(inputs),
+		})
+	}
+	out.moreWaitingInputs = waiting.NextCursor != ""
+
+	running, err := s.overviewRunning(ctx, claims, scopes, names, grants)
+	if err != nil {
+		return overviewAttention{}, err
+	}
+	out.running = running
+
+	failing, err := s.deps.RecordStore.FailingJobs(ctx, recordstore.FailingJobsQuery{
+		Scopes: scopes, Since: now.Add(-recordstore.FailingJobsWindow), Limit: overviewFailingJobLimit,
+	})
+	if err != nil {
+		return overviewAttention{}, err
+	}
+	for _, job := range failing.Jobs {
+		out.failingJobs = append(out.failingJobs, s.overviewFailingJob(claims, job, names, grants))
+	}
+	out.moreFailingJobs = failing.More
+
+	next, ok, err := s.deps.RecordStore.NextCronRun(ctx, scopes, now)
+	if err != nil {
+		return overviewAttention{}, err
+	}
+	if ok {
+		folder := ""
+		if parsed, err := rbac.ParseTenant(next.Tenant); err == nil {
+			folder = parsed.Folder
+		}
+		out.nextScheduled = &PipelinesOverviewScheduledRun{
+			Tenant:       railNameFor(names, next.Cluster, next.Tenant),
+			TenantFolder: folder,
+			Cluster:      next.Cluster,
+			JobPath:      next.JobPath,
+			At:           next.At,
+		}
+	}
+	return out, nil
+}
+
+// overviewRunning answers up to overviewRunningShown runs in progress that wait
+// for no answer, with the top-level stage of each one when the store knows it.
+func (s *Server) overviewRunning(ctx context.Context, claims *auth.Claims, scopes []recordstore.RunScope, names map[string][]string, grants map[string]fleetTenantGrants) ([]PipelinesOverviewRunningRun, error) {
+	page, err := s.deps.RecordStore.ListRunsAcross(ctx, recordstore.RunsAcrossQuery{
+		Scopes: scopes, Status: "RUNNING", Sort: recordstore.RunSortStarted, Limit: overviewRunningLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var rows []FleetRunRow
+	for _, run := range page.Runs {
+		row := s.fleetRowFor(claims, run, names, nil, grants)
+		if row.Status != "RUNNING" || row.PendingInput {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	if len(rows) > overviewRunningShown {
+		rows = rows[:overviewRunningShown]
+	}
+	out := make([]PipelinesOverviewRunningRun, 0, len(rows))
+	if len(rows) == 0 {
+		return out, nil
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.RunID)
+	}
+	stages, err := s.deps.RecordStore.CurrentStages(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out = append(out, PipelinesOverviewRunningRun{Run: row, Stage: stages[row.RunID]})
+	}
+	return out, nil
+}
+
+// overviewFailingJob maps one failing job of the store onto the overview row.
+// The stage is the digest's failed stage. StageError is the first line of that
+// stage's error, without ANSI escapes and capped in runes.
+func (s *Server) overviewFailingJob(claims *auth.Claims, job recordstore.FailingJob, names map[string][]string, grants map[string]fleetTenantGrants) PipelinesOverviewFailingJob {
+	out := PipelinesOverviewFailingJob{
+		Run:               s.fleetRowFor(claims, job.Failed, names, nil, grants),
+		TestsFailed:       0,
+		FailuresSincePass: job.FailuresSincePass,
+	}
+	if job.Failed.TestsFailed != nil {
+		out.TestsFailed = *job.Failed.TestsFailed
+	}
+	if failed := digestFailedStage(job.FailedStages); failed != nil {
+		out.Stage = digestStageName(failed)
+		if failed.Error != nil {
+			out.StageError = firstErrorLine(*failed.Error)
+		}
+	}
+	if job.LastPassed != nil {
+		passed := &PipelinesOverviewPassedRun{
+			RunID:     job.LastPassed.RunID,
+			CreatedAt: job.LastPassed.CreatedAt,
+			EndedAt:   job.LastPassed.EndedAt,
+		}
+		if job.LastPassed.BuildNumber != nil {
+			passed.BuildNumber = *job.LastPassed.BuildNumber
+		}
+		out.LastPassed = passed
+	}
+	return out
+}
+
+// firstErrorLine answers the first line of a stage error, without ANSI escapes,
+// trimmed, and capped at overviewStageErrorRunes runes with an ellipsis.
+func firstErrorLine(raw string) string {
+	line, _, _ := strings.Cut(stripANSIEscapes(raw), "\n")
+	line = strings.TrimSpace(line)
+	if utf8.RuneCountInString(line) <= overviewStageErrorRunes {
+		return line
+	}
+	return string([]rune(line)[:overviewStageErrorRunes]) + "…"
+}
+
+// overviewHours answers the OverviewHours buckets of the window, oldest first.
+// It copies the store's buckets by position, and a missing bucket stays zero.
+func overviewHours(windowStart time.Time, hours []recordstore.HourCount) []PipelinesOverviewHour {
+	out := make([]PipelinesOverviewHour, recordstore.OverviewHours)
+	for i := range out {
+		out[i].Start = windowStart.Add(time.Duration(i) * time.Hour)
+	}
+	for i, h := range hours {
+		if i < len(out) {
+			out[i].Runs = h.Runs
+			out[i].Failed = h.Failed
+		}
+	}
+	return out
 }

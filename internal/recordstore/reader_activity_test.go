@@ -575,3 +575,34 @@ func TestActivityRetentionDays(t *testing.T) {
 		t.Fatalf("days = %d, want 0 when NewReader is given none", days)
 	}
 }
+
+// TestListActivityExcludeBuildEvents asserts the SQL exclusion drops the three
+// build events that repeat a run row, and keeps a build.interrupted row and a
+// controller event.
+func TestListActivityExcludeBuildEvents(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Truncate(time.Second)
+	events := []activity.Event{
+		{Timestamp: base, Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "mite", Type: activity.BuildStartedType, Severity: "info", Message: "started"},
+		{Timestamp: base.Add(time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "mite", Type: activity.BuildCompletedType, Severity: "info", Message: "completed"},
+		{Timestamp: base.Add(2 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "recorder", Type: activity.BuildFailedType, Severity: "error", Message: "failed"},
+		{Timestamp: base.Add(3 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "recorder", Type: "build.interrupted", Severity: "warning", Message: "interrupted"},
+		{Timestamp: base.Add(4 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "api", Type: "settings.updated", Severity: "info", Message: "settings"},
+	}
+	pool := seedActivityEvents(t, events)
+	r := NewReader(pool)
+	ctx := context.Background()
+
+	page, err := r.ListActivity(ctx, ActivityQuery{ExcludeBuildEvents: true, Scope: activity.Scope{All: true}})
+	if err != nil {
+		t.Fatalf("ListActivity with the flag: %v", err)
+	}
+	got := map[string]bool{}
+	for _, e := range page.Items {
+		got[e.Message] = true
+	}
+	if len(page.Items) != 2 || !got["interrupted"] || !got["settings"] {
+		t.Fatalf("with the flag: %+v, want only the interrupted and settings events", page.Items)
+	}
+}

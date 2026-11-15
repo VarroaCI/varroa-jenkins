@@ -19,3 +19,26 @@ const countedResultSQL = `result IS NOT NULL AND result NOT IN ('` + resultInter
 func CountsTowardPassRate(result string) bool {
 	return result != "" && result != resultInterrupted && result != resultNotBuilt
 }
+
+// countedResultRunSQL is countedResultSQL qualified by the alias "r". A
+// statement that joins two relations uses this form.
+const countedResultRunSQL = `r.result IS NOT NULL AND r.result NOT IN ('` + resultInterrupted + `', '` + resultNotBuilt + `')`
+
+// newestCountedRunSQL is the lateral body that finds the newest counted
+// build run of one job. It reads the job from the outer alias "j", which
+// names the cluster, tenant, and job_path columns. The failing-jobs read
+// and the held-run rule of the run groups read both use it, so the two
+// reads agree on which run a job holds.
+const newestCountedRunSQL = `SELECT r.run_id, r.created_at, r.result FROM varroa.runs r
+	WHERE r.cluster = j.cluster AND r.tenant = j.tenant AND r.job_path = j.job_path
+		AND ` + countedResultRunSQL + ` AND ` + recordsBuildRunSQL + `
+	ORDER BY r.created_at DESC, r.run_id DESC LIMIT 1`
+
+// newestCountedRunBeforeSQL is newestCountedRunSQL limited to the runs created
+// before the bound expression, which names a parameter. The run groups read
+// uses it, so the held run is the newest counted run known at its window end.
+// A run created at or after the window end is not held in that window.
+const newestCountedRunBeforeSQL = `SELECT r.run_id, r.created_at, r.result FROM varroa.runs r
+	WHERE r.cluster = j.cluster AND r.tenant = j.tenant AND r.job_path = j.job_path
+		AND r.created_at < $3 AND ` + countedResultRunSQL + ` AND ` + recordsBuildRunSQL + `
+	ORDER BY r.created_at DESC, r.run_id DESC LIMIT 1`

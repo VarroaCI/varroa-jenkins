@@ -194,3 +194,76 @@ func TestRunsOverviewEmptyScopes(t *testing.T) {
 		t.Fatalf("window start = %v; want now minus 24h", out.WindowStart)
 	}
 }
+
+// TestRunsOverviewHourlyBucketsSumToWindow asserts the 24 hourly buckets are
+// oldest first and that their runs sum to the window total.
+func TestRunsOverviewHourlyBucketsSumToWindow(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	r := NewReader(pool)
+	now := time.Now().UTC()
+	success := "SUCCESS"
+	seedAcrossRun(t, db, "pay", "pay/build", now.Add(-30*time.Minute), "COMPLETED", &success)
+	seedAcrossRun(t, db, "pay", "pay/build", now.Add(-90*time.Minute), "COMPLETED", &success)
+
+	out, err := r.RunsOverview(context.Background(), RunsOverviewQuery{
+		Scopes: []RunScope{{Cluster: "core", Tenant: "pay"}}, Now: now,
+	})
+	if err != nil {
+		t.Fatalf("RunsOverview: %v", err)
+	}
+	if len(out.Hourly) != OverviewHours {
+		t.Fatalf("hourly buckets = %d, want %d", len(out.Hourly), OverviewHours)
+	}
+	var sum int64
+	for i, h := range out.Hourly {
+		sum += h.Runs
+		if i > 0 && !h.Start.After(out.Hourly[i-1].Start) {
+			t.Fatalf("bucket %d starts at %v, not after %v", i, h.Start, out.Hourly[i-1].Start)
+		}
+	}
+	if sum != out.Totals.Runs24h || sum != 2 {
+		t.Fatalf("hourly sum = %d, totals.runs24h = %d; want 2", sum, out.Totals.Runs24h)
+	}
+	if last := out.Hourly[OverviewHours-1]; last.Runs != 1 {
+		t.Fatalf("newest bucket runs = %d, want 1", last.Runs)
+	}
+}
+
+// TestRunsOverviewHourlyCountsFailures asserts a failure lands in its hour.
+func TestRunsOverviewHourlyCountsFailures(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	r := NewReader(pool)
+	now := time.Now().UTC()
+	failure := "FAILURE"
+	seedAcrossRun(t, db, "pay", "pay/build", now.Add(-10*time.Minute), "COMPLETED", &failure)
+
+	out, err := r.RunsOverview(context.Background(), RunsOverviewQuery{
+		Scopes: []RunScope{{Cluster: "core", Tenant: "pay"}}, Now: now,
+	})
+	if err != nil {
+		t.Fatalf("RunsOverview: %v", err)
+	}
+	if last := out.Hourly[OverviewHours-1]; last.Runs != 1 || last.Failed != 1 {
+		t.Fatalf("newest bucket = %+v, want one run and one failure", last)
+	}
+}
+
+// TestRunsOverviewEmptyScopesAnswersTwentyFourHours asserts an empty scope list
+// still answers 24 zero buckets, with no store call.
+func TestRunsOverviewEmptyScopesAnswersTwentyFourHours(t *testing.T) {
+	t.Parallel()
+
+	pool, _ := setupLedgerPool(t)
+	r := NewReader(pool)
+	out, err := r.RunsOverview(context.Background(), RunsOverviewQuery{Now: time.Now().UTC()})
+	if err != nil {
+		t.Fatalf("RunsOverview: %v", err)
+	}
+	if len(out.Hourly) != OverviewHours {
+		t.Fatalf("hourly buckets = %d, want %d", len(out.Hourly), OverviewHours)
+	}
+}

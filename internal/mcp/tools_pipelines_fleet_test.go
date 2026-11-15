@@ -217,6 +217,11 @@ func TestGetPipelinesOverviewTool(t *testing.T) {
 	if _, ok := payload["totals"]; !ok {
 		t.Error("overview carries no totals field")
 	}
+	for _, key := range []string{"hourly", "waitingInputs", "failingJobs"} {
+		if _, ok := payload[key]; !ok {
+			t.Errorf("overview carries no %s field", key)
+		}
+	}
 }
 
 // fmtContent renders a tool result's content for a substring check.
