@@ -920,7 +920,7 @@ func TestStreamActivitySpecListsRangeAndErrors(t *testing.T) {
 	if item == nil || item.Get == nil {
 		t.Fatal("spec has no streamActivity operation")
 	}
-	for _, name := range []string{"controller", "cluster", "namespace", "source", "severity", "actor", "type", "start", "end", "excludeRoutineSignIns"} {
+	for _, name := range []string{"controller", "cluster", "namespace", "source", "severity", "actor", "type", "start", "end", "excludeRoutineSignIns", "excludeBuildEvents", "excludeRoutineEvents"} {
 		if item.Get.Parameters.GetByInAndName("query", name) == nil {
 			t.Errorf("streamActivity lists no query parameter %q", name)
 		}
@@ -980,5 +980,62 @@ func TestActivityExcludeBuildEventsReachesBackfill(t *testing.T) {
 	}
 	if backfill.queries[1].ExcludeBuildEvents {
 		t.Fatal("the unflagged request set the exclusion")
+	}
+}
+
+// TestParseActivityQueryExcludeRoutineEvents asserts excludeRoutineEvents
+// accepts true and false, and rejects any other value.
+func TestParseActivityQueryExcludeRoutineEvents(t *testing.T) {
+	t.Parallel()
+
+	q, err := parseActivityQuery(httptest.NewRequest("GET", "/activity?excludeRoutineEvents=true", nil))
+	if err != nil || !q.ExcludeRoutineEvents {
+		t.Fatalf("excludeRoutineEvents=true: query %+v, err %v; want the flag set", q, err)
+	}
+	q, err = parseActivityQuery(httptest.NewRequest("GET", "/activity?excludeRoutineEvents=false", nil))
+	if err != nil || q.ExcludeRoutineEvents {
+		t.Fatalf("excludeRoutineEvents=false: query %+v, err %v; want the flag unset", q, err)
+	}
+	if _, err := parseActivityQuery(httptest.NewRequest("GET", "/activity?excludeRoutineEvents=yes", nil)); err == nil {
+		t.Fatal("excludeRoutineEvents=yes was accepted, want a 400")
+	}
+}
+
+// TestActivityExcludeRoutineEventsReachesBackfill proves the flag travels
+// from the request to the backfill query, and that the handler drops the
+// routine events from the page.
+func TestActivityExcludeRoutineEventsReachesBackfill(t *testing.T) {
+	at := time.Now()
+	events := []activity.Event{
+		{Timestamp: at, Namespace: "ns", Controller: "c1", Type: "connected", Source: "mite", Severity: "info", Message: "connected"},
+		{Timestamp: at, Namespace: "ns", Controller: "c1", Type: "item.created", Actor: "varroa-mite", Source: "mite", Severity: "info", Message: "mite item"},
+		{Timestamp: at, Namespace: "ns", Controller: "c1", Type: "item.created", Actor: "nathan", Source: "jenkins", Severity: "info", Message: "person item"},
+		{Timestamp: at, Namespace: "ns", Controller: "c1", Type: "provisioning.failed", Source: "operator", Severity: "error", Message: "failed"},
+	}
+	backfill := &fakeBackfill{events: events}
+	srv := NewServer(&Dependencies{
+		Backfill:   backfill,
+		Authorizer: testAuthorizer(true, ""),
+		Logger:     slog.Default(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/activity?excludeRoutineEvents=true", nil)
+	req = req.WithContext(contextWithClaims(req.Context(), &auth.Claims{Subject: "test-user"}))
+	w := httptest.NewRecorder()
+	srv.handleActivity(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Items []activity.Event `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(envelope.Items) != 2 {
+		t.Fatalf("expected the person item and the failure, got %+v", envelope.Items)
+	}
+	if len(backfill.queries) != 1 || !backfill.queries[0].ExcludeRoutineEvents {
+		t.Fatalf("the flag did not reach the backfill query: %+v", backfill.queries)
 	}
 }

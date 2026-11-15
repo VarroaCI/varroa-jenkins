@@ -109,6 +109,7 @@ func (b *pgBackfill) Query(ctx context.Context, q activity.Query) (activity.Page
 		Start: q.Start, End: q.End, Limit: limit, Cursor: q.Cursor, Scope: q.Scope,
 		ExcludeRoutineSignIns: q.ExcludeRoutineSignIns,
 		ExcludeBuildEvents:    q.ExcludeBuildEvents,
+		ExcludeRoutineEvents:  q.ExcludeRoutineEvents,
 	}
 	filters := activityFilterKey(rq)
 

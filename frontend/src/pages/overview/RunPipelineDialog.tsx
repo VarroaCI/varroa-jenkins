@@ -104,7 +104,7 @@ export function RunPipelineDialog({ tenants, permissions, onClose }: RunPipeline
             <option value="">{tenant === "" ? "Choose a tenant first" : jobs.isLoading ? "Loading jobs…" : "Choose a job"}</option>
             {pipelineJobs.map((item) => (
               <option key={item.jobPath} value={item.jobPath}>
-                {item.jobPath}
+                {stripTenantFolder(jobs.data?.tenantFolder ?? "", item.jobPath) || item.jobPath}
               </option>
             ))}
           </select>

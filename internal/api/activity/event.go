@@ -1,6 +1,7 @@
 package activity
 
 import (
+	"slices"
 	"strings"
 	"time"
 )
@@ -95,4 +96,36 @@ func IsBuildEvent(e Event) bool {
 		}
 	}
 	return false
+}
+
+// routineTypes lists the routine event types. A controller writes each one on
+// every start and restart. A transition to Failed also writes provisioning.failed,
+// which is not in this list.
+var routineTypes = []string{"connected", "disconnected", "phase", "provisioning.started", "provisioning.completed"}
+
+// routineItemTypes lists the Jenkins item events. One is routine only when a machine actor made the change.
+var routineItemTypes = []string{"item.created", "item.updated", "item.deleted", "item.moved", "config.changed"}
+
+// machineActors lists the actors of an item change that no person made. The plugin
+// reports the Jenkins system user as "". The mite calls Jenkins as varroa-mite or varroa-mite-system.
+var machineActors = []string{"", "varroa-mite", "varroa-mite-system"}
+
+// RoutineTypes returns a copy of the routine event types. The SQL clause of
+// recordstore ListActivity reads these lists.
+func RoutineTypes() []string { return append([]string(nil), routineTypes...) }
+
+// RoutineItemTypes returns a copy of the item event types that are routine
+// only for a machine actor.
+func RoutineItemTypes() []string { return append([]string(nil), routineItemTypes...) }
+
+// MachineActors returns a copy of the actors that mark an item change as machine work.
+func MachineActors() []string { return append([]string(nil), machineActors...) }
+
+// IsRoutineEvent reports whether e is a routine event. The SQL form in
+// recordstore ListActivity must match this rule. Call it after Normalize.
+func IsRoutineEvent(e Event) bool {
+	if slices.Contains(routineTypes, e.Type) {
+		return true
+	}
+	return slices.Contains(routineItemTypes, e.Type) && slices.Contains(machineActors, e.Actor)
 }

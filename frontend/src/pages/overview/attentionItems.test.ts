@@ -5,7 +5,9 @@ import {
   attentionCount,
   attentionItems,
   failingDetail,
+  failingTitle,
   inputDetail,
+  inputTitle,
   type AttentionSources,
 } from "./attentionItems";
 import { clusterEntry, failingJob, NOW, waitingInput } from "../../test/overviewFactories";
@@ -123,6 +125,14 @@ describe("attentionItems", () => {
     expect(one).toMatch(/· no passed run on record$/);
     const many = failingDetail(failingJob({ lastPassed: undefined, failuresSincePass: 3 }), NOW);
     expect(many).toMatch(/· 3 failures, no passed run on record$/);
+  });
+
+  it("names a nested job once in the input and failing titles", () => {
+    const nested = { tenant: "smoke-b", tenantFolder: "smoke-b", jobPath: "smoke-b/platform/nightly-audit" };
+    const input = waitingInput({}, { ...nested, buildNumber: 41 });
+    expect(inputTitle(input)).toBe("smoke-b / platform/nightly-audit #41 waits for approval");
+    const failing = failingJob({}, { ...nested, buildNumber: 41 });
+    expect(failingTitle(failing)).toBe("smoke-b / platform/nightly-audit is failing");
   });
 
   it("builds the input detail with the message and the submitter", () => {

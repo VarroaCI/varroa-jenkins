@@ -32,9 +32,11 @@ type ActivityQuery struct {
 	ExcludeRoutineSignIns                                         bool
 	// ExcludeBuildEvents leaves out each build event (activity.IsBuildEvent).
 	ExcludeBuildEvents bool
-	Limit              int
-	Cursor             string
-	Scope              activity.Scope
+	// ExcludeRoutineEvents leaves out each event that activity.IsRoutineEvent matches.
+	ExcludeRoutineEvents bool
+	Limit                int
+	Cursor               string
+	Scope                activity.Scope
 }
 
 // ActivityPage is one page of ListActivity. NextCursor is empty on the
@@ -79,6 +81,9 @@ func activityFilterKey(q ActivityQuery) string {
 	}
 	if q.ExcludeBuildEvents {
 		parts = append(parts, "excludeBuildEvents")
+	}
+	if q.ExcludeRoutineEvents {
+		parts = append(parts, "excludeRoutineEvents")
 	}
 	return strings.Join(parts, "\x1f")
 }
@@ -164,6 +169,12 @@ func (r *pgReader) ListActivity(ctx context.Context, q ActivityQuery) (ActivityP
 		// The SQL form of activity.IsBuildEvent, read from the same list.
 		args = append(args, activity.BuildRepeatTypes())
 		clauses = append(clauses, fmt.Sprintf("NOT (type = ANY($%d::text[]))", len(args)))
+	}
+	if q.ExcludeRoutineEvents {
+		// The SQL form of activity.IsRoutineEvent, read from the same three lists.
+		args = append(args, activity.RoutineTypes(), activity.RoutineItemTypes(), activity.MachineActors())
+		n := len(args)
+		clauses = append(clauses, fmt.Sprintf("NOT (type = ANY($%d::text[]) OR (type = ANY($%d::text[]) AND actor = ANY($%d::text[])))", n-2, n-1, n))
 	}
 	lower := q.Start
 	if edge != nil && (lower == nil || lower.Before(*edge)) {

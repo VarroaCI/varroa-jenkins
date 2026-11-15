@@ -493,3 +493,44 @@ func TestPgBackfillQuery_ExactSizeLastPageHasNoMore(t *testing.T) {
 		t.Fatalf("range pages start at %q then %q; want newest first, row 4 then row 0", first.Items[0].Message, second.Items[0].Message)
 	}
 }
+
+// TestPgBackfillQuery_ExcludeRoutineEvents proves the exclusion reaches the
+// SQL and the Backfill pass-through. Routine events newer than the kept events
+// must not fill the page.
+func TestPgBackfillQuery_ExcludeRoutineEvents(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Truncate(time.Second)
+	var events []activity.Event
+	for i := 0; i < 5; i++ {
+		events = append(events, activity.Event{
+			Timestamp: base.Add(time.Duration(i) * time.Second),
+			Cluster:   "core", Namespace: "ns", Controller: "ctrl", Source: "operator",
+			Type: "cell.rolled", Severity: "info", Message: fmt.Sprintf("kept %d", i),
+		})
+	}
+	for i := 0; i < 40; i++ {
+		events = append(events, activity.Event{
+			Timestamp: base.Add(time.Duration(10+i) * time.Second),
+			Cluster:   "core", Namespace: "ns", Controller: "ctrl", Source: "mite",
+			Type: "item.created", Actor: "varroa-mite", Severity: "info",
+			Message: fmt.Sprintf("routine %d", i),
+		})
+	}
+	pool := seedActivityEvents(t, events)
+	bf := NewActivityBackfill(NewReader(pool))
+	ctx := context.Background()
+
+	page, err := bf.Query(ctx, activity.Query{Limit: 5, ExcludeRoutineEvents: true, Scope: activity.Scope{All: true}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(page.Items) != 5 {
+		t.Fatalf("got %d items, want the 5 kept events", len(page.Items))
+	}
+	for _, e := range page.Items {
+		if activity.IsRoutineEvent(e) {
+			t.Fatalf("a routine event %q reached the page", e.Message)
+		}
+	}
+}

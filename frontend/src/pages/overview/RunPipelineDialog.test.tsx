@@ -113,6 +113,24 @@ describe("RunPipelineDialog", () => {
     expect(cont).toBeEnabled();
   });
 
+  it("lists each job without its tenant folder", async () => {
+    mockListPipelines.mockResolvedValue({
+      ...listing([item("payments/platform/nightly-audit"), item("payments/checkout")]),
+      tenantFolder: "payments",
+    });
+    renderDialog(["payments"]);
+    await screen.findByRole("option", { name: "checkout" });
+    const options = within(screen.getByRole("combobox", { name: "Job" }))
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(options).toEqual(["Choose a job", "platform/nightly-audit", "checkout"]);
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Job" }), "payments/platform/nightly-audit");
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByTestId("where").textContent).toBe(
+      `/pipelines/payments/${encodeURIComponent("payments/platform/nightly-audit")}?run=1`,
+    );
+  });
+
   it("Continue opens the job page with run=1", async () => {
     const { onClose } = renderDialog(["payments"]);
     await screen.findByRole("option", { name: "checkout" });

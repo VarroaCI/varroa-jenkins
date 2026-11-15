@@ -6472,6 +6472,9 @@ type ListActivityParams struct {
 
 	// ExcludeBuildEvents true leaves out each event that only repeats a run: build.started, build.completed, and build.failed. Other build events stay.
 	ExcludeBuildEvents *bool `form:"excludeBuildEvents,omitempty" json:"excludeBuildEvents,omitempty"`
+
+	// ExcludeRoutineEvents true leaves out each routine event: connected, disconnected, phase, provisioning.started, and provisioning.completed, and an item.created, item.updated, item.deleted, item.moved, or config.changed event whose actor is empty, varroa-mite, or varroa-mite-system.
+	ExcludeRoutineEvents *bool `form:"excludeRoutineEvents,omitempty" json:"excludeRoutineEvents,omitempty"`
 }
 
 // ListActivityParamsSource defines parameters for ListActivity.
@@ -11801,6 +11804,22 @@ func NewListActivityRequest(server string, params *ListActivityParams) (*http.Re
 		if params.ExcludeBuildEvents != nil {
 
 			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "excludeBuildEvents", runtime.ParamLocationQuery, *params.ExcludeBuildEvents); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.ExcludeRoutineEvents != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "excludeRoutineEvents", runtime.ParamLocationQuery, *params.ExcludeRoutineEvents); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
