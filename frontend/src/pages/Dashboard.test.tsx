@@ -114,7 +114,9 @@ describe("Dashboard", () => {
     renderWithProviders(<Dashboard />);
     const attention = await screen.findByRole("heading", { name: /Needs attention/ });
     const day = screen.getByRole("heading", { name: "Last 24 hours" });
+    const feed = screen.getByRole("heading", { name: "Earlier today" });
     expect(attention.compareDocumentPosition(day) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(day.compareDocumentPosition(feed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows New controller only with the create verb", () => {
@@ -125,11 +127,11 @@ describe("Dashboard", () => {
     expect(screen.getByRole("link", { name: "New controller" })).toHaveAttribute("href", "/controllers/create");
   });
 
-  it("renders the connect tile once, after the day panel", async () => {
+  it("renders the connect tile once, after the feed", async () => {
     renderWithProviders(<Dashboard />);
     const tile = await screen.findByTestId("connect-client-tile");
-    const day = await screen.findByRole("heading", { name: "Last 24 hours" });
-    expect(day.compareDocumentPosition(tile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const feed = await screen.findByRole("heading", { name: "Earlier today" });
+    expect(feed.compareDocumentPosition(tile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getAllByTestId("connect-client-tile")).toHaveLength(1);
   });
 
