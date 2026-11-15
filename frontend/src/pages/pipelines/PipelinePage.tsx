@@ -280,6 +280,27 @@ export default function PipelinePage() {
     enabled: !!tenant && !!job,
   });
 
+  // run=1 comes from the Overview's Run a pipeline dialog. After the job and
+  // the permissions load, the page opens the run drawer for a caller who may
+  // run. The page then removes the parameter, so a refresh does not reopen it.
+  const runRequested = searchParams.get("run") === "1";
+  useEffect(() => {
+    const data = jobQuery.data;
+    if (!runRequested || !data || !permissions) return;
+    const folderRel = stripTenantFolder(data.tenantFolder, data.jobPath);
+    const may = canAccessTenantPipeline(permissions, data.tenant, "write", folderRel);
+    const container = data.kind === "multibranch" || data.kind === "organizationFolder";
+    if (may && !container) setDrawerOpen(true);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("run");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [runRequested, jobQuery.data, permissions, setSearchParams]);
+
   useDocumentTitle(
     jobQuery.data && tenant ? jobTitle(tenant, jobQuery.data.tenantFolder, jobQuery.data.jobPath) : null,
   );

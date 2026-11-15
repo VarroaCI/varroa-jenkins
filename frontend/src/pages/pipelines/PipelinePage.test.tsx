@@ -463,6 +463,34 @@ describe("PipelinePage", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
+  it("opens the run drawer for run=1 and removes the parameter", async () => {
+    vi.mocked(usePermissions).mockReturnValue({
+      data: {
+        global: {},
+        scopes: [],
+        tenants: [{ tenant: "acme", jobs: [], capabilities: { pipelines: { write: true } } }],
+      },
+    } as unknown as ReturnType<typeof usePermissions>);
+    mockGetPipelineJob.mockResolvedValue(jobDetail({ parameters: [] }));
+    renderPage("/pipelines/acme/payments%2Fcheckout-api%2Fmain?run=1");
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe("/pipelines/acme/payments%2Fcheckout-api%2Fmain"),
+    );
+  });
+
+  it("ignores run=1 for a caller who cannot run, and still removes the parameter", async () => {
+    vi.mocked(usePermissions).mockReturnValue({
+      data: { global: {}, scopes: [], tenants: [{ tenant: "acme", jobs: [], capabilities: { pipelines: { read: true } } }] },
+    } as unknown as ReturnType<typeof usePermissions>);
+    mockGetPipelineJob.mockResolvedValue(jobDetail({ parameters: [] }));
+    renderPage("/pipelines/acme/payments%2Fcheckout-api%2Fmain?run=1");
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe("/pipelines/acme/payments%2Fcheckout-api%2Fmain"),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("navigates to the new run with requested state, so the run page starts in the requested window", async () => {
     vi.mocked(usePermissions).mockReturnValue({
       data: {
