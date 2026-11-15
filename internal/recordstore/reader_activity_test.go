@@ -606,3 +606,62 @@ func TestListActivityExcludeBuildEvents(t *testing.T) {
 		t.Fatalf("with the flag: %+v, want only the interrupted and settings events", page.Items)
 	}
 }
+
+// TestListActivityExcludeRoutineEvents asserts the SQL exclusion keeps exactly
+// the events that the Go rule activity.IsRoutineEvent does not match.
+func TestListActivityExcludeRoutineEvents(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Truncate(time.Second)
+	events := []activity.Event{
+		{Timestamp: base, Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "mite", Type: "connected", Severity: "info", Message: "connected"},
+		{Timestamp: base.Add(1 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "operator", Type: "phase", Severity: "info", Message: "phase"},
+		{Timestamp: base.Add(2 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "operator", Type: "provisioning.completed", Severity: "info", Message: "provisioning"},
+		{Timestamp: base.Add(3 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "mite", Type: "item.created", Actor: "varroa-mite", Severity: "info", Message: "mite item"},
+		{Timestamp: base.Add(4 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "jenkins", Type: "item.created", Actor: "", Severity: "info", Message: "system item"},
+		{Timestamp: base.Add(5 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "jenkins", Type: "item.created", Actor: "nathan", Severity: "info", Message: "person item"},
+		{Timestamp: base.Add(6 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "operator", Type: "provisioning.failed", Severity: "error", Message: "failed"},
+		{Timestamp: base.Add(7 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "operator", Type: "cell.rolled", Severity: "info", Message: "rolled"},
+	}
+	pool := seedActivityEvents(t, events)
+	r := NewReader(pool)
+	ctx := context.Background()
+
+	page, err := r.ListActivity(ctx, ActivityQuery{ExcludeRoutineEvents: true, Scope: activity.Scope{All: true}})
+	if err != nil {
+		t.Fatalf("ListActivity with the flag: %v", err)
+	}
+	got := map[string]bool{}
+	for _, e := range page.Items {
+		got[e.Message] = true
+	}
+	want := map[string]bool{"person item": true, "failed": true, "rolled": true}
+	if len(page.Items) != len(want) {
+		t.Fatalf("with the flag: %+v, want exactly the person item, failed, and rolled events", page.Items)
+	}
+	for m := range want {
+		if !got[m] {
+			t.Fatalf("with the flag: %q is missing from %+v", m, page.Items)
+		}
+	}
+}
+
+// TestActivityFilterKey_ExcludeRoutineEvents proves the cursor fingerprint
+// holds the routine exclusion only when it is set.
+func TestActivityFilterKey_ExcludeRoutineEvents(t *testing.T) {
+	t.Parallel()
+
+	unset := ActivityQuery{Scope: activity.Scope{All: true}}
+	set := unset
+	set.ExcludeRoutineEvents = true
+
+	if activityFilterKey(unset) == activityFilterKey(set) {
+		t.Fatal("the flagged and unflagged queries share a cursor fingerprint")
+	}
+	if !strings.Contains(activityFilterKey(set), "excludeRoutineEvents") {
+		t.Fatalf("the flagged key %q does not name the exclusion", activityFilterKey(set))
+	}
+	if strings.Contains(activityFilterKey(unset), "excludeRoutineEvents") {
+		t.Fatalf("the unset flag changed the key: %q", activityFilterKey(unset))
+	}
+}

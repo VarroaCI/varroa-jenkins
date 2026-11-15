@@ -60,8 +60,8 @@ describe("todayFeed", () => {
     ];
     const feed = buildDayFeed(groups, []);
     expect(feed.timed).toHaveLength(0);
-    expect(feed.folds).toHaveLength(1);
-    const other = feed.folds[0] as OtherRow;
+    expect(feed.folds).toHaveLength(0);
+    const other = feed.other as OtherRow;
     expect(other).toMatchObject({ kind: "other", runs: 3 });
     expect(tenantCounts(other.groups)).toBe("payments (2), member-b (1)");
   });
@@ -90,18 +90,42 @@ describe("todayFeed", () => {
     expect(order).toEqual(["later", "human", "member-b: 3 plugins updated"]);
   });
 
-  it("folds consecutive repeats of one event", () => {
-    const same = { message: "Controller test-ctrl restarted", controller: "test-ctrl", namespace: "default", cluster: "core" };
+  it("folds repeats of one event across the day", () => {
+    const a = { message: "smoke-a/lock-hold created", controller: "smoke-a", namespace: "default", cluster: "core" };
+    const b = { message: "smoke-a/cron-probe created", controller: "smoke-a", namespace: "default", cluster: "core" };
     const events = [
-      createActivityEvent({ ...same, timestamp: "2026-11-14T10:03:00Z" }),
-      createActivityEvent({ ...same, timestamp: "2026-11-14T10:02:00Z" }),
-      createActivityEvent({ ...same, timestamp: "2026-11-14T10:01:00Z" }),
-      createActivityEvent({ message: "ledger-ctrl went to sleep", controller: "ledger-ctrl", namespace: "default", timestamp: "2026-11-14T09:00:00Z" }),
+      createActivityEvent({ ...a, timestamp: "2026-11-14T10:04:00Z" }),
+      createActivityEvent({ ...b, timestamp: "2026-11-14T10:03:00Z" }),
+      createActivityEvent({ ...a, timestamp: "2026-11-14T10:02:00Z" }),
+      createActivityEvent({ ...a, timestamp: "2026-11-14T10:01:00Z" }),
     ];
     const feed = buildDayFeed([], events);
     expect(feed.timed).toHaveLength(2);
     expect(feed.timed[0]).toMatchObject({ kind: "event", repeats: 3 });
     expect(feed.timed[1]).toMatchObject({ kind: "event", repeats: 1 });
+  });
+
+  it("keeps two messages of one controller and type apart", () => {
+    const events = [
+      createActivityEvent({ message: "smoke-a/lock-hold created", controller: "smoke-a", type: "item.created", timestamp: "2026-11-14T10:02:00Z" }),
+      createActivityEvent({ message: "smoke-a/cron-probe created", controller: "smoke-a", type: "item.created", timestamp: "2026-11-14T10:01:00Z" }),
+    ];
+    const feed = buildDayFeed([], events);
+    expect(feed.timed).toHaveLength(2);
+    expect(feed.timed.every((r) => r.kind === "event" && r.repeats === 1)).toBe(true);
+  });
+
+  it("names a nested job once", () => {
+    const g = group({
+      tenantFolder: "smoke-b",
+      tenant: "smoke-b",
+      jobPath: "smoke-b/platform/nightly-audit",
+      runs: 3,
+      passed: 3,
+      failed: 0,
+      newest: run({ runId: "run-3", buildNumber: 7, tenant: "smoke-b", jobPath: "smoke-b/platform/nightly-audit" }),
+    });
+    expect(groupTitle(g)).toBe("smoke-b / platform/nightly-audit ran 3 times");
   });
 
   it("names the failed count in a fold detail", () => {

@@ -23,6 +23,13 @@ describe("dayText", () => {
     expect(failedHoursLabel(hourly())).toBe("Runs per hour, last 24 hours. No failures.");
   });
 
+  it("names a nested running job once", () => {
+    const running = [
+      { run: fleetRun({ runId: "r1", status: "RUNNING", result: undefined, buildNumber: 7, tenant: "smoke-b", tenantFolder: "smoke-b", jobPath: "smoke-b/platform/nightly-audit" }) },
+    ];
+    expect(runningParts(running, NOW).name).toBe("smoke-b / platform/nightly-audit #7");
+  });
+
   it("names the first running run with its stage and elapsed time, and the count of the rest", () => {
     expect(runningParts([], NOW)).toEqual({ name: "", detail: "Nothing is running." });
     const running = [

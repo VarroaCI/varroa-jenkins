@@ -60,12 +60,42 @@ describe("TodayFeed", () => {
     expect(mocks.listActivity).toHaveBeenCalledWith(expect.objectContaining({ start: since }));
   });
 
-  it("asks the activity read to leave out build events and routine sign-ins", async () => {
+  it("asks the activity read to leave out build events, routine sign-ins, and routine events", async () => {
     renderFeed();
     await screen.findByText("Nothing ran and nothing changed since midnight.");
     expect(mocks.listActivity).toHaveBeenCalledWith(
-      expect.objectContaining({ excludeBuildEvents: true, excludeRoutineSignIns: true }),
+      expect.objectContaining({ excludeBuildEvents: true, excludeRoutineSignIns: true, excludeRoutineEvents: true }),
     );
+  });
+
+  it("shows eight timed rows, then the job fold", async () => {
+    const events = Array.from({ length: 12 }, (_, i) =>
+      createActivityEvent({
+        message: `ledger-ctrl event ${i}`,
+        controller: "ledger-ctrl",
+        namespace: "default",
+        timestamp: `2026-11-14T10:${String(59 - i).padStart(2, "0")}:00Z`,
+      }),
+    );
+    mocks.listFleetRunGroups.mockResolvedValue(groupPage({ groups: [group()] }));
+    mocks.listActivity.mockResolvedValue(activityPage({ items: events }));
+    renderFeed();
+    const fold = await screen.findByText("payments / release ran 2 times");
+    expect(screen.getByText("ledger-ctrl event 7")).toBeInTheDocument();
+    expect(screen.queryByText("ledger-ctrl event 8")).not.toBeInTheDocument();
+    const lastTimed = screen.getByText("ledger-ctrl event 7");
+    expect(lastTimed.compareDocumentPosition(fold) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show all 12" })).toBeInTheDocument();
+  });
+
+  it("caps the job folds at five", async () => {
+    const groups = Array.from({ length: 7 }, (_, i) => group({ jobPath: `job-${i}` }));
+    mocks.listFleetRunGroups.mockResolvedValue(groupPage({ groups }));
+    renderFeed();
+    await screen.findByText("payments / job-0 ran 2 times");
+    expect(screen.getAllByText(/ran 2 times$/)).toHaveLength(5);
+    await userEvent.click(screen.getByRole("button", { name: "Show all 7 jobs" }));
+    expect(screen.getAllByText(/ran 2 times$/)).toHaveLength(7);
   });
 
   it("shows the held-failure note", async () => {

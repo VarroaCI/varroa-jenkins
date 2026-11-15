@@ -1238,15 +1238,17 @@ export interface ActivityParams {
   limit?: number;
   excludeRoutineSignIns?: boolean;
   excludeBuildEvents?: boolean;
+  excludeRoutineEvents?: boolean;
 }
 
-/** Reads the newest activity events, optionally without build events or routine sign-ins. */
+/** Reads the newest activity events, optionally without build events, routine sign-ins, or routine events. */
 export function listActivity(p: ActivityParams): Promise<ActivityPage> {
   const qs = new URLSearchParams();
   if (p.start) qs.set("start", p.start);
   if (p.limit) qs.set("limit", String(p.limit));
   if (p.excludeRoutineSignIns) qs.set("excludeRoutineSignIns", "true");
   if (p.excludeBuildEvents) qs.set("excludeBuildEvents", "true");
+  if (p.excludeRoutineEvents) qs.set("excludeRoutineEvents", "true");
   const s = qs.toString();
   return bffFetch<ActivityPage>(`/activity${s ? `?${s}` : ""}`);
 }

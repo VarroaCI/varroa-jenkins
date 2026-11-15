@@ -109,3 +109,62 @@ func TestMatchesExcludeBuildEvents(t *testing.T) {
 		t.Fatal("settings.updated did not match with ExcludeBuildEvents set")
 	}
 }
+
+func TestIsRoutineEvent(t *testing.T) {
+	t.Parallel()
+
+	routine := []Event{
+		{Type: "connected", Actor: ""},
+		{Type: "disconnected", Actor: ""},
+		{Type: "phase", Actor: "varroa-mite"},
+		{Type: "provisioning.started", Actor: ""},
+		{Type: "provisioning.completed", Actor: ""},
+		{Type: "item.created", Actor: "varroa-mite"},
+		{Type: "item.created", Actor: ""},
+		{Type: "item.created", Actor: "varroa-mite-system"},
+		{Type: "config.changed", Actor: "varroa-mite"},
+	}
+	for _, e := range routine {
+		if !IsRoutineEvent(e) {
+			t.Errorf("%s by %q: IsRoutineEvent = false, want true", e.Type, e.Actor)
+		}
+	}
+	kept := []Event{
+		{Type: "item.created", Actor: "nathan"},
+		{Type: "item.deleted", Actor: "alice"},
+		{Type: "provisioning.failed", Actor: ""},
+		{Type: "cell.rolled", Actor: ""},
+		{Type: "pod.replaced", Actor: ""},
+		{Type: "controller.restarted", Actor: "nathan"},
+	}
+	for _, e := range kept {
+		if IsRoutineEvent(e) {
+			t.Errorf("%s by %q: IsRoutineEvent = true, want false", e.Type, e.Actor)
+		}
+	}
+}
+
+func TestMatchesExcludeRoutineEvents(t *testing.T) {
+	t.Parallel()
+
+	q := Query{ExcludeRoutineEvents: true}
+	machine := Event{Type: "item.created", Actor: "varroa-mite", Severity: "info", Cluster: "core"}
+	if Matches(machine, q) {
+		t.Fatal("a mite item.created matched with ExcludeRoutineEvents set")
+	}
+	if !Matches(machine, Query{}) {
+		t.Fatal("a mite item.created did not match without the exclusion")
+	}
+	person := Event{Type: "item.created", Actor: "nathan", Severity: "info", Cluster: "core"}
+	if !Matches(person, q) {
+		t.Fatal("a person's item.created did not match with ExcludeRoutineEvents set")
+	}
+	failed := Event{Type: "provisioning.failed", Severity: "error", Cluster: "core"}
+	if !Matches(failed, q) {
+		t.Fatal("provisioning.failed did not match with ExcludeRoutineEvents set")
+	}
+	connected := Event{Type: "connected", Severity: "info", Cluster: "core"}
+	if Matches(connected, q) {
+		t.Fatal("connected matched with ExcludeRoutineEvents set")
+	}
+}

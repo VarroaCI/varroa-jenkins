@@ -9,7 +9,10 @@ import { shortDuration } from "./dayText";
 export const HUMAN_TRIGGERS: FleetTriggerKind[] = ["manual", "replay", "restart"];
 
 /** FEED_ROWS is the number of timed rows the feed shows before "Show all". */
-export const FEED_ROWS = 20;
+export const FEED_ROWS = 8;
+
+/** FOLD_ROWS is the number of job folds the feed shows before "Show all jobs". */
+export const FOLD_ROWS = 5;
 
 /** TimedRunRow is one run that keeps its own row. Its group holds one run. */
 export interface TimedRunRow {
@@ -44,10 +47,11 @@ export interface OtherRow {
   runs: number;
 }
 
-/** DayFeed holds the rows of the feed. Timed rows come first, newest first. Folds follow. */
+/** DayFeed holds the rows of the feed. Timed rows come first, newest first. Job folds follow, then the other row. */
 export interface DayFeed {
   timed: (TimedRunRow | TimedEventRow)[];
-  folds: (FoldRow | OtherRow)[];
+  folds: FoldRow[];
+  other?: OtherRow;
 }
 
 const RESULT_WORDS: Record<string, string> = {
@@ -137,12 +141,13 @@ export function eventDetail(e: ActivityEvent): string | undefined {
  * buildDayFeed orders the runs and the events of the day. A group of two or more
  * runs is a job fold. A single run keeps its own row when a person started it or
  * it did not pass. The single passes of machine triggers fold into one other row
- * when there are two or more. Consecutive events with the same repeat key fold
- * into one row. The events keep the order the server sent, newest first.
+ * when there are two or more. Repeats of one event fold into one row across the
+ * whole day, because the repeat key holds the message. The events keep the order
+ * the server sent, newest first.
  */
 export function buildDayFeed(groups: FleetRunGroup[], events: ActivityEvent[]): DayFeed {
   const timed: (TimedRunRow | TimedEventRow)[] = [];
-  const folds: (FoldRow | OtherRow)[] = [];
+  const folds: FoldRow[] = [];
   const others: FleetRunGroup[] = [];
 
   for (const g of groups) {
@@ -155,35 +160,45 @@ export function buildDayFeed(groups: FleetRunGroup[], events: ActivityEvent[]): 
       others.push(g);
     }
   }
+  let other: OtherRow | undefined;
   if (others.length === 1) {
     timed.push(runRow(others[0]));
   } else if (others.length >= 2) {
-    folds.push({ kind: "other", key: "other", groups: others, runs: others.length });
+    other = { kind: "other", key: "other", groups: others, runs: others.length };
   }
 
-  for (let i = 0; i < events.length; ) {
-    const k = repeatKey(events[i]);
-    let j = i + 1;
-    while (j < events.length && repeatKey(events[j]) === k) j++;
-    timed.push({
-      kind: "event",
-      key: `event:${i}:${events[i].timestamp}`,
-      atIso: events[i].timestamp,
-      event: events[i],
-      repeats: j - i,
-    });
-    i = j;
-  }
+  const byKey = new Map<string, TimedEventRow>();
+  events.forEach((e, i) => {
+    const k = repeatKey(e);
+    const seen = byKey.get(k);
+    if (seen) {
+      seen.repeats += 1;
+      return;
+    }
+    const row: TimedEventRow = { kind: "event", key: `event:${i}:${e.timestamp}`, atIso: e.timestamp, event: e, repeats: 1 };
+    byKey.set(k, row);
+    timed.push(row);
+  });
 
   const at = (r: TimedRunRow | TimedEventRow) => Date.parse(r.atIso);
   timed.sort((a, b) => at(b) - at(a));
 
-  folds.sort((a, b) => {
-    if (a.kind === "other" || b.kind === "other") return a.kind === "other" ? 1 : -1;
-    return b.group.runs - a.group.runs || a.group.tenant.localeCompare(b.group.tenant) || a.group.jobPath.localeCompare(b.group.jobPath);
-  });
+  folds.sort((a, b) => b.group.runs - a.group.runs || a.group.tenant.localeCompare(b.group.tenant) || a.group.jobPath.localeCompare(b.group.jobPath));
 
-  return { timed, folds };
+  return { timed, folds, other };
+}
+
+/**
+ * activityHref links to the activity view of one controller, from the start of
+ * the day. It leaves out the cluster when the event has none.
+ */
+export function activityHref(cluster: string | undefined, namespace: string | undefined, controller: string | undefined, since: string): string {
+  const qs = new URLSearchParams();
+  if (cluster) qs.set("cluster", cluster);
+  qs.set("controller", `${namespace ?? ""}/${controller ?? ""}`);
+  qs.set("range", "custom");
+  qs.set("start", since);
+  return `/activity?${qs.toString()}`;
 }
 
 /** runRow makes the timed row of one run. */

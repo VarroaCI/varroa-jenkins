@@ -10,6 +10,8 @@ import { hhmm } from "./attentionItems";
 import { useNow } from "./useNow";
 import {
   FEED_ROWS,
+  FOLD_ROWS,
+  activityHref,
   buildDayFeed,
   eventDetail,
   eventTitle,
@@ -33,8 +35,8 @@ export interface TodayFeedProps {
 /**
  * TodayFeed lists what ran and what changed since local midnight. Runs come
  * from the job groups of the server, with the held failure left out. Events
- * come from the activity read, without build events and routine sign-ins.
- * Each part shows its own state, so a failed read keeps the other part.
+ * come from the activity read, without build events, routine sign-ins, or
+ * routine events. Each part shows its own state, so a failed read keeps the other part.
  */
 export function TodayFeed({ canPipelines }: TodayFeedProps) {
   const now = useNow(60_000);
@@ -48,7 +50,8 @@ export function TodayFeed({ canPipelines }: TodayFeedProps) {
   });
   const events = useQuery({
     queryKey: ["overview-activity", since],
-    queryFn: () => listActivity({ start: since, limit: 100, excludeRoutineSignIns: true, excludeBuildEvents: true }),
+    queryFn: () =>
+      listActivity({ start: since, limit: 100, excludeRoutineSignIns: true, excludeBuildEvents: true, excludeRoutineEvents: true }),
     refetchInterval: 30_000,
   });
 
@@ -56,7 +59,7 @@ export function TodayFeed({ canPipelines }: TodayFeedProps) {
   const feed = buildDayFeed(canPipelines ? (groups.data?.groups ?? []) : [], events.data?.items ?? []);
   const runsNote = canPipelines ? (groups.isError ? runsErrorNote(groups.error) : undefined) : NOT_READ_NOTE;
   const eventsNote = events.isError ? eventsErrorNote(events.error) : undefined;
-  const hasRows = feed.timed.length > 0 || feed.folds.length > 0;
+  const hasRows = feed.timed.length > 0 || feed.folds.length > 0 || feed.other !== undefined;
   const empty = !loading && !hasRows && !runsNote && !eventsNote;
 
   return (
@@ -134,12 +137,18 @@ function FeedNote({ note, onRetry }: { note: Note; onRetry?: () => void }) {
 
 function FeedRows({ feed, since }: { feed: DayFeed; since: string }) {
   const [showAll, setShowAll] = useState(false);
+  const [showAllFolds, setShowAllFolds] = useState(false);
   const [otherOpen, setOtherOpen] = useState(false);
   const timed = showAll ? feed.timed : feed.timed.slice(0, FEED_ROWS);
+  const folds = showAllFolds ? feed.folds : feed.folds.slice(0, FOLD_ROWS);
   return (
     <>
       {timed.map((row) =>
-        row.kind === "run" ? <RunItem key={row.key} row={row} /> : <EventItem key={row.key} row={row} />,
+        row.kind === "run" ? (
+          <RunItem key={row.key} row={row} />
+        ) : (
+          <EventItem key={row.key} row={row} since={since} />
+        ),
       )}
       {feed.timed.length > FEED_ROWS && (
         <div className={styles.more}>
@@ -148,13 +157,17 @@ function FeedRows({ feed, since }: { feed: DayFeed; since: string }) {
           </button>
         </div>
       )}
-      {feed.folds.map((row) =>
-        row.kind === "fold" ? (
-          <FoldItem key={row.key} row={row} since={since} />
-        ) : (
-          <OtherItem key={row.key} row={row} open={otherOpen} onToggle={() => setOtherOpen((v) => !v)} />
-        ),
+      {folds.map((row) => (
+        <FoldItem key={row.key} row={row} since={since} />
+      ))}
+      {feed.folds.length > FOLD_ROWS && (
+        <div className={styles.more}>
+          <button type="button" className={styles.btnGhost} onClick={() => setShowAllFolds((v) => !v)}>
+            {showAllFolds ? "Show fewer jobs" : `Show all ${feed.folds.length} jobs`}
+          </button>
+        </div>
       )}
+      {feed.other && <OtherItem row={feed.other} open={otherOpen} onToggle={() => setOtherOpen((v) => !v)} />}
     </>
   );
 }
@@ -200,24 +213,16 @@ function RunItem({ row }: { row: TimedRunRow }) {
   );
 }
 
-function EventItem({ row }: { row: TimedEventRow }) {
+function EventItem({ row, since }: { row: TimedEventRow; since: string }) {
   const e: ActivityEvent = row.event;
   const action =
     row.repeats > 1 && e.controller && e.namespace ? (
-      <Link className={styles.btn} to={eventLink(e)}>
+      <Link className={styles.btn} to={activityHref(e.cluster, e.namespace, e.controller, since)}>
         Show
       </Link>
     ) : undefined;
   const title = row.repeats > 1 ? `${eventTitle(e)} × ${row.repeats}` : eventTitle(e);
   return <Item time={hhmm(row.atIso)} title={title} detail={eventDetail(e)} action={action} />;
-}
-
-/** eventLink names the activity view of one controller. */
-function eventLink(e: ActivityEvent): string {
-  const qs = new URLSearchParams();
-  if (e.cluster) qs.set("cluster", e.cluster);
-  qs.set("controller", `${e.namespace ?? ""}/${e.controller ?? ""}`);
-  return `/activity?${qs.toString()}`;
 }
 
 function FoldItem({ row, since }: { row: FoldRow; since: string }) {

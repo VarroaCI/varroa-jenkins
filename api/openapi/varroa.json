@@ -19617,6 +19617,15 @@
               "default": false,
               "type": "boolean"
             }
+          },
+          {
+            "description": "true leaves out each routine event: connected, disconnected, phase, provisioning.started, and provisioning.completed, and an item.created, item.updated, item.deleted, item.moved, or config.changed event whose actor is empty, varroa-mite, or varroa-mite-system.",
+            "in": "query",
+            "name": "excludeRoutineEvents",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -19783,6 +19792,15 @@
               "default": false,
               "type": "boolean"
             }
+          },
+          {
+            "description": "true leaves out each routine event: connected, disconnected, phase, provisioning.started, and provisioning.completed, and an item.created, item.updated, item.deleted, item.moved, or config.changed event whose actor is empty, varroa-mite, or varroa-mite-system.",
+            "in": "query",
+            "name": "excludeRoutineEvents",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -19804,7 +19822,7 @@
                 }
               }
             },
-            "description": "Invalid filter or range: a bound is not RFC 3339, start is not before end, or a source, severity, excludeRoutineSignIns, or excludeBuildEvents value is unknown."
+            "description": "Invalid filter or range: a bound is not RFC 3339, start is not before end, or a source, severity, excludeRoutineSignIns, excludeBuildEvents, or excludeRoutineEvents value is unknown."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
