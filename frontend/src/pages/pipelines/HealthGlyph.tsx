@@ -1,5 +1,6 @@
 import { Cloud, CloudLightning, CloudRain, CloudSun, Sun, type LucideIcon } from "lucide-react";
 import type { JobHealth, PipelineHealthBucket } from "../../types";
+import { plural } from "../../lib/plural";
 import styles from "./HealthGlyph.module.css";
 
 type ShownBucket = Exclude<PipelineHealthBucket, "unknown">;
@@ -17,7 +18,7 @@ const BUCKET_GLYPH: Record<ShownBucket, { Icon: LucideIcon; name: string; cls: s
 export function healthLabel(health: JobHealth): string {
   if (health.bucket === "unknown") return "No counted build yet";
   const { name } = BUCKET_GLYPH[health.bucket];
-  return `${name}: ${health.passed} of ${health.counted} counted builds passed`;
+  return `${name}: ${health.passed} of ${plural(health.counted, "counted build", "counted builds")} passed`;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
 import type { PipelinesOverviewTenant, RecentRunResult } from "../../types";
+import { plural } from "../../lib/plural";
 import styles from "./TenantRail.module.css";
 
 /** STRIP_CELLS is the number of result cells each rail row draws. */
@@ -56,11 +57,12 @@ export function stripCells(recent: RecentRunResult[]): StripCell[] {
 
 /** railMeta answers the meta line of one row. It names every cluster other than the local one. */
 export function railMeta(t: PipelinesOverviewTenant, localCluster: string): string {
+  const runs = plural(t.runs24h, "run", "runs");
   let base: string;
   if (t.placement === "awaitingCell") base = "awaiting a cell";
   else if (t.runs24h === 0) base = "no runs in 24 h";
-  else if (t.waitingInput > 0) base = `${t.runs24h} runs · waits for input`;
-  else base = `${t.runs24h} runs · ${t.running} running`;
+  else if (t.waitingInput > 0) base = `${runs} · waits for input`;
+  else base = `${runs} · ${t.running} running`;
   const others = t.clusters.filter((c) => c !== localCluster);
   return others.length > 0 ? `${base} · ${others.join(", ")}` : base;
 }

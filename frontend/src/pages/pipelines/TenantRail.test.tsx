@@ -113,4 +113,9 @@ describe("TenantRail", () => {
     renderRail([tenant({ name: "pay" })]);
     expect(screen.getByRole("link", { name: "Open pay" })).toHaveAttribute("href", "/pipelines/pay");
   });
+  it("meta line says 1 run for one run", () => {
+    renderRail([tenant({ name: "one", runs24h: 1 }), tenant({ name: "ask", runs24h: 1, waitingInput: 1 })]);
+    expect(screen.getByText("1 run · 0 running")).toBeInTheDocument();
+    expect(screen.getByText("1 run · waits for input")).toBeInTheDocument();
+  });
 });

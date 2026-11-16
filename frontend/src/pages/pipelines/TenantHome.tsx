@@ -22,6 +22,7 @@ import { age } from "../../components/activityTimeline.util";
 import { useClusters, coreOf } from "../../hooks/useClusters";
 import { controllerRoute } from "../../routing";
 import { holderOf, holdsLock } from "../../lib/fleetLocks";
+import { plural } from "../../lib/plural";
 import type { FleetLock, RunNotification, RunnerEntry, RunningRun, TenantCell } from "../../types";
 import JobTree, { formatDuration } from "./JobTree";
 import { breakablePath } from "./breakablePath";
@@ -414,15 +415,15 @@ export default function TenantHome() {
       <div className={styles.pageDesc}>Pipelines for this tenant</div>
       {data?.retention && (
         <div className={styles.retention} data-testid="tenant-retention">
-          Build history kept {data.retention.effectiveDays} days
+          Build history kept {plural(data.retention.effectiveDays, "day", "days")}
           {data.retention.tenantDays !== undefined &&
             data.retention.tenantDays < data.retention.storeDays &&
-            ` (store limit ${data.retention.storeDays} days)`}
+            ` (store limit ${plural(data.retention.storeDays, "day", "days")})`}
           {data.retention.jobs.length > 0 && (
             <ul className={styles.retentionJobs}>
               {data.retention.jobs.map((rule) => (
                 <li key={rule.job}>
-                  {rule.job}: {rule.effectiveDays} days
+                  {rule.job}: {plural(rule.effectiveDays, "day", "days")}
                 </li>
               ))}
             </ul>

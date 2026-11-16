@@ -145,4 +145,11 @@ describe("DayPanel", () => {
     expect(mocks.getPipelinesOverview).not.toHaveBeenCalled();
     expect(screen.queryByText(/Runs per hour/)).toBeNull();
   });
+  it("says 1 run for one run", async () => {
+    mocks.getPipelinesOverview.mockResolvedValue(
+      overview({ totals: totals({ runs24h: 1, passed: 1, failed: 0, finished: 1 }) }),
+    );
+    renderDay({ canControllers: false });
+    expect(await screen.findByText(exactText("1 run · 1 passed · 0 failed · median 1m"))).toBeInTheDocument();
+  });
 });

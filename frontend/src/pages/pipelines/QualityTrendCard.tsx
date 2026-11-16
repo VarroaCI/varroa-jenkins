@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Card } from "../../components/Card";
+import { plural } from "../../lib/plural";
 import type {
   CoverageTrendPoint,
   CoverageTrendSeries,
@@ -201,7 +202,7 @@ function CoverageChart({ tenant, jobPath, series, window }: {
 }
 
 function warningsLabel(p: WarningsTrendPoint): string {
-  const parts = [buildName(p), `${p.total} warnings`];
+  const parts = [buildName(p), plural(p.total, "warning", "warnings")];
   if (p.new !== undefined) parts.push(`${p.new} new`);
   return parts.join(" · ");
 }

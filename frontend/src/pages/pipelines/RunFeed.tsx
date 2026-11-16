@@ -11,6 +11,7 @@ import { RecoveryState } from "../../components/RecoveryState";
 import { Button } from "../../components/Button";
 import { useToast } from "../../components/Toast";
 import { age } from "../../components/activityTimeline.util";
+import { plural } from "../../lib/plural";
 import type { FleetRunRow, FleetRunSort } from "../../types";
 import {
   DEFAULT_FEED_QUERY,
@@ -193,7 +194,7 @@ export function RunFeed({ query, onQuery, tenants, localCluster, live, onNewPipe
     <section className={styles.feed} aria-label="Run feed">
       <div className={styles.toolbar}>
         <div className={styles.toolbarTop}>
-          <span className={styles.count}>{rows.length} runs loaded</span>
+          <span className={styles.count}>{plural(rows.length, "run", "runs")} loaded</span>
           <span className={styles.live}>live · updated {updatedText}</span>
         </div>
         {live.newRuns > 0 && (

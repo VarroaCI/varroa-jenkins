@@ -1400,4 +1400,24 @@ describe("TenantHome — the proposal card", () => {
     });
     expect(screen.queryByText("propose-card")).not.toBeInTheDocument();
   });
+  it("says 1 day for a one-day window", async () => {
+    mockListPipelines.mockResolvedValue({
+      items: [],
+      runningNow: [],
+      truncated: false,
+      retention: {
+        storeDays: 365,
+        tenantDays: 1,
+        effectiveDays: 1,
+        jobs: [{ job: "pr-*", days: 1, effectiveDays: 1 }],
+      },
+    });
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId("tenant-retention")).toHaveTextContent(
+        "Build history kept 1 day (store limit 365 days)",
+      ),
+    );
+    expect(screen.getByText("pr-*: 1 day")).toBeInTheDocument();
+  });
 });

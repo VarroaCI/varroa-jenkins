@@ -28,4 +28,7 @@ describe("HealthGlyph", () => {
     expect(container).toBeEmptyDOMElement();
     expect(healthLabel(health("unknown"))).toBe("No counted build yet");
   });
+  it("uses the singular noun for one counted build", () => {
+    expect(healthLabel(health("sunny", 1, 1))).toBe("Sunny: 1 of 1 counted build passed");
+  });
 });
