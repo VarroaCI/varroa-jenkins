@@ -17,10 +17,10 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
-// jenkinsRoleBindingDeps seeds two bindings: one carrying every field whose
-// cost Task 6 exists to cut (subjects, controllerScope selector, pattern,
-// propagate) and one whose JenkinsScope is nil, the shape that a create
-// without jenkinsScope produces.
+// jenkinsRoleBindingDeps seeds three bindings: one Folder binding carrying
+// subjects, a controllerScope selector, and a propagate value; one Pattern
+// binding; and one whose JenkinsScope is nil, the shape that a create without
+// jenkinsScope produces.
 func jenkinsRoleBindingDeps(t *testing.T) *api.Dependencies {
 	t.Helper()
 	store := crdstore.NewFake()
@@ -38,8 +38,15 @@ func jenkinsRoleBindingDeps(t *testing.T) *api.Dependencies {
 					Type:      "Folder",
 					Folder:    "team-a/project-x",
 					Propagate: "Subtree",
-					Pattern:   "tenant-.*",
 				},
+			},
+		},
+		&v1alpha1.JenkinsRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "jrb-pattern"},
+			Spec: v1alpha1.JenkinsRoleBindingSpec{
+				RoleRef:      "ci-read",
+				Subjects:     []v1alpha1.SubjectRef{{Kind: "Group", Name: "auditors"}},
+				JenkinsScope: &v1alpha1.JenkinsScope{Type: "Pattern", Pattern: "tenant-.*"},
 			},
 		},
 		&v1alpha1.JenkinsRoleBinding{
@@ -104,18 +111,19 @@ func TestSummarizeJenkinsRoleBinding_NilJenkinsScopeDoesNotPanic(t *testing.T) {
 			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "ci-bot"}},
 		},
 	})
-	if got.ScopeType != "" || got.ScopeFolder != "" {
-		t.Errorf("nil JenkinsScope must project empty scope, got type=%q folder=%q",
-			got.ScopeType, got.ScopeFolder)
+	if got.ScopeType != v1alpha1.JenkinsScopeGlobal {
+		t.Errorf("nil JenkinsScope must project scopeType Global, got %q", got.ScopeType)
+	}
+	if got.ScopeFolder != "" || got.ScopePropagate != "" || got.ScopePattern != "" {
+		t.Errorf("nil JenkinsScope must project no folder, propagate, or pattern: %+v", got)
 	}
 	if got.SubjectCount != 1 {
 		t.Errorf("SubjectCount = %d, want 1", got.SubjectCount)
 	}
 }
 
-// The projection exists to drop spec.subjects[], jenkinsScope.pattern,
-// jenkinsScope.propagate and the whole controllerScope selector. The count
-// must survive; the payload text must not.
+// The projection drops spec.subjects[] and the controllerScope selector terms.
+// The count must survive; the subject names must not.
 func TestSummarizeJenkinsRoleBinding_DropsSubjectsKeepsCount(t *testing.T) {
 	got := summarizeJenkinsRoleBinding(&v1alpha1.JenkinsRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: "jrb-scoped"},
@@ -129,7 +137,6 @@ func TestSummarizeJenkinsRoleBinding_DropsSubjectsKeepsCount(t *testing.T) {
 				Type:      "Folder",
 				Folder:    "team-a/project-x",
 				Propagate: "Subtree",
-				Pattern:   "tenant-.*",
 			},
 		},
 	})
@@ -139,8 +146,11 @@ func TestSummarizeJenkinsRoleBinding_DropsSubjectsKeepsCount(t *testing.T) {
 	if got.ScopeType != "Folder" || got.ScopeFolder != "team-a/project-x" {
 		t.Errorf("scope not projected: type=%q folder=%q", got.ScopeType, got.ScopeFolder)
 	}
+	if got.ScopePropagate != "Subtree" {
+		t.Errorf("ScopePropagate = %q, want Subtree", got.ScopePropagate)
+	}
 	b, _ := json.Marshal(got)
-	for _, dropped := range []string{"alice", "devs", "jenkins", "Subtree", "tenant-.*"} {
+	for _, dropped := range []string{"alice", "devs", "jenkins"} {
 		if strings.Contains(string(b), dropped) {
 			t.Errorf("summary still carries dropped %q: %s", dropped, b)
 		}
@@ -154,10 +164,11 @@ func TestSummarizeJenkinsRoleBinding_DropsSubjectsKeepsCount(t *testing.T) {
 func TestListJenkinsRoleBindings_DefaultsToSummary(t *testing.T) {
 	sc := listJenkinsRoleBindingsResult(t, map[string]interface{}{})
 	items, ok := sc["items"].([]any)
-	if !ok || len(items) != 2 {
-		t.Fatalf("expected 2 items, got %v", sc["items"])
+	if !ok || len(items) != 3 {
+		t.Fatalf("expected 3 items, got %v", sc["items"])
 	}
-	scoped, nilScope := findJenkinsRoleBindings(t, items)
+	rows := jenkinsRoleBindingRowsByName(t, items, "jrb-scoped", "jrb-pattern", "jrb-nil-scope")
+	scoped, pattern, nilScope := rows["jrb-scoped"], rows["jrb-pattern"], rows["jrb-nil-scope"]
 	if _, present := nilScope["controllerScope"]; present {
 		t.Errorf("a binding with no controller scope must omit controllerScope: %v", nilScope)
 	}
@@ -166,10 +177,11 @@ func TestListJenkinsRoleBindings_DefaultsToSummary(t *testing.T) {
 		t.Errorf("controllerScope = %v, want %v", got, wantCS)
 	}
 
-	for _, item := range []map[string]any{scoped, nilScope} {
+	for _, item := range []map[string]any{scoped, pattern, nilScope} {
 		allowed := map[string]bool{
 			"name": true, "roleRef": true, "subjectCount": true,
-			"controllerScope": true, "scopeType": true, "scopeFolder": true, "controller": true,
+			"controllerScope": true, "scopeType": true, "scopeFolder": true,
+			"scopePropagate": true, "scopePattern": true, "controller": true,
 		}
 		for k := range item {
 			if !allowed[k] {
@@ -192,8 +204,21 @@ func TestListJenkinsRoleBindings_DefaultsToSummary(t *testing.T) {
 	if scoped["subjectCount"] != float64(2) {
 		t.Errorf("subjectCount = %v, want 2 (JSON-decoded numbers are float64)", scoped["subjectCount"])
 	}
-	if scoped["scopeType"] != "Folder" || scoped["scopeFolder"] != "team-a/project-x" {
-		t.Errorf("scope not projected in list result: %v", scoped)
+	if scoped["scopeType"] != "Folder" || scoped["scopeFolder"] != "team-a/project-x" || scoped["scopePropagate"] != "Subtree" {
+		t.Errorf("folder scope not projected in list result: %v", scoped)
+	}
+	if _, present := scoped["scopePattern"]; present {
+		t.Errorf("a Folder row must not carry scopePattern: %v", scoped)
+	}
+
+	if pattern["scopeType"] != "Pattern" || pattern["scopePattern"] != "tenant-.*" {
+		t.Errorf("pattern scope not projected in list result: %v", pattern)
+	}
+	if _, present := pattern["scopeFolder"]; present {
+		t.Errorf("a Pattern row must not carry scopeFolder: %v", pattern)
+	}
+	if _, present := pattern["scopePropagate"]; present {
+		t.Errorf("a Pattern row must not carry scopePropagate: %v", pattern)
 	}
 
 	// The nil-scope binding proves the whole list survives the JenkinsScope
@@ -201,35 +226,119 @@ func TestListJenkinsRoleBindings_DefaultsToSummary(t *testing.T) {
 	if nilScope["subjectCount"] != float64(1) {
 		t.Errorf("nil-scope binding subjectCount = %v, want 1", nilScope["subjectCount"])
 	}
-	if v, ok := nilScope["scopeType"]; ok && v != "" {
-		t.Errorf("nil-scope binding should not carry a scopeType, got %v", v)
+	if nilScope["scopeType"] != "Global" {
+		t.Errorf("nil-scope binding scopeType = %v, want Global", nilScope["scopeType"])
+	}
+	for _, k := range []string{"scopeFolder", "scopePropagate", "scopePattern"} {
+		if _, present := nilScope[k]; present {
+			t.Errorf("nil-scope binding must not carry %s: %v", k, nilScope)
+		}
 	}
 
 	b, _ := json.Marshal(items)
-	for _, dropped := range []string{"alice", "devs", "jenkins", "Subtree", "tenant-.*"} {
+	for _, dropped := range []string{"alice", "devs", "jenkins", "auditors"} {
 		if strings.Contains(string(b), dropped) {
 			t.Errorf("list summary still carries dropped %q: %s", dropped, b)
 		}
 	}
 }
 
-// findJenkinsRoleBindings splits the listed items back out by name, failing if
-// either seeded binding is missing.
-func findJenkinsRoleBindings(t *testing.T, items []any) (scoped, nilScope map[string]any) {
+// jenkinsRoleBindingRowsByName indexes the listed items by name, failing when
+// a named binding is missing.
+func jenkinsRoleBindingRowsByName(t *testing.T, items []any, names ...string) map[string]map[string]any {
 	t.Helper()
+	byName := make(map[string]map[string]any, len(items))
 	for _, raw := range items {
 		item := raw.(map[string]any)
-		switch item["name"] {
-		case "jrb-scoped":
-			scoped = item
-		case "jrb-nil-scope":
-			nilScope = item
+		if name, ok := item["name"].(string); ok {
+			byName[name] = item
 		}
 	}
-	if scoped == nil || nilScope == nil {
-		t.Fatalf("seeded bindings not both present: %v", items)
+	for _, name := range names {
+		if byName[name] == nil {
+			t.Fatalf("seeded binding %q missing from list: %v", name, items)
+		}
 	}
-	return scoped, nilScope
+	return byName
+}
+
+// TestSummarizeJenkinsRoleBinding_JenkinsScope is a table test over the four
+// scope fields of the summary.
+func TestSummarizeJenkinsRoleBinding_JenkinsScope(t *testing.T) {
+	for _, tc := range []struct {
+		name                                        string
+		scope                                       *v1alpha1.JenkinsScope
+		wantType, wantFolder, wantProp, wantPattern string
+	}{
+		{"nil scope", nil, "Global", "", "", ""},
+		{"explicit Global", &v1alpha1.JenkinsScope{Type: "Global"}, "Global", "", "", ""},
+		{"Folder, no propagate", &v1alpha1.JenkinsScope{Type: "Folder", Folder: "payments"}, "Folder", "payments", "None", ""},
+		{"Folder None", &v1alpha1.JenkinsScope{Type: "Folder", Folder: "payments", Propagate: "None"}, "Folder", "payments", "None", ""},
+		{"Folder Children", &v1alpha1.JenkinsScope{Type: "Folder", Folder: "payments", Propagate: "Children"}, "Folder", "payments", "Children", ""},
+		{"Folder Subtree", &v1alpha1.JenkinsScope{Type: "Folder", Folder: "payments", Propagate: "Subtree"}, "Folder", "payments", "Subtree", ""},
+		{"Pattern", &v1alpha1.JenkinsScope{Type: "Pattern", Pattern: "^payments/.*$"}, "Pattern", "", "", "^payments/.*$"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := summarizeJenkinsRoleBinding(&v1alpha1.JenkinsRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: "jrb"},
+				Spec:       v1alpha1.JenkinsRoleBindingSpec{RoleRef: "ci-read", JenkinsScope: tc.scope},
+			})
+			if got.ScopeType != tc.wantType || got.ScopeFolder != tc.wantFolder ||
+				got.ScopePropagate != tc.wantProp || got.ScopePattern != tc.wantPattern {
+				t.Errorf("got type=%q folder=%q propagate=%q pattern=%q, want type=%q folder=%q propagate=%q pattern=%q",
+					got.ScopeType, got.ScopeFolder, got.ScopePropagate, got.ScopePattern,
+					tc.wantType, tc.wantFolder, tc.wantProp, tc.wantPattern)
+			}
+		})
+	}
+}
+
+// The declared item schema must name every key the summary can emit. A field
+// added to the struct without a schema entry fails here.
+func TestJenkinsRoleBindingListSchema_DeclaresEverySummaryKey(t *testing.T) {
+	summary := jenkinsRoleBindingSummary{
+		Name:            "jrb",
+		RoleRef:         "ci-read",
+		SubjectCount:    1,
+		ControllerScope: &jenkinsControllerScopeSummary{Namespaces: []string{"prod-a"}, Selector: true},
+		ScopeType:       "Folder",
+		ScopeFolder:     "payments",
+		ScopePropagate:  "Subtree",
+		ScopePattern:    "^payments/.*$",
+		Controller:      &jenkinsRoleBindingController{Namespace: "prod-a", Name: "jenkins-a"},
+	}
+	b, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("marshal summary: %v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(b, &fields); err != nil {
+		t.Fatalf("unmarshal summary: %v", err)
+	}
+
+	var doc struct {
+		Properties struct {
+			Items struct {
+				Items struct {
+					AnyOf []struct {
+						Properties map[string]any `json:"properties"`
+					} `json:"anyOf"`
+				} `json:"items"`
+			} `json:"items"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(jenkinsRoleBindingListOutputSchema, &doc); err != nil {
+		t.Fatalf("declared schema is not valid JSON: %v", err)
+	}
+	if len(doc.Properties.Items.Items.AnyOf) == 0 {
+		t.Fatalf("schema has no summary branch under properties.items.items.anyOf")
+	}
+	declared := doc.Properties.Items.Items.AnyOf[0].Properties
+	for k := range fields {
+		if _, ok := declared[k]; !ok {
+			t.Errorf("summary key %q is not declared in jenkinsRoleBindingListOutputSchema", k)
+		}
+	}
 }
 
 // verbose is an escape hatch from the projection: the full CR, subjects and
