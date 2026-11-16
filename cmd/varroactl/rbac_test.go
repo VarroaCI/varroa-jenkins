@@ -417,8 +417,8 @@ func TestRBAC_JenkinsRoleBindings_ControllerColumn(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("want header plus two rows, got %d lines:\n%s", len(lines), out)
 	}
-	if header := strings.Fields(lines[0]); strings.Join(header, " ") != "NAME ROLE SUBJECTS JENKINS-SCOPE CONTROLLER" {
-		t.Errorf("header = %v, want NAME ROLE SUBJECTS JENKINS-SCOPE CONTROLLER", header)
+	if header := strings.Fields(lines[0]); strings.Join(header, " ") != "NAME ROLE SUBJECTS JENKINS-SCOPE CONTROLLER-SCOPE CONTROLLER" {
+		t.Errorf("header = %v, want NAME ROLE SUBJECTS JENKINS-SCOPE CONTROLLER-SCOPE CONTROLLER", header)
 	}
 	if last := lastField(lines[1]); last != "prod-a/jenkins-1" {
 		t.Errorf("owned row CONTROLLER = %q, want prod-a/jenkins-1\n%s", last, out)
@@ -483,6 +483,121 @@ func TestRBAC_JenkinsRoleBindings_JSONIsAPIObject(t *testing.T) {
 	labels, _ := meta["labels"].(map[string]any)
 	if labels[v1alpha1.LabelControllerName] != "jenkins-1" {
 		t.Errorf("JSON item lost its labels: %v", meta)
+	}
+}
+
+// jrbWith returns a hand-made JenkinsRoleBinding whose spec[key] is value.
+func jrbWith(key string, value any) map[string]any {
+	item := jrbItem("payments-admins", nil)
+	item["spec"].(map[string]any)[key] = value
+	return item
+}
+
+// withControllerScope sets spec.controllerScope on item and returns item.
+func withControllerScope(item map[string]any, scope any) map[string]any {
+	item["spec"].(map[string]any)["controllerScope"] = scope
+	return item
+}
+
+// jrbWithout returns a hand-made JenkinsRoleBinding with no spec[key].
+func jrbWithout(key string) map[string]any {
+	item := jrbItem("payments-admins", nil)
+	delete(item["spec"].(map[string]any), key)
+	return item
+}
+
+func TestJenkinsRoleBindingColumns_JenkinsScope(t *testing.T) {
+	tests := []struct {
+		name string
+		item map[string]any
+		want string
+	}{
+		{"absent", jrbWithout("jenkinsScope"), "Global"},
+		{"null", jrbWith("jenkinsScope", nil), "Global"},
+		{"global", jrbWith("jenkinsScope", map[string]any{"type": "Global"}), "Global"},
+		{"folder", jrbWith("jenkinsScope", map[string]any{"type": "Folder", "folder": "payments/backend"}), "Folder: payments/backend"},
+		{"folder with subtree", jrbWith("jenkinsScope", map[string]any{"type": "Folder", "folder": "payments", "propagate": "Subtree"}), "Folder: payments (Subtree)"},
+		{"folder with children", jrbWith("jenkinsScope", map[string]any{"type": "Folder", "folder": "payments", "propagate": "Children"}), "Folder: payments (Children)"},
+		{"folder with none", jrbWith("jenkinsScope", map[string]any{"type": "Folder", "folder": "payments", "propagate": "None"}), "Folder: payments"},
+		{"pattern", jrbWith("jenkinsScope", map[string]any{"type": "Pattern", "pattern": "payments/.*-release"}), "Pattern: payments/.*-release"},
+		{"folder without folder", jrbWith("jenkinsScope", map[string]any{"type": "Folder"}), "Folder"},
+		{"no type", jrbWith("jenkinsScope", map[string]any{}), "-"},
+		{"unreadable scope", jrbWith("jenkinsScope", "Global"), "-"},
+		{"unreadable type", jrbWith("jenkinsScope", map[string]any{"type": 5}), "-"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cols := jenkinsRoleBindingColumns(tt.item)
+			if len(cols) != 6 {
+				t.Fatalf("want 6 columns, got %d: %v", len(cols), cols)
+			}
+			if cols[3] != tt.want {
+				t.Errorf("JENKINS-SCOPE = %q, want %q", cols[3], tt.want)
+			}
+		})
+	}
+}
+
+func TestJenkinsRoleBindingColumns_ControllerScope(t *testing.T) {
+	tests := []struct {
+		name string
+		item map[string]any
+		want string
+	}{
+		{"absent", jrbItem("payments-admins", nil), "Cluster-wide"},
+		{"null", jrbWith("controllerScope", nil), "Cluster-wide"},
+		{"empty", jrbWith("controllerScope", map[string]any{}), "Cluster-wide"},
+		{"namespaces", jrbWith("controllerScope", map[string]any{"namespaces": []any{"ns-a", "ns-b"}}), "ns:ns-a,ns-b"},
+		{"labels sorted", jrbWith("controllerScope", map[string]any{"controllerSelector": map[string]any{"matchLabels": map[string]any{"tier": "prod", "env": "qa"}}}), "sel:env=qa,tier=prod"},
+		{"empty-value label", jrbWith("controllerScope", map[string]any{"controllerSelector": map[string]any{"matchLabels": map[string]any{"env": ""}}}), "sel:env="},
+		{"expressions only", jrbWith("controllerScope", map[string]any{"controllerSelector": map[string]any{"matchExpressions": []any{map[string]any{"key": "env", "operator": "Exists"}}}}), "Selector"},
+		{"empty selector", jrbWith("controllerScope", map[string]any{"controllerSelector": map[string]any{}}), "Cluster-wide"},
+		{"namespace and selector", jrbWith("controllerScope", map[string]any{"namespaces": []any{"prod-a"}, "controllerSelector": map[string]any{"matchLabels": map[string]any{"varroa.dev/controller-name": "jenkins-1"}}}), "ns:prod-a sel:varroa.dev/controller-name=jenkins-1"},
+		{"tenants", jrbWith("controllerScope", map[string]any{"tenants": []any{map[string]any{"name": "payments"}}}), "-"},
+		{"unreadable scope", jrbWith("controllerScope", map[string]any{"namespaces": "ns-a"}), "-"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cols := jenkinsRoleBindingColumns(tt.item)
+			if len(cols) != 6 {
+				t.Fatalf("want 6 columns, got %d: %v", len(cols), cols)
+			}
+			if cols[4] != tt.want {
+				t.Errorf("CONTROLLER-SCOPE = %q, want %q", cols[4], tt.want)
+			}
+		})
+	}
+}
+
+func TestRBAC_JenkinsRoleBindings_ScopeColumns(t *testing.T) {
+	testSetup(t)
+	srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{
+				withControllerScope(jrbWith("jenkinsScope", map[string]any{"type": "Folder", "folder": "payments/backend"}), map[string]any{"namespaces": []any{"ns-a"}}),
+				jrbItem("payments-readers", nil),
+			},
+		})
+	})
+	defer srv.Close()
+
+	root := newRootCmd()
+	root.SetArgs([]string{"get", "jenkinsrolebindings"})
+	var runErr error
+	out := captureStdout(t, func() { runErr = root.Execute() })
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("want header plus two rows, got %d lines:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[1], "Folder: payments/backend") || !strings.Contains(lines[1], "ns:ns-a") {
+		t.Errorf("row 1 = %q, want Folder: payments/backend and ns:ns-a\n%s", lines[1], out)
+	}
+	if !strings.Contains(lines[2], "Global") || !strings.Contains(lines[2], "Cluster-wide") {
+		t.Errorf("row 2 = %q, want Global and Cluster-wide\n%s", lines[2], out)
 	}
 }
 

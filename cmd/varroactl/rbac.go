@@ -59,7 +59,7 @@ func addRBACNouns(v *verbCommands) {
 		Namespaced:    false,
 		ClusterScoped: true,
 		DescribeFrom:  true,
-		Headers:       []string{"NAME", "ROLE", "SUBJECTS", "JENKINS-SCOPE", "CONTROLLER"},
+		Headers:       []string{"NAME", "ROLE", "SUBJECTS", "JENKINS-SCOPE", "CONTROLLER-SCOPE", "CONTROLLER"},
 		Columns:       jenkinsRoleBindingColumns,
 	})
 }
@@ -273,17 +273,7 @@ func jenkinsRoleBindingColumns(item map[string]any) []string {
 		}
 	}
 
-	// JENKINS-SCOPE: spec.jenkinsScope.type, default "Global"; the type prints unchanged
-	jenkinsScope := "Global"
-	if spec, ok := item["spec"].(map[string]any); ok {
-		if js, ok := spec["jenkinsScope"].(map[string]any); ok {
-			if jt, ok := js["type"].(string); ok && jt != "" {
-				jenkinsScope = jt
-			}
-		}
-	}
-
-	return []string{itemName(item), roleRef, subjects, jenkinsScope, jenkinsRoleBindingController(item)}
+	return []string{itemName(item), roleRef, subjects, jenkinsRoleBindingScope(item), jenkinsRoleBindingControllerScope(item), jenkinsRoleBindingController(item)}
 }
 
 // jenkinsRoleBindingController returns "<namespace>/<name>" of the controller
@@ -300,4 +290,91 @@ func jenkinsRoleBindingController(item map[string]any) string {
 		return "-"
 	}
 	return ns + "/" + name
+}
+
+// jenkinsRoleBindingScope returns the JENKINS-SCOPE cell of a JenkinsRoleBinding.
+// An absent spec.jenkinsScope is Global. A Folder or Pattern scope names its
+// folder or its pattern. A Folder scope adds its propagate value when that
+// value covers more than the folder. The cell is "-" when spec.jenkinsScope
+// cannot be read or names no type. The words match formatJenkinsScope in
+// frontend/src/pages/JenkinsRoleBindings.tsx. Change both together.
+func jenkinsRoleBindingScope(item map[string]any) string {
+	spec, _ := item["spec"].(map[string]any)
+	raw := spec["jenkinsScope"]
+	if raw == nil {
+		return v1alpha1.JenkinsScopeGlobal
+	}
+	var js v1alpha1.JenkinsScope
+	if !decodeSpecValue(raw, &js) || js.Type == "" {
+		return "-"
+	}
+	switch {
+	case js.Type == v1alpha1.JenkinsScopeFolder && js.Folder != "":
+		text := "Folder: " + js.Folder
+		if js.Propagate == "Children" || js.Propagate == "Subtree" {
+			text += " (" + js.Propagate + ")"
+		}
+		return text
+	case js.Type == v1alpha1.JenkinsScopePattern && js.Pattern != "":
+		return "Pattern: " + js.Pattern
+	}
+	return js.Type
+}
+
+// jenkinsRoleBindingControllerScope returns the CONTROLLER-SCOPE cell of a
+// JenkinsRoleBinding. An absent spec.controllerScope is "Cluster-wide". The
+// cell is "-" when spec.controllerScope cannot be read. The words match
+// formatControllerScope in frontend/src/pages/JenkinsRoleBindings.tsx.
+// Change both together.
+func jenkinsRoleBindingControllerScope(item map[string]any) string {
+	spec, _ := item["spec"].(map[string]any)
+	raw := spec["controllerScope"]
+	if raw == nil {
+		return "Cluster-wide"
+	}
+	var sc v1alpha1.VarroaRoleBindingScope
+	if !decodeSpecValue(raw, &sc) {
+		return "-"
+	}
+	return formatControllerScope(&sc)
+}
+
+// formatControllerScope joins the namespace and selector parts of sc with one
+// space. It returns "Cluster-wide" when sc names no namespace and no selector
+// term, because such a scope matches every controller. A label with an empty
+// value prints as "<key>=", because the selector still requires it. Label keys
+// are sorted. A scope with tenants matches no controller, so it returns "-".
+func formatControllerScope(sc *v1alpha1.VarroaRoleBindingScope) string {
+	if len(sc.Tenants) > 0 {
+		return "-"
+	}
+	var parts []string
+	if len(sc.Namespaces) > 0 {
+		parts = append(parts, "ns:"+strings.Join(sc.Namespaces, ","))
+	}
+	if sel := sc.ControllerSelector; sel != nil {
+		if len(sel.MatchLabels) > 0 {
+			labels := make([]string, 0, len(sel.MatchLabels))
+			for _, k := range slices.Sorted(maps.Keys(sel.MatchLabels)) {
+				labels = append(labels, k+"="+sel.MatchLabels[k])
+			}
+			parts = append(parts, "sel:"+strings.Join(labels, ","))
+		} else if len(sel.MatchExpressions) > 0 {
+			parts = append(parts, "Selector")
+		}
+	}
+	if len(parts) == 0 {
+		return "Cluster-wide"
+	}
+	return strings.Join(parts, " ")
+}
+
+// decodeSpecValue decodes raw, one value of a JSON document, into out. It
+// returns false when raw does not fit the type of out.
+func decodeSpecValue(raw, out any) bool {
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return false
+	}
+	return json.Unmarshal(b, out) == nil
 }
