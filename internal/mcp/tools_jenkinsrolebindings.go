@@ -23,8 +23,8 @@ import (
 func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listJRB := mcp.NewTool("list_jenkins_role_bindings",
 		mcp.WithDescription("List Jenkins role bindings managed by Varroa. Returns a compact "+
-			"summary per binding (name, roleRef, subjectCount, controllerScope, scopeType, scopeFolder, controller) \u2014 enough to "+
-			"survey a fleet and see who is bound to which role and how broadly. A row without "+
+			"summary per binding (name, roleRef, subjectCount, controllerScope, scopeType, scopeFolder, scopePropagate, scopePattern, controller) \u2014 enough to "+
+			"survey a fleet and see who is bound to which role, on which controllers, and on which items. A row without "+
 			"controllerScope binds on every controller. A row with controller comes from the spec.rbacSpec of that controller. Use "+
 			"get_jenkins_role_binding for the full resource. With cluster, the tool lists the bindings of that cluster only."),
 		mcp.WithBoolean("verbose", mcp.Description("Return full JenkinsRoleBinding resources instead "+
@@ -264,7 +264,8 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 // carries the same operational signal ("who is bound here, how many") and the
 // detail is one get_jenkins_role_binding away. JenkinsRoleBinding is
 // cluster-scoped (kubebuilder scope=Cluster), so the summary carries no
-// namespace.
+// namespace. The Jenkins scope stays whole, because it names the items that
+// the binding covers.
 type jenkinsRoleBindingSummary struct {
 	Name            string                         `json:"name"`
 	RoleRef         string                         `json:"roleRef,omitempty"`
@@ -272,6 +273,8 @@ type jenkinsRoleBindingSummary struct {
 	ControllerScope *jenkinsControllerScopeSummary `json:"controllerScope,omitempty"`
 	ScopeType       string                         `json:"scopeType,omitempty"`
 	ScopeFolder     string                         `json:"scopeFolder,omitempty"`
+	ScopePropagate  string                         `json:"scopePropagate,omitempty"`
+	ScopePattern    string                         `json:"scopePattern,omitempty"`
 	Controller      *jenkinsRoleBindingController  `json:"controller,omitempty"`
 }
 
@@ -316,11 +319,19 @@ func summarizeJenkinsRoleBinding(jrb *v1alpha1.JenkinsRoleBinding) jenkinsRoleBi
 		SubjectCount:    len(jrb.Spec.Subjects),
 		ControllerScope: summarizeControllerScope(jrb.Spec.ControllerScope),
 	}
-	// JenkinsScope is optional: nil means Global scope. Guard before
-	// dereference. An unguarded read panics on every Global binding.
-	if jrb.Spec.JenkinsScope != nil {
-		s.ScopeType = jrb.Spec.JenkinsScope.Type
-		s.ScopeFolder = jrb.Spec.JenkinsScope.Folder
+	// A nil JenkinsScope is Global. Guard before dereference: an unguarded
+	// read panics on every Global binding.
+	s.ScopeType = v1alpha1.JenkinsScopeGlobal
+	if js := jrb.Spec.JenkinsScope; js != nil {
+		s.ScopeType = js.Type
+		s.ScopeFolder = js.Folder
+		s.ScopePropagate = js.Propagate
+		s.ScopePattern = js.Pattern
+		// rbac.lowerScope gives an unset propagate the reach of None.
+		// Keep the two in step.
+		if js.Type == v1alpha1.JenkinsScopeFolder && js.Propagate == "" {
+			s.ScopePropagate = "None"
+		}
 	}
 	if ns, n, ok := v1alpha1.RBACSpecBindingOwner(jrb); ok {
 		s.Controller = &jenkinsRoleBindingController{Namespace: ns, Name: n}
@@ -410,7 +421,9 @@ var jenkinsRoleBindingListOutputSchema = listOutputSchema("Default summary proje
 	{Name: "roleRef", Type: "string", Desc: "JenkinsRole name this binding grants."},
 	{Name: "subjectCount", Type: "integer", Desc: "Number of bound subjects."},
 	{Name: "controllerScope", Type: "object", Desc: "Controller limits: namespaces, and selector (true when a label selector is set). Absent when the binding applies to every controller."},
-	{Name: "scopeType", Type: "string", Desc: "In-Jenkins scope type: Global, Folder, or Pattern."},
-	{Name: "scopeFolder", Type: "string", Desc: "Folder path, when scopeType is Folder."},
+	{Name: "scopeType", Type: "string", Desc: "In-Jenkins scope type: Global, Folder, or Pattern. A binding with no jenkinsScope shows Global."},
+	{Name: "scopeFolder", Type: "string", Desc: "Full folder name, when scopeType is Folder."},
+	{Name: "scopePropagate", Type: "string", Desc: "The folder reach, when scopeType is Folder. None covers the folder item only. Children covers the items directly in the folder. Subtree covers the folder and every item below it. A Folder scope with no stored propagate shows None."},
+	{Name: "scopePattern", Type: "string", Desc: "Regular expression over item full names, when scopeType is Pattern."},
 	{Name: "controller", Type: "object", Desc: "The controller whose spec.rbacSpec writes this binding: namespace and name. Absent for every other binding."},
 })
