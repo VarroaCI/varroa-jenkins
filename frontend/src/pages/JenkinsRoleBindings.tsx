@@ -15,12 +15,42 @@ import { rbacSpecOwner, rbacSpecOwnerLabel, rbacSpecOwnerSummary } from "../lib/
 import styles from "./JenkinsRoleBindings.module.css";
 import tableStyles from "./JenkinsRBACTable.module.css";
 
+// formatJenkinsScope returns the Jenkins scope text. jenkinsRoleBindingScope in
+// cmd/varroactl/rbac.go prints the same words. Change both together.
 function formatJenkinsScope(binding: JenkinsRoleBinding): string {
   const js = binding.spec.jenkinsScope;
-  if (!js) return "—";
-  if (js.type === "Folder" && js.folder) return `Folder: ${js.folder}`;
+  // An absent Jenkins scope is Global.
+  if (!js) return "Global";
+  if (js.type === "Folder" && js.folder) {
+    const covers = js.propagate === "Children" || js.propagate === "Subtree";
+    return `Folder: ${js.folder}${covers ? ` (${js.propagate})` : ""}`;
+  }
   if (js.type === "Pattern" && js.pattern) return `Pattern: ${js.pattern}`;
   return js.type || "—";
+}
+
+// formatControllerScope returns the controller scope text.
+// jenkinsRoleBindingControllerScope in cmd/varroactl/rbac.go prints the same
+// words. Change both together. A scope with tenants matches no controller.
+function formatControllerScope(binding: JenkinsRoleBinding): string {
+  const scope = binding.spec.controllerScope;
+  if (!scope) return "Cluster-wide";
+  if ((scope.tenants?.length ?? 0) > 0) return "—";
+  const parts: string[] = [];
+  if (scope.namespaces && scope.namespaces.length > 0) {
+    parts.push(`ns:${scope.namespaces.join(",")}`);
+  }
+  const sel = scope.controllerSelector;
+  if (sel) {
+    const matchLabels = sel.matchLabels ?? {};
+    const keys = Object.keys(matchLabels).sort();
+    if (keys.length > 0) {
+      parts.push(`sel:${keys.map((k) => `${k}=${matchLabels[k] ?? ""}`).join(",")}`);
+    } else if ((sel.matchExpressions?.length ?? 0) > 0) {
+      parts.push("Selector");
+    }
+  }
+  return parts.length > 0 ? parts.join(" ") : "Cluster-wide";
 }
 
 export default function JenkinsRoleBindings() {
@@ -135,7 +165,7 @@ export default function JenkinsRoleBindings() {
         <Card>
           <div className={tableStyles.scroll}>
           <table className={tableStyles.table}>
-            <thead><tr><th>Name</th><th>Cluster</th><th>Role</th><th>Subjects</th><th>Scope</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Cluster</th><th>Role</th><th>Subjects</th><th>Jenkins Scope</th><th>Controller Scope</th><th>Actions</th></tr></thead>
             <tbody>{filtered.map((b) => {
               const copy = federatedCopySource("JenkinsRoleBinding", b.metadata);
               const owner = rbacSpecOwner(b.metadata);
@@ -162,7 +192,8 @@ export default function JenkinsRoleBindings() {
               <td data-label="Cluster" className={tableStyles.mono}>{cluster}</td>
               <td data-label="Role" className={tableStyles.mono}>{b.spec.roleRef}</td>
               <td data-label="Subjects">{(b.spec.subjects || []).map((subject) => <span className={tableStyles.badge} key={`${subject.kind}:${subject.name}`}>{subject.kind}: {subject.name}</span>)}</td>
-              <td data-label="Scope"><span className={tableStyles.scopeBadge}>{formatJenkinsScope(b)}</span></td>
+              <td data-label="Jenkins Scope"><span className={tableStyles.scopeBadge}>{formatJenkinsScope(b)}</span></td>
+              <td data-label="Controller Scope"><span className={tableStyles.scopeBadge}>{formatControllerScope(b)}</span></td>
               <td data-label="Actions"><div className={tableStyles.actions}>
                 {canDoGlobal(permissions, "jenkinsrolebindings", "update") && (
                   <Button

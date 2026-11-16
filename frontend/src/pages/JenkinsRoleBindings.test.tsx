@@ -340,3 +340,91 @@ describe("JenkinsRoleBindings no accessible cluster", () => {
     await waitFor(() => expect(screen.queryByText("jenkins-binding-folder")).not.toBeInTheDocument());
   });
 });
+
+describe("JenkinsRoleBindings scope columns", () => {
+  const cell = (name: string, label: string) =>
+    screen.getByText(name).closest("tr")!.querySelector(`td[data-label="${label}"]`);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows the Jenkins scope and the controller scope of each binding", async () => {
+    const patternBinding = createJenkinsRoleBinding({
+      metadata: { name: "scope-pattern" },
+      spec: {
+        subjects: [{ kind: "Group", name: "release" }],
+        roleRef: "jenkins-global-reader",
+        jenkinsScope: { type: "Pattern", pattern: "payments/.*-release" },
+      },
+    });
+    const noJenkinsScope = createJenkinsRoleBinding({
+      metadata: { name: "scope-none" },
+      spec: { subjects: [{ kind: "Group", name: "ops" }], roleRef: "jenkins-global-reader" },
+    });
+    const subtreeBinding = createJenkinsRoleBinding({
+      metadata: { name: "scope-subtree" },
+      spec: {
+        subjects: [{ kind: "Group", name: "leads" }],
+        roleRef: "jenkins-global-reader",
+        jenkinsScope: { type: "Folder", folder: "payments", propagate: "Subtree" },
+      },
+    });
+    const namespaces = createJenkinsRoleBinding({
+      metadata: { name: "scope-namespaces" },
+      spec: {
+        subjects: [{ kind: "Group", name: "ns" }],
+        roleRef: "jenkins-global-reader",
+        controllerScope: { namespaces: ["ns-a", "ns-b"] },
+      },
+    });
+    const labels = createJenkinsRoleBinding({
+      metadata: { name: "scope-labels" },
+      spec: {
+        subjects: [{ kind: "Group", name: "labels" }],
+        roleRef: "jenkins-global-reader",
+        controllerScope: { controllerSelector: { matchLabels: { tier: "prod", env: "" } } },
+      },
+    });
+    const expressions = createJenkinsRoleBinding({
+      metadata: { name: "scope-expressions" },
+      spec: {
+        subjects: [{ kind: "Group", name: "expr" }],
+        roleRef: "jenkins-global-reader",
+        controllerScope: { controllerSelector: { matchExpressions: [{ key: "env", operator: "Exists" }] } },
+      },
+    });
+    const tenants = createJenkinsRoleBinding({
+      metadata: { name: "scope-tenants" },
+      spec: {
+        subjects: [{ kind: "Group", name: "tn" }],
+        roleRef: "jenkins-global-reader",
+        controllerScope: { tenants: [{ name: "payments" }] },
+      },
+    });
+    mockListJenkinsRoleBindings.mockResolvedValue({
+      items: [patternBinding, noJenkinsScope, subtreeBinding, namespaces, labels, expressions, tenants],
+    });
+
+    renderWithProviders(<JenkinsRoleBindings />);
+    await screen.findByText("scope-pattern");
+
+    expect(cell("scope-pattern", "Jenkins Scope")!.textContent).toBe("Pattern: payments/.*-release");
+    expect(cell("scope-pattern", "Controller Scope")!.textContent).toBe("Cluster-wide");
+    expect(cell("scope-none", "Jenkins Scope")!.textContent).toBe("Global");
+    expect(cell("scope-subtree", "Jenkins Scope")!.textContent).toBe("Folder: payments (Subtree)");
+    expect(cell("scope-namespaces", "Controller Scope")!.textContent).toBe("ns:ns-a,ns-b");
+    expect(cell("scope-labels", "Controller Scope")!.textContent).toBe("sel:env=,tier=prod");
+    expect(cell("scope-expressions", "Controller Scope")!.textContent).toBe("Selector");
+    expect(cell("scope-tenants", "Controller Scope")!.textContent).toBe("—");
+  });
+
+  it("names the Jenkins Scope and Controller Scope columns", async () => {
+    mockListJenkinsRoleBindings.mockResolvedValue({ items: [folderScopeBinding] });
+    renderWithProviders(<JenkinsRoleBindings />);
+    await screen.findByText("jenkins-binding-folder");
+
+    expect(screen.getByRole("columnheader", { name: "Jenkins Scope" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Controller Scope" })).toBeInTheDocument();
+  });
+});
