@@ -28,6 +28,23 @@ const TENANTS_EXPRESSIONS_DISABLED_REASON =
 const MATCH_EXPRESSIONS_NOTE =
   "The dashboard does not edit match expressions. A save keeps them. Use the API or kubectl to change them.";
 
+const EMPTY_STORED_SCOPE_NOTE =
+  "The stored scope of this binding names no namespace, label, expression, or tenant. " +
+  "Name one of them in the Scope section. " +
+  "To make the binding cluster-wide, remove spec.scope with the API or kubectl.";
+
+// scopeNamesPart reports whether a scope names at least one namespace, label,
+// expression, or tenant. The API server refuses a scope that names none.
+function scopeNamesPart(scope: VarroaRoleBindingScope | undefined): boolean {
+  if (!scope) return false;
+  if (scope.namespaces && scope.namespaces.length > 0) return true;
+  if (scope.tenants && scope.tenants.length > 0) return true;
+  const selector = scope.controllerSelector;
+  if (!selector) return false;
+  if (selector.matchLabels && Object.keys(selector.matchLabels).length > 0) return true;
+  return !!selector.matchExpressions && selector.matchExpressions.length > 0;
+}
+
 type MatchExpression = NonNullable<
   NonNullable<VarroaRoleBindingScope["controllerSelector"]>["matchExpressions"]
 >[number];
@@ -112,9 +129,6 @@ export default function RoleBindingForm() {
       return;
     }
 
-    setLoading(true);
-    setError("");
-
     const namespaces = scopeNamespaces
       .split(",")
       .map((n) => n.trim())
@@ -142,6 +156,17 @@ export default function RoleBindingForm() {
     }
     if (tenants && tenants.length > 0) scope.tenants = tenants;
     else delete scope.tenants;
+
+    // The save is a full update. A stored scope that names no part would be
+    // dropped by this rebuild, and the binding would become cluster-wide.
+    if (loadedScope && !scopeNamesPart(loadedScope) && !scopeNamesPart(scope)) {
+      setError(EMPTY_STORED_SCOPE_NOTE);
+      setScopeOpen(true);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
 
     const binding: VarroaRoleBinding = {
       apiVersion: "varroa.dev/v1alpha1",

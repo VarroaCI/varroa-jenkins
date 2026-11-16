@@ -104,3 +104,58 @@ cases:
     field: spec.scope
     new: {spec: {scope: {namespaces: null, tenants: [{name: tenant-a, jobs: ["builds/*"]}]}}}
     want: accept
+
+  - name: scope with an empty namespaces list refused
+    rule: |-
+      (has(self.namespaces) && size(self.namespaces) > 0) || (has(self.tenants) && size(self.tenants) > 0) || (has(self.controllerSelector) && ((has(self.controllerSelector.matchLabels) && size(self.controllerSelector.matchLabels) > 0) || (has(self.controllerSelector.matchExpressions) && size(self.controllerSelector.matchExpressions) > 0)))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null}}}
+    want: reject
+  - name: scope with namespaces set to an empty list refused
+    rule: |-
+      (has(self.namespaces) && size(self.namespaces) > 0) || (has(self.tenants) && size(self.tenants) > 0) || (has(self.controllerSelector) && ((has(self.controllerSelector.matchLabels) && size(self.controllerSelector.matchLabels) > 0) || (has(self.controllerSelector.matchExpressions) && size(self.controllerSelector.matchExpressions) > 0)))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: []}}}
+    want: reject
+  - name: scope with an empty controller selector refused
+    rule: |-
+      (has(self.namespaces) && size(self.namespaces) > 0) || (has(self.tenants) && size(self.tenants) > 0) || (has(self.controllerSelector) && ((has(self.controllerSelector.matchLabels) && size(self.controllerSelector.matchLabels) > 0) || (has(self.controllerSelector.matchExpressions) && size(self.controllerSelector.matchExpressions) > 0)))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, controllerSelector: {}}}}
+    want: reject
+  - name: scope with a controller selector of empty lists refused
+    rule: |-
+      (has(self.namespaces) && size(self.namespaces) > 0) || (has(self.tenants) && size(self.tenants) > 0) || (has(self.controllerSelector) && ((has(self.controllerSelector.matchLabels) && size(self.controllerSelector.matchLabels) > 0) || (has(self.controllerSelector.matchExpressions) && size(self.controllerSelector.matchExpressions) > 0)))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, controllerSelector: {matchLabels: {}, matchExpressions: []}}}}
+    want: reject
+  - name: scope with a namespace accepted
+    rule: |-
+      (has(self.namespaces) && size(self.namespaces) > 0) || (has(self.tenants) && size(self.tenants) > 0) || (has(self.controllerSelector) && ((has(self.controllerSelector.matchLabels) && size(self.controllerSelector.matchLabels) > 0) || (has(self.controllerSelector.matchExpressions) && size(self.controllerSelector.matchExpressions) > 0)))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: [tenant-a]}}}
+    want: accept
+  - name: scope with a label accepted
+    rule: |-
+      (has(self.namespaces) && size(self.namespaces) > 0) || (has(self.tenants) && size(self.tenants) > 0) || (has(self.controllerSelector) && ((has(self.controllerSelector.matchLabels) && size(self.controllerSelector.matchLabels) > 0) || (has(self.controllerSelector.matchExpressions) && size(self.controllerSelector.matchExpressions) > 0)))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, controllerSelector: {matchLabels: {app: a}}}}}
+    want: accept
+  - name: scope with a label of an empty value accepted
+    rule: |-
+      (has(self.namespaces) && size(self.namespaces) > 0) || (has(self.tenants) && size(self.tenants) > 0) || (has(self.controllerSelector) && ((has(self.controllerSelector.matchLabels) && size(self.controllerSelector.matchLabels) > 0) || (has(self.controllerSelector.matchExpressions) && size(self.controllerSelector.matchExpressions) > 0)))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, controllerSelector: {matchLabels: {env: ""}}}}}
+    want: accept
+  - name: scope with an expression accepted
+    rule: |-
+      (has(self.namespaces) && size(self.namespaces) > 0) || (has(self.tenants) && size(self.tenants) > 0) || (has(self.controllerSelector) && ((has(self.controllerSelector.matchLabels) && size(self.controllerSelector.matchLabels) > 0) || (has(self.controllerSelector.matchExpressions) && size(self.controllerSelector.matchExpressions) > 0)))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, controllerSelector: {matchExpressions: [{key: tier, operator: Exists}]}}}}
+    want: accept
+  - name: scope with a tenant accepted
+    rule: |-
+      (has(self.namespaces) && size(self.namespaces) > 0) || (has(self.tenants) && size(self.tenants) > 0) || (has(self.controllerSelector) && ((has(self.controllerSelector.matchLabels) && size(self.controllerSelector.matchLabels) > 0) || (has(self.controllerSelector.matchExpressions) && size(self.controllerSelector.matchExpressions) > 0)))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: tenant-a}]}}}
+    want: accept
