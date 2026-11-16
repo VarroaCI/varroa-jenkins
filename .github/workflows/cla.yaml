@@ -15,8 +15,18 @@ permissions:
 jobs:
   cla-check:
     runs-on: ubuntu-latest
+    # On the closed event, the action locks the pull request. The lock keeps
+    # each signature comment unchanged after the merge. A release-please pull
+    # request holds no contributor signature. After the merge, Release Please
+    # writes a comment and labels to that pull request. A lock refuses the
+    # comment and can refuse the label write. Then each later run fails. For
+    # this reason, the job does not run for the closed event of a release-please
+    # branch of this repository.
     if: >
-      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'pull_request_target' &&
+       !(github.event.action == 'closed' &&
+         github.event.pull_request.head.repo.full_name == github.repository &&
+         startsWith(github.event.pull_request.head.ref, 'release-please--'))) ||
       (github.event.issue.pull_request &&
        (github.event.comment.body == 'recheck' ||
         github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
