@@ -87,6 +87,9 @@ const (
 // buildRepeatTypes lists the event types that repeat a run row: the three
 // build events and the three run requests. The SQL clause of recordstore
 // ListActivity reads this same list.
+// A refused trigger has no row in the run groups read. Its command.failed or
+// build.claim_* event is its only Overview row. This list and the routine
+// lists below must not name those types.
 var buildRepeatTypes = []string{BuildStartedType, BuildCompletedType, BuildFailedType, RunRequestedType, RunReplayRequestedType, RunRestartRequestedType}
 
 // BuildRepeatTypes returns a copy of the event types that repeat a run row.

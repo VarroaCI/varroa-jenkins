@@ -55,6 +55,8 @@ The **Jenkins** row in **Last 24 hours** counts the controllers, cells included.
 
 **Earlier today** lists runs and events since local midnight. Runs of one job fold into one row. A job's newest failed run appears in the attention panel instead. Routine events and the run requests that MCP tools write stay on the Activity page.
 
+A trigger that starts no build has no run row. The feed shows its activity event instead: `command.failed`, or a `build.claim_*` event. To see it, a reader needs read access to the cell controller.
+
 ## Diagnose gaps
 
 | Symptom | Check |
