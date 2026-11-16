@@ -152,7 +152,7 @@ func registerRestartRunTool(mcpServer *server.MCPServer, deps *api.Dependencies)
 		// One activity event records the request, on the cluster the
 		// command reached, which can differ from the cluster this BFF serves.
 		emitActivityForCluster(ctx, deps, claims, targetCluster, activity.Event{
-			Type:    "pipeline.run_restart_requested",
+			Type:    activity.RunRestartRequestedType,
 			Message: fmt.Sprintf("Restart of run %s requested (run %s)", run, runID),
 		})
 		return resultJSON(map[string]any{"runId": runID, "intentKey": intentKey, "state": "requested"})
@@ -188,7 +188,7 @@ func registerReplayRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) 
 		// One activity event records the request, on the cluster the
 		// command reached, which can differ from the cluster this BFF serves.
 		emitActivityForCluster(ctx, deps, claims, targetCluster, activity.Event{
-			Type:    "pipeline.run_replay_requested",
+			Type:    activity.RunReplayRequestedType,
 			Message: fmt.Sprintf("Replay of run %s requested (run %s)", run, runID),
 		})
 		return resultJSON(map[string]any{"runId": runID, "intentKey": intentKey, "state": "requested"})
@@ -284,7 +284,7 @@ func registerRunPipelineTool(mcpServer *server.MCPServer, deps *api.Dependencies
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
 		emitActivityForCluster(ctx, deps, claims, targetCluster, activity.Event{
-			Type:    "pipeline.run_requested",
+			Type:    activity.RunRequestedType,
 			Message: fmt.Sprintf("Pipeline run requested for %s (run %s)", job, runID),
 		})
 		return resultJSON(map[string]any{"runId": runID, "intentKey": intentKey, "state": "requested"})

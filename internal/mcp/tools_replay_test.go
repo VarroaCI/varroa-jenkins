@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/varroaci/varroa-jenkins/internal/api"
+	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
@@ -113,8 +114,8 @@ func TestReplayRunToolRecordsActivityOnTheTargetCluster(t *testing.T) {
 	if e.Cluster != "core" {
 		t.Errorf("event Cluster = %q, want the target cluster core", e.Cluster)
 	}
-	if e.Type != "pipeline.run_replay_requested" {
-		t.Errorf("event Type = %q, want pipeline.run_replay_requested", e.Type)
+	if e.Type != activity.RunReplayRequestedType {
+		t.Errorf("event Type = %q, want %s", e.Type, activity.RunReplayRequestedType)
 	}
 }
 

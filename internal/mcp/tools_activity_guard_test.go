@@ -549,6 +549,45 @@ func TestEveryMutatingToolEmitsActivity(t *testing.T) {
 	}
 }
 
+// TestRunRequestToolsWriteARunRepeatEvent asserts that each tool which starts a
+// run writes one request event that the Overview feed leaves out.
+func TestRunRequestToolsWriteARunRepeatEvent(t *testing.T) {
+	cases := map[string]string{
+		"run_pipeline": activity.RunRequestedType,
+		"replay_run":   activity.RunReplayRequestedType,
+		"restart_run":  activity.RunRestartRequestedType,
+	}
+	for name, want := range cases {
+		t.Run(name, func(t *testing.T) {
+			sink := &recordingSink{}
+			handler := NewHandler(guardEmitDeps(t, sink))
+
+			resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+				"name":      name,
+				"arguments": guardArgsFor(name),
+			}, guardClaims)
+
+			b, err := json.Marshal(resp.Result)
+			if err != nil {
+				t.Fatalf("marshal result: %v", err)
+			}
+			if strings.Contains(string(b), `"isError":true`) {
+				t.Fatalf("tool returned an error: %s", b)
+			}
+			if len(sink.events) != 1 {
+				t.Fatalf("published %d events, want exactly 1", len(sink.events))
+			}
+			e := sink.events[0]
+			if e.Type != want {
+				t.Fatalf("event Type = %q, want %q", e.Type, want)
+			}
+			if !activity.IsBuildEvent(e) {
+				t.Fatalf("%s is not a build event, so the Overview feed would show it", e.Type)
+			}
+		})
+	}
+}
+
 func (guardAssistantOperator) SetAssistantKey(context.Context, string, string, []byte) error {
 	return nil
 }

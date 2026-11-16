@@ -576,9 +576,9 @@ func TestActivityRetentionDays(t *testing.T) {
 	}
 }
 
-// TestListActivityExcludeBuildEvents asserts the SQL exclusion drops the three
-// build events that repeat a run row, and keeps a build.interrupted row and a
-// controller event.
+// TestListActivityExcludeBuildEvents asserts the SQL exclusion drops the build
+// events and the MCP run requests that repeat a run row, and keeps every
+// other event.
 func TestListActivityExcludeBuildEvents(t *testing.T) {
 	t.Parallel()
 
@@ -589,6 +589,11 @@ func TestListActivityExcludeBuildEvents(t *testing.T) {
 		{Timestamp: base.Add(2 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "recorder", Type: activity.BuildFailedType, Severity: "error", Message: "failed"},
 		{Timestamp: base.Add(3 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "recorder", Type: "build.interrupted", Severity: "warning", Message: "interrupted"},
 		{Timestamp: base.Add(4 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "api", Type: "settings.updated", Severity: "info", Message: "settings"},
+		// The MCP run requests carry no namespace or controller.
+		{Timestamp: base.Add(5 * time.Second), Cluster: "c1", Source: "mcp", Type: activity.RunRequestedType, Severity: "info", Message: "run"},
+		{Timestamp: base.Add(6 * time.Second), Cluster: "c1", Source: "mcp", Type: activity.RunReplayRequestedType, Severity: "info", Message: "replay"},
+		{Timestamp: base.Add(7 * time.Second), Cluster: "c1", Source: "mcp", Type: activity.RunRestartRequestedType, Severity: "info", Message: "restart"},
+		{Timestamp: base.Add(8 * time.Second), Cluster: "c1", Source: "mcp", Type: "pipeline.branch_scan_requested", Severity: "info", Message: "scan"},
 	}
 	pool := seedActivityEvents(t, events)
 	r := NewReader(pool)
@@ -602,8 +607,8 @@ func TestListActivityExcludeBuildEvents(t *testing.T) {
 	for _, e := range page.Items {
 		got[e.Message] = true
 	}
-	if len(page.Items) != 2 || !got["interrupted"] || !got["settings"] {
-		t.Fatalf("with the flag: %+v, want only the interrupted and settings events", page.Items)
+	if len(page.Items) != 3 || !got["interrupted"] || !got["settings"] || !got["scan"] {
+		t.Fatalf("with the flag: %+v, want only the interrupted, settings, and scan events", page.Items)
 	}
 }
 

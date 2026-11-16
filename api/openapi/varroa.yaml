@@ -14852,7 +14852,8 @@ paths:
           default: false
           type: boolean
       - description: 'true leaves out each event that only repeats a run: build.started,
-          build.completed, and build.failed. Other build events stay.'
+          build.completed, build.failed, pipeline.run_requested, pipeline.run_replay_requested,
+          and pipeline.run_restart_requested. Other build and pipeline events stay.'
         in: query
         name: excludeBuildEvents
         schema:
@@ -14976,7 +14977,8 @@ paths:
           default: false
           type: boolean
       - description: 'true leaves out each event that only repeats a run: build.started,
-          build.completed, and build.failed. Other build events stay.'
+          build.completed, build.failed, pipeline.run_requested, pipeline.run_replay_requested,
+          and pipeline.run_restart_requested. Other build and pipeline events stay.'
         in: query
         name: excludeBuildEvents
         schema:
