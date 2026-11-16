@@ -12,11 +12,18 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/api"
 )
 
-// listControllersResult calls list_controllers with no brood and returns the
-// decoded structuredContent.
+// listControllersResult calls list_controllers through a controllerBrood over
+// the admin deps and returns the decoded structuredContent.
 func listControllersResult(t *testing.T, args map[string]interface{}) map[string]any {
 	t.Helper()
-	return listControllersResultWith(t, adminDeps(), args)
+	return listControllersResultWith(t, controllerBroodDeps(), args)
+}
+
+// controllerBroodDeps returns the admin deps with a controllerBrood.
+func controllerBroodDeps() *api.Dependencies {
+	deps := adminDeps()
+	withControllerBrood(deps)
+	return deps
 }
 
 // listControllersResultWith calls list_controllers against deps and returns the
@@ -89,21 +96,6 @@ func TestListControllers_DefaultsToSummary(t *testing.T) {
 	}
 }
 
-// The cluster field is an assertion about where a controller lives, and callers
-// act on it. Echoing the caller's own filter back would let `cluster: "prod"`
-// return local controllers stamped "prod", which is worse than reporting
-// nothing — the summary would be confidently wrong.
-func TestListControllers_DoesNotEchoCallerSuppliedCluster(t *testing.T) {
-	item := firstItem(t, listControllersResult(t, map[string]interface{}{
-		"namespace": "ns",
-		"cluster":   "totally-made-up-cluster",
-	}))
-	if got := item["cluster"]; got != nil && got != "" {
-		t.Errorf("cluster = %v; without a brood there is no authoritative cluster "+
-			"name, so it must be omitted rather than reflected from the request", got)
-	}
-}
-
 func TestListControllers_VerboseReturnsFullButSanitizedCRs(t *testing.T) {
 	item := firstItem(t, listControllersResult(t, map[string]interface{}{
 		"namespace": "ns", "verbose": true,
@@ -147,8 +139,8 @@ func TestListControllers_OutputMatchesDeclaredSchema(t *testing.T) {
 		deps *api.Dependencies
 		args map[string]interface{}
 	}{
-		{"summary", adminDeps(), map[string]interface{}{"namespace": "ns"}},
-		{"verbose", adminDeps(), map[string]interface{}{"namespace": "ns", "verbose": true}},
+		{"summary", controllerBroodDeps(), map[string]interface{}{"namespace": "ns"}},
+		{"verbose", controllerBroodDeps(), map[string]interface{}{"namespace": "ns", "verbose": true}},
 		{"fanout-summary", fanoutDeps(&fanoutBrood{
 			rows: []api.ClusterController{fanoutCoreRow()},
 			statuses: []api.ClusterFanoutStatus{

@@ -355,6 +355,7 @@ func TestStreamableHTTPServerInit(t *testing.T) {
 
 func TestListControllersReturnsSuccess(t *testing.T) {
 	deps := newTestDeps()
+	withControllerBrood(deps)
 	handler := NewHandler(deps)
 
 	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{

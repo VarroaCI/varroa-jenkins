@@ -113,7 +113,7 @@ func requireAbsent(t *testing.T, tool, payload string, forbidden ...string) {
 }
 
 func TestMCPGetController_DoesNotLeakWakeToken(t *testing.T) {
-	got := callToolRaw(t, adminDeps(), "get_controller", map[string]interface{}{
+	got := callToolRaw(t, controllerBroodDeps(), "get_controller", map[string]interface{}{
 		"name":      "hibernated",
 		"namespace": "ns",
 	})
@@ -124,7 +124,7 @@ func TestMCPGetController_DoesNotLeakWakeToken(t *testing.T) {
 }
 
 func TestMCPListControllers_DoesNotLeakWakeToken(t *testing.T) {
-	got := callToolRaw(t, adminDeps(), "list_controllers", map[string]interface{}{
+	got := callToolRaw(t, controllerBroodDeps(), "list_controllers", map[string]interface{}{
 		"namespace": "ns",
 	})
 	requireAbsent(t, "list_controllers", got, "wakeToken", testWakeToken, "managedFields")
