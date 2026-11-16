@@ -120,15 +120,31 @@ Set global.domain in values.yaml to see external URLs.
     Set each member bus.url to those node addresses.
 {{- end }}
 
-  If this install existed before enabling nats.external, the varroa-nats-creds
-  TLS certificate must be rotated to include the new SANs. Run:
-    kubectl -n {{ .Release.Namespace }} delete secret varroa-nats-creds
-    helm upgrade <release> <chart> ...
-    kubectl -n {{ .Release.Namespace }} rollout restart deploy/varroa-nats
-    kubectl -n {{ .Release.Namespace }} rollout restart deploy/varroa-operator
-    kubectl -n {{ .Release.Namespace }} rollout restart deploy/varroa-gateway
-    kubectl -n {{ .Release.Namespace }} rollout restart deploy/varroa-bff
-  Then re-copy the pruned secret to every hive cluster.
+  The server certificate holds nats.external.host, extraSANs, and ipSANs.
+  When these values change, helm upgrade signs a new server certificate
+  with the stored CA. The CA and the passwords stay the same. The NATS pods
+  load the new certificate without a restart, and the members need no new
+  Secret copy. The certificate holds only the names in the values, so list
+  every address that a member bus.url names. Show the names:
+    kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-nats-creds \
+      -o jsonpath='{.metadata.annotations.varroa\.dev/nats-tls-sans}'
+
+  To replace the CA, delete the Secret and upgrade. This makes a new CA and
+  new passwords. Then restart each bus client. Copy the new ca.crt and the
+  member passwords to every member, and restart the member operator and
+  gateway:
+    kubectl -n {{ .Release.Namespace }} delete secret {{ .Release.Name }}-nats-creds
+    helm upgrade {{ .Release.Name }} <chart> ...
+    kubectl -n {{ .Release.Namespace }} rollout restart \
+      deploy/{{ .Release.Name }}-varroa-operator \
+      deploy/{{ .Release.Name }}-varroa-gateway \
+      deploy/{{ .Release.Name }}-varroa-bff
+{{- if .Values.recordStore.enabled }}
+    kubectl -n {{ .Release.Namespace }} rollout restart deploy/varroa-recorder
+{{- end }}
+{{- if .Values.agentRunner.enabled }}
+    kubectl -n {{ .Release.Namespace }} rollout restart deploy/varroa-agent
+{{- end }}
   See docs/install/multi-cluster.md for the full runbook.
 {{- end }}
 

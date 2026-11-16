@@ -846,6 +846,11 @@ nats:
     nodePort: 0                 # fixed nodePort when serviceType=NodePort (0 = auto)
     externalTrafficPolicy: Cluster  # Cluster | Local. Local keeps the member source address for allowedCIDRs. A NodePort with Local answers only on nodes that run a NATS pod.
     annotations: {}
+    # The server certificate holds host, extraSANs, and ipSANs. When they
+    # change, helm upgrade signs a new server certificate with the stored CA.
+    # The certificate holds only these names: list each address that a member
+    # bus.url names in ipSANs. An IP address in host is a DNS SAN, which a
+    # client that dials that IP address does not accept.
     host: ""                    # REQUIRED when enabled — external DNS name; becomes a cert SAN + NOTES output
     extraSANs: []               # additional DNS SANs
     ipSANs: []                  # IP SANs

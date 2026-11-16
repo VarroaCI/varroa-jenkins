@@ -41,11 +41,29 @@ NATS bus — memoized credential seed. Called once per render; caches all
 credentials (per-service passwords, CA, TLS) on $ so every consumer gets
 the same values. On upgrade reuses the existing Secret; on first install
 generates everything fresh.
+The server certificate follows the SAN values. The annotation
+varroa.dev/nats-tls-sans records the SAN list of the stored certificate,
+because Sprig cannot read the SANs of a certificate. When the list from
+the values is different, the helper signs a new server certificate with
+the stored CA. The CA and the passwords do not change, so the clients and
+the members keep their trust. A Secret without the annotation gets a new
+certificate once. tests/test-nats-tls-resign.sh replaces the lookup call
+below with a fixture, so keep that call on one line in this form.
 */}}
 {{- define "varroa.nats.creds" -}}
 {{- if not (hasKey $ "natsCreds") -}}
   {{- $secretName := printf "%s-nats-creds" $.Release.Name -}}
   {{- $existing := lookup "v1" "Secret" $.Release.Namespace $secretName -}}
+  {{- $altNames := list (printf "%s-nats" $.Release.Name) (printf "%s-nats.%s.svc" $.Release.Name $.Release.Namespace) (printf "%s-nats.%s.svc.cluster.local" $.Release.Name $.Release.Namespace) (printf "*.%s-nats.%s.svc.cluster.local" $.Release.Name $.Release.Namespace) -}}
+  {{- $external := .Values.nats.external | default dict -}}
+  {{- if $external.host -}}
+    {{- $altNames = append $altNames $external.host -}}
+  {{- end -}}
+  {{- range $external.extraSANs -}}
+    {{- $altNames = append $altNames . -}}
+  {{- end -}}
+  {{- $ipSANs := $external.ipSANs | default list -}}
+  {{- $sanRecord := printf "dns=%s;ip=%s" (join "," $altNames) (join "," $ipSANs) -}}
   {{- if $existing -}}
     {{- /*
       recorder-password is new. A release from before this change stores no
@@ -60,6 +78,17 @@ generates everything fresh.
     {{- if hasKey $existing.data "agentrunner-password" -}}
       {{- $agentPass = index $existing.data "agentrunner-password" | b64dec -}}
     {{- end -}}
+    {{- $tlsCert := index $existing.data "tls.crt" | b64dec -}}
+    {{- $tlsKey := index $existing.data "tls.key" | b64dec -}}
+    {{- if ne (dig "metadata" "annotations" "varroa.dev/nats-tls-sans" "" $existing) $sanRecord -}}
+      {{- if not (and (hasKey $existing.data "ca.crt") (hasKey $existing.data "ca.key")) -}}
+        {{- fail (printf "Secret %s holds no ca.crt or ca.key, so the chart cannot sign a new NATS server certificate." $secretName) -}}
+      {{- end -}}
+      {{- $ca := buildCustomCert (index $existing.data "ca.crt") (index $existing.data "ca.key") -}}
+      {{- $cert := genSignedCert (printf "%s-nats" $.Release.Name) $ipSANs $altNames 365 $ca -}}
+      {{- $tlsCert = $cert.Cert -}}
+      {{- $tlsKey = $cert.Key -}}
+    {{- end -}}
     {{- $_ := set $ "natsCreds" (dict
           "operator" (index $existing.data "operator-password" | b64dec)
           "gateway"  (index $existing.data "gateway-password"  | b64dec)
@@ -68,19 +97,11 @@ generates everything fresh.
           "agentrunner" $agentPass
           "caCert"   (index $existing.data "ca.crt"   | b64dec)
           "caKey"    (index $existing.data "ca.key"   | b64dec)
-          "tlsCert"  (index $existing.data "tls.crt"  | b64dec)
-          "tlsKey"   (index $existing.data "tls.key"  | b64dec)) -}}
+          "tlsCert"  $tlsCert
+          "tlsKey"   $tlsKey
+          "tlsSANs"  $sanRecord) -}}
   {{- else -}}
     {{- $ca := genCA (printf "%s-nats-ca" $.Release.Name) 365 -}}
-    {{- $altNames := list (printf "%s-nats" $.Release.Name) (printf "%s-nats.%s.svc" $.Release.Name $.Release.Namespace) (printf "%s-nats.%s.svc.cluster.local" $.Release.Name $.Release.Namespace) (printf "*.%s-nats.%s.svc.cluster.local" $.Release.Name $.Release.Namespace) -}}
-    {{- $external := .Values.nats.external | default dict -}}
-    {{- if $external.host -}}
-      {{- $altNames = append $altNames $external.host -}}
-    {{- end -}}
-    {{- range $external.extraSANs -}}
-      {{- $altNames = append $altNames . -}}
-    {{- end -}}
-    {{- $ipSANs := $external.ipSANs | default list -}}
     {{- $cert := genSignedCert (printf "%s-nats" $.Release.Name) $ipSANs $altNames 365 $ca -}}
     {{- $_ := set $ "natsCreds" (dict
           "operator" (randAlphaNum 32)
@@ -91,7 +112,8 @@ generates everything fresh.
           "caCert"   $ca.Cert
           "caKey"    $ca.Key
           "tlsCert"  $cert.Cert
-          "tlsKey"   $cert.Key) -}}
+          "tlsKey"   $cert.Key
+          "tlsSANs"  $sanRecord) -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}
