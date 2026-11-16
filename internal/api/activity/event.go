@@ -76,19 +76,28 @@ const (
 	BuildFailedType    = "build.failed"
 )
 
-// buildRepeatTypes lists the build event types that repeat a run row. The SQL
-// clause of recordstore ListActivity reads this same list.
-var buildRepeatTypes = []string{BuildStartedType, BuildCompletedType, BuildFailedType}
+// Run request types. The MCP tools run_pipeline, replay_run, and restart_run
+// write one each after the BFF sends the command. The new run has its own run row.
+const (
+	RunRequestedType        = "pipeline.run_requested"
+	RunReplayRequestedType  = "pipeline.run_replay_requested"
+	RunRestartRequestedType = "pipeline.run_restart_requested"
+)
 
-// BuildRepeatTypes returns a copy of the build event types that repeat a run
-// row. A feed of runs leaves out exactly these types. Every other build.* type
-// reports something that no run row shows, so it stays in the feed.
+// buildRepeatTypes lists the event types that repeat a run row: the three
+// build events and the three run requests. The SQL clause of recordstore
+// ListActivity reads this same list.
+var buildRepeatTypes = []string{BuildStartedType, BuildCompletedType, BuildFailedType, RunRequestedType, RunReplayRequestedType, RunRestartRequestedType}
+
+// BuildRepeatTypes returns a copy of the event types that repeat a run row.
+// A feed of runs leaves out exactly these types. Every other build.* or
+// pipeline.* type reports something that no run row shows, so it stays in the feed.
 func BuildRepeatTypes() []string {
 	return append([]string(nil), buildRepeatTypes...)
 }
 
-// IsBuildEvent reports whether e is a build event that repeats a run row. It
-// is true for build.started, build.completed, and build.failed only.
+// IsBuildEvent reports whether e repeats a run row. It is true for the types
+// that BuildRepeatTypes lists and for no other type.
 func IsBuildEvent(e Event) bool {
 	for _, t := range buildRepeatTypes {
 		if e.Type == t {

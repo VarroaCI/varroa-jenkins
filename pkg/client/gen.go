@@ -6470,7 +6470,7 @@ type ListActivityParams struct {
 	// ExcludeRoutineSignIns true leaves out each routine local sign-in, an auth.local.login event below warning severity.
 	ExcludeRoutineSignIns *bool `form:"excludeRoutineSignIns,omitempty" json:"excludeRoutineSignIns,omitempty"`
 
-	// ExcludeBuildEvents true leaves out each event that only repeats a run: build.started, build.completed, and build.failed. Other build events stay.
+	// ExcludeBuildEvents true leaves out each event that only repeats a run: build.started, build.completed, build.failed, pipeline.run_requested, pipeline.run_replay_requested, and pipeline.run_restart_requested. Other build and pipeline events stay.
 	ExcludeBuildEvents *bool `form:"excludeBuildEvents,omitempty" json:"excludeBuildEvents,omitempty"`
 
 	// ExcludeRoutineEvents true leaves out each routine event: connected, disconnected, phase, provisioning.started, and provisioning.completed, and an item.created, item.updated, item.deleted, item.moved, or config.changed event whose actor is empty, varroa-mite, or varroa-mite-system.

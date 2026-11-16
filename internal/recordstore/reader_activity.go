@@ -30,7 +30,7 @@ type ActivityQuery struct {
 	Cluster, Controller, Namespace, Source, Severity, Actor, Type string
 	Start, End                                                    *time.Time
 	ExcludeRoutineSignIns                                         bool
-	// ExcludeBuildEvents leaves out each build event (activity.IsBuildEvent).
+	// ExcludeBuildEvents leaves out each event that repeats a run row (activity.IsBuildEvent).
 	ExcludeBuildEvents bool
 	// ExcludeRoutineEvents leaves out each event that activity.IsRoutineEvent matches.
 	ExcludeRoutineEvents bool

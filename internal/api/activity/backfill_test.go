@@ -85,13 +85,17 @@ func TestMatches_ClusterAndController(t *testing.T) {
 	}
 }
 
-// TestMatchesExcludeBuildEvents asserts the exclusion drops the three build
-// events that repeat a run row, and keeps every other build event.
+// TestMatchesExcludeBuildEvents asserts the exclusion drops the build events
+// and the run requests that repeat a run row, and keeps every other event.
 func TestMatchesExcludeBuildEvents(t *testing.T) {
 	t.Parallel()
 
 	q := Query{ExcludeBuildEvents: true}
-	for _, typ := range []string{BuildStartedType, BuildCompletedType, BuildFailedType} {
+	repeats := []string{
+		BuildStartedType, BuildCompletedType, BuildFailedType,
+		RunRequestedType, RunReplayRequestedType, RunRestartRequestedType,
+	}
+	for _, typ := range repeats {
 		e := Event{Type: typ, Severity: "info", Source: "recorder", Cluster: "core"}
 		if Matches(e, q) {
 			t.Fatalf("%s matched with ExcludeBuildEvents set", typ)
@@ -100,13 +104,17 @@ func TestMatchesExcludeBuildEvents(t *testing.T) {
 			t.Fatalf("%s did not match without the exclusion", typ)
 		}
 	}
-	kept := Event{Type: "build.interrupted", Severity: "warning", Source: "recorder", Cluster: "core"}
-	if !Matches(kept, q) {
-		t.Fatal("build.interrupted did not match with ExcludeBuildEvents set")
+	kept := []Event{
+		{Type: "build.interrupted", Severity: "warning", Source: "recorder", Cluster: "core"},
+		{Type: "pipeline.branch_scan_requested", Severity: "info", Source: "mcp", Cluster: "core"},
+		{Type: "pipeline.run_input_proceeded", Severity: "info", Source: "mcp", Cluster: "core"},
+		{Type: "tenantagent.run_requested", Severity: "info", Source: "mcp", Cluster: "core"},
+		{Type: "settings.updated", Severity: "info", Source: "api", Cluster: "core"},
 	}
-	other := Event{Type: "settings.updated", Severity: "info", Source: "api", Cluster: "core"}
-	if !Matches(other, q) {
-		t.Fatal("settings.updated did not match with ExcludeBuildEvents set")
+	for _, e := range kept {
+		if !Matches(e, q) {
+			t.Fatalf("%s did not match with ExcludeBuildEvents set", e.Type)
+		}
 	}
 }
 
