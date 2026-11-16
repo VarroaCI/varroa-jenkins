@@ -612,6 +612,38 @@ func TestListActivityExcludeBuildEvents(t *testing.T) {
 	}
 }
 
+// TestListActivityKeepsRefusedTriggerEvents asserts that the Overview query
+// keeps the activity event of a refused trigger. The run groups read leaves
+// out a run that started no build, so this event is its only Overview row.
+func TestListActivityKeepsRefusedTriggerEvents(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Truncate(time.Second)
+	events := []activity.Event{
+		{Timestamp: base, Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "operator", Type: "command.failed", Actor: "alice", Reason: "trigger_build", Severity: "warning", Message: "person refusal"},
+		{Timestamp: base.Add(1 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "operator", Type: "command.failed", Actor: "varroa-recorder", Reason: "trigger_build", Severity: "warning", Message: "cron refusal"},
+		{Timestamp: base.Add(2 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "recorder", Type: "build.claim_vetoed", Severity: "warning", Message: "vetoed"},
+		{Timestamp: base.Add(3 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "mite", Type: activity.BuildStartedType, Severity: "info", Message: "started"},
+		{Timestamp: base.Add(4 * time.Second), Cluster: "c1", Source: "mcp", Type: activity.RunRequestedType, Severity: "info", Message: "run"},
+		{Timestamp: base.Add(5 * time.Second), Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "mite", Type: "connected", Severity: "info", Message: "connected"},
+	}
+	pool := seedActivityEvents(t, events)
+	r := NewReader(pool)
+	ctx := context.Background()
+
+	page, err := r.ListActivity(ctx, ActivityQuery{ExcludeRoutineSignIns: true, ExcludeBuildEvents: true, ExcludeRoutineEvents: true, Scope: activity.Scope{All: true}})
+	if err != nil {
+		t.Fatalf("ListActivity: %v", err)
+	}
+	got := map[string]bool{}
+	for _, e := range page.Items {
+		got[e.Message] = true
+	}
+	if len(page.Items) != 3 || !got["person refusal"] || !got["cron refusal"] || !got["vetoed"] {
+		t.Fatalf("Overview query: %+v, want only the person refusal, cron refusal, and vetoed events", page.Items)
+	}
+}
+
 // TestListActivityExcludeRoutineEvents asserts the SQL exclusion keeps exactly
 // the events that the Go rule activity.IsRoutineEvent does not match.
 func TestListActivityExcludeRoutineEvents(t *testing.T) {

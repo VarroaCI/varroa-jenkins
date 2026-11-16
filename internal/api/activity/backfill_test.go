@@ -152,6 +152,41 @@ func TestIsRoutineEvent(t *testing.T) {
 	}
 }
 
+// TestRefusedTriggerEventsStayInTheOverviewFeed pins the Overview rule for a
+// refused trigger. The run groups read leaves out a run that started no build,
+// so this event is its only Overview row.
+func TestRefusedTriggerEventsStayInTheOverviewFeed(t *testing.T) {
+	t.Parallel()
+
+	q := Query{ExcludeRoutineSignIns: true, ExcludeBuildEvents: true, ExcludeRoutineEvents: true}
+	events := []Event{
+		{Type: "command.failed", Source: "operator", Reason: "trigger_build", Actor: "alice"},
+		{Type: "command.failed", Source: "operator", Reason: "trigger_build", Actor: "varroa-recorder"},
+		{Type: "command.failed", Source: "operator", Reason: "trigger_build", Actor: "varroa-upstream/acme"},
+		{Type: "command.failed", Source: "operator", Reason: "trigger_build", Actor: ""},
+		{Type: "build.claim_vetoed", Source: "recorder"},
+		{Type: "build.claim_expired", Source: "recorder"},
+		{Type: "build.claim_abandoned", Source: "recorder"},
+	}
+	for _, e := range events {
+		e.Cluster = "core"
+		e.Namespace = "varroa-system"
+		e.Controller = "cell-a"
+		e.ItemPath = "acme/app"
+		e.Severity = "warning"
+		e.Message = "refused"
+		if IsBuildEvent(e) {
+			t.Errorf("%s by %q: IsBuildEvent = true, want false", e.Type, e.Actor)
+		}
+		if IsRoutineEvent(e) {
+			t.Errorf("%s by %q: IsRoutineEvent = true, want false", e.Type, e.Actor)
+		}
+		if !Matches(e, q) {
+			t.Errorf("%s by %q: did not match the Overview query", e.Type, e.Actor)
+		}
+	}
+}
+
 func TestMatchesExcludeRoutineEvents(t *testing.T) {
 	t.Parallel()
 
