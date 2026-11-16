@@ -203,7 +203,7 @@ describe("PipelinePage", () => {
     renderPage();
     await screen.findByText("Waiting");
     expect(screen.getByText("deploys")).toBeInTheDocument();
-    expect(screen.getByText(/1 of 1 builds run/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 1 build running/)).toBeInTheDocument();
     expect(screen.getByText("Run run-9")).toBeInTheDocument();
   });
 

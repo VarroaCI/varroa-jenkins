@@ -102,6 +102,16 @@ func olderWaiter(w capWaiter, runID uuid.UUID, mine time.Time) bool {
 	return w.runID.String() < runID.String()
 }
 
+// capCountText answers the running count of a cap, for example
+// "1 of 1 build running". The noun agrees with the limit.
+func capCountText(running, limit int) string {
+	noun := "builds"
+	if limit == 1 {
+		noun = "build"
+	}
+	return fmt.Sprintf("%d of %d %s running", running, limit, noun)
+}
+
 // decideCaps answers whether one claim waits behind a concurrency cap. It
 // checks each matching tenant limit in spec order, then the cell cap. A
 // live older waiter on the same limit counts against that limit, so a
@@ -123,7 +133,7 @@ func decideCaps(tenant string, req ClaimRequest, runID uuid.UUID, mine time.Time
 		}
 		if running+ahead >= l.Max {
 			return capVerdict{Blocked: true, Kind: capKindTenant, Name: l.Name, Max: l.Max, Running: running,
-				Message: fmt.Sprintf("waiting on concurrency limit %q: %d of %d builds run", l.Name, running, l.Max)}
+				Message: fmt.Sprintf("waiting on concurrency limit %q: %s", l.Name, capCountText(running, l.Max))}
 		}
 	}
 	if cellMax > 0 {
@@ -141,7 +151,7 @@ func decideCaps(tenant string, req ClaimRequest, runID uuid.UUID, mine time.Time
 		}
 		if running+ahead >= cellMax {
 			return capVerdict{Blocked: true, Kind: capKindCell, Max: cellMax, Running: running,
-				Message: fmt.Sprintf("waiting on the tenant cap of cell %s: %d of %d builds run", req.Cell, running, cellMax)}
+				Message: fmt.Sprintf("waiting on the tenant cap of cell %s: %s", req.Cell, capCountText(running, cellMax))}
 		}
 	}
 	return capVerdict{}

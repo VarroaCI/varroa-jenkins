@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { queueWaitMs, sortedParams, TRIGGER_LABEL, QUEUE_WAIT_SHOWN_MS } from "./runMeta";
+import { queueWaitMs, sortedParams, TRIGGER_LABEL, QUEUE_WAIT_SHOWN_MS, waitCountText } from "./runMeta";
 
 describe("queueWaitMs", () => {
   it("answers the gap from queue to start", () => {
@@ -38,5 +38,16 @@ describe("constants", () => {
 
   it("shows queue waits above five seconds", () => {
     expect(QUEUE_WAIT_SHOWN_MS).toBe(5000);
+  });
+});
+
+describe("waitCountText", () => {
+  it.each([
+    [0, 1, "0 of 1 build running"],
+    [1, 1, "1 of 1 build running"],
+    [1, 3, "1 of 3 builds running"],
+    [2, 3, "2 of 3 builds running"],
+  ])("answers %i running of %i", (running, max, want) => {
+    expect(waitCountText({ running, max })).toBe(want);
   });
 });

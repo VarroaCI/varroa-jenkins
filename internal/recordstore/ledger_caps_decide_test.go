@@ -41,7 +41,7 @@ func TestDecideCaps_AtLimitBlocksWithName(t *testing.T) {
 	if !v.Blocked || v.Kind != capKindTenant || v.Name != "builds" {
 		t.Fatalf("two builds running must block on builds, got %+v", v)
 	}
-	if !strings.Contains(v.Message, `"builds": 2 of 2 builds run`) {
+	if !strings.Contains(v.Message, `"builds": 2 of 2 builds running`) {
 		t.Fatalf("message = %q", v.Message)
 	}
 }
@@ -85,6 +85,28 @@ func TestDecideCaps_CellCapCountsOnlySameCell(t *testing.T) {
 		[]inFlightRun{capTestRun("deploy/prod", "cell-a")}, nil)
 	if !v.Blocked || v.Kind != capKindCell {
 		t.Fatalf("a build on the same cell must block on the cell cap, got %+v", v)
+	}
+	if v.Message != "waiting on the tenant cap of cell cell-a: 1 of 1 build running" {
+		t.Fatalf("message = %q", v.Message)
+	}
+}
+
+func TestCapCountText(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		running, limit int
+		want           string
+	}{
+		{0, 1, "0 of 1 build running"},
+		{1, 1, "1 of 1 build running"},
+		{1, 3, "1 of 3 builds running"},
+		{2, 3, "2 of 3 builds running"},
+	}
+	for _, tt := range tests {
+		if got := capCountText(tt.running, tt.limit); got != tt.want {
+			t.Errorf("capCountText(%d, %d) = %q, want %q", tt.running, tt.limit, got, tt.want)
+		}
 	}
 }
 

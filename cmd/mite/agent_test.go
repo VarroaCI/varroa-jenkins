@@ -1566,3 +1566,14 @@ func TestComputeStateHash_FramesEachSection(t *testing.T) {
 		seen[got] = name
 	}
 }
+
+func TestDeferBuildsText(t *testing.T) {
+	t.Parallel()
+
+	if got := deferBuildsText(1); got != "1 build running" {
+		t.Fatalf("deferBuildsText(1) = %q", got)
+	}
+	if got := deferBuildsText(2); got != "2 builds running" {
+		t.Fatalf("deferBuildsText(2) = %q", got)
+	}
+}

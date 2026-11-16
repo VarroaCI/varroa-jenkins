@@ -3089,8 +3089,17 @@ func (a *Agent) shouldApplyNow(cmd *mitev1.DesiredStateCommand) bool {
 		return true
 	}
 
-	a.deferReason = fmt.Sprintf("%d builds running", running)
+	a.deferReason = deferBuildsText(running)
 	return false
+}
+
+// deferBuildsText answers the idle-defer reason for a count of running
+// builds, for example "1 build running" or "2 builds running".
+func deferBuildsText(running int) string {
+	if running == 1 {
+		return "1 build running"
+	}
+	return fmt.Sprintf("%d builds running", running)
 }
 
 // runningBuildsLocked is like runningBuilds but assumes deferMu is held.
