@@ -25,16 +25,6 @@ import (
 // =============================================================================
 
 func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
-	clusterOrDefault := func(args map[string]any) string {
-		if c := strArg(args, "cluster"); c != "" {
-			return c
-		}
-		if deps.Brood != nil {
-			return deps.Brood.LocalCluster()
-		}
-		return "core"
-	}
-
 	listC := mcp.NewTool("list_controllers",
 		mcp.WithDescription("List Jenkins controllers managed by Varroa. Returns a compact "+
 			"summary per controller (name, namespace, cluster, phase, version, "+
@@ -51,6 +41,9 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		withListOutput(controllerListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listC, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.Brood == nil {
+			return mcp.NewToolResultError(broodNotConfigured), nil
+		}
 		args := getArgs(req)
 		ns := strArg(args, "namespace")
 		clusterFilter := strArg(args, "cluster")
@@ -66,46 +59,26 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		var entries []entry
 		clusters := []api.ClusterFanoutStatus{}
 
-		if deps.Brood != nil {
-			if clusterFilter != "" && !deps.Brood.IsKnown(ctx, clusterFilter) {
-				return mcp.NewToolResultError("unknown cluster: " + clusterFilter), nil
+		if clusterFilter != "" && !deps.Brood.IsKnown(ctx, clusterFilter) {
+			return mcp.NewToolResultError("unknown cluster: " + clusterFilter), nil
+		}
+		cc, statuses, err := deps.Brood.ListAll(ctx, ns, clusterFilter)
+		// A filtered call to a member that does not answer returns its
+		// status row with the error. That row is the answer, not a tool error.
+		// A failed read of the local cluster is a tool error, even with a row.
+		if err != nil && (len(statuses) == 0 || clusterFilter == deps.Brood.LocalCluster()) {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list controllers: %v", err)), nil
+		}
+		if statuses != nil {
+			clusters = statuses
+		}
+		claims, _ := requireClaims(ctx)
+		for _, c := range cc {
+			if deps.Authorizer != nil && claims != nil &&
+				!deps.Authorizer.CanReadController(claims, c.CR.Namespace, c.CR.Name) {
+				continue
 			}
-			cc, statuses, err := deps.Brood.ListAll(ctx, ns, clusterFilter)
-			// A filtered call to a member that does not answer returns its
-			// status row with the error. That row is the answer, not a tool error.
-			// A failed read of the local cluster is a tool error, even with a row.
-			if err != nil && (len(statuses) == 0 || clusterFilter == deps.Brood.LocalCluster()) {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to list controllers: %v", err)), nil
-			}
-			if statuses != nil {
-				clusters = statuses
-			}
-			claims, _ := requireClaims(ctx)
-			for _, c := range cc {
-				if deps.Authorizer != nil && claims != nil &&
-					!deps.Authorizer.CanReadController(claims, c.CR.Namespace, c.CR.Name) {
-					continue
-				}
-				entries = append(entries, entry{cluster: c.Cluster, cr: c.CR})
-			}
-		} else {
-			// Fallback: direct local list.
-			controllers, err := deps.LocalControllers(ctx, ns)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to list controllers: %v", err)), nil
-			}
-			claims, _ := requireClaims(ctx)
-			for _, c := range controllers {
-				if deps.Authorizer != nil && claims != nil &&
-					!deps.Authorizer.CanReadController(claims, c.Namespace, c.Name) {
-					continue
-				}
-				// Cluster is left empty rather than echoing the caller's filter.
-				// Without a brood there is no authoritative cluster name to
-				// report, and labelling local results with a caller-supplied
-				// string would let `cluster: "prod"` come back stamped "prod".
-				entries = append(entries, entry{cr: c})
-			}
+			entries = append(entries, entry{cluster: c.Cluster, cr: c.CR})
 		}
 
 		var items any
@@ -139,7 +112,6 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 	addTool(mcpServer, kindRead, getC, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := getArgs(req)
 		ns, name := strArg(args, "namespace"), strArg(args, "name")
-		cluster := clusterOrDefault(args)
 		if deps.Authorizer != nil {
 			claims, err := requireClaims(ctx)
 			if err != nil {
@@ -149,13 +121,11 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 				return mcp.NewToolResultError("access denied: missing controllers:read permission"), nil
 			}
 		}
-		var cr *v1alpha1.Controller
-		var err error
-		if deps.Brood != nil {
-			cr, err = deps.Brood.Get(ctx, cluster, ns, name)
-		} else {
-			cr, err = crdstore.Get[v1alpha1.Controller](ctx, deps.Store, name, ns)
+		cluster, refusal := resolveControllerCluster(ctx, deps, args)
+		if refusal != nil {
+			return refusal, nil
 		}
+		cr, err := deps.Brood.Get(ctx, cluster, ns, name)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("controller not found: %v", err)), nil
 		}
@@ -198,9 +168,12 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			return mcp.NewToolResultError("authentication required"), nil
 		}
 		ns, name := strArg(args, "namespace"), strArg(args, "name")
-		cluster := clusterOrDefault(args)
 		if !deps.Authorizer.CanCreateController(claims, ns, name) {
 			return mcp.NewToolResultError("access denied: missing controllers:create permission"), nil
+		}
+		cluster, refusal := resolveControllerCluster(ctx, deps, args)
+		if refusal != nil {
+			return refusal, nil
 		}
 		cr := &v1alpha1.Controller{ObjectMeta: objMeta(args)}
 		// Same patch shape as update_controller, so a field settable on an
@@ -278,9 +251,12 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			return mcp.NewToolResultError("authentication required"), nil
 		}
 		ns, name := strArg(args, "namespace"), strArg(args, "name")
-		cluster := clusterOrDefault(args)
 		if !deps.Authorizer.CanUpdateController(claims, ns, name) {
 			return mcp.NewToolResultError("access denied: missing controllers:update permission"), nil
+		}
+		cluster, refusal := resolveControllerCluster(ctx, deps, args)
+		if refusal != nil {
+			return refusal, nil
 		}
 		spec, err := controllerSpecPatch(args)
 		if err != nil {
@@ -331,26 +307,17 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		}
 		args := getArgs(req)
 		ns, name := strArg(args, "namespace"), strArg(args, "name")
-		cluster := clusterOrDefault(args)
 		if !deps.Authorizer.CanDeleteController(claims, ns, name) {
 			return mcp.NewToolResultError("access denied: missing controllers:delete permission"), nil
 		}
-		if deps.Brood != nil {
-			if err := deps.Brood.Delete(ctx, cluster, ns, name); err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to delete controller: %v", err)), nil
-			}
-			emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
-				Type:       "controller.deleted",
-				Message:    "Controller " + name + " deleted in " + ns,
-				Namespace:  ns,
-				Controller: name,
-			})
-			return mcp.NewToolResultText("controller " + ns + "/" + name + " deleted"), nil
+		cluster, refusal := resolveControllerCluster(ctx, deps, args)
+		if refusal != nil {
+			return refusal, nil
 		}
-		if err := crdstore.Delete[v1alpha1.Controller](ctx, deps.Store, name, ns); err != nil {
+		if err := deps.Brood.Delete(ctx, cluster, ns, name); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete controller: %v", err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:       "controller.deleted",
 			Message:    "Controller " + name + " deleted in " + ns,
 			Namespace:  ns,
@@ -378,9 +345,12 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		}
 		args := getArgs(req)
 		ns, name := strArg(args, "namespace"), strArg(args, "name")
-		cluster := clusterOrDefault(args)
 		if !deps.Authorizer.CanApproveRestart(claims, ns, name) {
 			return mcp.NewToolResultError("access denied: missing controllers:approve-restart permission"), nil
+		}
+		cluster, refusal := resolveControllerCluster(ctx, deps, args)
+		if refusal != nil {
+			return refusal, nil
 		}
 		if deps.Reconciler == nil {
 			return mcp.NewToolResultError("reconciler not available"), nil
@@ -413,9 +383,12 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		}
 		args := getArgs(req)
 		ns, name := strArg(args, "namespace"), strArg(args, "name")
-		cluster := clusterOrDefault(args)
 		if !deps.Authorizer.CanManageController(claims, ns, name) {
 			return mcp.NewToolResultError("access denied: missing controllers:manage permission"), nil
+		}
+		cluster, refusal := resolveControllerCluster(ctx, deps, args)
+		if refusal != nil {
+			return refusal, nil
 		}
 		if deps.Reconciler == nil {
 			return mcp.NewToolResultError("reconciler not available"), nil
@@ -450,9 +423,12 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		}
 		args := getArgs(req)
 		ns, name := strArg(args, "namespace"), strArg(args, "name")
-		cluster := clusterOrDefault(args)
 		if !deps.Authorizer.CanManageController(claims, ns, name) {
 			return mcp.NewToolResultError("access denied: missing controllers:manage permission"), nil
+		}
+		cluster, refusal := resolveControllerCluster(ctx, deps, args)
+		if refusal != nil {
+			return refusal, nil
 		}
 		if deps.Reconciler == nil {
 			return mcp.NewToolResultError("reconciler not available"), nil
@@ -486,9 +462,12 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		}
 		args := getArgs(req)
 		ns, name := strArg(args, "namespace"), strArg(args, "name")
-		cluster := clusterOrDefault(args)
 		if !deps.Authorizer.CanManageController(claims, ns, name) {
 			return mcp.NewToolResultError("access denied: missing controllers:manage permission"), nil
+		}
+		cluster, refusal := resolveControllerCluster(ctx, deps, args)
+		if refusal != nil {
+			return refusal, nil
 		}
 		if deps.Reconciler == nil {
 			return mcp.NewToolResultError("reconciler not available"), nil
@@ -556,6 +535,27 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		}
 		return mcp.NewToolResultText(buf.String()), nil
 	})
+}
+
+// broodNotConfigured refuses a Controller tool call on a server without deps.Brood.
+const broodNotConfigured = "brood not configured"
+
+// resolveControllerCluster maps the cluster argument of a Controller tool onto
+// one cluster. An empty argument selects the local cluster of deps.Brood. Any
+// other name must be a cluster that deps.Brood knows. Without a brood, the
+// helper refuses the call: the tool must not use the local store in its place.
+func resolveControllerCluster(ctx context.Context, deps *api.Dependencies, args map[string]any) (string, *mcp.CallToolResult) {
+	if deps.Brood == nil {
+		return "", mcp.NewToolResultError(broodNotConfigured)
+	}
+	name := strArg(args, "cluster")
+	if name == "" {
+		return deps.Brood.LocalCluster(), nil
+	}
+	if !deps.Brood.IsKnown(ctx, name) {
+		return "", mcp.NewToolResultError("unknown cluster: " + name)
+	}
+	return name, nil
 }
 
 // controllerSvc mirrors api.Server.controllerSvc so the MCP tools validate a
@@ -641,11 +641,10 @@ func controllerSpecPatch(args map[string]any) (map[string]interface{}, error) {
 const noSpecFields = "nothing to update: supply version, composedBundleRef, " +
 	"powerState, hibernation, or a spec merge patch"
 
-// mergeControllerSpec applies a spec merge patch to a Controller in-process,
-// for the local-direct paths that have no brood to send a patch to. It
-// round-trips through JSON so nested objects merge key by key, exactly as
-// handleUpdateController's local branch does, rather than replacing whole
-// structs the way a typed assignment would.
+// mergeControllerSpec applies a spec merge patch to a new Controller before
+// create_controller sends it to the brood. It round-trips through JSON so
+// nested objects merge key by key, rather than replacing whole structs the way
+// a typed assignment would.
 //
 // An explicit null clears the key it names, whatever its shape. That does not
 // follow from encoding/json — a null unmarshals into a non-pointer field as a

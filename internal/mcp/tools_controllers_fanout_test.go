@@ -183,15 +183,17 @@ func TestListControllers_ListAllErrorWithoutStatusIsToolError(t *testing.T) {
 	}
 }
 
-func TestListControllers_NoBroodReportsEmptyClusters(t *testing.T) {
-	tr := callListControllers(t, adminDeps(), map[string]interface{}{"namespace": "ns"})
-	if tr.IsError {
-		t.Fatalf("unexpected tool error: %v", tr.Content)
-	}
-	sc := decodeStructured(t, tr)
-	rows, ok := sc["clusters"].([]any)
-	if !ok || len(rows) != 0 {
-		t.Errorf("clusters = %v, want empty array", sc["clusters"])
+// Without a brood, list_controllers refuses the call, also with a cluster filter.
+func TestListControllers_NoBroodRefusesTheCall(t *testing.T) {
+	for _, cluster := range []string{"", "made-up"} {
+		args := map[string]interface{}{"namespace": "ns"}
+		if cluster != "" {
+			args["cluster"] = cluster
+		}
+		tr := callListControllers(t, adminDeps(), args)
+		if !tr.IsError || toolText(tr) != "brood not configured" {
+			t.Errorf("cluster %q: result = %q, want the brood refusal", cluster, toolText(tr))
+		}
 	}
 }
 

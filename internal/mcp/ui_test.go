@@ -322,6 +322,7 @@ func callWithClaims(t *testing.T, deps *api.Dependencies, claims *auth.Claims, t
 
 func adminDepsWithDashboard() *api.Dependencies {
 	deps := adminDeps()
+	withControllerBrood(deps)
 	deps.DashboardURL = testDashboardURL
 	crdstore.MustSeed(deps.Store.(*crdstore.Fake), &v1alpha1.Controller{
 		ObjectMeta: metav1.ObjectMeta{Name: "broken", Namespace: "ns", ResourceVersion: "1"},
