@@ -39,9 +39,9 @@ jobs:
       # The merged release pull request bumps the manifest on main, so the
       # checkout of this push holds the released version. The step runs also
       # when release-please fails, because release-please can fail after it
-      # creates the release, for example on the comment to the locked pull
-      # request. The run check keeps the step idempotent: a push that releases
-      # nothing finds the run of the current tag and exits.
+      # creates the release, for example on its comment or label write to the
+      # release pull request. The run check keeps the step idempotent: a push
+      # that releases nothing finds the run of the current tag and exits.
       - uses: actions/checkout@v4
         if: always()
 
