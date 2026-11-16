@@ -25,6 +25,7 @@ import { canAccessTenantPipeline, usePermissions } from "../../hooks/usePermissi
 import { useToast } from "../../components/Toast";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { plural } from "../../lib/plural";
 import { Tabs, tabPanelProps } from "../../components/Tabs";
 import { ForbiddenPage, GenericErrorPage, RecordStoreUnreachablePage, RecoveryState } from "../../components/RecoveryState";
 import type {
@@ -941,7 +942,7 @@ export default function BuildPage() {
               {(artifactsQuery.data?.items ?? []).map((a) => (
                 <tr key={a.path}>
                   <td>{breakablePath(a.path)}</td>
-                  <td>{a.sizeBytes} bytes</td>
+                  <td>{plural(a.sizeBytes, "byte", "bytes")}</td>
                   <td>
                     <button
                       type="button"
@@ -974,7 +975,7 @@ export default function BuildPage() {
             <div className={styles.reportLine}>
               <span className={styles.ranWithLabel}>Test report</span>
               <span className={styles.mono}>{testReport.path}</span>
-              <span>{testReport.sizeBytes} bytes</span>
+              <span>{plural(testReport.sizeBytes, "byte", "bytes")}</span>
               <button
                 type="button"
                 disabled={!testReport.downloadable}

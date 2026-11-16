@@ -229,4 +229,17 @@ describe("QualityTrendCard", () => {
     expect(screen.getByText("<img src=x onerror=alert(1)> · warnings")).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
   });
+  it("says 1 warning for a single warning", () => {
+    const { container } = renderCard({
+      warnings: [
+        {
+          id: "checkstyle",
+          name: "checkstyle",
+          points: [{ runId: "run-1", buildNumber: 1, total: 1 }],
+        },
+      ],
+    });
+    const labels = [...container.querySelectorAll("svg a")].map((a) => a.getAttribute("aria-label"));
+    expect(labels).toEqual(["#1 · 1 warning"]);
+  });
 });

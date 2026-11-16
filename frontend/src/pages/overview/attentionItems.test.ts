@@ -153,4 +153,13 @@ describe("attentionItems", () => {
     expect(plain).toContain("· 3 inputs wait");
     expect(plain).not.toContain(" by ");
   });
+  it("uses the singular noun for one parameter", () => {
+    const text = inputDetail(waitingInput({ input: { id: "p", parameterCount: 1 } }), NOW);
+    expect(text).toContain("· needs 1 value");
+    expect(text).not.toContain("values");
+  });
+
+  it("uses the singular noun for one failed test", () => {
+    expect(failingDetail(failingJob({ testsFailed: 1 }), NOW)).toContain(": 1 test failed");
+  });
 });

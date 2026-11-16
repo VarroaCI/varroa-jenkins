@@ -77,7 +77,7 @@ function DayBody({ ov, now }: { ov: PipelinesOverview; now: number }) {
       <div className={styles.hist}>
         {totals ? (
           <p className={styles.totals}>
-            <b>{totals.runs}</b> runs · <b>{totals.passed}</b> passed ·{" "}
+            <b>{totals.runs}</b> {totals.runs === 1 ? "run" : "runs"} · <b>{totals.passed}</b> passed ·{" "}
             <b className={totals.failed > 0 ? styles.failCount : undefined}>{totals.failed}</b> failed · median{" "}
             {totals.median}
           </p>

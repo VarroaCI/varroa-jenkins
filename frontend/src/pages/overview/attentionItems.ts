@@ -4,6 +4,7 @@ import { age } from "../../components/activityTimeline.util";
 import { runActorText } from "../../components/runs/runRowText";
 import { ATTENTION_LABEL } from "../../components/StatusPill";
 import { stripTenantFolder } from "../pipelines/jobPath";
+import { plural } from "../../lib/plural";
 
 /** ATTENTION_ROWS is the number of rows the panel shows before "Show all". */
 export const ATTENTION_ROWS = 8;
@@ -85,10 +86,6 @@ export function attentionItems(s: AttentionSources): AttentionItem[] {
   return out;
 }
 
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
-
 /** attentionBreakdown names each kind in the panel header, for example "1 approval · 2 failing jobs". */
 export function attentionBreakdown(items: AttentionItem[]): string {
   const count = (k: AttentionItem["kind"]) => items.filter((i) => i.kind === k).length;
@@ -140,7 +137,7 @@ export function inputDetail(w: PipelinesOverviewWaitingInput, now: number): stri
   let text = `${msg} · started ${age(w.run.startedAt ?? w.run.createdAt, { now })}`;
   if (actor) text += ` by ${actor}`;
   if (w.input.submitter) text += ` · only ${w.input.submitter} may answer`;
-  if (w.input.parameterCount > 0) text += ` · needs ${w.input.parameterCount} values`;
+  if (w.input.parameterCount > 0) text += ` · needs ${plural(w.input.parameterCount, "value", "values")}`;
   else if (w.inputCount > 1) text += ` · ${w.inputCount} inputs wait`;
   return text;
 }
@@ -159,7 +156,7 @@ export function failingDetail(job: PipelinesOverviewFailingJob, now: number): st
   const head = job.run.buildNumber !== undefined ? `#${job.run.buildNumber} failed` : "The run failed";
   let text = `${head} ${when}`;
   if (job.stage) text += ` in ${job.stage}`;
-  if (job.testsFailed && job.testsFailed > 0) text += `: ${job.testsFailed} tests failed`;
+  if (job.testsFailed && job.testsFailed > 0) text += `: ${plural(job.testsFailed, "test", "tests")} failed`;
   else if (job.stageError) text += `: ${job.stageError}`;
 
   const k = job.failuresSincePass;

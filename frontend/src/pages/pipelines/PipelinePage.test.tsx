@@ -160,7 +160,7 @@ describe("PipelinePage", () => {
     );
     renderPage();
     await screen.findByText("Health");
-    expect(screen.getByText(/1 of 1 counted builds passed/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 1 counted build passed/)).toBeInTheDocument();
   });
 
   it("shows the Quality trend card when the job read carries qualityTrend", async () => {

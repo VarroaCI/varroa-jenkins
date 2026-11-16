@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Card } from "../../components/Card";
+import { plural } from "../../lib/plural";
 import type { JobHealth, JobTrendPoint } from "../../types";
 import { HealthGlyph } from "./HealthGlyph";
 import { formatDuration } from "./JobTree";
@@ -192,7 +193,7 @@ export function JobHealthCard({
         <div className={styles.summary}>
           <HealthGlyph health={health} />
           <span>
-            {health.passed} of {health.counted} counted builds passed
+            {health.passed} of {plural(health.counted, "counted build", "counted builds")} passed
             {health.score !== undefined && ` · ${health.score}%`}
           </span>
           <span className={styles.window}>last {health.window} finished builds</span>
