@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import RoleBindings from "./RoleBindings";
 import { renderWithProviders } from "../test/render-utils";
 import { createRoleBinding } from "../test/factories";
+import type { VarroaRoleBindingScope } from "../types";
 
 const mockNavigate = vi.fn();
 vi.mock("react-router-dom", async () => {
@@ -290,5 +291,77 @@ describe("RoleBindings — a selector of match expressions", () => {
     await screen.findByText("both-binding");
     const row = screen.getByText("both-binding").parentElement!;
     expect(within(row).getByText("sel:tier=prod")).toBeInTheDocument();
+  });
+});
+
+describe("RoleBindings — a scope that names no part, or an empty-value label", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each<[string, VarroaRoleBindingScope, string]>([
+    ["an empty-value label", { controllerSelector: { matchLabels: { env: "" } } }, "sel:env="],
+    [
+      "an empty-value label beside a label",
+      { controllerSelector: { matchLabels: { env: "", tier: "prod" } } },
+      "sel:env=,tier=prod",
+    ],
+    ["an empty scope", {}, "All controllers"],
+    ["an empty namespace list", { namespaces: [] }, "All controllers"],
+    ["an empty selector", { controllerSelector: {} }, "All controllers"],
+    [
+      "a namespace and an empty selector",
+      { namespaces: ["ns-a"], controllerSelector: {} },
+      "ns:ns-a",
+    ],
+  ])("prints %s as %s", async (_label, scope, want) => {
+    mockListRoleBindings.mockResolvedValue({
+      items: [
+        createRoleBinding({
+          metadata: { name: "probe-binding" },
+          spec: {
+            subjects: [{ kind: "Group", name: "developers" }],
+            roleRef: "varroa:operator",
+            scope,
+          },
+        }),
+      ],
+    });
+    renderWithProviders(<RoleBindings />);
+    const row = (await screen.findByText("probe-binding")).parentElement!;
+    expect(within(row).getByText(want)).toBeInTheDocument();
+    expect(within(row).queryByText("Cluster-wide")).not.toBeInTheDocument();
+  });
+
+  it("counts an empty scope under Scoped, not Cluster-wide", async () => {
+    const user = userEvent.setup();
+    mockListRoleBindings.mockResolvedValue({
+      items: [
+        createRoleBinding({
+          metadata: { name: "open-binding" },
+          spec: { subjects: [{ kind: "User", name: "alice" }], roleRef: "varroa:admin" },
+        }),
+        createRoleBinding({
+          metadata: { name: "empty-binding" },
+          spec: {
+            subjects: [{ kind: "User", name: "bob" }],
+            roleRef: "varroa:operator",
+            scope: {},
+          },
+        }),
+      ],
+    });
+    renderWithProviders(<RoleBindings />);
+    await waitFor(() => {
+      expect(screen.getByText("open-binding")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /^Cluster-wide/ }));
+    expect(screen.getByText("open-binding")).toBeInTheDocument();
+    expect(screen.queryByText("empty-binding")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Scoped/ }));
+    expect(screen.queryByText("open-binding")).not.toBeInTheDocument();
+    expect(screen.getByText("empty-binding")).toBeInTheDocument();
   });
 });

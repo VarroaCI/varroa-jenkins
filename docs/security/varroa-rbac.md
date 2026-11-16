@@ -59,6 +59,8 @@ spec:
 When both scope fields are set, a controller must match both. Namespace scope
 does not narrow cluster-scoped resources.
 
+A scope that names no namespace, label, expression, or tenant, such as `scope: {}`, applies to every controller. It grants no cluster-scoped resource and no pipelines tenant. To make a cluster-wide binding, omit `scope`.
+
 ## Read catalog and bundle objects
 
 A caller reads a `CatalogItem`, `CatalogSource`, or `ComposedBundle` in a

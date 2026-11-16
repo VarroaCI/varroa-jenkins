@@ -134,8 +134,8 @@ func roleBindingColumns(item map[string]any) []string {
 }
 
 // roleBindingScope returns the SCOPE cell of a VarroaRoleBinding: the
-// spec.scope text, "Cluster-wide" when spec.scope is absent or names no part,
-// or "-" when spec.scope cannot be read. The words match formatScope in
+// spec.scope text, "Cluster-wide" when spec.scope is absent, or "-" when
+// spec.scope cannot be read. The words match formatScope in
 // frontend/src/pages/RoleBindings.tsx. Change both together.
 func roleBindingScope(item map[string]any) string {
 	spec, _ := item["spec"].(map[string]any)
@@ -155,19 +155,20 @@ func roleBindingScope(item map[string]any) string {
 }
 
 // formatBindingScope joins the namespace, selector, and tenant parts of sc
-// with one space, or returns "Cluster-wide" when sc names no part.
-// Label keys are sorted, because the dashboard shows them in JSON key order.
+// with one space. A label with an empty value prints as "key=", because it
+// still narrows the selector. A scope that names no part returns
+// "All controllers". The resolver matches that scope on every controller. It
+// grants no cluster-scoped resource and no tenant. Label keys are sorted,
+// because the dashboard shows them in JSON key order.
 func formatBindingScope(sc *v1alpha1.VarroaRoleBindingScope) string {
 	var parts []string
 	if len(sc.Namespaces) > 0 {
 		parts = append(parts, "ns:"+strings.Join(sc.Namespaces, ","))
 	}
 	if sel := sc.ControllerSelector; sel != nil {
-		var labels []string
+		labels := make([]string, 0, len(sel.MatchLabels))
 		for _, k := range slices.Sorted(maps.Keys(sel.MatchLabels)) {
-			if v := sel.MatchLabels[k]; v != "" {
-				labels = append(labels, k+"="+v)
-			}
+			labels = append(labels, k+"="+sel.MatchLabels[k])
 		}
 		if len(labels) > 0 {
 			parts = append(parts, "sel:"+strings.Join(labels, ","))
@@ -183,7 +184,7 @@ func formatBindingScope(sc *v1alpha1.VarroaRoleBindingScope) string {
 		parts = append(parts, p)
 	}
 	if len(parts) == 0 {
-		return "Cluster-wide"
+		return "All controllers"
 	}
 	return strings.Join(parts, " ")
 }

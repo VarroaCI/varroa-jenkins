@@ -205,7 +205,18 @@ func TestRoleBindingColumns_Scope(t *testing.T) {
 	}{
 		{"no scope", vrbItem("vrb-none", nil, nil), "Cluster-wide"},
 		{"null scope", withScope("vrb", nil), "Cluster-wide"},
-		{"empty scope", withScope("vrb", map[string]any{}), "Cluster-wide"},
+		{"empty scope", withScope("vrb", map[string]any{}), "All controllers"},
+		{"empty namespaces", withScope("vrb", map[string]any{"namespaces": []any{}}), "All controllers"},
+		{"empty-value label", withScope("vrb", map[string]any{"controllerSelector": map[string]any{
+			"matchLabels": map[string]any{"env": ""},
+		}}), "sel:env="},
+		{"empty-value label beside a label", withScope("vrb", map[string]any{"controllerSelector": map[string]any{
+			"matchLabels": map[string]any{"tier": "prod", "env": ""},
+		}}), "sel:env=,tier=prod"},
+		{"empty-value label and expressions", withScope("vrb", map[string]any{"controllerSelector": map[string]any{
+			"matchLabels":      map[string]any{"env": ""},
+			"matchExpressions": []any{map[string]any{"key": "env", "operator": "Exists"}},
+		}}), "sel:env="},
 		{"namespaces", withScope("vrb", map[string]any{"namespaces": []any{"ns-a", "ns-b"}}), "ns:ns-a,ns-b"},
 		{"labels sorted", withScope("vrb", map[string]any{"controllerSelector": map[string]any{
 			"matchLabels": map[string]any{"tier": "prod", "env": "qa"},
@@ -223,7 +234,11 @@ func TestRoleBindingColumns_Scope(t *testing.T) {
 				"matchExpressions": []any{map[string]any{"key": "env", "operator": "Exists"}},
 			},
 		}), "ns:ns-a Selector"},
-		{"empty selector", withScope("vrb", map[string]any{"controllerSelector": map[string]any{}}), "Cluster-wide"},
+		{"empty selector", withScope("vrb", map[string]any{"controllerSelector": map[string]any{}}), "All controllers"},
+		{"namespace and empty selector", withScope("vrb", map[string]any{
+			"namespaces":         []any{"ns-a"},
+			"controllerSelector": map[string]any{},
+		}), "ns:ns-a"},
 		{"one tenant", withScope("vrb", map[string]any{"tenants": []any{
 			map[string]any{"name": "payments"},
 		}}), "tenant:payments"},

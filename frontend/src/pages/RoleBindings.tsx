@@ -25,14 +25,15 @@ function formatSubjects(binding: VarroaRoleBinding): string {
 
 function formatScope(binding: VarroaRoleBinding): string {
   const scope = binding.spec.scope;
+  // Only an absent scope is cluster-wide. formatBindingScope in cmd/varroactl/rbac.go prints the same words. Change both together.
   if (!scope) return "Cluster-wide";
   const parts: string[] = [];
   if (scope.namespaces && scope.namespaces.length > 0) {
     parts.push(`ns:${scope.namespaces.join(",")}`);
   }
   if (scope.controllerSelector) {
+    // A label with an empty value still narrows the binding, so it prints as `key=`.
     const labels = Object.entries(scope.controllerSelector.matchLabels ?? {})
-      .filter(([, v]) => v !== undefined && v !== "")
       .map(([k, v]) => `${k}=${v}`)
       .join(",");
     if (labels) parts.push(`sel:${labels}`);
@@ -44,10 +45,12 @@ function formatScope(binding: VarroaRoleBinding): string {
     const jobs = tenant.jobs && tenant.jobs.length > 0 ? ` jobs:${tenant.jobs.join(",")}` : "";
     parts.push(`tenant:${tenant.name}${jobs}`);
   }
-  return parts.length > 0 ? parts.join(" ") : "Cluster-wide";
+  // A scope that names no part matches every controller. It grants no cluster-scoped resource and no tenant.
+  return parts.length > 0 ? parts.join(" ") : "All controllers";
 }
 
 function scopeCategory(binding: VarroaRoleBinding): string {
+  // The Cluster-wide chip counts an absent scope only, as the resolver does. An empty scope counts as Scoped.
   if (!binding.spec.scope) return "Cluster-wide";
   return "Scoped";
 }
