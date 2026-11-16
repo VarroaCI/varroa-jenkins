@@ -24,7 +24,7 @@ import { QualityTrendCard } from "./QualityTrendCard";
 import { JobBadgeCard } from "./JobBadgeCard";
 import { forgeFileHref, forgeTreeHref } from "./forgeLink";
 import { RevisionLink } from "./RevisionLink";
-import { TRIGGER_LABEL, changeRequestLabel, queueWaitMs, safeWebUrl } from "./runMeta";
+import { TRIGGER_LABEL, changeRequestLabel, queueWaitMs, safeWebUrl, waitCountText } from "./runMeta";
 import type {
   ChangeRequest,
   RunNotification,
@@ -565,7 +565,7 @@ export default function PipelinePage() {
                 <div key={w.runId}>
                   <dt>{w.kind === "cell" ? "Cell cap" : w.limit ?? "Limit"}</dt>
                   <dd>
-                    {w.running} of {w.max} builds run, waiting since {new Date(w.since).toLocaleTimeString()}.{" "}
+                    {waitCountText(w)}, waiting since {new Date(w.since).toLocaleTimeString()}.{" "}
                     <span>Run {w.runId}</span>
                   </dd>
                 </div>

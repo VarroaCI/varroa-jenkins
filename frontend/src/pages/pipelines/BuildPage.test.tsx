@@ -1797,7 +1797,22 @@ describe("BuildPage — concurrency wait", () => {
     );
     renderPage();
     expect(
-      await screen.findByText("Waiting on concurrency limit deploys: 1 of 1 builds run."),
+      await screen.findByText("Waiting on concurrency limit deploys: 1 of 1 build running."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the cell cap notice", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({
+        status: "QUEUED",
+        result: undefined,
+        buildNumber: undefined,
+        waiting: { kind: "cell", cell: "cell-a", max: 3, running: 2, since: "2026-10-12T01:00:00Z" },
+      }),
+    );
+    renderPage();
+    expect(
+      await screen.findByText("Waiting on the tenant cap of cell cell-a: 2 of 3 builds running."),
     ).toBeInTheDocument();
   });
 });

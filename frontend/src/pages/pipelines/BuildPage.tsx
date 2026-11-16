@@ -48,6 +48,7 @@ import { ShortcutLegend } from "./ShortcutLegend";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { formatDuration } from "./JobTree";
 import { breakablePath } from "./breakablePath";
+import { waitCountText } from "./runMeta";
 import { groupTestCases } from "./testCaseGroups";
 import { StageGraph } from "./StageGraph";
 import { RunLogViewer, type RunLogViewerHandle } from "./RunLogViewer";
@@ -833,8 +834,8 @@ export default function BuildPage() {
       {run.waiting && (
         <div className={styles.waitNotice} role="status">
           {run.waiting.kind === "cell"
-            ? `Waiting on the tenant cap of cell ${run.waiting.cell ?? ""}: ${run.waiting.running} of ${run.waiting.max} builds run.`
-            : `Waiting on concurrency limit ${run.waiting.limit ?? ""}: ${run.waiting.running} of ${run.waiting.max} builds run.`}
+            ? `Waiting on the tenant cap of cell ${run.waiting.cell ?? ""}: ${waitCountText(run.waiting)}.`
+            : `Waiting on concurrency limit ${run.waiting.limit ?? ""}: ${waitCountText(run.waiting)}.`}
         </div>
       )}
 

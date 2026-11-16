@@ -1,4 +1,5 @@
-import type { ChangeRequest, TriggerSource } from "../../types";
+import { plural } from "../../lib/plural";
+import type { ChangeRequest, RunWait, TriggerSource } from "../../types";
 
 /** QUEUE_WAIT_SHOWN_MS is the shortest queue wait the build page names.
  * A shorter wait is noise, so the page hides it. */
@@ -52,4 +53,9 @@ export function safeWebUrl(url?: string): string | undefined {
 export function sortedParams(params?: Record<string, string>): [string, string][] {
   if (!params) return [];
   return Object.entries(params).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** waitCountText answers the count of a cap wait, for example "1 of 1 build running". The noun agrees with the maximum. */
+export function waitCountText(w: Pick<RunWait, "running" | "max">): string {
+  return `${w.running} of ${plural(w.max, "build", "builds")} running`;
 }
