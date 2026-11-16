@@ -66,6 +66,7 @@ spec:
                   has RBAC in. Must have at least one entry.
                 items:
                   type: string
+                minItems: 1
                 type: array
               pipelines:
                 description: |-

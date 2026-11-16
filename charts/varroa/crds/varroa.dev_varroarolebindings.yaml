@@ -52,7 +52,8 @@ spec:
                 description: |-
                   Scope restricts which namespaces, controllers, or pipelines tenants this
                   binding applies to. A scope names one dimension: tenants, or
-                  namespaces/controllerSelector, never both.
+                  namespaces/controllerSelector, never both. A scope names at least one
+                  namespace, label, expression, or tenant. A cluster-wide binding omits scope.
                 properties:
                   controllerSelector:
                     description: ControllerSelector is an optional label selector
@@ -134,6 +135,13 @@ spec:
                 x-kubernetes-validations:
                 - message: a scope names one dimension
                   rule: '!has(self.tenants) || (!has(self.namespaces) && !has(self.controllerSelector))'
+                - message: a scope must name a namespace, a label, an expression,
+                    or a tenant. To bind cluster-wide, omit scope
+                  rule: (has(self.namespaces) && size(self.namespaces) > 0) || (has(self.tenants)
+                    && size(self.tenants) > 0) || (has(self.controllerSelector) &&
+                    ((has(self.controllerSelector.matchLabels) && size(self.controllerSelector.matchLabels)
+                    > 0) || (has(self.controllerSelector.matchExpressions) && size(self.controllerSelector.matchExpressions)
+                    > 0)))
                 - message: a scope that names no tenant grants nothing
                   rule: '!has(self.tenants) || size(self.tenants) > 0'
                 - message: a grant that names no tenant grants nothing

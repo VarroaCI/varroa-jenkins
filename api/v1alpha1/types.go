@@ -1556,6 +1556,7 @@ type TenantSpec struct {
 	Subjects []SubjectRef `json:"subjects,omitempty"`
 	// Namespaces is the required list of Kubernetes namespaces this tenant
 	// has RBAC in. Must have at least one entry.
+	// +kubebuilder:validation:MinItems=1
 	Namespaces []string `json:"namespaces"`
 	// RoleRef is the VarroaRole to bind. Defaults to "developer" when empty.
 	RoleRef string `json:"roleRef,omitempty"`
@@ -3161,8 +3162,10 @@ type VarroaRoleBindingSpec struct {
 	RoleRef  string       `json:"roleRef"`
 	// Scope restricts which namespaces, controllers, or pipelines tenants this
 	// binding applies to. A scope names one dimension: tenants, or
-	// namespaces/controllerSelector, never both.
+	// namespaces/controllerSelector, never both. A scope names at least one
+	// namespace, label, expression, or tenant. A cluster-wide binding omits scope.
 	// +kubebuilder:validation:XValidation:rule="!has(self.tenants) || (!has(self.namespaces) && !has(self.controllerSelector))",message="a scope names one dimension"
+	// +kubebuilder:validation:XValidation:rule="(has(self.namespaces) && size(self.namespaces) > 0) || (has(self.tenants) && size(self.tenants) > 0) || (has(self.controllerSelector) && ((has(self.controllerSelector.matchLabels) && size(self.controllerSelector.matchLabels) > 0) || (has(self.controllerSelector.matchExpressions) && size(self.controllerSelector.matchExpressions) > 0)))",message="a scope must name a namespace, a label, an expression, or a tenant. To bind cluster-wide, omit scope"
 	// +kubebuilder:validation:XValidation:rule="!has(self.tenants) || size(self.tenants) > 0",message="a scope that names no tenant grants nothing"
 	// +kubebuilder:validation:XValidation:rule="!has(self.tenants) || self.tenants.all(t, size(t.name) > 0)",message="a grant that names no tenant grants nothing"
 	// +kubebuilder:validation:XValidation:rule="!has(self.tenants) || self.tenants.all(t, !t.name.contains('/'))",message="a tenant name is a Tenant name"

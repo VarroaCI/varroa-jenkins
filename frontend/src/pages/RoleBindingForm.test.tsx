@@ -559,3 +559,70 @@ describe("RoleBindingForm — controller selector match expressions", () => {
     });
   });
 });
+
+describe("RoleBindingForm — a stored scope that names no part", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = "my-binding";
+    mockListRoles.mockResolvedValue({ items: availableRoles });
+    mockListTenants.mockResolvedValue([]);
+    mockListPipelines.mockResolvedValue({
+      items: [],
+      runningNow: [],
+      tenantFolder: "",
+      truncated: false,
+    });
+    mockUpdateRoleBinding.mockResolvedValue({});
+  });
+
+  async function openEditWith(scope: VarroaRoleBindingScope) {
+    mockGetRoleBinding.mockResolvedValue(
+      createRoleBinding({
+        metadata: { name: "my-binding" },
+        spec: { subjects: [{ kind: "User", name: "alice" }], roleRef: "varroa:admin", scope },
+      }),
+    );
+    renderWithProviders(<RoleBindingForm />);
+    await waitFor(() => {
+      expect(screen.getByText("Edit Role Binding: my-binding")).toBeInTheDocument();
+    });
+    return userEvent.setup();
+  }
+
+  it.each([
+    { label: "an empty scope", scope: {} },
+    { label: "an empty namespaces list", scope: { namespaces: [] } },
+    { label: "an empty controller selector", scope: { controllerSelector: {} } },
+    {
+      label: "a controller selector of empty lists",
+      scope: { controllerSelector: { matchLabels: {}, matchExpressions: [] } },
+    },
+  ])("refuses the save and does not widen the binding for $label", async ({ scope }) => {
+    const user = await openEditWith(scope as VarroaRoleBindingScope);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/names no namespace, label, expression, or tenant/)).toBeInTheDocument();
+    expect(mockUpdateRoleBinding).not.toHaveBeenCalled();
+  });
+
+  it("saves a stored empty scope once the user names a namespace", async () => {
+    const user = await openEditWith({});
+    await user.click(screen.getByText(/Scope/));
+    await user.type(screen.getByPlaceholderText("namespace-a, namespace-b"), "team-a");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(mockUpdateRoleBinding).toHaveBeenCalled();
+    });
+    expect(mockUpdateRoleBinding.mock.calls[0][1].spec.scope).toEqual({ namespaces: ["team-a"] });
+  });
+
+  it("removes a scope that names a part when the user clears every field", async () => {
+    const user = await openEditWith({ namespaces: ["team-a"] });
+    await user.click(screen.getByText(/Scope/));
+    await user.clear(screen.getByPlaceholderText("namespace-a, namespace-b"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(mockUpdateRoleBinding).toHaveBeenCalled();
+    });
+    expect(mockUpdateRoleBinding.mock.calls[0][1].spec.scope).toBeUndefined();
+  });
+});

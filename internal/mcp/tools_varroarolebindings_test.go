@@ -615,28 +615,6 @@ func TestCreateVarroaRoleBinding_ControllerSelectorKeepsExpressions(t *testing.T
 	}
 }
 
-// TestCreateVarroaRoleBinding_EmptyControllerSelectorAccepted proves that an
-// empty selector is stored as an empty selector, so it survives a round trip.
-func TestCreateVarroaRoleBinding_EmptyControllerSelectorAccepted(t *testing.T) {
-	deps := varroaRoleBindingWriterDeps(t)
-	tr := callToolAs(t, deps, mcpRBWriterClaims, "create_varroa_role_binding", map[string]interface{}{
-		"name":     "vrb-empty-selector",
-		"roleRef":  "developer",
-		"subjects": []interface{}{map[string]interface{}{"kind": "User", "name": "alice"}},
-		"scope":    map[string]interface{}{"controllerSelector": map[string]interface{}{}},
-	})
-	if tr.IsError {
-		t.Fatalf("create_varroa_role_binding returned error: %v", tr.Content)
-	}
-	stored, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), deps.Store, "vrb-empty-selector", "")
-	if err != nil {
-		t.Fatalf("get created binding: %v", err)
-	}
-	if stored.Spec.Scope == nil || stored.Spec.Scope.ControllerSelector == nil {
-		t.Fatalf("stored binding lost its empty controllerSelector: %+v", stored.Spec.Scope)
-	}
-}
-
 // TestCreateVarroaRoleBinding_InvalidScopeRejected proves that a scope shape
 // the parser cannot keep whole is refused before any object is written.
 func TestCreateVarroaRoleBinding_InvalidScopeRejected(t *testing.T) {
@@ -703,6 +681,17 @@ func TestCreateVarroaRoleBinding_InvalidScopeRejected(t *testing.T) {
 		{
 			name:  "namespaces is an empty list",
 			scope: map[string]interface{}{"namespaces": []interface{}{}},
+		},
+		{
+			name:  "controllerSelector is empty",
+			scope: map[string]interface{}{"controllerSelector": map[string]interface{}{}},
+		},
+		{
+			name: "controllerSelector holds empty lists",
+			scope: map[string]interface{}{"controllerSelector": map[string]interface{}{
+				"matchLabels":      map[string]interface{}{},
+				"matchExpressions": []interface{}{},
+			}},
 		},
 		{
 			name:  "namespaces holds a non-string",
@@ -799,6 +788,11 @@ func TestCreateVarroaRoleBinding_EmptyScopeMessages(t *testing.T) {
 			scope: map[string]interface{}{"namespaces": []interface{}{}},
 			want:  "invalid scope: scope.namespaces is empty and sets no namespace limit; name one namespace or omit the key",
 		},
+		{
+			name:  "empty controllerSelector",
+			scope: map[string]interface{}{"controllerSelector": map[string]interface{}{}},
+			want:  "invalid scope: scope.controllerSelector is empty and sets no label limit; name one label or expression, or omit the key",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -816,6 +810,28 @@ func TestCreateVarroaRoleBinding_EmptyScopeMessages(t *testing.T) {
 				t.Errorf("error text = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestParseBindingScope_EmptySelectorRefused proves that both scope arguments
+// refuse an empty controllerSelector, because an empty selector matches every
+// controller.
+func TestParseBindingScope_EmptySelectorRefused(t *testing.T) {
+	cases := []struct {
+		arg    scopeArg
+		prefix string
+	}{
+		{arg: varroaScopeArg, prefix: "invalid scope: scope.controllerSelector"},
+		{arg: jenkinsControllerScopeArg, prefix: "invalid controllerScope: controllerScope.controllerSelector"},
+	}
+	for _, tc := range cases {
+		_, err := parseBindingScope(map[string]interface{}{"controllerSelector": map[string]interface{}{}}, tc.arg)
+		if err == nil {
+			t.Fatalf("parseBindingScope(%s) accepted an empty controllerSelector", tc.arg.name)
+		}
+		if !strings.HasPrefix(err.Error(), tc.prefix) {
+			t.Errorf("error = %q, want prefix %q", err.Error(), tc.prefix)
+		}
 	}
 }
 

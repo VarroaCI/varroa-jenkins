@@ -27,7 +27,7 @@ kubectl apply -f tenant.yaml
 kubectl get tenant payments -o yaml
 ```
 
-`namespaces` must not be empty. `roleRef` defaults to `developer`. `members` names local users; `subjects` names identities from the configured provider.
+`namespaces` must name at least one namespace. The API server refuses an empty list. `roleRef` defaults to `developer`. `members` names local users; `subjects` names identities from the configured provider.
 
 The names `runs` and `overview` are reserved. The pipelines API uses them as routes.
 

@@ -308,6 +308,11 @@ func parseBindingScope(raw interface{}, a scopeArg) (*v1alpha1.VarroaRoleBinding
 		if err != nil {
 			return nil, err
 		}
+		// An empty selector matches every controller. The VarroaRoleBinding
+		// CRD refuses it, so the parser refuses it first with a clearer message.
+		if len(sel.MatchLabels) == 0 && len(sel.MatchExpressions) == 0 {
+			return nil, fmt.Errorf("invalid %s: %s.controllerSelector is empty and sets no label limit; name one label or expression, or omit the key", a.name, a.name)
+		}
 		scope.ControllerSelector = sel
 	}
 	return scope, nil
