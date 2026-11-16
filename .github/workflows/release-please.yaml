@@ -31,7 +31,7 @@ jobs:
       # tags` trigger will NOT run for it. The step after this one dispatches
       # release.yaml against the tag; it carries a workflow_dispatch trigger
       # for exactly this.
-      - uses: google-github-actions/release-please-action@v4
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           config-file: .github/release-please-config.json
           manifest-file: .release-please-manifest.json
