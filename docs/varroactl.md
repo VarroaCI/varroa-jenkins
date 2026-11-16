@@ -138,7 +138,7 @@ Use [Controller lifecycle operations](operations/lifecycle.md) for state changes
 
 `get jenkinsrolebindings` prints `NAME`, `ROLE`, `SUBJECTS`, `JENKINS-SCOPE`, and `CONTROLLER`. The operator writes one binding for each role in the `spec.rbacSpec` of a controller. `CONTROLLER` shows that controller as `<namespace>/<name>`. It shows `-` for every other binding. See [Configure Varroa RBAC](security/varroa-rbac.md#create-a-custom-role).
 
-`get rolebindings` prints `NAME`, `ROLE`, `SUBJECTS`, `SCOPE`, and `OWNER`. `OWNER` shows the `TenantAgent` or `BroodSchedule` that writes the binding, as `<kind>/<namespace>/<name>`. It shows `-` for every other binding. See [Read a role binding that the operator writes](security/varroa-rbac.md#read-a-role-binding-that-the-operator-writes).
+`get rolebindings` prints `NAME`, `ROLE`, `SUBJECTS`, `SCOPE`, and `OWNER`. `SCOPE` uses the words of the dashboard Role Bindings page. `ns:<a>,<b>` shows the namespaces. `sel:<key>=<value>` shows the controller labels. `Selector` shows a selector with only match expressions. `tenant:<name>` shows a tenant, followed by `jobs:<glob>` when the grant names jobs. A binding with no scope shows `Cluster-wide`. `OWNER` shows the `TenantAgent` or `BroodSchedule` that writes the binding, as `<kind>/<namespace>/<name>`. It shows `-` for every other binding. See [Read a role binding that the operator writes](security/varroa-rbac.md#read-a-role-binding-that-the-operator-writes).
 
 ## Work across clusters
 

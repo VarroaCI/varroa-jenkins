@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -127,21 +130,62 @@ func roleBindingColumns(item map[string]any) []string {
 		}
 	}
 
-	// SCOPE: namespaces=a,b / selector / "-"
-	scope := "-"
-	if spec, ok := item["spec"].(map[string]any); ok {
-		if ns, ok := spec["namespaces"].([]any); ok && len(ns) > 0 {
-			nsStrs := make([]string, 0, len(ns))
-			for _, n := range ns {
-				nsStrs = append(nsStrs, fmt.Sprintf("%v", n))
+	return []string{itemName(item), roleRef, subjects, roleBindingScope(item), roleBindingOwner(item)}
+}
+
+// roleBindingScope returns the SCOPE cell of a VarroaRoleBinding: the
+// spec.scope text, "Cluster-wide" when spec.scope is absent or names no part,
+// or "-" when spec.scope cannot be read. The words match formatScope in
+// frontend/src/pages/RoleBindings.tsx. Change both together.
+func roleBindingScope(item map[string]any) string {
+	spec, _ := item["spec"].(map[string]any)
+	raw := spec["scope"]
+	if raw == nil {
+		return "Cluster-wide"
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return "-"
+	}
+	var sc v1alpha1.VarroaRoleBindingScope
+	if err := json.Unmarshal(b, &sc); err != nil {
+		return "-"
+	}
+	return formatBindingScope(&sc)
+}
+
+// formatBindingScope joins the namespace, selector, and tenant parts of sc
+// with one space, or returns "Cluster-wide" when sc names no part.
+// Label keys are sorted, because the dashboard shows them in JSON key order.
+func formatBindingScope(sc *v1alpha1.VarroaRoleBindingScope) string {
+	var parts []string
+	if len(sc.Namespaces) > 0 {
+		parts = append(parts, "ns:"+strings.Join(sc.Namespaces, ","))
+	}
+	if sel := sc.ControllerSelector; sel != nil {
+		var labels []string
+		for _, k := range slices.Sorted(maps.Keys(sel.MatchLabels)) {
+			if v := sel.MatchLabels[k]; v != "" {
+				labels = append(labels, k+"="+v)
 			}
-			scope = "namespaces=" + strings.Join(nsStrs, ",")
-		} else if sel, ok := spec["namespaceSelector"].(map[string]any); ok && len(sel) > 0 {
-			scope = "selector"
+		}
+		if len(labels) > 0 {
+			parts = append(parts, "sel:"+strings.Join(labels, ","))
+		} else if len(sel.MatchExpressions) > 0 {
+			parts = append(parts, "Selector")
 		}
 	}
-
-	return []string{itemName(item), roleRef, subjects, scope, roleBindingOwner(item)}
+	for _, t := range sc.Tenants {
+		p := "tenant:" + t.Name
+		if len(t.Jobs) > 0 {
+			p += " jobs:" + strings.Join(t.Jobs, ",")
+		}
+		parts = append(parts, p)
+	}
+	if len(parts) == 0 {
+		return "Cluster-wide"
+	}
+	return strings.Join(parts, " ")
 }
 
 // roleBindingOwner returns "<kind>/<namespace>/<name>" of the object whose
@@ -229,7 +273,7 @@ func jenkinsRoleBindingColumns(item map[string]any) []string {
 		}
 	}
 
-	// JENKINS-SCOPE: spec.jenkinsScope.type default "Global", "Folder" shows "folder"
+	// JENKINS-SCOPE: spec.jenkinsScope.type, default "Global"; the type prints unchanged
 	jenkinsScope := "Global"
 	if spec, ok := item["spec"].(map[string]any); ok {
 		if js, ok := spec["jenkinsScope"].(map[string]any); ok {

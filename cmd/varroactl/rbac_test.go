@@ -190,20 +190,76 @@ func TestRBAC_Roles_NameOutput(t *testing.T) {
 // Smoke tests for the other three families
 // ---------------------------------------------------------------------------
 
-func TestRBAC_RoleBindings_Smoke(t *testing.T) {
+// withScope returns a VarroaRoleBinding API object whose spec.scope is scope.
+func withScope(name string, scope any) map[string]any {
+	item := vrbItem(name, nil, nil)
+	item["spec"].(map[string]any)["scope"] = scope
+	return item
+}
+
+func TestRoleBindingColumns_Scope(t *testing.T) {
+	tests := []struct {
+		name string
+		item map[string]any
+		want string
+	}{
+		{"no scope", vrbItem("vrb-none", nil, nil), "Cluster-wide"},
+		{"null scope", withScope("vrb", nil), "Cluster-wide"},
+		{"empty scope", withScope("vrb", map[string]any{}), "Cluster-wide"},
+		{"namespaces", withScope("vrb", map[string]any{"namespaces": []any{"ns-a", "ns-b"}}), "ns:ns-a,ns-b"},
+		{"labels sorted", withScope("vrb", map[string]any{"controllerSelector": map[string]any{
+			"matchLabels": map[string]any{"tier": "prod", "env": "qa"},
+		}}), "sel:env=qa,tier=prod"},
+		{"expressions only", withScope("vrb", map[string]any{"controllerSelector": map[string]any{
+			"matchExpressions": []any{map[string]any{"key": "env", "operator": "Exists"}},
+		}}), "Selector"},
+		{"labels and expressions", withScope("vrb", map[string]any{"controllerSelector": map[string]any{
+			"matchLabels":      map[string]any{"tier": "prod"},
+			"matchExpressions": []any{map[string]any{"key": "env", "operator": "Exists"}},
+		}}), "sel:tier=prod"},
+		{"namespace and expressions", withScope("vrb", map[string]any{
+			"namespaces": []any{"ns-a"},
+			"controllerSelector": map[string]any{
+				"matchExpressions": []any{map[string]any{"key": "env", "operator": "Exists"}},
+			},
+		}), "ns:ns-a Selector"},
+		{"empty selector", withScope("vrb", map[string]any{"controllerSelector": map[string]any{}}), "Cluster-wide"},
+		{"one tenant", withScope("vrb", map[string]any{"tenants": []any{
+			map[string]any{"name": "payments"},
+		}}), "tenant:payments"},
+		{"tenant with jobs", withScope("vrb", map[string]any{"tenants": []any{
+			map[string]any{"name": "payments", "jobs": []any{"release/*", "build/**"}},
+		}}), "tenant:payments jobs:release/*,build/**"},
+		{"two tenants", withScope("vrb", map[string]any{"tenants": []any{
+			map[string]any{"name": "payments"},
+			map[string]any{"name": "billing", "jobs": []any{"deploy/*"}},
+		}}), "tenant:payments tenant:billing jobs:deploy/*"},
+		{"unreadable scope", withScope("vrb", map[string]any{"namespaces": "ns-a"}), "-"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cols := roleBindingColumns(tc.item)
+			if len(cols) != 5 {
+				t.Fatalf("want 5 columns, got %d: %v", len(cols), cols)
+			}
+			if cols[3] != tc.want {
+				t.Errorf("SCOPE = %q, want %q", cols[3], tc.want)
+			}
+		})
+	}
+}
+
+func TestRBAC_RoleBindings_ScopeColumn(t *testing.T) {
 	testSetup(t)
 	srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"items": []map[string]any{
-				{
-					"metadata": map[string]any{"name": "binding1"},
-					"spec": map[string]any{
-						"roleRef": "admin",
-						"subjects": []any{
-							map[string]any{"kind": "User", "name": "alice"},
-						},
-					},
-				},
+				withScope("vrb-ns", map[string]any{"namespaces": []any{"ns-a", "ns-b"}}),
+				withScope("vrb-sel", map[string]any{"controllerSelector": map[string]any{
+					"matchLabels": map[string]any{"tier": "prod"},
+				}}),
+				withScope("vrb-tenant", map[string]any{"tenants": []any{map[string]any{"name": "payments"}}}),
+				vrbItem("vrb-none", nil, nil),
 			},
 		})
 	})
@@ -211,8 +267,20 @@ func TestRBAC_RoleBindings_Smoke(t *testing.T) {
 
 	root := newRootCmd()
 	root.SetArgs([]string{"get", "rolebindings"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	var runErr error
+	out := captureStdout(t, func() { runErr = root.Execute() })
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("want header plus four rows, got %d lines:\n%s", len(lines), out)
+	}
+	want := []string{"ns:ns-a,ns-b", "sel:tier=prod", "tenant:payments", "Cluster-wide"}
+	for i, w := range want {
+		if got := strings.Fields(lines[i+1])[3]; got != w {
+			t.Errorf("row %d SCOPE = %q, want %q\n%s", i, got, w, out)
+		}
 	}
 }
 
