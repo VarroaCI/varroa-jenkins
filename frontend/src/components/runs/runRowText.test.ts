@@ -99,9 +99,9 @@ describe("runTiming", () => {
     );
   });
 
-  it("shows the age and the duration of a completed run", () => {
+  it("shows only the duration of a completed run", () => {
     const r = row({ durationMs: 75_000, startedAt: new Date(NOW - 3600_000).toISOString() });
-    expect(runTiming(r, NOW)).toBe("1h ago · 1m 15s");
+    expect(runTiming(r, NOW)).toBe("1m 15s");
   });
 });
 

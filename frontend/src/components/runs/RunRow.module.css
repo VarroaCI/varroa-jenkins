@@ -180,10 +180,16 @@
     border-bottom: 1px solid var(--border);
   }
 
-  .row td {
+  /* The bundle can load tables.module.css after this file. This selector outranks .dataTable td in any order. */
+  tr.row > td {
     display: block;
     padding: 0;
     border: 0;
     min-width: 0;
+  }
+
+  /* A stacked row shows no empty cell. An empty cell holds no child node. */
+  tr.row > td:empty {
+    display: none;
   }
 }

@@ -1,5 +1,4 @@
 import type { FleetRunRow } from "../../types";
-import { age } from "../activityTimeline.util";
 import { formatDuration } from "../../pages/pipelines/JobTree";
 import { stripTenantFolder } from "../../pages/pipelines/jobPath";
 import { displayActor, isMachineActor } from "./runActor";
@@ -13,8 +12,9 @@ function elapsedSince(ts: string | undefined, now: number): number | undefined {
 
 /**
  * runTiming answers the timing text of a run: its queue state, its elapsed
- * time while it runs, its wait for input, its interrupted reason, or its age
- * and duration once it ends.
+ * time while it runs, its wait for input, its interrupted reason, or its
+ * duration once it ends. The Started cell holds the age, so this text never
+ * repeats it.
  */
 export function runTiming(r: FleetRunRow, now: number): string {
   if (r.pendingInput) {
@@ -29,8 +29,7 @@ export function runTiming(r: FleetRunRow, now: number): string {
   if (r.result === "INTERRUPTED") {
     return r.interruptedReason ? `interrupted · ${r.interruptedReason}` : "interrupted";
   }
-  const started = r.startedAt ?? r.createdAt;
-  return `${age(started, { now })} · ${formatDuration(r.durationMs)}`;
+  return formatDuration(r.durationMs);
 }
 
 /** runJobName answers the job path without its tenant folder. */

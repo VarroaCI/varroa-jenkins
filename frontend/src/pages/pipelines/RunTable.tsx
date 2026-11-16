@@ -12,8 +12,8 @@ export interface RunTableProps {
 }
 
 /**
- * RunTable is the one frame of a fleet run table. The command center and the
- * Overview both draw their rows inside it.
+ * RunTable is the one frame of a fleet run table. The command center draws
+ * its rows inside it.
  */
 export function RunTable({ head, children }: RunTableProps) {
   return (
