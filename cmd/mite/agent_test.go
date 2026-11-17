@@ -1226,7 +1226,8 @@ func TestApplyConfigViaReloadHappyPath(t *testing.T) {
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"hello from casc\"\n",
 	}
-	configOK, configErr := agent.applyConfigViaReload(context.Background(), client, cmd)
+	out := agent.applyConfigViaReload(context.Background(), client, cmd)
+	configOK, configErr := out.configOK, out.configErr
 	if !configOK {
 		t.Fatalf("expected success, got ConfigError=%q", configErr)
 	}
@@ -1289,7 +1290,8 @@ func TestApplyConfigViaReloadRollbackRestored(t *testing.T) {
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"risky\"\n",
 	}
-	configOK, configErr := agent.applyConfigViaReload(context.Background(), client, cmd)
+	out := agent.applyConfigViaReload(context.Background(), client, cmd)
+	configOK, configErr := out.configOK, out.configErr
 	if configOK {
 		t.Fatal("expected failure after rollback")
 	}
@@ -1334,7 +1336,8 @@ func TestApplyConfigViaReloadRollbackAlsoFailed(t *testing.T) {
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"risky\"\n",
 	}
-	configOK, configErr := agent.applyConfigViaReload(context.Background(), client, cmd)
+	out := agent.applyConfigViaReload(context.Background(), client, cmd)
+	configOK, configErr := out.configOK, out.configErr
 	if configOK {
 		t.Fatal("expected failure after double failure")
 	}
@@ -1359,7 +1362,8 @@ func TestApplyConfigViaReloadNoLastGood(t *testing.T) {
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"first ever\"\n",
 	}
-	configOK, configErr := agent.applyConfigViaReload(context.Background(), client, cmd)
+	out := agent.applyConfigViaReload(context.Background(), client, cmd)
+	configOK, configErr := out.configOK, out.configErr
 	if configOK {
 		t.Fatal("expected failure with no last-good")
 	}
@@ -1397,7 +1401,8 @@ func TestApplyConfigViaReloadWritesRbacYaml(t *testing.T) {
 		JcascYaml: "jenkins:\n  systemMessage: \"hello\"\n",
 		RbacYaml:  "jenkins:\n  authorizationStrategy:\n    roleBased:\n      roles:\n        global: []\n",
 	}
-	configOK, configErr := agent.applyConfigViaReload(context.Background(), client, cmd)
+	out := agent.applyConfigViaReload(context.Background(), client, cmd)
+	configOK, configErr := out.configOK, out.configErr
 	if !configOK {
 		t.Fatalf("expected success, got ConfigError=%q", configErr)
 	}

@@ -123,6 +123,8 @@ A lost mite stream keeps the pod and the phase `Running`. The operator rolls the
 
 Reloadable configuration can apply without replacing the pod. Changes to plugins, images, or other restart-class settings can return the controller to `Provisioning` while Varroa rolls it.
 
+The mite applies `config.yaml` and `rbac.yaml` in one JCasC reload. When Jenkins refuses the reload, the mite tries each changed document alone with the last accepted copy of the other. Jenkins keeps each document that it accepts. The `config` and `rbac` sections of `status.lastApplyResult` each report their own result and Jenkins error.
+
 Each pod start applies the next-boot seed: the ConfigMap of the controller whose name ends in `-casc`. Varroa updates the seed after the live reload accepts a configuration. When the live reload refuses `config.yaml` or `rbac.yaml`, the seed keeps the last accepted copy of each refused document. `status.cascRefusal` holds the digest of each refused document. A restart thus boots with the configuration that Jenkins last accepted, and the status still shows **Apply failed**. A pod roll seeds a changed document that the live reload did not refuse. The first pod of a new controller starts with the resolved configuration.
 
 ```bash

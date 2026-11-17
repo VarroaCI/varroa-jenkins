@@ -2579,31 +2579,27 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 	//    bundle file(s) into the CASC directory, then POST .../reload. The
 	//    mite has no path to the admin-gated apply/check endpoints, so it
 	//    needs no Jenkins.ADMINISTER. rbac.yaml is written and reloaded
-	//    together with config in the same call.
+	//    together with config in the same call. Each document gets its own
+	//    verdict, so a refused rbac.yaml does not fail an accepted
+	//    config.yaml.
 	configChanged := cmd.JcascYaml != "" && !converged("config")
 	rbacChanged := cmd.RbacYaml != "" && !converged("rbac")
 
 	if configChanged || rbacChanged {
-		configOK, configErr := a.applyConfigViaReload(ctx, jenkinsClient, cmd)
-		result.ConfigSuccess = configOK
-		if !configOK {
-			result.ConfigError = configErr
+		out := a.applyConfigViaReload(ctx, jenkinsClient, cmd)
+		if cmd.JcascYaml != "" {
+			result.ConfigSuccess, result.ConfigError = out.configOK, out.configErr
 		}
-		// rbac.yaml is written as part of the same reload; treat
-		// success/failure uniformly with config.
 		if cmd.RbacYaml != "" {
-			result.RbacSuccess = configOK
-			if !configOK {
-				result.RbacError = configErr
-			}
+			result.RbacSuccess, result.RbacError = out.rbacOK, out.rbacErr
 		}
 		// Update stored last-good for snapshot hashes.
-		if configOK && cmd.JcascYaml != "" {
+		if out.configOK && cmd.JcascYaml != "" {
 			if err := os.WriteFile(filepath.Join(a.miteDir, "last-jcasc.yaml"), []byte(cmd.JcascYaml), 0600); err != nil {
 				a.Logger.Error("store jcasc failed", "error", err)
 			}
 		}
-		if configOK && cmd.RbacYaml != "" {
+		if out.rbacOK && cmd.RbacYaml != "" {
 			if err := os.WriteFile(filepath.Join(a.miteDir, "last-rbac.yaml"), []byte(cmd.RbacYaml), 0600); err != nil {
 				a.Logger.Error("store rbac failed", "error", err)
 			}
@@ -2616,6 +2612,12 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 		if cmd.RbacYaml != "" {
 			result.RbacSuccess = true
 		}
+	}
+	// A command without rbac.yaml has no RBAC to apply, so the section is
+	// trivially converged. The operator reads RbacSuccess as the rbac
+	// section of the apply result.
+	if cmd.RbacYaml == "" {
+		result.RbacSuccess = true
 	}
 
 	// 4. Apply the rehydration section: write every seeded build record
@@ -2892,6 +2894,8 @@ func confinedJoin(base, name string) (string, error) {
 
 // saveLastGood copies the named file from the live CASC directory into the
 // last-good sibling directory.  Errors are logged; the copy is best-effort.
+// When no live file exists, it removes the last-good copy: a copy from an
+// earlier pod is not live content, and a rollback must not restore it.
 func (a *Agent) saveLastGood(filename string) {
 	src, err := confinedJoin(cascDir(), filename)
 	if err != nil {
@@ -2909,8 +2913,14 @@ func (a *Agent) saveLastGood(filename string) {
 		return
 	}
 	srcData, err := os.ReadFile(src)
+	if errors.Is(err, os.ErrNotExist) {
+		if rerr := os.Remove(dst); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+			a.Logger.Warn("remove stale last-good failed", "file", filename, "error", rerr)
+		}
+		return
+	}
 	if err != nil {
-		// No existing file to save — not an error on first write.
+		a.Logger.Warn("read live file for last-good failed", "file", filename, "error", err)
 		return
 	}
 	if err := os.WriteFile(dst, srcData, 0600); err != nil {
@@ -2950,16 +2960,68 @@ func (a *Agent) hasLastGood(filename string) bool {
 	return err == nil
 }
 
-// applyConfigViaReload writes the changed bundle file(s) into the live CASC
+// cascReloadOutcome is the verdict of one CASC reload apply on each bundle
+// document of a command. A document that the command does not carry has ok
+// false and an empty error.
+type cascReloadOutcome struct {
+	configOK, rbacOK   bool
+	configErr, rbacErr string
+}
+
+// cascDoc is one bundle document that a command writes into the live CASC
+// directory, with its verdict.
+type cascDoc struct {
+	name    string
+	content string
+	// changed is true when content differs from the live file that the
+	// write replaces, or when no live file existed.
+	changed bool
+	ok      bool
+	err     string
+}
+
+// Suffixes of the failure text of a refused document. They tell the three
+// rollback outcomes apart.
+const (
+	cascRolledBack       = "rolled back to last-good"
+	cascRollbackFailed   = "rollback also failed"
+	cascNoLastGood       = "no last-good to roll back to"
+	cascReloadFailedText = "reload failed: %v; %s"
+)
+
+// applyConfigViaReload writes the bundle file(s) of cmd into the live CASC
 // directory, saves last-good copies, and triggers /configuration-as-code/reload.
-// On reload failure it restores last-good and retries exactly once, reporting
-// the outcome.  The config section is always reported as failed when reload
-// fails — the requested desired state was not applied — and convergence is
-// never recorded for a failed reload (the caller must gate on configOK).
-func (a *Agent) applyConfigViaReload(ctx context.Context, client *jenkins.Client, cmd *mitev1.DesiredStateCommand) (configOK bool, configErr string) {
-	casc := cascDir()
-	if err := os.MkdirAll(casc, 0755); err != nil {
-		return false, fmt.Sprintf("mkdir casc dir: %v", err)
+// JCasC loads every document of the directory in one reload, so one refused
+// document fails the whole reload. When the reload fails and both documents
+// changed, the mite reloads each document alone with the last-good copy of
+// the other, so a refused rbac.yaml does not block an accepted config.yaml.
+// A refused document is put back to its last-good copy and is reported as
+// failed. Convergence is never recorded for a failed document (the caller
+// must gate on the verdict).
+func (a *Agent) applyConfigViaReload(ctx context.Context, client *jenkins.Client, cmd *mitev1.DesiredStateCommand) cascReloadOutcome {
+	config := &cascDoc{name: "config.yaml", content: cmd.JcascYaml}
+	rbac := &cascDoc{name: "rbac.yaml", content: cmd.RbacYaml}
+	var docs []*cascDoc
+	for _, d := range []*cascDoc{config, rbac} {
+		if d.content != "" {
+			docs = append(docs, d)
+		}
+	}
+	a.reloadCascDocs(ctx, client, docs)
+	return cascReloadOutcome{configOK: config.ok, configErr: config.err, rbacOK: rbac.ok, rbacErr: rbac.err}
+}
+
+// reloadCascDocs writes docs, reloads JCasC, and sets the verdict of each
+// document.
+func (a *Agent) reloadCascDocs(ctx context.Context, client *jenkins.Client, docs []*cascDoc) {
+	failAll := func(msg string) {
+		for _, d := range docs {
+			d.ok, d.err = false, msg
+		}
+	}
+	if err := os.MkdirAll(cascDir(), 0755); err != nil {
+		failAll(fmt.Sprintf("mkdir casc dir: %v", err))
+		return
 	}
 
 	// Do NOT preflight with /configuration-as-code/check — it requires
@@ -2970,60 +3032,175 @@ func (a *Agent) applyConfigViaReload(ctx context.Context, client *jenkins.Client
 	// client's Reload reads the final request path, not the status code.
 
 	// Save last-good copies before overwriting.
-	if cmd.JcascYaml != "" {
-		a.saveLastGood("config.yaml")
+	for _, d := range docs {
+		a.saveLastGood(d.name)
+		d.changed = a.cascDocChanged(d.name, d.content)
 	}
-	if cmd.RbacYaml != "" {
-		a.saveLastGood("rbac.yaml")
-	}
-
-	// Write the changed files.
-	if cmd.JcascYaml != "" {
-		if err := os.WriteFile(filepath.Join(casc, "config.yaml"), []byte(cmd.JcascYaml), 0600); err != nil {
-			return false, fmt.Sprintf("write config.yaml: %v", err)
-		}
-	}
-	if cmd.RbacYaml != "" {
-		if err := os.WriteFile(filepath.Join(casc, "rbac.yaml"), []byte(cmd.RbacYaml), 0600); err != nil {
-			return false, fmt.Sprintf("write rbac.yaml: %v", err)
+	for _, d := range docs {
+		if err := writeCascDoc(d.name, d.content); err != nil {
+			failAll(fmt.Sprintf("write %s: %v", d.name, err))
+			return
 		}
 	}
 
-	// Trigger reload.
-	if err := client.Reload(ctx); err != nil {
-		a.Logger.Error("casc reload failed", "error", err)
+	reloadErr := client.Reload(ctx)
+	if reloadErr == nil {
+		for _, d := range docs {
+			d.ok = true
+		}
+		return
+	}
+	a.Logger.Error("casc reload failed", "error", reloadErr)
 
-		// Determine rollback outcome (three spec branches).
+	// blame holds the reload error that refused each document.
+	blame := make(map[*cascDoc]error, len(docs))
+	if len(docs) == 2 && docs[0].changed && docs[1].changed {
+		if a.isolateCascDocs(ctx, client, docs, reloadErr, blame) {
+			return
+		}
+	} else {
+		// An unchanged document holds live content, so the changed
+		// documents caused the refusal.
+		for _, d := range docs {
+			if d.changed {
+				blame[d] = reloadErr
+			}
+		}
+		if len(blame) == 0 {
+			for _, d := range docs {
+				blame[d] = reloadErr
+			}
+		}
+	}
+
+	suffix := a.rollbackCascDocs(ctx, client, docs)
+	for _, d := range docs {
+		cause, blamed := blame[d]
 		switch {
-		case !a.hasLastGood("config.yaml") && !a.hasLastGood("rbac.yaml"):
-			return false, fmt.Sprintf("reload failed: %v; no last-good to roll back to", err)
+		case blamed:
+			d.ok, d.err = false, fmt.Sprintf(cascReloadFailedText, cause, suffix)
+		case suffix == cascRolledBack:
+			// The rollback put back the same content, and Jenkins accepted it.
+			d.ok = true
 		default:
-			// Restore last-good files.
-			restored := true
-			if a.hasLastGood("config.yaml") {
-				if rerr := a.restoreLastGood("config.yaml"); rerr != nil {
-					a.Logger.Warn("restore last-good config.yaml failed", "error", rerr)
-					restored = false
-				}
-			}
-			if a.hasLastGood("rbac.yaml") {
-				if rerr := a.restoreLastGood("rbac.yaml"); rerr != nil {
-					a.Logger.Warn("restore last-good rbac.yaml failed", "error", rerr)
-					restored = false
-				}
-			}
-			if !restored {
-				return false, fmt.Sprintf("reload failed: %v; rollback also failed", err)
-			}
-			// Re-issue reload exactly once.
-			if rerr := client.Reload(ctx); rerr != nil {
-				return false, fmt.Sprintf("reload failed: %v; rollback also failed", err)
-			}
-			return false, fmt.Sprintf("reload failed: %v; rolled back to last-good", err)
+			d.ok, d.err = false, fmt.Sprintf(cascReloadFailedText, reloadErr, suffix)
 		}
 	}
+}
 
-	return true, ""
+// isolateCascDocs reloads each of two changed documents alone, with the
+// last-good copy of the other. combined is the error of the reload of both
+// documents. When one reload succeeds, isolateCascDocs sets every verdict and
+// answers true: the live directory then holds the accepted document and the
+// last-good copy of the refused one. Otherwise it records the error of each
+// document in blame and answers false. The caller then rolls back both.
+func (a *Agent) isolateCascDocs(ctx context.Context, client *jenkins.Client, docs []*cascDoc, combined error, blame map[*cascDoc]error) bool {
+	alone := make([]error, len(docs))
+	for i, d := range docs {
+		other := docs[1-i]
+		if err := writeCascDoc(d.name, d.content); err != nil {
+			a.Logger.Warn("casc isolation write failed", "file", d.name, "error", err)
+			break
+		}
+		if err := a.revertCascDoc(other.name); err != nil {
+			a.Logger.Warn("casc isolation restore failed", "file", other.name, "error", err)
+			break
+		}
+		alone[i] = client.Reload(ctx)
+		if alone[i] != nil {
+			a.Logger.Warn("casc reload refused one document", "file", d.name, "error", alone[i])
+			continue
+		}
+		// d loads alone, so the other document caused the refusal. When
+		// the first document loads alone, the error of the reload of both
+		// documents belongs to the second document. When the second
+		// document loads alone, the first document has the error of its
+		// own reload.
+		cause := combined
+		if i == 1 {
+			cause = alone[0]
+		}
+		d.ok = true
+		other.ok, other.err = false, fmt.Sprintf(cascReloadFailedText, cause, cascRolledBack)
+		return true
+	}
+	for i, d := range docs {
+		blame[d] = alone[i]
+		if blame[d] == nil {
+			blame[d] = combined
+		}
+	}
+	return false
+}
+
+// rollbackCascDocs puts the last-good copy of each document back, removes a
+// document that did not exist before the write, and re-issues the reload
+// exactly once. It answers the suffix of the failure text.
+func (a *Agent) rollbackCascDocs(ctx context.Context, client *jenkins.Client, docs []*cascDoc) string {
+	anyLastGood := false
+	restored := true
+	for _, d := range docs {
+		if a.hasLastGood(d.name) {
+			anyLastGood = true
+		}
+		// A refused document must leave the CASC directory even when no
+		// last-good copy exists, so a later pod start does not read it.
+		if err := a.revertCascDoc(d.name); err != nil {
+			a.Logger.Warn("restore last-good failed", "file", d.name, "error", err)
+			restored = false
+		}
+	}
+	if !restored {
+		return cascRollbackFailed
+	}
+	if !anyLastGood {
+		return cascNoLastGood
+	}
+	if err := client.Reload(ctx); err != nil {
+		return cascRollbackFailed
+	}
+	return cascRolledBack
+}
+
+// writeCascDoc writes one document into the live CASC directory.
+func writeCascDoc(name, content string) error {
+	p, err := confinedJoin(cascDir(), name)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p, []byte(content), 0600)
+}
+
+// revertCascDoc puts the live file of name back to its last-good copy. A
+// document with no last-good copy did not exist before the write, so its live
+// file is removed.
+func (a *Agent) revertCascDoc(name string) error {
+	if a.hasLastGood(name) {
+		return a.restoreLastGood(name)
+	}
+	p, err := confinedJoin(cascDir(), name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// cascDocChanged reports whether content differs from the last-good copy of
+// name, which saveLastGood took from the live file. A document with no
+// last-good copy is new, so it counts as changed.
+func (a *Agent) cascDocChanged(name, content string) bool {
+	p, err := confinedJoin(cascLastGoodDir(), name)
+	if err != nil {
+		return true
+	}
+	prior, err := os.ReadFile(p)
+	if err != nil {
+		return true
+	}
+	return string(prior) != content
 }
 
 // toProtoDeferredDeletions converts items engine DeferredDeletion values

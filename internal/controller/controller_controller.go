@@ -4282,14 +4282,16 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				// via the init-container pod roll), so the plugins section is
 				// always reported OK and never penalizes Succeeded.
 				pluginsOK := true
-				rbacOK := d.ConfigSuccess
+				// The mite gives rbac.yaml its own verdict, so a refused
+				// rbac.yaml names the rbac section and not config. A push
+				// with no rbac.yaml reports the section as converged.
 				ar := v1alpha1.ApplyResult{
 					Hash:      d.AppliedHash,
 					Timestamp: metav1.Now(),
-					Succeeded: d.ConfigSuccess && rbacOK && pluginsOK && d.ItemsSuccess,
+					Succeeded: d.ConfigSuccess && d.RbacSuccess && pluginsOK && d.ItemsSuccess,
 					Sections: []v1alpha1.ApplySectionResult{
 						{Name: "config", OK: d.ConfigSuccess, Error: truncate(d.ConfigError, 1024)},
-						{Name: "rbac", OK: rbacOK, Error: ""},
+						{Name: "rbac", OK: d.RbacSuccess, Error: truncate(d.RbacError, 1024)},
 						// plugins section always OK since the mite never runs it;
 						// plugins converge via the init-container pod roll.
 						{Name: "plugins", OK: pluginsOK, Error: truncate(d.PluginsError, 1024)},
