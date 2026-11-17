@@ -23,7 +23,7 @@ runs:
           version=$(grep -m1 '^go ' go.mod | awk '{print $2}')
         fi
         echo "version=$version" >> "$GITHUB_OUTPUT"
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v6
       with:
         go-version: ${{ steps.version.outputs.version }}
         cache: ${{ inputs.cache }}
