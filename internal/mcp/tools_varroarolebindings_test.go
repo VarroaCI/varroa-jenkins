@@ -770,8 +770,9 @@ func TestUpdateVarroaRoleBinding_InvalidControllerSelectorKeepsStoredScope(t *te
 }
 
 // TestCreateVarroaRoleBinding_EmptyScopeMessages pins the refusal text for the
-// two empty shapes. Both keep the binding cluster-wide if accepted, so each
-// message must name the fix and must not claim the scope grants nothing.
+// empty shapes. Each shape matches every controller if accepted, so each
+// message must name the fix and must not claim the scope grants nothing. No
+// message may call the binding cluster-wide, because only an omitted scope is.
 func TestCreateVarroaRoleBinding_EmptyScopeMessages(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -781,7 +782,7 @@ func TestCreateVarroaRoleBinding_EmptyScopeMessages(t *testing.T) {
 		{
 			name:  "empty scope",
 			scope: map[string]interface{}{},
-			want:  "invalid scope: an empty scope sets no limit, so the binding becomes cluster-wide; name namespaces, controllerSelector, or tenants, or omit scope",
+			want:  "invalid scope: an empty scope names no dimension and matches every controller; name namespaces, controllerSelector, or tenants, or omit scope",
 		},
 		{
 			name:  "empty namespaces list",
