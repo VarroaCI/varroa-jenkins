@@ -3,8 +3,7 @@ import { NavLink } from "react-router-dom";
 import { Boxes, CircleUserRound, Clock3, Hexagon, PlugZap, Shield, Waypoints, Workflow } from "lucide-react";
 import { NavIcon } from "./NavIcon";
 import { usePermissions, canSeePipelines } from "../hooks/usePermissions";
-import { canCatalogArea, canAdminArea, canCellsRow } from "../lib/navPermissions";
-import { canDoAnywhere } from "../hooks/usePermissions";
+import { canCatalogArea, canAdminArea, canCellsRow, canControllersRow } from "../lib/navPermissions";
 import styles from "./MoreSheet.module.css";
 
 interface MoreSheetProps {
@@ -13,7 +12,7 @@ interface MoreSheetProps {
 
 export function MoreSheet({ onClose }: MoreSheetProps) {
   const { data: permissions } = usePermissions();
-  const showPlugins = canDoAnywhere(permissions, "controllers", "read");
+  const showPlugins = canControllersRow(permissions);
   const showPipelines = canSeePipelines(permissions);
   const showCells = canCellsRow(permissions);
   // The group visibility is the union of its rows gates, or the Cells row

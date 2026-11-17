@@ -18,6 +18,7 @@ vi.mock("../hooks/usePermissions", async () => {
 
 import { useControllers } from "../hooks/useControllers";
 import { usePermissions } from "../hooks/usePermissions";
+import type { Permissions } from "../types/auth";
 
 function renderTabBar(route = "/") {
   const queryClient = createTestQueryClient();
@@ -28,6 +29,39 @@ function renderTabBar(route = "/") {
       </QueryClientProvider>
     </MemoryRouter>,
   );
+}
+
+// mockPermissionsData sets the permissions read. Undefined data is a read
+// that has not answered yet.
+function mockPermissionsData(data: Permissions | undefined) {
+  const answered = data !== undefined;
+  vi.mocked(usePermissions).mockReturnValue({
+    data,
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: answered,
+    isPending: !answered,
+    status: answered ? "success" : "pending",
+    dataUpdatedAt: 0,
+    errorUpdatedAt: 0,
+    failureCount: 0,
+    failureReason: null,
+    errorUpdateCount: 0,
+    isFetched: answered,
+    isFetchedAfterMount: answered,
+    isFetching: false,
+    isPlaceholderData: false,
+    isPaused: false,
+    isRefetching: false,
+    isStale: false,
+    isInitialLoading: false,
+    isLoadingError: false,
+    isRefetchError: false,
+    fetchStatus: "idle",
+    promise: Promise.resolve(data),
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof usePermissions>);
 }
 
 describe("TabBar", () => {
@@ -60,33 +94,7 @@ describe("TabBar", () => {
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof useControllers>);
 
-    vi.mocked(usePermissions).mockReturnValue({
-      data: { global: { "*": { "*": true } }, scopes: [] },
-      isLoading: false,
-      error: null,
-      isError: false,
-      isSuccess: true,
-      status: "success",
-      isPending: false,
-      dataUpdatedAt: 0,
-      errorUpdatedAt: 0,
-      failureCount: 0,
-      failureReason: null,
-      errorUpdateCount: 0,
-      isFetched: true,
-      isFetchedAfterMount: true,
-      isFetching: false,
-      isPlaceholderData: false,
-      isPaused: false,
-      isRefetching: false,
-      isStale: false,
-      isInitialLoading: false,
-      isLoadingError: false,
-      isRefetchError: false,
-      fetchStatus: "idle",
-      promise: Promise.resolve(undefined),
-      refetch: vi.fn(),
-    } as unknown as ReturnType<typeof usePermissions>);
+    mockPermissionsData({ global: { "*": { "*": true } }, scopes: [] });
   });
 
   it("renders four links with correct hrefs and a More button", () => {
@@ -174,6 +182,40 @@ describe("TabBar", () => {
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Clusters" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Activity" })).toBeInTheDocument();
+  });
+
+  it("hides the Controllers tab for a pipelines-only caller and sends no controllers read", () => {
+    mockPermissionsData({
+      global: {},
+      scopes: [],
+      tenants: [{ tenant: "team-a", jobs: [], capabilities: { pipelines: { read: true } } }],
+    });
+    vi.mocked(useControllers).mockClear();
+    renderTabBar("/");
+    expect(screen.queryByRole("link", { name: "Controllers" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Clusters" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Activity" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More" })).toBeInTheDocument();
+    expect(vi.mocked(useControllers)).toHaveBeenCalledWith(false);
+    expect(vi.mocked(useControllers)).not.toHaveBeenCalledWith(true);
+  });
+
+  it("shows the Controllers tab for a namespace-scoped controllers:read grant", () => {
+    mockPermissionsData({
+      global: {},
+      scopes: [{ namespaces: ["ns-a"], hasControllerSelector: false, capabilities: { controllers: { read: true } } }],
+    });
+    vi.mocked(useControllers).mockClear();
+    renderTabBar("/");
+    expect(screen.getByRole("link", { name: "Controllers" })).toHaveAttribute("href", "/controllers");
+    expect(vi.mocked(useControllers)).toHaveBeenCalledWith(true);
+  });
+
+  it("hides the Controllers tab while the permissions read has not answered", () => {
+    mockPermissionsData(undefined);
+    renderTabBar("/");
+    expect(screen.queryByRole("link", { name: "Controllers" })).not.toBeInTheDocument();
   });
 
   it("returns focus to the More button when the sheet closes via Escape", () => {

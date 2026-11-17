@@ -45,3 +45,12 @@ export function canCellsRow(perms: Permissions | undefined): boolean {
 export function canAgentsRow(perms: Permissions | undefined): boolean {
   return canDoGlobal(perms, "agentsessions", "read");
 }
+
+/**
+ * Whether the user can see the Controllers row and the Plugins row. Both
+ * pages list controllers, so any non-tenant controllers:read grant admits the
+ * rows. A tenant-scoped grant admits neither row.
+ */
+export function canControllersRow(perms: Permissions | undefined): boolean {
+  return canDoAnywhere(perms, "controllers", "read");
+}

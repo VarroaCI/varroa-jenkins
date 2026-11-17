@@ -4,21 +4,21 @@ import { Activity, Bot, Boxes, ChevronRight, CircleUserRound, Clock3, Hexagon, L
 import { Pulse } from "./Pulse";
 import { NavIcon } from "./NavIcon";
 import { usePermissions, canSeePipelines } from "../hooks/usePermissions";
-import { canCatalogArea, canAdminArea, canCellsRow, canAgentsRow } from "../lib/navPermissions";
+import { canCatalogArea, canAdminArea, canCellsRow, canAgentsRow, canControllersRow } from "../lib/navPermissions";
 import { useControllers } from "../hooks/useControllers";
 import styles from "./Sidebar.module.css";
 
-interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; door?: boolean; gate?: "pipelines" | "cells" | "agents" }
+interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; door?: boolean; gate?: "pipelines" | "controllers" | "cells" | "agents" }
 interface NavGroup { label: string; items: NavItem[] }
 
 const GROUPS: NavGroup[] = [
   { label: "Operate", items: [
     { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
     { to: "/pipelines", label: "Pipelines", icon: Waypoints, gate: "pipelines" },
-    { to: "/controllers", label: "Controllers", icon: Server },
+    { to: "/controllers", label: "Controllers", icon: Server, gate: "controllers" },
     { to: "/cells", label: "Cells", icon: Hexagon, gate: "cells" },
     { to: "/agents", label: "Tenant agents", icon: Bot, gate: "agents" },
-    { to: "/plugins", label: "Plugins", icon: PlugZap },
+    { to: "/plugins", label: "Plugins", icon: PlugZap, gate: "controllers" },
     { to: "/clusters", label: "Clusters", icon: Network },
     { to: "/activity", label: "Activity", icon: Activity },
   ] },
@@ -36,6 +36,8 @@ function isItemVisible(item: NavItem, permissions: ReturnType<typeof usePermissi
   // The pipelines gate reads the caller's grants, not the record store: the
   // row still renders when the pipelines API answers 503.
   if (item.gate === "pipelines") return canSeePipelines(permissions);
+  // A tenant-scoped grant reads no controller, so it admits neither row.
+  if (item.gate === "controllers") return canControllersRow(permissions);
   // CellPool is cluster scoped, so the row takes the cluster-wide partition.
   if (item.gate === "cells") return canCellsRow(permissions);
   if (item.gate === "agents") return canAgentsRow(permissions);
@@ -59,7 +61,7 @@ interface FlyoutState {
 
 export function Sidebar({ collapsed = false, onToggle = () => {} }: SidebarProps) {
   const { data: permissions } = usePermissions();
-  const { data: controllers } = useControllers();
+  const { data: controllers } = useControllers(canControllersRow(permissions));
   const controllersCount = controllers?.length;
   const [flyout, setFlyout] = useState<FlyoutState | null>(null);
 

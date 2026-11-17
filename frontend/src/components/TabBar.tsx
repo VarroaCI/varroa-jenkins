@@ -3,11 +3,15 @@ import { NavLink } from "react-router-dom";
 import { Activity, LayoutDashboard, MoreHorizontal, Network, Server } from "lucide-react";
 import { NavIcon } from "./NavIcon";
 import { useControllers } from "../hooks/useControllers";
+import { usePermissions } from "../hooks/usePermissions";
+import { canControllersRow } from "../lib/navPermissions";
 import { MoreSheet } from "./MoreSheet";
 import styles from "./TabBar.module.css";
 
 export function TabBar() {
-  const { data: controllers } = useControllers();
+  const { data: permissions } = usePermissions();
+  const showControllers = canControllersRow(permissions);
+  const { data: controllers } = useControllers(showControllers);
   const controllersCount = controllers?.length;
   const [moreOpen, setMoreOpen] = useState(false);
   const moreBtnRef = useRef<HTMLButtonElement>(null);
@@ -25,11 +29,13 @@ export function TabBar() {
           <span className={styles.tabIcon}><NavIcon icon={LayoutDashboard} /></span>
           <span className={styles.tabLabel}>Overview</span>
         </NavLink>
-        <NavLink to="/controllers" aria-label="Controllers" className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ""}`}>
-          <span className={styles.tabIcon}><NavIcon icon={Server} /></span>
-          <span className={styles.tabLabel}>Controllers</span>
-          {controllersCount !== undefined && <span className={styles.tabCount}>{controllersCount}</span>}
-        </NavLink>
+        {showControllers && (
+          <NavLink to="/controllers" aria-label="Controllers" className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ""}`}>
+            <span className={styles.tabIcon}><NavIcon icon={Server} /></span>
+            <span className={styles.tabLabel}>Controllers</span>
+            {controllersCount !== undefined && <span className={styles.tabCount}>{controllersCount}</span>}
+          </NavLink>
+        )}
         <NavLink to="/clusters" aria-label="Clusters" className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ""}`}>
           <span className={styles.tabIcon}><NavIcon icon={Network} /></span>
           <span className={styles.tabLabel}>Clusters</span>
