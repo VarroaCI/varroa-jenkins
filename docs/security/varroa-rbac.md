@@ -98,6 +98,10 @@ Built-in roles carry this `pipelines` matrix:
 | `developer` | `read`, `write` |
 | `viewer` | `read` |
 
+The **Controllers** row and the **Plugins** row need `controllers` `read` in a binding that has
+no tenant scope. A tenant-scoped binding grants no `controllers` verb. A caller with only
+`pipelines` verbs therefore sees neither row, and on a phone sees no **Controllers** tab.
+
 ## Read and scale a cell pool
 
 `cellpools` carries two verbs. `read` lists and gets a [cell pool](../operations/cells.md);

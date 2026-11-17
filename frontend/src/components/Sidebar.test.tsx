@@ -20,6 +20,7 @@ vi.mock("../hooks/useControllers", () => ({
 
 import { usePermissions } from "../hooks/usePermissions";
 import { useControllers } from "../hooks/useControllers";
+import type { Permissions } from "../types/auth";
 
 function renderSidebar(route = "/") {
   const queryClient = createTestQueryClient();
@@ -43,35 +44,43 @@ function renderSidebarCollapsed(route = "/") {
   );
 }
 
+// mockPermissionsData sets the permissions read. Undefined data is a read
+// that has not answered yet.
+function mockPermissionsData(data: Permissions | undefined) {
+  const answered = data !== undefined;
+  vi.mocked(usePermissions).mockReturnValue({
+    data,
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: answered,
+    isPending: !answered,
+    status: answered ? "success" : "pending",
+    dataUpdatedAt: 0,
+    errorUpdatedAt: 0,
+    failureCount: 0,
+    failureReason: null,
+    errorUpdateCount: 0,
+    isFetched: answered,
+    isFetchedAfterMount: answered,
+    isFetching: false,
+    isPlaceholderData: false,
+    isPaused: false,
+    isRefetching: false,
+    isStale: false,
+    isInitialLoading: false,
+    isLoadingError: false,
+    isRefetchError: false,
+    fetchStatus: "idle",
+    promise: Promise.resolve(data),
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof usePermissions>);
+}
+
 describe("Sidebar", () => {
   beforeEach(() => {
-    vi.mocked(usePermissions).mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: null,
-      isError: false,
-      isSuccess: false,
-      isPending: true,
-      status: "pending",
-      dataUpdatedAt: 0,
-      errorUpdatedAt: 0,
-      failureCount: 0,
-      failureReason: null,
-      errorUpdateCount: 0,
-      isFetched: false,
-      isFetchedAfterMount: false,
-      isFetching: false,
-      isPlaceholderData: false,
-      isPaused: false,
-      isRefetching: false,
-      isStale: false,
-      isInitialLoading: false,
-      isLoadingError: false,
-      isRefetchError: false,
-      fetchStatus: "idle",
-      promise: Promise.resolve(undefined),
-      refetch: vi.fn(),
-    } as unknown as ReturnType<typeof usePermissions>);
+    // A caller who reads controllers and holds no other grant.
+    mockPermissionsData({ global: { controllers: { read: true } }, scopes: [] });
 
     vi.mocked(useControllers).mockReturnValue({
       data: undefined,
@@ -426,7 +435,7 @@ describe("Sidebar", () => {
     });
 
     it("hides both doors when permissions data is undefined (loading)", () => {
-      // beforeEach already sets data: undefined
+      mockPermissionsData(undefined);
       renderSidebar("/");
       expect(screen.queryByText("Catalog")).not.toBeInTheDocument();
       expect(screen.queryByText("Admin & access")).not.toBeInTheDocument();
@@ -789,6 +798,56 @@ describe("Sidebar", () => {
       const flyoutEl = container.querySelector('div[aria-hidden="true"]');
       expect(flyoutEl).toBeInTheDocument();
       expect(flyoutEl!.textContent).toBe("Overview");
+    });
+  });
+
+  describe("controllers gate", () => {
+    it("hides the Controllers and Plugins rows for a pipelines-only caller and sends no controllers read", () => {
+      mockPermissionsData({
+        global: {},
+        scopes: [],
+        tenants: [{ tenant: "team-a", jobs: [], capabilities: { pipelines: { read: true } } }],
+      });
+      vi.mocked(useControllers).mockClear();
+      renderSidebar("/");
+      expect(screen.getByRole("link", { name: "Pipelines" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /^Controllers/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Plugins" })).not.toBeInTheDocument();
+      expect(vi.mocked(useControllers)).toHaveBeenCalledWith(false);
+      expect(vi.mocked(useControllers)).not.toHaveBeenCalledWith(true);
+    });
+
+    it("shows the Controllers and Plugins rows for a namespace-scoped controllers:read grant", () => {
+      mockPermissionsData({
+        global: {},
+        scopes: [{ namespaces: ["ns-a"], hasControllerSelector: false, capabilities: { controllers: { read: true } } }],
+      });
+      vi.mocked(useControllers).mockClear();
+      renderSidebar("/");
+      expect(screen.getByRole("link", { name: "Controllers" })).toHaveAttribute("href", "/controllers");
+      expect(screen.getByRole("link", { name: "Plugins" })).toHaveAttribute("href", "/plugins");
+      expect(vi.mocked(useControllers)).toHaveBeenCalledWith(true);
+    });
+
+    it("hides the Controllers row for a tenant-scoped controllers:read grant", () => {
+      mockPermissionsData({
+        global: {},
+        scopes: [{
+          namespaces: [],
+          hasControllerSelector: false,
+          tenants: [{ name: "team-a" }],
+          capabilities: { controllers: { read: true } },
+        }],
+      });
+      renderSidebar("/");
+      expect(screen.queryByRole("link", { name: /^Controllers/ })).not.toBeInTheDocument();
+    });
+
+    it("hides the Controllers row while the permissions read has not answered", () => {
+      mockPermissionsData(undefined);
+      renderSidebar("/");
+      expect(screen.queryByRole("link", { name: /^Controllers/ })).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
     });
   });
 

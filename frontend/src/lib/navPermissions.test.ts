@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canCatalogArea, canAdminArea, canCellsRow } from "./navPermissions";
+import { canCatalogArea, canAdminArea, canCellsRow, canControllersRow } from "./navPermissions";
 import type { Permissions } from "../types/auth";
 
 describe("canCatalogArea", () => {
@@ -119,5 +119,50 @@ describe("canCellsRow", () => {
   it("refuses a caller with no grant", () => {
     expect(canCellsRow({ global: {}, scopes: [] })).toBe(false);
     expect(canCellsRow(undefined)).toBe(false);
+  });
+});
+
+describe("canControllersRow", () => {
+  it("admits a cluster-wide controllers:read grant", () => {
+    expect(canControllersRow({ global: { controllers: { read: true } }, scopes: [] })).toBe(true);
+  });
+
+  it("admits a wildcard grant", () => {
+    expect(canControllersRow({ global: { "*": { "*": true } }, scopes: [] })).toBe(true);
+  });
+
+  it("admits a namespace-scoped controllers:read grant", () => {
+    const perms: Permissions = {
+      global: {},
+      scopes: [{ namespaces: ["ns-a"], hasControllerSelector: false, capabilities: { controllers: { read: true } } }],
+    };
+    expect(canControllersRow(perms)).toBe(true);
+  });
+
+  it("refuses a tenant-scoped grant", () => {
+    const perms: Permissions = {
+      global: {},
+      scopes: [{
+        namespaces: [],
+        hasControllerSelector: false,
+        tenants: [{ name: "team-a" }],
+        capabilities: { controllers: { read: true } },
+      }],
+    };
+    expect(canControllersRow(perms)).toBe(false);
+  });
+
+  it("refuses a pipelines-only caller", () => {
+    const perms: Permissions = {
+      global: {},
+      scopes: [],
+      tenants: [{ tenant: "team-a", jobs: [], capabilities: { pipelines: { read: true } } }],
+    };
+    expect(canControllersRow(perms)).toBe(false);
+  });
+
+  it("refuses a caller with no grant and an unanswered read", () => {
+    expect(canControllersRow({ global: {}, scopes: [] })).toBe(false);
+    expect(canControllersRow(undefined)).toBe(false);
   });
 });
