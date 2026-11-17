@@ -170,6 +170,7 @@ func newBundleParityServer(client *bundleTestClient, operatorNS string) *Server 
 		Store:             storeFromBundleClient(client),
 		Authorizer:        adminTestAuthorizer(),
 		ConfigBrood:       fakeBrood,
+		Brood:             newStoreBrood(storeFromBundleClient(client)),
 		OperatorNamespace: operatorNS,
 		Logger:            slog.Default(),
 	})

@@ -225,6 +225,7 @@ func TestNotifyActivity_HandleReprovision(t *testing.T) {
 
 func TestNotifyActivity_HandleRestartController(t *testing.T) {
 	srv, sink := publishTestServer(t)
+	srv.deps.Brood = &fakeBroodForCreate{local: "core"}
 	r := withClaims(httptest.NewRequest(http.MethodPost, "/controllers/ns/ctrl/restart", nil))
 	srv.handleRestartController(httptest.NewRecorder(), r, "core", "ns", "ctrl")
 	assertPublished(t, sink, "controller.restarted")
@@ -255,6 +256,7 @@ func TestNotifyActivity_HandleCreateController(t *testing.T) {
 
 func TestNotifyActivity_HandleDeleteController(t *testing.T) {
 	srv, sink := publishTestServer(t)
+	srv.deps.Brood = &fakeBroodForCreate{local: "core"}
 	r := withClaims(httptest.NewRequest(http.MethodDelete, "/controllers/ns/ctrl", nil))
 	srv.handleDeleteController(httptest.NewRecorder(), r, "core", "ns", "ctrl")
 	assertPublished(t, sink, "controller.deleted")

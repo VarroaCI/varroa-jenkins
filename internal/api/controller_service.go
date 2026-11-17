@@ -22,7 +22,7 @@ import (
 type ControllerService struct {
 	Store             crdstore.Backend
 	Client            controller.ResourceClient
-	LocalCluster      string // "" when multi-cluster routing is disabled
+	LocalCluster      string // the BFF's own cluster; path mode is valid only here
 	DashboardHost     string
 	OperatorNamespace string
 	ManagedNamespaces string
@@ -63,7 +63,7 @@ func (svc *ControllerService) ValidateIngress(spec *v1alpha1.IngressSpec, forCre
 		return &ServiceError{Status: http.StatusBadRequest, Message: "ingressSpec.mode must be \"subdomain\" or \"path\""}
 	}
 	if forCreate && spec.RoutingMode() == v1alpha1.RoutingModePath {
-		if svc.LocalCluster != "" && cluster != svc.LocalCluster {
+		if cluster != svc.LocalCluster {
 			return &ServiceError{Status: http.StatusBadRequest, Message: "path mode is only supported on the local cluster"}
 		}
 		switch {
@@ -103,14 +103,10 @@ func (svc *ControllerService) ValidateBundleRef(ctx context.Context, ref *v1alph
 
 // controllerSvc builds the service view over the server's dependencies.
 func (s *Server) controllerSvc() *ControllerService {
-	local := ""
-	if s.deps.Brood != nil {
-		local = s.deps.Brood.LocalCluster()
-	}
 	return &ControllerService{
 		Store:             s.deps.Store,
 		Client:            s.deps.Client,
-		LocalCluster:      local,
+		LocalCluster:      s.deps.Brood.LocalCluster(),
 		DashboardHost:     s.deps.DashboardHost,
 		OperatorNamespace: s.deps.OperatorNamespace,
 		ManagedNamespaces: s.deps.ManagedNamespaces,

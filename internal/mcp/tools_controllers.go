@@ -41,13 +41,14 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		withListOutput(controllerListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listC, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if deps.Brood == nil {
-			return mcp.NewToolResultError(broodNotConfigured), nil
-		}
 		args := getArgs(req)
 		ns := strArg(args, "namespace")
 		clusterFilter := strArg(args, "cluster")
 		verbose, _ := args["verbose"].(bool)
+		// An empty filter lists every cluster. A set filter must name a known cluster.
+		if _, err := api.ResolveCluster(ctx, deps.Brood, clusterFilter); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
 		// Collect (cluster, CR) pairs first: cluster identity lives on the brood
 		// wrapper, not the CR, so it has to be carried alongside rather than read
@@ -59,9 +60,6 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		var entries []entry
 		clusters := []api.ClusterFanoutStatus{}
 
-		if clusterFilter != "" && !deps.Brood.IsKnown(ctx, clusterFilter) {
-			return mcp.NewToolResultError("unknown cluster: " + clusterFilter), nil
-		}
 		cc, statuses, err := deps.Brood.ListAll(ctx, ns, clusterFilter)
 		// A filtered call to a member that does not answer returns its
 		// status row with the error. That row is the answer, not a tool error.
@@ -537,25 +535,15 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 	})
 }
 
-// broodNotConfigured refuses a Controller tool call on a server without deps.Brood.
-const broodNotConfigured = "brood not configured"
-
 // resolveControllerCluster maps the cluster argument of a Controller tool onto
-// one cluster. An empty argument selects the local cluster of deps.Brood. Any
-// other name must be a cluster that deps.Brood knows. Without a brood, the
-// helper refuses the call: the tool must not use the local store in its place.
+// one cluster through api.ResolveCluster, the rule that the REST handlers also
+// use. Its error text is the tool error.
 func resolveControllerCluster(ctx context.Context, deps *api.Dependencies, args map[string]any) (string, *mcp.CallToolResult) {
-	if deps.Brood == nil {
-		return "", mcp.NewToolResultError(broodNotConfigured)
+	cluster, err := api.ResolveCluster(ctx, deps.Brood, strArg(args, "cluster"))
+	if err != nil {
+		return "", mcp.NewToolResultError(err.Error())
 	}
-	name := strArg(args, "cluster")
-	if name == "" {
-		return deps.Brood.LocalCluster(), nil
-	}
-	if !deps.Brood.IsKnown(ctx, name) {
-		return "", mcp.NewToolResultError("unknown cluster: " + name)
-	}
-	return name, nil
+	return cluster, nil
 }
 
 // controllerSvc mirrors api.Server.controllerSvc so the MCP tools validate a
@@ -563,10 +551,6 @@ func resolveControllerCluster(ctx context.Context, deps *api.Dependencies, args 
 // than re-deriving the rules is the point: spec now carries ingressSpec and
 // composedBundleRef, and a second copy of those checks would drift.
 func controllerSvc(deps *api.Dependencies) *api.ControllerService {
-	local := ""
-	if deps.Brood != nil {
-		local = deps.Brood.LocalCluster()
-	}
 	// Invariant (5): the BFF wires optional Dependencies conditionally, and the
 	// service logs on both validation failure paths — a nil Logger would panic
 	// the request instead of returning the validation error.
@@ -577,7 +561,7 @@ func controllerSvc(deps *api.Dependencies) *api.ControllerService {
 	return &api.ControllerService{
 		Store:             deps.Store,
 		Client:            deps.Client,
-		LocalCluster:      local,
+		LocalCluster:      deps.Brood.LocalCluster(),
 		DashboardHost:     deps.DashboardHost,
 		OperatorNamespace: deps.OperatorNamespace,
 		ManagedNamespaces: deps.ManagedNamespaces,

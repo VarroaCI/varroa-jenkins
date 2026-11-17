@@ -930,32 +930,6 @@ func (e *endpointResolver) resolve(cr *v1alpha1.Controller, cluster string) stri
 	return v1alpha1.ExternalURL(cr, host)
 }
 
-// visibleControllers lists controllers the caller may read. It lists cluster-wide,
-// narrows to nsFilter when non-empty (narrow only — never widens beyond the caller's
-// grants), and keeps a row only when the Authorizer permits reading it. It is the single
-// authorization gate for the controller collection endpoints (list + search); the
-// ?namespace= param is enforced here, not trusted. Deny-by-default: when the Authorizer
-// is nil it returns an empty slice, never the unfiltered inventory.
-func (s *Server) visibleControllers(ctx context.Context, claims *auth.Claims, nsFilter string) ([]*v1alpha1.Controller, error) {
-	controllers, err := s.deps.LocalControllers(ctx, "") // cluster-wide; authz decides visibility
-	if err != nil {
-		return nil, err
-	}
-	if s.deps.Authorizer == nil {
-		return nil, nil // deny-by-default
-	}
-	out := make([]*v1alpha1.Controller, 0, len(controllers))
-	for _, cr := range controllers {
-		if nsFilter != "" && cr.Namespace != nsFilter {
-			continue
-		}
-		if s.deps.Authorizer.CanReadController(claims, cr.Namespace, cr.Name) {
-			out = append(out, cr)
-		}
-	}
-	return out, nil
-}
-
 // listMiteReadConcurrency bounds the mite KV reads of one controllers list.
 // Each read is a NATS round trip, so a serial loop costs two round trips per row.
 const listMiteReadConcurrency = 16
@@ -984,37 +958,24 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 
 	ctx := r.Context()
 
-	// Validate cluster filter if set.
-	if clusterFilter != "" && s.deps.Brood != nil && !s.deps.Brood.IsKnown(ctx, clusterFilter) {
-		s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown cluster"})
+	// An empty filter lists every cluster. A set filter must name a known cluster.
+	if _, err := ResolveCluster(ctx, s.deps.Brood, clusterFilter); err != nil {
+		s.writeClusterRefusal(w, err)
 		return
 	}
 
 	var allControllers []*v1alpha1.Controller
 	var clusterLabels []string
-	var clustersStatus []ClusterFanoutStatus
 
-	if s.deps.Brood != nil {
-		cc, cs, err := s.deps.Brood.ListAll(ctx, namespace, clusterFilter)
-		if err != nil {
-			s.deps.Logger.Error("list all controllers failed", "error", err)
+	cc, clustersStatus, err := s.deps.Brood.ListAll(ctx, namespace, clusterFilter)
+	if err != nil {
+		s.deps.Logger.Error("list all controllers failed", "error", err)
+	}
+	for _, c := range cc {
+		if s.deps.Authorizer != nil && s.deps.Authorizer.CanReadController(claims, c.CR.Namespace, c.CR.Name) {
+			allControllers = append(allControllers, c.CR)
+			clusterLabels = append(clusterLabels, c.Cluster)
 		}
-		for _, c := range cc {
-			if s.deps.Authorizer == nil || s.deps.Authorizer.CanReadController(claims, c.CR.Namespace, c.CR.Name) {
-				allControllers = append(allControllers, c.CR)
-				clusterLabels = append(clusterLabels, c.Cluster)
-			}
-		}
-		clustersStatus = cs
-	} else {
-		// Fallback: local-only via visibleControllers.
-		controllers, err := s.visibleControllers(ctx, claims, namespace)
-		if err != nil {
-			s.deps.Logger.Error("list controllers failed", "error", err)
-			s.writeJSONError(w, http.StatusInternalServerError, "failed to list controllers")
-			return
-		}
-		allControllers = controllers
 	}
 
 	out := make([]controllerResponse, len(allControllers))
@@ -1024,10 +985,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 	// reads run after this serial pass, so the caps resolver stays serial.
 	var localIdx []int
 	for i, cr := range allControllers {
-		cluster := ""
-		if i < len(clusterLabels) {
-			cluster = clusterLabels[i]
-		}
+		cluster := clusterLabels[i]
 		crResp := controllerResponse{
 			Name:              cr.Name,
 			Namespace:         cr.Namespace,
@@ -1049,7 +1007,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 		// Mite telemetry lives in the local cluster's KV only — a lookup for a
 		// remote row is a guaranteed-miss NATS round-trip. Remote rows use the
 		// remote operator's own view from the CR status instead.
-		if cluster == "" || s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster() {
+		if cluster == s.deps.Brood.LocalCluster() {
 			seedPersistedMiteFacts(cr, &crResp.MiteVersion, &crResp.JenkinsVersion, &crResp.JenkinsHealth, &crResp.LastSeen)
 			localIdx = append(localIdx, i)
 		} else if ms := cr.Status.MiteStatus; ms != nil {
@@ -1084,11 +1042,10 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 	resp := map[string]interface{}{
 		"items": out,
 	}
-	if clustersStatus != nil {
-		resp["clusters"] = clustersStatus
-	} else if s.deps.Brood != nil {
-		resp["clusters"] = []ClusterFanoutStatus{}
+	if clustersStatus == nil {
+		clustersStatus = []ClusterFanoutStatus{}
 	}
+	resp["clusters"] = clustersStatus
 
 	s.writeJSON(w, http.StatusOK, resp)
 }
@@ -1202,7 +1159,7 @@ func (s *Server) handleControllerDetail(w http.ResponseWriter, r *http.Request, 
 	// remote controller is a guaranteed-miss NATS round-trip. Remote
 	// controllers use the remote operator's own view from the CR status
 	// instead (mirrors the list handler's per-row merge above).
-	if cluster == "" || s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster() {
+	if cluster == s.deps.Brood.LocalCluster() {
 		seedPersistedMiteFacts(cr, &resp.MiteVersion, &resp.JenkinsVersion, &resp.JenkinsHealth, &resp.LastSeen)
 		if ms := cr.Status.MiteStatus; ms != nil && ms.CertExpiry != nil {
 			resp.CertExpiry = ms.CertExpiry.Format("2006-01-02")
@@ -1313,7 +1270,7 @@ func (s *Server) handleControllerYAML(w http.ResponseWriter, r *http.Request, cl
 // getController resolves a controller CR, routing remote clusters over the
 // Brood bus. Local lookups stay direct so k8s error semantics are preserved.
 func (s *Server) getController(ctx context.Context, cluster, namespace, name string) (*v1alpha1.Controller, error) {
-	if s.deps.Brood != nil && cluster != s.deps.Brood.LocalCluster() {
+	if cluster != s.deps.Brood.LocalCluster() {
 		return s.deps.Brood.Get(ctx, cluster, namespace, name)
 	}
 	return crdstore.Get[v1alpha1.Controller](ctx, s.deps.Store, name, namespace)
@@ -1895,8 +1852,7 @@ func (s *Server) handleBreakGlass(w http.ResponseWriter, r *http.Request, cluste
 		return
 	}
 
-	isLocal := s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster()
-	if !isLocal {
+	if cluster != s.deps.Brood.LocalCluster() {
 		s.writeJSONError(w, http.StatusBadRequest,
 			"break-glass reaches only the core cluster: the BFF signs a token with its own operator namespace's key, which a remote cluster's plugin cannot verify")
 		return
@@ -2022,18 +1978,10 @@ func (s *Server) handleRestartController(w http.ResponseWriter, r *http.Request,
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
-	if s.deps.Brood != nil {
-		if err := s.deps.Brood.DeletePod(r.Context(), cluster, ns, name); err != nil {
-			s.deps.Logger.Error("restart failed", "cluster", cluster, "namespace", ns, "name", name, "error", err)
-			writeBroodError(w, err)
-			return
-		}
-	} else {
-		if err := s.deps.Client.DeleteControllerPod(r.Context(), ns, name); err != nil {
-			s.deps.Logger.Error("restart failed", "namespace", ns, "name", name, "error", err)
-			s.writeJSONError(w, k8sErrorToHTTP(err), "failed to delete pod")
-			return
-		}
+	if err := s.deps.Brood.DeletePod(r.Context(), cluster, ns, name); err != nil {
+		s.deps.Logger.Error("restart failed", "cluster", cluster, "namespace", ns, "name", name, "error", err)
+		writeBroodError(w, err)
+		return
 	}
 
 	if ActorFrom(claims) != "" {
@@ -2830,34 +2778,23 @@ func (s *Server) handlePreflightController(w http.ResponseWriter, r *http.Reques
 		ingressChecks = append(ingressChecks, check)
 	}
 
-	if s.deps.Brood != nil {
-		crJSON, _ := json.Marshal(req.Controller)
-		var bundleJSON json.RawMessage
-		if req.Bundle != nil {
-			bundleJSON, _ = json.Marshal(req.Bundle)
-		}
-		checks, err := s.deps.Brood.Preflight(ctx, cluster, ControllersCreateArgs{Namespace: namespace, Controller: crJSON, Bundle: bundleJSON})
-		if err != nil {
-			s.deps.Logger.Error("preflight via brood failed", "cluster", cluster, "namespace", namespace, "name", req.Name, "error", err)
-			writeBroodErrorChecks(w, err, checks)
-			return
-		}
-		if checks == nil {
-			checks = []bus.Check{}
-		}
-		for _, c := range ingressChecks {
-			checks = append(checks, bus.Check(c))
-		}
-		s.writeJSON(w, http.StatusOK, map[string]interface{}{"checks": checks})
+	crJSON, _ := json.Marshal(req.Controller)
+	var bundleJSON json.RawMessage
+	if req.Bundle != nil {
+		bundleJSON, _ = json.Marshal(req.Bundle)
+	}
+	checks, err := s.deps.Brood.Preflight(ctx, cluster, ControllersCreateArgs{Namespace: namespace, Controller: crJSON, Bundle: bundleJSON})
+	if err != nil {
+		s.deps.Logger.Error("preflight via brood failed", "cluster", cluster, "namespace", namespace, "name", req.Name, "error", err)
+		writeBroodErrorChecks(w, err, checks)
 		return
 	}
-
-	// Fallback: local direct.
-	checks := preflight.Run(ctx, PreflightStore{Store: s.deps.Store, Client: s.deps.Client}, &req.Controller, req.Bundle, preflight.Options{OperatorNamespace: s.deps.OperatorNamespace, ManagedNamespaces: s.deps.ManagedNamespaces})
 	if checks == nil {
-		checks = []preflight.Check{}
+		checks = []bus.Check{}
 	}
-	checks = append(checks, ingressChecks...)
+	for _, c := range ingressChecks {
+		checks = append(checks, bus.Check(c))
+	}
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{"checks": checks})
 }
 
@@ -2883,8 +2820,7 @@ func (s *Server) handleRenderController(w http.ResponseWriter, r *http.Request, 
 	req.Namespace = namespace
 
 	// Apply server-side defaults only when target == local cluster.
-	isLocal := s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster()
-	if isLocal {
+	if cluster == s.deps.Brood.LocalCluster() {
 		defaults, _ := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, s.deps.Store, "varroa-defaults", "")
 		if req.Spec.Version == "" && defaults != nil {
 			req.Spec.Version = defaults.Spec.DefaultVersion
@@ -3036,18 +2972,10 @@ func (s *Server) handleDeleteController(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	if s.deps.Brood != nil {
-		if err := s.deps.Brood.Delete(ctx, cluster, namespace, name); err != nil {
-			s.deps.Logger.Error("delete controller failed", "cluster", cluster, "namespace", namespace, "name", name, "error", err)
-			writeBroodError(w, err)
-			return
-		}
-	} else {
-		if err := crdstore.Delete[v1alpha1.Controller](ctx, s.deps.Store, name, namespace); err != nil {
-			s.deps.Logger.Error("delete controller failed", "namespace", namespace, "name", name, "error", err)
-			s.writeJSONError(w, k8sErrorToHTTP(err), "failed to delete controller")
-			return
-		}
+	if err := s.deps.Brood.Delete(ctx, cluster, namespace, name); err != nil {
+		s.deps.Logger.Error("delete controller failed", "cluster", cluster, "namespace", namespace, "name", name, "error", err)
+		writeBroodError(w, err)
+		return
 	}
 
 	// Emit activity event.
@@ -3259,12 +3187,7 @@ func writeBroodErrorConflicts(w http.ResponseWriter, err error, conflicts []bus.
 
 // requireLocalCluster checks if the given cluster is the local cluster.
 // If not, it writes a 501 response for the given operation and returns false.
-// Brood is always wired in production (cmd/bff); the nil check only
-// accommodates handler tests that don't construct one.
 func (s *Server) requireLocalCluster(w http.ResponseWriter, cluster, op string) bool {
-	if s.deps.Brood == nil {
-		return true
-	}
 	if cluster != s.deps.Brood.LocalCluster() {
 		s.writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": op + " is not available for remote clusters",

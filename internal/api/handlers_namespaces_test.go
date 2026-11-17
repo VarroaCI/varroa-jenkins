@@ -55,6 +55,7 @@ func TestHandleDeployableNamespaces_GET(t *testing.T) {
 	deps := &Dependencies{
 		Client:            client,
 		Store:             storeFromProvisioning(client),
+		Brood:             newStoreBrood(nil),
 		Authorizer:        authorizer,
 		ManagedNamespaces: "", // cluster-wide mode (empty string)
 		Logger:            slog.Default(),
@@ -124,6 +125,7 @@ func TestHandleDeployableNamespaces_GET_ScopedMode(t *testing.T) {
 	deps := &Dependencies{
 		Client:            client,
 		Store:             storeFromProvisioning(client),
+		Brood:             newStoreBrood(nil),
 		Authorizer:        authorizer,
 		ManagedNamespaces: "team-a team-b", // scoped mode: two managed namespaces
 		Logger:            slog.Default(),
@@ -188,6 +190,7 @@ func TestHandleDeployableNamespaces_GET_NoClaims(t *testing.T) {
 	deps := &Dependencies{
 		Client:            client,
 		Store:             storeFromProvisioning(client),
+		Brood:             newStoreBrood(nil),
 		Authorizer:        NewAuthorizer(nil, false),
 		ManagedNamespaces: "",
 		Logger:            slog.Default(),

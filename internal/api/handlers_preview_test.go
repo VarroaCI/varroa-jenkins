@@ -28,6 +28,7 @@ func newPreviewServer() *Server {
 	return NewServer(&Dependencies{
 		Client:            fc,
 		Store:             storeFromFake(fc),
+		Brood:             newStoreBrood(storeFromFake(fc)),
 		Authorizer:        adminTestAuthorizer(),
 		OperatorNamespace: "test-ns",
 		Logger:            slog.Default(),
@@ -103,6 +104,7 @@ func TestPreviewController_TransientLookupErrorFailsClosed(t *testing.T) {
 			st.FailAlways("get", ctrlGVR, errors.New("etcd unavailable"))
 			return st
 		}(),
+		Brood:             newStoreBrood(nil),
 		Authorizer:        adminTestAuthorizer(),
 		OperatorNamespace: "test-ns",
 		Logger:            slog.Default(),

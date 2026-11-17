@@ -157,6 +157,7 @@ func TestDispatchComposedBundles_ClusterScoped(t *testing.T) {
 	srv := NewServer(&Dependencies{
 		Authorizer:  adminTestAuthorizer(),
 		ConfigBrood: brood,
+		Brood:       newStoreBrood(nil),
 		Logger:      slog.Default(),
 	})
 
@@ -243,6 +244,7 @@ func TestDispatchComposedBundles_ScopedDeveloper_ListFiltersNamespaces(t *testin
 	srv := NewServer(&Dependencies{
 		Authorizer:        scopedBundleReaderAuthorizer(),
 		ConfigBrood:       brood,
+		Brood:             newStoreBrood(nil),
 		OperatorNamespace: "varroa-system",
 		Logger:            slog.Default(),
 	})
@@ -263,6 +265,7 @@ func TestDispatchComposedBundles_ScopedDeveloper_GetOtherNamespaceForbidden(t *t
 	srv := NewServer(&Dependencies{
 		Authorizer:        scopedBundleReaderAuthorizer(),
 		ConfigBrood:       &scopeTestConfigBrood{},
+		Brood:             newStoreBrood(nil),
 		OperatorNamespace: "varroa-system",
 		Logger:            slog.Default(),
 	})
@@ -285,6 +288,7 @@ func TestDispatchComposedBundles_Admin_ListSeesAll(t *testing.T) {
 	srv := NewServer(&Dependencies{
 		Authorizer:  adminTestAuthorizer(),
 		ConfigBrood: brood,
+		Brood:       newStoreBrood(nil),
 		Logger:      slog.Default(),
 	})
 	w := httptest.NewRecorder()

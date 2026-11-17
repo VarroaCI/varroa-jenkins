@@ -76,6 +76,7 @@ func detailServer(t *testing.T, item *v1alpha1.CatalogItem, profiles []*v1alpha1
 		Store:             store,
 		Authorizer:        adminTestAuthorizer(),
 		ConfigBrood:       &detailBrood{item: raw},
+		Brood:             newStoreBrood(store),
 		OperatorNamespace: "varroa-system",
 		Logger:            slog.Default(),
 	})

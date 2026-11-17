@@ -26,6 +26,7 @@ func TestListCatalogItems_OperatorNamespaceEnvelope(t *testing.T) {
 	srv := NewServer(&Dependencies{
 		Client:            client,
 		Store:             storeFromBundleClient(client),
+		Brood:             newStoreBrood(nil),
 		Authorizer:        adminTestAuthorizer(),
 		ConfigBrood:       fakeBrood,
 		OperatorNamespace: "varroa-system",
