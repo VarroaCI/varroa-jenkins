@@ -47,6 +47,7 @@ func isQualifiedName(name string) bool {
 // or an error describing the first violation.
 //
 // known is a function that returns true for valid cluster names (local + members).
+// It checks each entry of clusters and the cluster of each cluster/ns/name entry.
 func validateAndPartition(req broodCreateRequest, localCluster string, known func(string) bool, operatorNS string) (map[string]v1alpha1.BroodOperationSpec, error) {
 	ns := req.Namespace
 	if ns == "" {
@@ -145,13 +146,24 @@ func validateAndPartition(req broodCreateRequest, localCluster string, known fun
 		return nil, fmt.Errorf("tenant namespace mode supports at most one target cluster")
 	}
 
-	// Rule: unknown cluster anywhere.
+	// Rule: unknown cluster anywhere, in clusters or in a name qualifier.
 	for _, c := range clusters {
 		if c == "all" {
 			continue
 		}
 		if !known(c) {
 			return nil, fmt.Errorf("unknown cluster %q", c)
+		}
+	}
+	if has3Token {
+		for _, n := range names {
+			parts := strings.SplitN(n, "/", 3)
+			if !known(parts[0]) {
+				return nil, fmt.Errorf("unknown cluster %q", parts[0])
+			}
+			if parts[1] == "" || parts[2] == "" {
+				return nil, fmt.Errorf("invalid name %q: expected cluster/namespace/name", n)
+			}
 		}
 	}
 

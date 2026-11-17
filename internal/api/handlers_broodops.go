@@ -177,6 +177,16 @@ func (s *Server) broodOpAccess(claims *auth.Claims, ns string, manage bool) bool
 	return s.deps.Authorizer.CanReadController(claims, ns, "")
 }
 
+// broodOpsOrUnavailable returns the brood operations store. Without one, it
+// writes 503 and returns false.
+func (s *Server) broodOpsOrUnavailable(w http.ResponseWriter) (BroodOps, bool) {
+	if s.deps.BroodOps == nil {
+		s.writeJSONError(w, http.StatusServiceUnavailable, "brood operations not configured")
+		return nil, false
+	}
+	return s.deps.BroodOps, true
+}
+
 // --- 4.3 Create ---
 
 // handleBroodCreate handles POST /brood-operations (operator+).
@@ -207,6 +217,10 @@ func (s *Server) handleBroodCreate(w http.ResponseWriter, r *http.Request) {
 	local, err := ResolveCluster(r.Context(), s.deps.Brood, "")
 	if err != nil {
 		s.writeClusterRefusal(w, err)
+		return
+	}
+	broodOps, ok := s.broodOpsOrUnavailable(w)
+	if !ok {
 		return
 	}
 
@@ -258,7 +272,7 @@ func (s *Server) handleBroodCreate(w http.ResponseWriter, r *http.Request) {
 	name := mintBroodOpName(req.Spec.Action.Verb)
 
 	// Fan-out create.
-	results := s.deps.BroodOps.Create(r.Context(), orderedClusters, ns, name, specs, claims.PreferredUsername)
+	results := broodOps.Create(r.Context(), orderedClusters, ns, name, specs, claims.PreferredUsername)
 
 	// Build response per D-7.
 	var succeeded []ClusterCreateResult
@@ -372,6 +386,10 @@ func (s *Server) handleBroodPreview(w http.ResponseWriter, r *http.Request) {
 		s.writeClusterRefusal(w, err)
 		return
 	}
+	broodOps, ok := s.broodOpsOrUnavailable(w)
+	if !ok {
+		return
+	}
 
 	// Grammar validation (same path as create).
 	specs, err := validateAndPartition(req, local, func(cluster string) bool {
@@ -388,7 +406,7 @@ func (s *Server) handleBroodPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fan-out preview.
-	results := s.deps.BroodOps.Preview(r.Context(), orderedClusters, ns, specs)
+	results := broodOps.Preview(r.Context(), orderedClusters, ns, specs)
 
 	// Build response.
 	resp := broodPreviewResponse{
@@ -469,9 +487,13 @@ func (s *Server) handleBroodList(w http.ResponseWriter, r *http.Request) {
 		s.writeClusterRefusal(w, err)
 		return
 	}
+	broodOps, ok := s.broodOpsOrUnavailable(w)
+	if !ok {
+		return
+	}
 
 	// Fan-out list.
-	ops, statuses, err := s.deps.BroodOps.List(r.Context(), ns, clusterFilter)
+	ops, statuses, err := broodOps.List(r.Context(), ns, clusterFilter)
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -549,9 +571,13 @@ func (s *Server) handleBroodDetail(w http.ResponseWriter, r *http.Request, ns, n
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	broodOps, ok := s.broodOpsOrUnavailable(w)
+	if !ok {
+		return
+	}
 
 	// Fan-out get to all clusters.
-	ops, statuses, err := s.deps.BroodOps.Get(r.Context(), ns, name)
+	ops, statuses, err := broodOps.Get(r.Context(), ns, name)
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -659,9 +685,13 @@ func (s *Server) handleBroodDelete(w http.ResponseWriter, r *http.Request, ns, n
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	broodOps, ok := s.broodOpsOrUnavailable(w)
+	if !ok {
+		return
+	}
 
 	// Resolve member clusters via Get fan-out.
-	children, _, err := s.deps.BroodOps.Get(r.Context(), ns, name)
+	children, _, err := broodOps.Get(r.Context(), ns, name)
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -680,7 +710,7 @@ func (s *Server) handleBroodDelete(w http.ResponseWriter, r *http.Request, ns, n
 	}
 
 	// Fan out cancel.
-	results := s.deps.BroodOps.Cancel(r.Context(), holdingClusters, ns, name)
+	results := broodOps.Cancel(r.Context(), holdingClusters, ns, name)
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"clusters": results,
@@ -698,6 +728,10 @@ func (s *Server) handleBroodSuspend(w http.ResponseWriter, r *http.Request, ns, 
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	broodOps, ok := s.broodOpsOrUnavailable(w)
+	if !ok {
+		return
+	}
 
 	var req suspendRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -706,7 +740,7 @@ func (s *Server) handleBroodSuspend(w http.ResponseWriter, r *http.Request, ns, 
 	}
 
 	// Resolve member clusters via Get fan-out.
-	children, _, err := s.deps.BroodOps.Get(r.Context(), ns, name)
+	children, _, err := broodOps.Get(r.Context(), ns, name)
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -724,7 +758,7 @@ func (s *Server) handleBroodSuspend(w http.ResponseWriter, r *http.Request, ns, 
 	}
 
 	// Fan out suspend.
-	results := s.deps.BroodOps.Suspend(r.Context(), holdingClusters, ns, name, req.Suspend)
+	results := broodOps.Suspend(r.Context(), holdingClusters, ns, name, req.Suspend)
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"clusters": results,
@@ -783,13 +817,21 @@ func (s *Server) handleBroodStream(w http.ResponseWriter, r *http.Request, ns, n
 // interval and max stream duration, for testability.
 func (s *Server) handleBroodStreamWithPoll(w http.ResponseWriter, r *http.Request, ns, name string, pollInterval, maxDuration time.Duration) {
 	claims := auth.ClaimsFromContext(r.Context())
-	if claims == nil || !s.deps.Authorizer.CanReadController(claims, ns, "") {
+	if claims == nil {
+		s.writeJSONError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	if !s.broodOpAccess(claims, ns, false) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	broodOps, ok := s.broodOpsOrUnavailable(w)
+	if !ok {
 		return
 	}
 
 	// Pre-check: do one BroodOps.Get to decide 404 vs 502 vs proceed.
-	children, statuses, err := s.deps.BroodOps.Get(r.Context(), ns, name)
+	children, statuses, err := broodOps.Get(r.Context(), ns, name)
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -868,7 +910,7 @@ func (s *Server) handleBroodStreamWithPoll(w http.ResponseWriter, r *http.Reques
 			fmt.Fprintf(w, ": ping\n\n")
 			flusher.Flush()
 		case <-poll.C:
-			children, statuses, err := s.deps.BroodOps.Get(r.Context(), ns, name)
+			children, statuses, err := broodOps.Get(r.Context(), ns, name)
 			if err != nil {
 				sendSSEClosed(w, flusher, "", "")
 				return

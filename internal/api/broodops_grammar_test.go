@@ -143,6 +143,35 @@ func TestValidateAndPartition_UnknownCluster(t *testing.T) {
 	}
 }
 
+// A cluster/ns/name entry must name a known cluster, like a clusters entry.
+func TestValidateAndPartition_UnknownQualifierCluster(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		names []string
+		want  string
+	}{
+		{name: "unknown member", names: []string{"core/team-a/ci", "nope/team-b/web"}, want: `unknown cluster "nope"`},
+		{name: "empty cluster token", names: []string{"/team-a/ci"}, want: `unknown cluster ""`},
+		{name: "all sentinel", names: []string{"all/team-a/ci"}, want: `unknown cluster "all"`},
+		{name: "empty namespace token", names: []string{"core//ci"}, want: `invalid name "core//ci": expected cluster/namespace/name`},
+		{name: "empty name token", names: []string{"core/team-a/"}, want: `invalid name "core/team-a/": expected cluster/namespace/name`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := broodCreateRequest{
+				Namespace: "operator-ns",
+				Spec:      v1alpha1.BroodOperationSpec{Targets: v1alpha1.BroodTargets{Names: tc.names}},
+			}
+			specs, err := validateAndPartition(req, "core", knownCluster, "operator-ns")
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if specs != nil {
+				t.Errorf("specs = %v, want nil", specs)
+			}
+		})
+	}
+}
+
 func TestValidateAndPartition_AllMixedWithExplicit(t *testing.T) {
 	req := broodCreateRequest{
 		Namespace: "operator-ns",

@@ -104,6 +104,9 @@ func TestBroodHandlers_403RoleMatrix(t *testing.T) {
 		{"preview-viewer", http.MethodPost, "/brood-operations/preview", `{"namespace":"team-ns","spec":{"action":{"verb":"reconcile"},"targets":{"selector":{}}}}`, viewerClaims, http.StatusOK},
 		{"preview-viewer-operator-ns-403", http.MethodPost, "/brood-operations/preview", `{"spec":{"action":{"verb":"reconcile"},"targets":{"selector":{}}}}`, viewerClaims, http.StatusForbidden},
 		{"detail-viewer-operator-ns-403", http.MethodGet, "/brood-operations/operator-ns/op", "", viewerClaims, http.StatusForbidden},
+		{"stream-no-claims-401", http.MethodGet, "/brood-operations/ns/op/stream", "", nil, http.StatusUnauthorized},
+		{"stream-viewer-404", http.MethodGet, "/brood-operations/ns/missing/stream", "", viewerClaims, http.StatusNotFound},
+		{"stream-viewer-operator-ns-403", http.MethodGet, "/brood-operations/operator-ns/op/stream", "", viewerClaims, http.StatusForbidden},
 	}
 
 	for _, tt := range tests {
@@ -135,6 +138,76 @@ func TestBroodHandlers_403RoleMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A cluster/ns/name entry that names an unknown cluster answers 400 before
+// any create or preview call reaches the store.
+func TestBroodHandlers_UnknownQualifierClusterRefused(t *testing.T) {
+	body := `{"spec":{"action":{"verb":"reconcile"},"targets":{"names":["core/ns/ctrl-a","nope/ns/ctrl-b"]}}}`
+	for _, path := range []string{"/brood-operations", "/brood-operations/preview"} {
+		t.Run(path, func(t *testing.T) {
+			ops := &countingBroodOps{}
+			srv := newBroodTestServer()
+			srv.deps.BroodOps = ops
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+			req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{Subject: "admin", Groups: []string{"admins"}}))
+			w := httptest.NewRecorder()
+			srv.handleBroodOperations(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+			}
+			var resp map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp["error"] != `unknown cluster "nope"` {
+				t.Errorf("body = %s, want error %q", w.Body.String(), `unknown cluster "nope"`)
+			}
+			if ops.creates != 0 || ops.previews != 0 {
+				t.Errorf("creates = %d, previews = %d, want none", ops.creates, ops.previews)
+			}
+		})
+	}
+}
+
+// Without a brood operations store, every brood operation route answers 503
+// after its access check.
+func TestBroodHandlers_NoBroodOpsStore(t *testing.T) {
+	routes := []struct{ method, path, body string }{
+		{http.MethodGet, "/brood-operations", ""},
+		{http.MethodPost, "/brood-operations", `{"namespace":"ns","spec":{"action":{"verb":"reconcile"},"targets":{"names":["ctrl-a"]}}}`},
+		{http.MethodPost, "/brood-operations/preview", `{"namespace":"ns","spec":{"action":{"verb":"reconcile"},"targets":{"selector":{}}}}`},
+		{http.MethodGet, "/brood-operations/ns/op", ""},
+		{http.MethodDelete, "/brood-operations/ns/op", ""},
+		{http.MethodPost, "/brood-operations/ns/op/suspend", `{"suspend":true}`},
+		{http.MethodGet, "/brood-operations/ns/op/stream", ""},
+	}
+	for _, rt := range routes {
+		t.Run(rt.method+" "+rt.path, func(t *testing.T) {
+			srv := newBroodTestServer()
+			srv.deps.BroodOps = nil
+			req := httptest.NewRequest(rt.method, rt.path, strings.NewReader(rt.body))
+			req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{Subject: "admin", Groups: []string{"admins"}}))
+			w := httptest.NewRecorder()
+			srv.handleBroodOperations(w, req)
+			if w.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, want 503: %s", w.Code, w.Body.String())
+			}
+			var resp map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp["error"] != "brood operations not configured" {
+				t.Errorf("body = %s, want error %q", w.Body.String(), "brood operations not configured")
+			}
+		})
+	}
+
+	t.Run("refused caller gets 403", func(t *testing.T) {
+		srv := newBroodTestServer()
+		srv.deps.BroodOps = nil
+		req := httptest.NewRequest(http.MethodDelete, "/brood-operations/ns/op", nil)
+		req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{Subject: "viewer", Groups: []string{"viewers"}}))
+		w := httptest.NewRecorder()
+		srv.handleBroodOperations(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403: %s", w.Code, w.Body.String())
+		}
+	})
 }
 
 // TestBroodHandlers_PreviewOK verifies the preview endpoint works for viewers.
@@ -538,6 +611,22 @@ func (s *stubBroodOps) Preview(ctx context.Context, clusters []string, ns string
 		results[i] = ClusterPreviewResult{Cluster: c, OK: true}
 	}
 	return results
+}
+
+// countingBroodOps counts the create and preview calls that reach the store.
+type countingBroodOps struct {
+	stubBroodOps
+	creates, previews int
+}
+
+func (c *countingBroodOps) Create(ctx context.Context, clusters []string, ns, name string, specs map[string]v1alpha1.BroodOperationSpec, startedBy string) []ClusterCreateResult {
+	c.creates++
+	return c.stubBroodOps.Create(ctx, clusters, ns, name, specs, startedBy)
+}
+
+func (c *countingBroodOps) Preview(ctx context.Context, clusters []string, ns string, specs map[string]v1alpha1.BroodOperationSpec) []ClusterPreviewResult {
+	c.previews++
+	return c.stubBroodOps.Preview(ctx, clusters, ns, specs)
 }
 
 // --- Test helpers ---
