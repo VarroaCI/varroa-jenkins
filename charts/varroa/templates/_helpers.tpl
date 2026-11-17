@@ -41,14 +41,19 @@ NATS bus — memoized credential seed. Called once per render; caches all
 credentials (per-service passwords, CA, TLS) on $ so every consumer gets
 the same values. On upgrade reuses the existing Secret; on first install
 generates everything fresh.
-The server certificate follows the SAN values. The annotation
-varroa.dev/nats-tls-sans records the SAN list of the stored certificate,
-because Sprig cannot read the SANs of a certificate. When the list from
-the values is different, the helper signs a new server certificate with
-the stored CA. The CA and the passwords do not change, so the clients and
-the members keep their trust. A Secret without the annotation gets a new
-certificate once. tests/test-nats-tls-resign.sh replaces the lookup call
-below with a fixture, so keep that call on one line in this form.
+Sprig cannot read a certificate, so three annotations on the Secret record
+what the stored certificates hold: varroa.dev/nats-tls-sans (the SAN list),
+varroa.dev/nats-tls-not-after, and varroa.dev/nats-ca-not-after (RFC 3339,
+UTC). An absent or unreadable date counts as expired.
+The helper signs a new server certificate with the stored CA key when the
+SAN list differs or fewer than 180 days remain. It renews the CA
+certificate with the same key and the same name when fewer than 365 days
+remain, and then also signs a new server certificate. The earlier and the
+renewed CA certificate both verify a server certificate of that key, so a
+member copy of ca.crt stays valid until its own end date. The passwords
+never change. tests/test-nats-tls-resign.sh replaces the lookup call below
+with a fixture, so keep that call on one line in this form. The test also
+holds the four day counts below.
 */}}
 {{- define "varroa.nats.creds" -}}
 {{- if not (hasKey $ "natsCreds") -}}
@@ -64,6 +69,15 @@ below with a fixture, so keep that call on one line in this form.
   {{- end -}}
   {{- $ipSANs := $external.ipSANs | default list -}}
   {{- $sanRecord := printf "dns=%s;ip=%s" (join "," $altNames) (join "," $ipSANs) -}}
+  {{- $layout := "2006-01-02T15:04:05Z07:00" -}}
+  {{- $now := now -}}
+  {{- $tlsDays := 365 -}}
+  {{- $caDays := 3650 -}}
+  {{- $tlsRenewSeconds := mul 180 86400 -}}
+  {{- $caRenewSeconds := mul 365 86400 -}}
+  {{- $tlsNotAfterNew := dateInZone $layout ($now | dateModify (printf "+%dh" (mul $tlsDays 24))) "UTC" -}}
+  {{- $caNotAfterNew := dateInZone $layout ($now | dateModify (printf "+%dh" (mul $caDays 24))) "UTC" -}}
+  {{- $caCN := printf "%s-nats-ca" $.Release.Name -}}
   {{- if $existing -}}
     {{- /*
       recorder-password is new. A release from before this change stores no
@@ -78,16 +92,30 @@ below with a fixture, so keep that call on one line in this form.
     {{- if hasKey $existing.data "agentrunner-password" -}}
       {{- $agentPass = index $existing.data "agentrunner-password" | b64dec -}}
     {{- end -}}
+    {{- $tlsNotAfter := dig "metadata" "annotations" "varroa.dev/nats-tls-not-after" "" $existing -}}
+    {{- $caNotAfter := dig "metadata" "annotations" "varroa.dev/nats-ca-not-after" "" $existing -}}
+    {{- $caDue := lt (sub (toDate $layout $caNotAfter).Unix $now.Unix) $caRenewSeconds -}}
+    {{- $sanStale := ne (dig "metadata" "annotations" "varroa.dev/nats-tls-sans" "" $existing) $sanRecord -}}
+    {{- $tlsDue := lt (sub (toDate $layout $tlsNotAfter).Unix $now.Unix) $tlsRenewSeconds -}}
+    {{- $caCert := index $existing.data "ca.crt" | b64dec -}}
     {{- $tlsCert := index $existing.data "tls.crt" | b64dec -}}
     {{- $tlsKey := index $existing.data "tls.key" | b64dec -}}
-    {{- if ne (dig "metadata" "annotations" "varroa.dev/nats-tls-sans" "" $existing) $sanRecord -}}
+    {{- $caRenewed := false -}}
+    {{- if or $caDue $sanStale $tlsDue -}}
       {{- if not (and (hasKey $existing.data "ca.crt") (hasKey $existing.data "ca.key")) -}}
-        {{- fail (printf "Secret %s holds no ca.crt or ca.key, so the chart cannot sign a new NATS server certificate." $secretName) -}}
+        {{- fail (printf "Secret %s holds no ca.crt or ca.key, so the chart cannot sign a new NATS server certificate or renew the NATS CA." $secretName) -}}
       {{- end -}}
-      {{- $ca := buildCustomCert (index $existing.data "ca.crt") (index $existing.data "ca.key") -}}
-      {{- $cert := genSignedCert (printf "%s-nats" $.Release.Name) $ipSANs $altNames 365 $ca -}}
+      {{- if $caDue -}}
+        {{- $renewedCA := genCAWithKey $caCN $caDays (index $existing.data "ca.key" | b64dec) -}}
+        {{- $caCert = $renewedCA.Cert -}}
+        {{- $caNotAfter = $caNotAfterNew -}}
+        {{- $caRenewed = true -}}
+      {{- end -}}
+      {{- $ca := buildCustomCert ($caCert | b64enc) (index $existing.data "ca.key") -}}
+      {{- $cert := genSignedCert (printf "%s-nats" $.Release.Name) $ipSANs $altNames $tlsDays $ca -}}
       {{- $tlsCert = $cert.Cert -}}
       {{- $tlsKey = $cert.Key -}}
+      {{- $tlsNotAfter = $tlsNotAfterNew -}}
     {{- end -}}
     {{- $_ := set $ "natsCreds" (dict
           "operator" (index $existing.data "operator-password" | b64dec)
@@ -95,14 +123,17 @@ below with a fixture, so keep that call on one line in this form.
           "bff"      (index $existing.data "bff-password"       | b64dec)
           "recorder" $recorderPass
           "agentrunner" $agentPass
-          "caCert"   (index $existing.data "ca.crt"   | b64dec)
-          "caKey"    (index $existing.data "ca.key"   | b64dec)
+          "caCert"   $caCert
+          "caKey"    (index $existing.data "ca.key" | b64dec)
           "tlsCert"  $tlsCert
           "tlsKey"   $tlsKey
-          "tlsSANs"  $sanRecord) -}}
+          "tlsSANs"  $sanRecord
+          "tlsNotAfter" $tlsNotAfter
+          "caNotAfter" $caNotAfter
+          "caRenewed" $caRenewed) -}}
   {{- else -}}
-    {{- $ca := genCA (printf "%s-nats-ca" $.Release.Name) 365 -}}
-    {{- $cert := genSignedCert (printf "%s-nats" $.Release.Name) $ipSANs $altNames 365 $ca -}}
+    {{- $ca := genCA $caCN $caDays -}}
+    {{- $cert := genSignedCert (printf "%s-nats" $.Release.Name) $ipSANs $altNames $tlsDays $ca -}}
     {{- $_ := set $ "natsCreds" (dict
           "operator" (randAlphaNum 32)
           "gateway"  (randAlphaNum 32)
@@ -113,7 +144,10 @@ below with a fixture, so keep that call on one line in this form.
           "caKey"    $ca.Key
           "tlsCert"  $cert.Cert
           "tlsKey"   $cert.Key
-          "tlsSANs"  $sanRecord) -}}
+          "tlsSANs"  $sanRecord
+          "tlsNotAfter" $tlsNotAfterNew
+          "caNotAfter" $caNotAfterNew
+          "caRenewed" false) -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}

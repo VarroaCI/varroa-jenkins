@@ -171,6 +171,8 @@ To keep earlier values, use `--reset-then-reuse-values`. The chart refuses `--re
 The chart mints the NATS passwords, the TLS material, and the JetStream
 encryption key once and re-reads them on `helm upgrade`. Renderers that cannot
 read the cluster (`helm template`, ArgoCD, Flux) mint fresh values on each render.
+`helm upgrade` also renews the NATS certificates before they expire. See
+[NATS certificates](../operations/nats-upgrades.md#certificates).
 Fresh passwords are safe: the components recover in about a minute. A fresh key
 is not: NATS encrypts JetStream with the key in `varroa-nats-js-key`, and a
 changed or lost key loses all JetStream state. Back up the key after the first

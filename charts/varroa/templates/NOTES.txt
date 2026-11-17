@@ -109,6 +109,29 @@ Set global.domain in values.yaml to see external URLs.
   See docs/install/multi-cluster.md for the full runbook.
 {{- end }}
 
+{{- if not (include "varroa.isHive" .) }}
+{{- include "varroa.nats.creds" $ }}
+================================================================================
+  NATS Certificates
+================================================================================
+  CA certificate:     valid until {{ $.natsCreds.caNotAfter }}
+  Server certificate: valid until {{ $.natsCreds.tlsNotAfter }}
+  helm upgrade signs a new server certificate when fewer than 180 days
+  remain, and renews the CA certificate with the same key when fewer than
+  365 days remain. Run helm upgrade at least once every 180 days.
+{{- if $.natsCreds.caRenewed }}
+
+  This upgrade renewed the CA certificate. The bus clients in this cluster
+  read the new ca.crt on their next connection.
+{{- if (.Values.nats.external).enabled }}
+  Copy the new ca.crt to the varroa-nats-creds Secret of each member
+  before the earlier copy expires. Show the end date of a member copy:
+    kubectl -n <member-namespace> get secret varroa-nats-creds \
+      -o jsonpath='{.data.ca\.crt}' | base64 -d | openssl x509 -noout -enddate
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{- if and (not (include "varroa.isHive" .)) ((.Values.nats.external).enabled) }}
 ================================================================================
   External NATS Exposure
@@ -129,8 +152,9 @@ Set global.domain in values.yaml to see external URLs.
     kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-nats-creds \
       -o jsonpath='{.metadata.annotations.varroa\.dev/nats-tls-sans}'
 
-  To replace the CA, delete the Secret and upgrade. This makes a new CA and
-  new passwords. Then restart each bus client. Copy the new ca.crt and the
+  helm upgrade renews the CA certificate with the same key. To replace the
+  CA key, delete the Secret and upgrade. This makes a new CA key and new
+  passwords. Then restart each bus client. Copy the new ca.crt and the
   member passwords to every member, and restart the member operator and
   gateway:
     kubectl -n {{ .Release.Namespace }} delete secret {{ .Release.Name }}-nats-creds

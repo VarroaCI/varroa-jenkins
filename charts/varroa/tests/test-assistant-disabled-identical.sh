@@ -29,7 +29,7 @@ check() {
 
 # mask removes the lines that hold a per-render random value.
 mask() {
-  grep -v -E '\$2a\$|ca\.(crt|key):|tls\.(crt|key):|password:|secret: "|-password:|key: "?[A-Za-z0-9+/=]{40,}"?$|: "?[A-Za-z0-9+/=]{60,}"?$' || true
+  grep -v -E '\$2a\$|ca\.(crt|key):|tls\.(crt|key):|password:|secret: "|-password:|key: "?[A-Za-z0-9+/=]{40,}"?$|: "?[A-Za-z0-9+/=]{60,}"?$|varroa\.dev/nats-(tls|ca)-not-after:' || true
 }
 
 echo "=== Default render: assistant is absent ==="
