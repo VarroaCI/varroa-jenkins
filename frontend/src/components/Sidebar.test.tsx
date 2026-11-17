@@ -143,7 +143,7 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Brood Schedules")).not.toBeInTheDocument();
   });
 
-  it("renders all 11 nav rows when every permission is held", () => {
+  it("renders every nav row when every permission is held", () => {
     vi.mocked(usePermissions).mockReturnValue({
       data: { global: { "*": { "*": true } }, scopes: [] },
       isLoading: false,
@@ -172,11 +172,12 @@ describe("Sidebar", () => {
     } as unknown as ReturnType<typeof usePermissions>);
 
     renderSidebar("/");
-    // Exactly the 11 rows
+    // Every row of the table
     expect(screen.getByText("Overview")).toBeInTheDocument();
     expect(screen.getByText("Pipelines")).toBeInTheDocument();
     expect(screen.getByText("Controllers")).toBeInTheDocument();
     expect(screen.getByText("Cells")).toBeInTheDocument();
+    expect(screen.getByText("Tenant agents")).toBeInTheDocument();
     expect(screen.getByText("Plugins")).toBeInTheDocument();
     expect(screen.getByText("Clusters")).toBeInTheDocument();
     expect(screen.getByText("Activity")).toBeInTheDocument();
@@ -881,7 +882,7 @@ describe("Sidebar", () => {
       } as unknown as ReturnType<typeof usePermissions>);
     }
 
-    it("renders eleven rows for a full-permission caller", () => {
+    it("renders every row for a full-permission caller", () => {
       mockPerms({
         global: { "*": { "*": true } },
         scopes: [],
@@ -889,7 +890,7 @@ describe("Sidebar", () => {
       });
       renderSidebar("/");
       const labels = [
-        "Overview", "Pipelines", "Controllers", "Cells", "Plugins", "Clusters",
+        "Overview", "Pipelines", "Controllers", "Cells", "Tenant agents", "Plugins", "Clusters",
         "Activity", "Operations", "Schedules", "Catalog", "Admin & access",
       ];
       for (const label of labels) {
@@ -913,6 +914,41 @@ describe("Sidebar", () => {
       });
       renderSidebar("/");
       expect(screen.queryByText("Cells")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("agents gate", () => {
+    it("shows the Tenant agents row for a cluster-wide agentsessions:read grant", () => {
+      mockPermissionsData({ global: { agentsessions: { read: true } }, scopes: [] });
+      renderSidebar("/");
+      expect(screen.getByRole("link", { name: "Tenant agents" })).toHaveAttribute("href", "/agents");
+    });
+
+    it("places the Tenant agents row between Cells and Plugins", () => {
+      mockPermissionsData({
+        global: { "*": { "*": true } },
+        scopes: [],
+        tenants: [{ tenant: "team-a", jobs: [], capabilities: { pipelines: { read: true } } }],
+      });
+      renderSidebar("/");
+      const routes = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
+      expect(routes.indexOf("/agents")).toBe(routes.indexOf("/cells") + 1);
+      expect(routes.indexOf("/plugins")).toBe(routes.indexOf("/agents") + 1);
+    });
+
+    it("hides the Tenant agents row for a namespace-scoped grant", () => {
+      mockPermissionsData({
+        global: {},
+        scopes: [{ namespaces: ["ns-a"], hasControllerSelector: false, capabilities: { agentsessions: { read: true } } }],
+      });
+      renderSidebar("/");
+      expect(screen.queryByRole("link", { name: "Tenant agents" })).not.toBeInTheDocument();
+    });
+
+    it("hides the Tenant agents row while the permissions read has not answered", () => {
+      mockPermissionsData(undefined);
+      renderSidebar("/");
+      expect(screen.queryByRole("link", { name: "Tenant agents" })).not.toBeInTheDocument();
     });
   });
 });

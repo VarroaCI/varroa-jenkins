@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canCatalogArea, canAdminArea, canCellsRow, canControllersRow } from "./navPermissions";
+import { canCatalogArea, canAdminArea, canCellsRow, canAgentsRow, canControllersRow } from "./navPermissions";
 import type { Permissions } from "../types/auth";
 
 describe("canCatalogArea", () => {
@@ -119,6 +119,42 @@ describe("canCellsRow", () => {
   it("refuses a caller with no grant", () => {
     expect(canCellsRow({ global: {}, scopes: [] })).toBe(false);
     expect(canCellsRow(undefined)).toBe(false);
+  });
+});
+
+describe("canAgentsRow", () => {
+  it("admits a cluster-wide agentsessions:read grant", () => {
+    expect(canAgentsRow({ global: { agentsessions: { read: true } }, scopes: [] })).toBe(true);
+  });
+
+  it("admits a wildcard grant", () => {
+    expect(canAgentsRow({ global: { "*": { "*": true } }, scopes: [] })).toBe(true);
+  });
+
+  it("refuses a namespace-scoped grant alone", () => {
+    const perms: Permissions = {
+      global: {},
+      scopes: [{ namespaces: ["ns-a"], hasControllerSelector: false, capabilities: { agentsessions: { read: true } } }],
+    };
+    expect(canAgentsRow(perms)).toBe(false);
+  });
+
+  it("refuses a tenant-scoped grant", () => {
+    const perms: Permissions = {
+      global: {},
+      scopes: [{
+        namespaces: [],
+        hasControllerSelector: false,
+        tenants: [{ name: "team-a" }],
+        capabilities: { agentsessions: { read: true } },
+      }],
+    };
+    expect(canAgentsRow(perms)).toBe(false);
+  });
+
+  it("refuses a caller with no grant and an unanswered read", () => {
+    expect(canAgentsRow({ global: {}, scopes: [] })).toBe(false);
+    expect(canAgentsRow(undefined)).toBe(false);
   });
 });
 
