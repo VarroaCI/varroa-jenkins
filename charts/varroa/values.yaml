@@ -761,6 +761,9 @@ nats:
       tls:
         enabled: true
         # A single Secret holds the server cert/key, the CA, and per-service passwords.
+        # helm upgrade signs a new server certificate (365 days) when fewer than
+        # 180 days remain. It renews the CA certificate (3650 days) with the same
+        # key when fewer than 365 days remain.
         # Bare `helm template` (no cluster) renders fresh material each time — not a deploy path.
         secretName: varroa-nats-creds
         dir: /etc/nats-certs/nats
