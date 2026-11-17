@@ -173,8 +173,12 @@ func TestCellPoolTools_RefuseAnUnknownOrUnreachableCluster(t *testing.T) {
 			resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
 				"name": tc.tool, "arguments": tc.args,
 			}, mcpAdminClaims)
-			if tr := parseToolResult(t, resp.Result); !tr.IsError {
+			tr := parseToolResult(t, resp.Result)
+			if !tr.IsError {
 				t.Fatal("the call must be refused")
+			}
+			if !tc.unreachable && toolText(tr) != "unknown cluster: nowhere" {
+				t.Errorf("error = %q, want unknown cluster: nowhere", toolText(tr))
 			}
 			if len(sink.events) != 0 {
 				t.Errorf("a refused call must publish nothing, got %+v", sink.events)

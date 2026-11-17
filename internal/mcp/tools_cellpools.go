@@ -95,7 +95,7 @@ func registerCellPoolTools(mcpServer *server.MCPServer, deps *api.Dependencies) 
 			"placedCells, unreadyCells, freeTenantSlots, departedBuildCells, the tenant list, and the PoolReady "+
 			"condition. The result names the pool's cluster."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("CellPool name")),
-		mcp.WithString("cluster", mcp.Description("Cluster that holds the pool. Default: the core cluster.")),
+		mcp.WithString("cluster", mcp.Description("Cluster that holds the pool. Default: the local cluster.")),
 	)
 	addTool(mcpServer, kindRead, getPool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -118,7 +118,7 @@ func registerCellPoolTools(mcpServer *server.MCPServer, deps *api.Dependencies) 
 			"names and removes nothing. profileRef, cellTemplate, libraries, approvedSignatures, mail, and giteaServers are not API operations: edit "+
 			"those with kubectl or through GitOps."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("CellPool name")),
-		mcp.WithString("cluster", mcp.Description("Cluster that holds the pool. Default: the core cluster.")),
+		mcp.WithString("cluster", mcp.Description("Cluster that holds the pool. Default: the local cluster.")),
 		mcp.WithNumber("warm", mcp.Description("Target count of free cells the pool keeps ready")),
 		mcp.WithNumber("maxCells", mcp.Description("Cap on the pool's cells, placed cells included. 0 means unlimited")),
 		mcp.WithNumber("maxTenantsPerCell", mcp.Description("Capacity a pool cell uses when its own spec.cell.maxTenants is zero. At most 64.")),

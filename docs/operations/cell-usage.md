@@ -16,7 +16,8 @@ curl -H "Authorization: Bearer $TOKEN" \
 ```
 
 Both take an optional `cluster` parameter, which defaults to the local cluster. The list read also
-takes an optional `namespace` parameter.
+takes an optional `namespace` parameter. A cluster that the brood does not know gives `404` with
+the text `unknown cluster: <name>`.
 
 Both apply the `controllers:read` check on each cell. The list read drops each refused cell. The
 single read answers `404` for an unknown controller, for one that is not a cell, and for a refused

@@ -23179,6 +23179,7 @@ type ListCellUsageResponse struct {
 		Items []ComponentsSchemasCellUsage `json:"items"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
+	JSON404 *ComponentsResponsesNotFound
 	JSON503 *ComponentsResponsesServiceUnavailable
 }
 
@@ -31828,6 +31829,13 @@ func ParseListCellUsageResponse(rsp *http.Response) (*ListCellUsageResponse, err
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest ComponentsResponsesServiceUnavailable

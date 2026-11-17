@@ -35,23 +35,22 @@ type CellPoolList struct {
 const cellPoolConflictMessage = "the cell pool changed during the update; retry the request"
 
 // ListCellPools lists the pools of one cluster, or of every known cluster
-// when cluster is empty. A cluster whose read fails is reported with ok
-// false in Clusters and adds no item; it does not fail the call. The HTTP
-// list route and the list_cell_pools tool both call it.
+// when cluster is empty. ResolveCluster resolves cluster. A cluster whose
+// read fails is reported with ok false in Clusters and adds no item; it
+// does not fail the call. The HTTP list route and the list_cell_pools tool
+// both call it.
 func (s *Server) ListCellPools(ctx context.Context, claims *auth.Claims, cluster string) (CellPoolList, *ServiceError) {
 	if !s.canReadCellPoolsFor(claims) {
 		return CellPoolList{}, &ServiceError{Status: http.StatusForbidden, Message: "forbidden"}
 	}
 
-	local := s.localCluster()
-	var targets []string
-	if cluster != "" {
-		name, _, serr := s.resolveCellPoolCluster(ctx, cluster)
-		if serr != nil {
-			return CellPoolList{}, serr
-		}
-		targets = []string{name}
-	} else {
+	target, err := ResolveCluster(ctx, s.deps.Brood, cluster)
+	if err != nil {
+		return CellPoolList{}, clusterServiceError(err)
+	}
+	local := s.deps.Brood.LocalCluster()
+	targets := []string{target}
+	if cluster == "" {
 		targets = s.cellPoolClusters(ctx, local)
 	}
 
@@ -97,21 +96,20 @@ func (s *Server) ListCellPools(ctx context.Context, claims *auth.Claims, cluster
 	return out, nil
 }
 
-// GetCellPool reads one pool of one cluster. An empty cluster means the
-// BFF's own cluster.
+// GetCellPool reads one pool of one cluster. ResolveCluster resolves
+// cluster, so an empty cluster means the BFF's own cluster.
 func (s *Server) GetCellPool(ctx context.Context, claims *auth.Claims, cluster, name string) (ClusterCellPool, *ServiceError) {
 	if !s.canReadCellPoolsFor(claims) {
 		return ClusterCellPool{}, &ServiceError{Status: http.StatusForbidden, Message: "forbidden"}
 	}
-	target, local, serr := s.resolveCellPoolCluster(ctx, cluster)
-	if serr != nil {
-		return ClusterCellPool{}, serr
+	target, err := ResolveCluster(ctx, s.deps.Brood, cluster)
+	if err != nil {
+		return ClusterCellPool{}, clusterServiceError(err)
 	}
 
 	var pool *v1alpha1.CellPool
-	var err error
 	switch {
-	case local:
+	case target == s.deps.Brood.LocalCluster():
 		if s.deps.Store == nil {
 			return ClusterCellPool{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "store not configured"}
 		}
@@ -127,24 +125,23 @@ func (s *Server) GetCellPool(ctx context.Context, claims *auth.Claims, cluster, 
 	return ClusterCellPool{Cluster: target, Pool: pool}, nil
 }
 
-// ScaleCellPool applies the named dials to one pool of one cluster. The
-// local cluster writes on the BFF's own store. A member cluster's operator
-// runs the same read-modify-write against its own apiserver. The caller
-// publishes the activity event, because the actor and the source belong to
-// the caller.
+// ScaleCellPool applies the named dials to one pool of one cluster.
+// ResolveCluster resolves cluster. The local cluster writes on the BFF's
+// own store. A member cluster's operator runs the same read-modify-write
+// against its own apiserver. The caller publishes the activity event,
+// because the actor and the source belong to the caller.
 func (s *Server) ScaleCellPool(ctx context.Context, claims *auth.Claims, cluster, name string, dials cells.CellPoolDials) (ClusterCellPool, *ServiceError) {
 	if s.deps.Authorizer == nil || claims == nil || !s.deps.Authorizer.CanUpdateCellPools(claims) {
 		return ClusterCellPool{}, &ServiceError{Status: http.StatusForbidden, Message: "forbidden"}
 	}
-	target, local, serr := s.resolveCellPoolCluster(ctx, cluster)
-	if serr != nil {
-		return ClusterCellPool{}, serr
+	target, err := ResolveCluster(ctx, s.deps.Brood, cluster)
+	if err != nil {
+		return ClusterCellPool{}, clusterServiceError(err)
 	}
 
 	var pool *v1alpha1.CellPool
-	var err error
 	switch {
-	case local:
+	case target == s.deps.Brood.LocalCluster():
 		if s.deps.Store == nil {
 			return ClusterCellPool{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "store not configured"}
 		}
@@ -172,27 +169,10 @@ func (s *Server) canReadCellPoolsFor(claims *auth.Claims) bool {
 	return s.deps.Authorizer != nil && claims != nil && s.deps.Authorizer.CanReadCellPools(claims)
 }
 
-// resolveCellPoolCluster maps a requested cluster onto its name and tells
-// whether it is the BFF's own cluster. An empty value is the local
-// cluster. A cluster the brood does not know is a 404. Without a brood
-// router only the local cluster is known.
-func (s *Server) resolveCellPoolCluster(ctx context.Context, cluster string) (string, bool, *ServiceError) {
-	local := s.localCluster()
-	if cluster == "" || cluster == local {
-		return local, true, nil
-	}
-	if s.deps.Brood == nil || !s.deps.Brood.IsKnown(ctx, cluster) {
-		return "", false, &ServiceError{Status: http.StatusNotFound, Message: "cluster " + cluster + " not found"}
-	}
-	return cluster, false, nil
-}
-
 // cellPoolClusters lists the clusters an unfiltered list covers: every
-// cluster the brood knows, else the local cluster alone.
+// cluster the brood knows, else the local cluster alone when the cluster
+// list fails. The caller resolves the brood first.
 func (s *Server) cellPoolClusters(ctx context.Context, local string) []string {
-	if s.deps.Brood == nil {
-		return []string{local}
-	}
 	infos, err := s.deps.Brood.Clusters(ctx)
 	if err != nil {
 		s.deps.Logger.Warn("cell pools: the cluster list failed; listing the local cluster only", "error", err)
@@ -213,7 +193,7 @@ func (s *Server) cellPoolClusters(ctx context.Context, local string) []string {
 // cellPoolsOn lists the pools of one cluster: the local cluster on the
 // BFF's own store, a member cluster through ConfigBrood.
 func (s *Server) cellPoolsOn(ctx context.Context, cluster string) ([]v1alpha1.CellPool, error) {
-	if s.isLocalCluster(cluster) || cluster == s.localCluster() {
+	if s.isLocalCluster(cluster) {
 		if s.deps.Store == nil {
 			return nil, errors.New("store not configured")
 		}

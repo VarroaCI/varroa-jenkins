@@ -229,7 +229,12 @@ func compareVersionsDesc(a, b string) bool {
 // JenkinsVersionProfile catalog and status. Any authenticated caller may read
 // this (same posture as /provisioning/config; catalog state is non-sensitive).
 func (s *Server) HandleVersionProfiles(w http.ResponseWriter, r *http.Request) {
-	s.handleVersionProfilesForCluster(w, r, s.localCluster())
+	cluster, err := ResolveCluster(r.Context(), s.deps.Brood, "")
+	if err != nil {
+		s.writeClusterRefusal(w, err)
+		return
+	}
+	s.handleVersionProfilesForCluster(w, r, cluster)
 }
 
 func (s *Server) handleVersionProfilesForCluster(w http.ResponseWriter, r *http.Request, cluster string) {
@@ -239,8 +244,8 @@ func (s *Server) handleVersionProfilesForCluster(w http.ResponseWriter, r *http.
 	}
 
 	ctx := r.Context()
-	if cluster != s.localCluster() {
-		s.deps.Logger.Debug("version-profiles request for non-local cluster", "cluster", cluster, "localCluster", s.localCluster())
+	if local := s.deps.Brood.LocalCluster(); cluster != local {
+		s.deps.Logger.Debug("version-profiles request for non-local cluster", "cluster", cluster, "localCluster", local)
 		views, err := s.deps.ConfigBrood.ViewVersionProfiles(ctx, cluster)
 		if err != nil {
 			writeConfigBroodError(w, err, cluster)
@@ -367,13 +372,6 @@ func profilePluginSetReady(p *v1alpha1.JenkinsVersionProfile) *bool {
 		}
 	}
 	return &ready
-}
-
-func (s *Server) localCluster() string {
-	if s.deps.Brood != nil && s.deps.Brood.LocalCluster() != "" {
-		return s.deps.Brood.LocalCluster()
-	}
-	return "core"
 }
 
 func (s *Server) dispatchProvisioning(w http.ResponseWriter, r *http.Request, cluster string, segments []string) {

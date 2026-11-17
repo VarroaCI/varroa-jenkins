@@ -35,7 +35,7 @@ func (s *Server) handleControllerClassesCollection(w http.ResponseWriter, r *htt
 	}
 
 	ctx := r.Context()
-	if cluster != s.localCluster() {
+	if cluster != s.deps.Brood.LocalCluster() {
 		s.writeJSONError(w, http.StatusNotImplemented, "controller-classes on remote clusters not yet supported")
 		return
 	}
@@ -58,7 +58,7 @@ func (s *Server) handleControllerClassResource(w http.ResponseWriter, r *http.Re
 	}
 
 	ctx := r.Context()
-	if cluster != s.localCluster() {
+	if cluster != s.deps.Brood.LocalCluster() {
 		s.writeJSONError(w, http.StatusNotImplemented, "controller-classes on remote clusters not yet supported")
 		return
 	}

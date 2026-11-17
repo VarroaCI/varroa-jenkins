@@ -114,10 +114,15 @@ func (s *Server) fillCellUsagePresentation(row *cellUsageJSON, cr *v1alpha1.Cont
 
 // CellUsage reads one cell's load. It is the single-cell HTTP path's
 // implementation and the get_cell_usage tool's implementation. It
-// answers 404 for an unknown controller, a controller that is not a
-// cell, and a caller the controller read check refuses: one code for
-// all three keeps the surface from confirming that a cell exists.
+// resolves cluster through ResolveCluster first. It answers 404 for an
+// unknown controller, a controller that is not a cell, and a caller the
+// controller read check refuses: one code for all three keeps the
+// surface from confirming that a cell exists.
 func (s *Server) CellUsage(ctx context.Context, claims *auth.Claims, cluster, namespace, name string) (CellUsage, *ServiceError) {
+	cluster, err := ResolveCluster(ctx, s.deps.Brood, cluster)
+	if err != nil {
+		return CellUsage{}, clusterServiceError(err)
+	}
 	if s.deps.RecordStore == nil {
 		return CellUsage{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
 	}
@@ -151,11 +156,9 @@ func (s *Server) CellUsage(ctx context.Context, claims *auth.Claims, cluster, na
 	return out, nil
 }
 
-// cellController reads one cell Controller from the named cluster.
+// cellController reads one cell Controller from a cluster that
+// ResolveCluster resolved.
 func (s *Server) cellController(ctx context.Context, cluster, namespace, name string) (*v1alpha1.Controller, error) {
-	if s.deps.Brood == nil {
-		return nil, nil
-	}
 	return s.deps.Brood.Get(ctx, cluster, namespace, name)
 }
 
@@ -193,8 +196,12 @@ type CellGrants struct {
 // A local cell is read on the BFF's own resolver. A member cell is read on
 // its own operator, which holds the Tenant and binding state the member
 // renders. That path answers 502 when the member does not answer. The read
-// touches no record store, so it answers no 503.
+// touches no record store, so it answers 503 only without a brood.
 func (s *Server) CellGrants(ctx context.Context, claims *auth.Claims, cluster, namespace, name string) (CellGrants, *ServiceError) {
+	cluster, err := ResolveCluster(ctx, s.deps.Brood, cluster)
+	if err != nil {
+		return CellGrants{}, clusterServiceError(err)
+	}
 	notFound := &ServiceError{Status: http.StatusNotFound, Message: "cell not found"}
 	if s.deps.Authorizer == nil || claims == nil || !s.deps.Authorizer.CanReadController(claims, namespace, name) {
 		return CellGrants{}, notFound
@@ -216,7 +223,7 @@ func (s *Server) CellGrants(ctx context.Context, claims *auth.Claims, cluster, n
 	if cr.Status.Cell == nil {
 		return out, nil
 	}
-	if s.isLocalCluster(cluster) || cluster == s.localCluster() {
+	if cluster == s.deps.Brood.LocalCluster() {
 		for _, tenant := range cr.Status.Cell.Tenants {
 			sources, truncated := s.deps.Authorizer.TenantGrantSources(tenant)
 			out.Tenants = append(out.Tenants, controller.CellTenantGrantsReport(

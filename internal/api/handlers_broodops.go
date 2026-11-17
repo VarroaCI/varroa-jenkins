@@ -204,6 +204,12 @@ func (s *Server) handleBroodCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	local, err := ResolveCluster(r.Context(), s.deps.Brood, "")
+	if err != nil {
+		s.writeClusterRefusal(w, err)
+		return
+	}
+
 	// Tenancy pre-check (best-effort, core operatorNS).
 	if err := controller.ValidateBroodTenancy(req.Spec, ns, s.deps.OperatorNamespace); err != nil {
 		s.writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -223,7 +229,7 @@ func (s *Server) handleBroodCreate(w http.ResponseWriter, r *http.Request) {
 	// local policy to a fan-out would reject an operation a remote cluster
 	// permits — and could not have approved one it forbids anyway. Mixed
 	// outcomes surface per-cluster in the fan-out response instead.
-	if req.Spec.Action.Verb == v1alpha1.BroodVerbExecuteGroovy && s.localOnlyRequest(req) {
+	if req.Spec.Action.Verb == v1alpha1.BroodVerbExecuteGroovy && localOnlyRequest(req, local) {
 		if defaults, dErr := crdstore.Get[v1alpha1.ProvisioningDefaults](
 			r.Context(), s.deps.Store, provisioningDefaultsName, ""); dErr == nil && defaults != nil {
 			if ok, why := defaults.Spec.BroodPolicy.ExecuteGroovyAllowed(ns); !ok {
@@ -234,7 +240,7 @@ func (s *Server) handleBroodCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Grammar validation.
-	specs, err := validateAndPartition(req, s.deps.Brood.LocalCluster(), func(cluster string) bool {
+	specs, err := validateAndPartition(req, local, func(cluster string) bool {
 		return s.deps.Brood.IsKnown(r.Context(), cluster)
 	}, s.deps.OperatorNamespace)
 	if err != nil {
@@ -361,8 +367,14 @@ func (s *Server) handleBroodPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	local, err := ResolveCluster(r.Context(), s.deps.Brood, "")
+	if err != nil {
+		s.writeClusterRefusal(w, err)
+		return
+	}
+
 	// Grammar validation (same path as create).
-	specs, err := validateAndPartition(req, s.deps.Brood.LocalCluster(), func(cluster string) bool {
+	specs, err := validateAndPartition(req, local, func(cluster string) bool {
 		return s.deps.Brood.IsKnown(r.Context(), cluster)
 	}, s.deps.OperatorNamespace)
 	if err != nil {
@@ -452,12 +464,10 @@ func (s *Server) handleBroodList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate ?cluster= if set.
-	if clusterFilter != "" {
-		if !s.deps.Brood.IsKnown(r.Context(), clusterFilter) {
-			s.writeJSONError(w, http.StatusNotFound, "unknown cluster: "+clusterFilter)
-			return
-		}
+	// An empty filter lists every cluster. A set filter must name a known cluster.
+	if _, err := ResolveCluster(r.Context(), s.deps.Brood, clusterFilter); err != nil {
+		s.writeClusterRefusal(w, err)
+		return
 	}
 
 	// Fan-out list.
@@ -985,11 +995,7 @@ const provisioningDefaultsName = "varroa-defaults"
 // localOnlyRequest reports whether a create request targets nothing but the
 // local cluster, which is the only case where the BFF's view of
 // ProvisioningDefaults is the same one that will enforce the operation.
-func (s *Server) localOnlyRequest(req broodCreateRequest) bool {
-	if s.deps.Brood == nil {
-		return true
-	}
-	local := s.deps.Brood.LocalCluster()
+func localOnlyRequest(req broodCreateRequest, local string) bool {
 	for _, c := range req.Clusters {
 		if c != "" && c != local {
 			return false

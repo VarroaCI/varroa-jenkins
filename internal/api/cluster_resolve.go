@@ -21,7 +21,7 @@ func (e *UnknownClusterError) Error() string { return "unknown cluster: " + e.Cl
 // ResolveCluster maps the cluster value of a call onto one cluster of brood.
 // An empty name selects the local cluster of brood. Any other name must be a
 // cluster that brood knows. Without a brood, it returns ErrBroodNotConfigured.
-// The REST handlers and the MCP Controller tools share this rule.
+// Every REST handler and MCP tool that takes a cluster shares this rule.
 func ResolveCluster(ctx context.Context, brood Brood, name string) (string, error) {
 	if brood == nil {
 		return "", ErrBroodNotConfigured
@@ -35,12 +35,19 @@ func ResolveCluster(ctx context.Context, brood Brood, name string) (string, erro
 	return name, nil
 }
 
-// writeClusterRefusal writes a ResolveCluster error: 503 without a brood,
-// 404 for an unknown cluster.
-func (s *Server) writeClusterRefusal(w http.ResponseWriter, err error) {
+// clusterServiceError maps a ResolveCluster error onto a ServiceError: 503
+// without a brood, 404 for an unknown cluster.
+func clusterServiceError(err error) *ServiceError {
 	status := http.StatusNotFound
 	if errors.Is(err, ErrBroodNotConfigured) {
 		status = http.StatusServiceUnavailable
 	}
-	s.writeJSONError(w, status, err.Error())
+	return &ServiceError{Status: status, Message: err.Error()}
+}
+
+// writeClusterRefusal writes a ResolveCluster error: 503 without a brood,
+// 404 for an unknown cluster.
+func (s *Server) writeClusterRefusal(w http.ResponseWriter, err error) {
+	serr := clusterServiceError(err)
+	s.writeJSONError(w, serr.Status, serr.Message)
 }

@@ -9,9 +9,21 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
+
+// corePoolBrood knows the local cluster core alone.
+type corePoolBrood struct{ api.Brood }
+
+func (corePoolBrood) LocalCluster() string { return "core" }
+
+func (corePoolBrood) Clusters(context.Context) ([]api.ClusterInfo, error) {
+	return []api.ClusterInfo{{ClusterInfo: bus.ClusterInfo{Name: "core"}, Core: true, Healthy: true}}, nil
+}
+
+func (corePoolBrood) IsKnown(_ context.Context, cluster string) bool { return cluster == "core" }
 
 // cellPoolDeps seeds two pools and an Authorizer holding the operator's own
 // cellpools verbs through a cluster-wide binding.
@@ -55,6 +67,7 @@ func cellPoolDeps(t *testing.T, verbs ...string) (*api.Dependencies, *crdstore.F
 		Client:     &stubClient{},
 		Store:      store,
 		Authorizer: api.NewAuthorizer(rbac.NewTestResolverWithRoles(roles, bindings), false),
+		Brood:      corePoolBrood{},
 	}, store
 }
 
@@ -331,6 +344,30 @@ func TestUpdateCellPool_Annotations(t *testing.T) {
 		return
 	}
 	t.Fatal("update_cell_pool is not registered")
+}
+
+// TestCellPoolTools_NoBroodRefusesTheCall proves each tool refuses without a
+// brood, and that the refused scale writes nothing to the local store.
+func TestCellPoolTools_NoBroodRefusesTheCall(t *testing.T) {
+	calls := map[string]map[string]interface{}{
+		"list_cell_pools":  {},
+		"get_cell_pool":    {"name": "lts-2-555"},
+		"update_cell_pool": {"name": "lts-2-555", "warm": 3},
+	}
+	for name, args := range calls {
+		t.Run(name, func(t *testing.T) {
+			deps, store := cellPoolDeps(t, "read", "update")
+			deps.Brood = nil
+			tr := callWithClaims(t, deps, mcpAdminClaims, name, args)
+			if !tr.IsError || toolText(tr) != "brood not configured" {
+				t.Fatalf("result = %q, want the brood refusal", toolText(tr))
+			}
+			pool, err := crdstore.Get[v1alpha1.CellPool](context.Background(), store, "lts-2-555", "")
+			if err != nil || pool.Spec.Warm != 1 {
+				t.Errorf("the refused call changed the stored pool: %+v, %v", pool, err)
+			}
+		})
+	}
 }
 
 // TestCellPoolTools_RefuseAnAbsentAuthorizer proves each tool refuses rather

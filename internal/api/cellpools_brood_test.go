@@ -338,6 +338,8 @@ func TestCellPools_LocalScalePublishesTheLocalCluster(t *testing.T) {
 	}
 }
 
+// TestCellPools_SingleClusterInstallListsCore covers a brood that knows the
+// local cluster core alone.
 func TestCellPools_SingleClusterInstallListsCore(t *testing.T) {
 	srv, store, ctx := cellPoolTestServer(t, nil)
 	seedCellPool(store, "lts-2-555", 1)
@@ -352,7 +354,7 @@ func TestCellPools_SingleClusterInstallListsCore(t *testing.T) {
 		t.Errorf("clusters = %+v, want core ok", body.Clusters)
 	}
 	if code, _ := listCellPools(ctx, t, srv, "?cluster=member-c"); code != http.StatusNotFound {
-		t.Errorf("another cluster without a brood router: status = %d, want 404", code)
+		t.Errorf("a cluster the brood does not know: status = %d, want 404", code)
 	}
 }
 

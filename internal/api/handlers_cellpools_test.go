@@ -23,7 +23,7 @@ import (
 
 // cellPoolTestServer builds a server whose caller holds cellpools:read and
 // cellpools:update through a cluster-wide binding, the shape both gates
-// require.
+// require. Its brood knows the local cluster core alone.
 func cellPoolTestServer(t *testing.T, scope *v1alpha1.VarroaRoleBindingScope) (*Server, *crdstore.Fake, context.Context) {
 	t.Helper()
 	role := &v1alpha1.VarroaRole{
@@ -49,6 +49,7 @@ func cellPoolTestServer(t *testing.T, scope *v1alpha1.VarroaRoleBindingScope) (*
 		Store:      store,
 		Logger:     slog.Default(),
 		Authorizer: authz,
+		Brood:      newStoreBrood(store),
 	})
 	ctx := auth.ContextWithClaims(context.Background(), &auth.Claims{Subject: "test-operator"})
 	return srv, store, ctx

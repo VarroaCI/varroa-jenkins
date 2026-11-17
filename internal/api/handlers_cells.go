@@ -112,14 +112,10 @@ func (c *cellCapResolver) poolCap(cluster, name string) int32 {
 	if !loaded {
 		byName = map[string]int32{}
 		c.pools[key] = byName
-		target := cluster
-		if key == "" {
-			target = c.s.localCluster()
-		}
-		pools, err := c.s.cellPoolsOn(c.ctx, target)
+		pools, err := c.s.cellPoolsOn(c.ctx, cluster)
 		if err != nil {
 			c.s.deps.Logger.Warn("cell cap: the pool list failed; the pool tier is skipped",
-				"cluster", target, "error", err)
+				"cluster", cluster, "error", err)
 			return 0
 		}
 		for i := range pools {
@@ -221,25 +217,13 @@ func (s *Server) isLocalCluster(cluster string) bool {
 	return cluster == s.deps.Brood.LocalCluster()
 }
 
-// cellUsageCluster resolves the cluster of a usage request: the optional
-// cluster parameter, else the local cluster.
-func (s *Server) cellUsageCluster(r *http.Request) string {
-	if cluster := r.URL.Query().Get("cluster"); cluster != "" {
-		return cluster
-	}
-	if s.deps.Brood != nil {
-		return s.deps.Brood.LocalCluster()
-	}
-	return ""
-}
-
 // handleCellUsage serves GET /cells/{namespace}/{name}/usage. It answers
 // 404 for an unknown controller, a controller that is not a cell, and a
 // caller the controller read check refuses. One code for all three keeps
 // the surface from confirming that a cell exists.
 func (s *Server) handleCellUsage(w http.ResponseWriter, r *http.Request) {
 	claims := auth.ClaimsFromContext(r.Context())
-	usage, serr := s.CellUsage(r.Context(), claims, s.cellUsageCluster(r), r.PathValue("namespace"), r.PathValue("name"))
+	usage, serr := s.CellUsage(r.Context(), claims, r.URL.Query().Get("cluster"), r.PathValue("namespace"), r.PathValue("name"))
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return
@@ -250,6 +234,11 @@ func (s *Server) handleCellUsage(w http.ResponseWriter, r *http.Request) {
 // handleListCellUsage serves GET /cells/usage. It drops each cell the
 // controller read check refuses and answers the surviving list.
 func (s *Server) handleListCellUsage(w http.ResponseWriter, r *http.Request) {
+	cluster, err := ResolveCluster(r.Context(), s.deps.Brood, r.URL.Query().Get("cluster"))
+	if err != nil {
+		s.writeClusterRefusal(w, err)
+		return
+	}
 	if s.deps.RecordStore == nil {
 		s.pipelinesUnavailable(w)
 		return
@@ -260,7 +249,6 @@ func (s *Server) handleListCellUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cluster := s.cellUsageCluster(r)
 	namespace := r.URL.Query().Get("namespace")
 	controllers, err := s.listCellControllers(r, cluster, namespace)
 	if err != nil {
@@ -318,12 +306,9 @@ func (s *Server) handleListCellUsage(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, itemsEnvelope(rows))
 }
 
-// listCellControllers lists the cluster's cells, narrowed by an optional
-// namespace.
+// listCellControllers lists the cells of a resolved cluster, narrowed by an
+// optional namespace.
 func (s *Server) listCellControllers(r *http.Request, cluster, namespace string) ([]*v1alpha1.Controller, error) {
-	if s.deps.Brood == nil {
-		return nil, nil
-	}
 	found, _, err := s.deps.Brood.ListAll(r.Context(), namespace, cluster)
 	if err != nil {
 		return nil, err
@@ -346,7 +331,7 @@ func (s *Server) listCellControllers(r *http.Request, cluster, namespace string)
 // which subjects may build on each tenant of the cell.
 func (s *Server) handleCellGrants(w http.ResponseWriter, r *http.Request) {
 	claims := auth.ClaimsFromContext(r.Context())
-	grants, serr := s.CellGrants(r.Context(), claims, s.cellUsageCluster(r), r.PathValue("namespace"), r.PathValue("name"))
+	grants, serr := s.CellGrants(r.Context(), claims, r.URL.Query().Get("cluster"), r.PathValue("namespace"), r.PathValue("name"))
 	if serr != nil {
 		s.writeJSONError(w, serr.Status, serr.Message)
 		return
