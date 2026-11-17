@@ -854,7 +854,7 @@ func TestBuildControllerScope_Messages(t *testing.T) {
 		raw  interface{}
 		want string
 	}{
-		{map[string]interface{}{}, "invalid controllerScope: an empty controllerScope sets no limit, so the binding becomes cluster-wide; name namespaces or controllerSelector, or omit controllerScope"},
+		{map[string]interface{}{}, "invalid controllerScope: an empty controllerScope names no dimension and matches every controller; name namespaces or controllerSelector, or omit controllerScope"},
 		{map[string]interface{}{"tenants": []interface{}{}}, "invalid controllerScope: a Jenkins role binding has no tenant meaning; name namespaces or controllerSelector"},
 		{map[string]interface{}{"foo": 1}, `invalid controllerScope: unknown controllerScope key "foo"; allowed keys are namespaces, controllerSelector`},
 	}

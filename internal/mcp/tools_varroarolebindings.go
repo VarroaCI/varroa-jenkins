@@ -262,8 +262,11 @@ func parseBindingScope(raw interface{}, a scopeArg) (*v1alpha1.VarroaRoleBinding
 	if !ok {
 		return nil, fmt.Errorf("invalid %s: %s must be an object naming %s", a.name, a.name, a.dims())
 	}
+	// An empty scope matches every controller. The text must not call it
+	// cluster-wide, because an empty VarroaRoleBinding scope grants no
+	// cluster-scoped resource.
 	if len(m) == 0 {
-		return nil, fmt.Errorf("invalid %s: an empty %s sets no limit, so the binding becomes cluster-wide; name %s, or omit %s", a.name, a.name, a.dims(), a.name)
+		return nil, fmt.Errorf("invalid %s: an empty %s names no dimension and matches every controller; name %s, or omit %s", a.name, a.name, a.dims(), a.name)
 	}
 	for key := range m {
 		switch {
@@ -352,7 +355,7 @@ func buildLabelSelector(raw interface{}, arg string) (*metav1.LabelSelector, err
 // present-and-empty jobs list, and a "tenants" value that is not a list at
 // all — that last shape must reject too, or a non-array "tenants" silently
 // parses as no tenant restriction, which scopeMatches (internal/rbac)
-// reads as an unrestricted, cluster-wide binding.
+// reads as a scope that matches every controller.
 func buildTenantScopes(raw interface{}) ([]v1alpha1.TenantScope, error) {
 	arr, ok := raw.([]interface{})
 	if !ok {
