@@ -125,6 +125,19 @@ func TestClusterRoutes_NoBroodRefusesTheCall(t *testing.T) {
 		{http.MethodGet, "/api/v1/clusters/core/namespaces/deployable", ""},
 		{http.MethodPost, "/api/v1/clusters/member-b/drain", `{"confirm":"member-b"}`},
 		{http.MethodGet, "/api/v1/clusters/core/composedbundles", ""},
+		{http.MethodGet, "/api/v1/cells/usage", ""},
+		{http.MethodGet, "/api/v1/cells/usage?cluster=core", ""},
+		{http.MethodGet, "/api/v1/cells/ns/ctrl/usage", ""},
+		{http.MethodGet, "/api/v1/cells/ns/ctrl/grants", ""},
+		{http.MethodGet, "/api/v1/cellpools", ""},
+		{http.MethodGet, "/api/v1/cellpools?cluster=core", ""},
+		{http.MethodGet, "/api/v1/cellpools/p", ""},
+		{http.MethodPatch, "/api/v1/cellpools/p", `{"spec":{"warm":1}}`},
+		{http.MethodGet, "/api/v1/brood-operations", ""},
+		{http.MethodGet, "/api/v1/brood-operations?cluster=core", ""},
+		{http.MethodPost, "/api/v1/brood-operations", `{"spec":{"action":{"verb":"Restart"}}}`},
+		{http.MethodPost, "/api/v1/brood-operations/preview", `{"spec":{"action":{"verb":"Restart"}}}`},
+		{http.MethodGet, "/api/v1/search?q=ctrl", ""},
 	}
 	for _, rt := range routes {
 		t.Run(rt.method+" "+rt.path, func(t *testing.T) {
@@ -146,6 +159,13 @@ func TestClusterRoutes_UnknownClusterRefusesTheCall(t *testing.T) {
 		{http.MethodPatch, "/api/v1/clusters/nowhere/controllers/ns/ctrl", `{"spec":{"version":"2.555"}}`},
 		{http.MethodPost, "/api/v1/clusters/nowhere/controllers/ns/ctrl/restart", ""},
 		{http.MethodGet, "/api/v1/clusters/nowhere/namespaces/deployable", ""},
+		{http.MethodGet, "/api/v1/cells/usage?cluster=nowhere", ""},
+		{http.MethodGet, "/api/v1/cells/ns/ctrl/usage?cluster=nowhere", ""},
+		{http.MethodGet, "/api/v1/cells/ns/ctrl/grants?cluster=nowhere", ""},
+		{http.MethodGet, "/api/v1/cellpools?cluster=nowhere", ""},
+		{http.MethodGet, "/api/v1/cellpools/p?cluster=nowhere", ""},
+		{http.MethodPatch, "/api/v1/cellpools/p?cluster=nowhere", `{"spec":{"warm":1}}`},
+		{http.MethodGet, "/api/v1/brood-operations?cluster=nowhere", ""},
 	}
 	for _, rt := range routes {
 		t.Run(rt.method+" "+rt.path, func(t *testing.T) {
@@ -158,6 +178,30 @@ func TestClusterRoutes_UnknownClusterRefusesTheCall(t *testing.T) {
 				t.Errorf("brood calls = %v, want none", brood.calls)
 			}
 		})
+	}
+}
+
+// Without a brood, the version profile list answers 503 and reads no store.
+func TestHandleVersionProfiles_NoBroodRefusesTheCall(t *testing.T) {
+	deps, _, _ := clusterRouteDeps(t)
+	w := httptest.NewRecorder()
+	NewServer(deps).HandleVersionProfiles(w, httptest.NewRequest(http.MethodGet, "/version-profiles", nil))
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "brood not configured") {
+		t.Fatalf("status = %d, body = %s; want 503 brood not configured", w.Code, w.Body.String())
+	}
+}
+
+// Without a brood, Search returns ErrBroodNotConfigured for a query that reads
+// a source. An empty query reads nothing, so it still answers no rows.
+func TestSearch_NoBroodRefusesTheQuery(t *testing.T) {
+	deps, _, _ := clusterRouteDeps(t)
+	srv := NewServer(deps)
+	if _, err := srv.Search(context.Background(), adminClaims, "ctrl", ""); !errors.Is(err, ErrBroodNotConfigured) {
+		t.Fatalf("Search error = %v, want ErrBroodNotConfigured", err)
+	}
+	resp, err := srv.Search(context.Background(), adminClaims, "  ", "")
+	if err != nil || len(resp.Items) != 0 {
+		t.Fatalf("empty query = %+v, %v; want no rows and no error", resp, err)
 	}
 }
 

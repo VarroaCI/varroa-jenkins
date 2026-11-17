@@ -296,9 +296,13 @@ func (s *Server) memberBadgeTarget(ctx context.Context, tenant, token string) (T
 		s.deps.Logger.Warn("badge placement lookup failed", "tenant", tenant, "error", err)
 		return TenantRef{}, false
 	}
+	local := ""
+	if s.deps.Brood != nil {
+		local = s.deps.Brood.LocalCluster()
+	}
 	var live []recordstore.TenantPlacement
 	for _, row := range rows {
-		if livePlacementRow(row, s.localCluster()) {
+		if livePlacementRow(row, local) {
 			live = append(live, row)
 		}
 	}

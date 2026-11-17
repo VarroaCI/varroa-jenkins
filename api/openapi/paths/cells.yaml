@@ -10,6 +10,8 @@
       check refuses. The counts come from the record store over a fixed
       24-hour window. A run whose result is TRIGGER_FAILED counts in no
       value, and a tenant that left the cell contributes no count to it.
+      A cluster that the brood does not know answers 404 with the text
+      "unknown cluster: <name>".
     parameters:
       - $ref: '../components/parameters.yaml#/clusterQuery'
       - $ref: '../components/parameters.yaml#/namespace'
@@ -29,6 +31,8 @@
               additionalProperties: false
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 

@@ -139,7 +139,7 @@ func (s *Server) fleetFanOut(ctx context.Context, p *fleetPluginParams) *fleetFa
 	// Done from the FULL cluster set — independently of the cluster filter and
 	// of whether a remote cluster has any caller-visible controllers (R22, R28).
 	// Drop rows from non-local clusters.
-	localCluster := s.localCluster()
+	localCluster := s.deps.Brood.LocalCluster()
 	finalStatuses := make([]ClusterFanoutStatus, 0, len(statuses))
 	localRows := make([]enriched, 0, len(enrichedRows))
 	for _, st := range statuses {

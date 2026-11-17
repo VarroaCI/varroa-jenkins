@@ -135,7 +135,8 @@ cluster when you give no `--cluster`.
 `GET /api/v1/cellpools` adds a `cluster` field to each pool and a `clusters` array with one read
 status for each cluster. A cluster that does not answer has `ok: false`. `GET` and `PATCH
 /api/v1/cellpools/{name}` take `?cluster=<name>`, and an unreachable member gives `502`. A member
-operator on an older image does not answer until you upgrade it.
+operator on an older image does not answer until you upgrade it. A cluster that the brood does not
+know gives `404` with the text `unknown cluster: <name>`.
 
 The same edit through `kubectl`:
 

@@ -402,7 +402,7 @@ func TestHandleVersionProfiles(t *testing.T) {
 			profiles:           []*v1alpha1.JenkinsVersionProfile{fullProfile},
 			configMaps:         contentCM,
 		}
-		srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), OperatorNamespace: "varroa"})
+		srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), OperatorNamespace: "varroa", Brood: newStoreBrood(nil)})
 		req := httptest.NewRequest(http.MethodGet, "/version-profiles", nil)
 		w := httptest.NewRecorder()
 		srv.HandleVersionProfiles(w, req)
@@ -450,7 +450,7 @@ func TestHandleVersionProfiles(t *testing.T) {
 			fakeResourceClient: *newFakeResourceClient(),
 			profiles:           []*v1alpha1.JenkinsVersionProfile{metaOnly},
 		}
-		srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), OperatorNamespace: "varroa"})
+		srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), OperatorNamespace: "varroa", Brood: newStoreBrood(nil)})
 		req := httptest.NewRequest(http.MethodGet, "/version-profiles", nil)
 		w := httptest.NewRecorder()
 		srv.HandleVersionProfiles(w, req)
@@ -478,7 +478,7 @@ func TestHandleVersionProfiles(t *testing.T) {
 			profiles:           []*v1alpha1.JenkinsVersionProfile{fullProfile},
 			configMapErr:       errors.New("configmaps is forbidden"),
 		}
-		srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), OperatorNamespace: "varroa"})
+		srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), OperatorNamespace: "varroa", Brood: newStoreBrood(nil)})
 		req := httptest.NewRequest(http.MethodGet, "/version-profiles", nil)
 		w := httptest.NewRecorder()
 		srv.HandleVersionProfiles(w, req)
@@ -506,7 +506,7 @@ func TestHandleVersionProfiles(t *testing.T) {
 					profiles:           []*v1alpha1.JenkinsVersionProfile{fullProfile},
 					configMaps:         map[string]map[string]string{"jenkins-version-2-552-pluginset-content": data},
 				}
-				srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), OperatorNamespace: "varroa"})
+				srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), OperatorNamespace: "varroa", Brood: newStoreBrood(nil)})
 				req := httptest.NewRequest(http.MethodGet, "/version-profiles", nil)
 				w := httptest.NewRecorder()
 				srv.HandleVersionProfiles(w, req)
@@ -528,7 +528,7 @@ func TestHandleVersionProfiles(t *testing.T) {
 			profiles:           []*v1alpha1.JenkinsVersionProfile{metaOnly},
 			configMapErr:       errors.New("configmaps is forbidden"),
 		}
-		srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), OperatorNamespace: "varroa"})
+		srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), OperatorNamespace: "varroa", Brood: newStoreBrood(nil)})
 		req := httptest.NewRequest(http.MethodGet, "/version-profiles", nil)
 		w := httptest.NewRecorder()
 		srv.HandleVersionProfiles(w, req)
@@ -542,7 +542,7 @@ func TestHandleVersionProfiles(t *testing.T) {
 
 	t.Run("empty returns []", func(t *testing.T) {
 		client := &fakeProvisioningClient{fakeResourceClient: *newFakeResourceClient()}
-		srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default()})
+		srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), Brood: newStoreBrood(nil)})
 		req := httptest.NewRequest(http.MethodGet, "/version-profiles", nil)
 		w := httptest.NewRecorder()
 		srv.HandleVersionProfiles(w, req)
@@ -562,7 +562,7 @@ func TestHandleVersionProfiles(t *testing.T) {
 
 	t.Run("POST is 405", func(t *testing.T) {
 		client := &fakeProvisioningClient{fakeResourceClient: *newFakeResourceClient()}
-		srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default()})
+		srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), Brood: newStoreBrood(nil)})
 		req := httptest.NewRequest(http.MethodPost, "/version-profiles", nil)
 		w := httptest.NewRecorder()
 		srv.HandleVersionProfiles(w, req)
@@ -574,7 +574,7 @@ func TestHandleVersionProfiles(t *testing.T) {
 
 func TestHandleVersionProfiles_ListErrorIs500(t *testing.T) {
 	client := &fakeProvisioningClient{fakeResourceClient: *newFakeResourceClient(), listErr: errors.New("list failed")}
-	srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default()})
+	srv := NewServer(&Dependencies{Client: client, Store: storeFromProvisioning(client), Logger: slog.Default(), Brood: newStoreBrood(nil)})
 	req := httptest.NewRequest(http.MethodGet, "/version-profiles", nil)
 	w := httptest.NewRecorder()
 	srv.HandleVersionProfiles(w, req)

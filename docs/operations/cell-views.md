@@ -117,7 +117,7 @@ The read applies the controller read check first, then cluster-wide `rolebinding
 | `404` | No such controller, a controller that is not a cell, or a refused controller check |
 | `502` | The cell runs on a member cluster and that cluster's operator does not answer |
 
-One code for the three `404` conditions confirms no cell's existence.
+One code for the three `404` conditions confirms no cell's existence. A cluster that the brood does not know also gives `404`, with the text `unknown cluster: <name>`.
 
 The read touches no record store, so it answers no `503`. It returns at most 50 grants for each tenant, narrowing grants first, and flags a cut list as `truncated`.
 

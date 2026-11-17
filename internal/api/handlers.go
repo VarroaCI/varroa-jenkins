@@ -1866,7 +1866,7 @@ func (s *Server) handleBreakGlass(w http.ResponseWriter, r *http.Request, cluste
 
 	if !v1alpha1.IsHeadless(cr) {
 		s.writeJSONError(w, http.StatusConflict,
-			fmt.Sprintf("controller is already reachable at %s; break-glass is only for a headless controller", s.controllerEndpoint(r.Context(), cr, s.localCluster())))
+			fmt.Sprintf("controller is already reachable at %s; break-glass is only for a headless controller", s.controllerEndpoint(r.Context(), cr, cluster)))
 		return
 	}
 
@@ -2100,6 +2100,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	claims := auth.ClaimsFromContext(r.Context())
 	resp, err := s.Search(r.Context(), claims, r.URL.Query().Get("q"), "")
+	if errors.Is(err, ErrBroodNotConfigured) {
+		s.writeClusterRefusal(w, err)
+		return
+	}
 	if err != nil {
 		s.writeJSONError(w, http.StatusServiceUnavailable, "search unavailable")
 		return
@@ -2136,6 +2140,9 @@ var errSearchUnavailable = errors.New("search unavailable")
 // controller read appears as an ok false row. A failed catalog-item
 // read marks that cluster's row ok false as well, so a caller can tell
 // which clusters returned incomplete results.
+//
+// A query that reads a source needs the brood. Without it, Search
+// returns ErrBroodNotConfigured from ResolveCluster.
 func (s *Server) Search(ctx context.Context, claims *auth.Claims, rawQuery, namespace string) (SearchResponse, error) {
 	q := strings.ToLower(strings.TrimSpace(rawQuery))
 	results := make([]SearchResult, 0, 20)
@@ -2146,6 +2153,9 @@ func (s *Server) Search(ctx context.Context, claims *auth.Claims, rawQuery, name
 		return SearchResponse{Items: []SearchResult{}, Clusters: []ClusterFanoutStatus{}}, nil
 	}
 
+	if _, err := ResolveCluster(ctx, s.deps.Brood, ""); err != nil {
+		return SearchResponse{}, err
+	}
 	controllers, statuses, err := s.deps.Brood.ListAll(ctx, namespace, "")
 	if err != nil {
 		s.deps.Logger.Error("search controller fan-out failed", "error", err)

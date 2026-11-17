@@ -116,6 +116,15 @@ func TestMCPSearch_NoAuthorizerReturnsEmptyClusters(t *testing.T) {
 	}
 }
 
+// TestSearchTool_NoBroodRefusesTheCall proves the search tool refuses a query
+// without a brood, rather than dereferencing a nil brood.
+func TestSearchTool_NoBroodRefusesTheCall(t *testing.T) {
+	tr := callWithClaims(t, adminDeps(), mcpAdminClaims, "search", map[string]interface{}{"query": "hibernated"})
+	if !tr.IsError || toolText(tr) != "search failed: brood not configured" {
+		t.Fatalf("result = %q, want the brood refusal", toolText(tr))
+	}
+}
+
 func TestSearchOutputSchema_DeclaresClusters(t *testing.T) {
 	var doc struct {
 		Properties map[string]json.RawMessage `json:"properties"`

@@ -21884,7 +21884,7 @@
     },
     "/api/v1/cells/usage": {
       "get": {
-        "description": "Gates each cell with the controller read check and drops a cell the check refuses. The counts come from the record store over a fixed 24-hour window. A run whose result is TRIGGER_FAILED counts in no value, and a tenant that left the cell contributes no count to it.\n",
+        "description": "Gates each cell with the controller read check and drops a cell the check refuses. The counts come from the record store over a fixed 24-hour window. A run whose result is TRIGGER_FAILED counts in no value, and a tenant that left the cell contributes no count to it. A cluster that the brood does not know answers 404 with the text \"unknown cluster: \u003cname\u003e\".\n",
         "operationId": "listCellUsage",
         "parameters": [
           {
@@ -21919,6 +21919,9 @@
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
           },
           "503": {
             "$ref": "#/components/responses/components_responses_ServiceUnavailable"

@@ -58,12 +58,7 @@ func registerGetCellUsageTool(mcpServer *server.MCPServer, deps *api.Dependencie
 		if namespace == "" || name == "" {
 			return mcp.NewToolResultError("namespace and name are required"), nil
 		}
-		cluster := strArg(args, "cluster")
-		if cluster == "" && deps.Brood != nil {
-			cluster = deps.Brood.LocalCluster()
-		}
-
-		usage, serr := api.NewServer(deps).CellUsage(ctx, claims, cluster, namespace, name)
+		usage, serr := api.NewServer(deps).CellUsage(ctx, claims, strArg(args, "cluster"), namespace, name)
 		if serr != nil {
 			return mcp.NewToolResultError(serr.Error()), nil
 		}

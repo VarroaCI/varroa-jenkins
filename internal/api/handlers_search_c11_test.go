@@ -128,8 +128,11 @@ func (erroringSearchReader) SearchRecords(ctx context.Context, q recordstore.Sea
 }
 
 // erroringBrood implements Brood by embedding a nil interface and
-// overriding only ListAll, for the total-source-failure test.
+// overriding only LocalCluster and ListAll, for the total-source-failure
+// test.
 type erroringBrood struct{ Brood }
+
+func (erroringBrood) LocalCluster() string { return "core" }
 
 func (erroringBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]ClusterController, []ClusterFanoutStatus, error) {
 	return nil, nil, errors.New("brood fan-out unavailable")

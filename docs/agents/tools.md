@@ -126,8 +126,9 @@ cluster. It returns the same value the REST path
 load counts, the totals, the tenant cap, the free slots, and the Jenkins
 queue length. The tool checks the `controllers:read` grant on the cell. A
 name that is not a cell, and a cell the caller may not read, both give a
-not-found error. Without the record store the tool gives an error that names
-it. See [Cell usage](../operations/cell-usage.md) for the count rules.
+not-found error. An unknown cluster gives the tool error
+`unknown cluster: <name>`. Without the record store the tool gives an error
+that names it. See [Cell usage](../operations/cell-usage.md) for the count rules.
 
 The server exposes three cell-pool tools. A
 [cell pool](../operations/cell-pools.md) sizes the cells of one version
@@ -147,8 +148,9 @@ carries `clusters`, one read status for each cluster. A cluster with
 `ok: false` did not answer, and its pools are absent. Pass `verbose: true`
 for the full resources, which add the cell template and the condition list.
 `get_cell_pool` returns one pool's full resource with a `cluster` key. Without
-`cluster`, `get_cell_pool` and `update_cell_pool` act on the core cluster. An
-unknown cluster, or a member that does not answer, gives a tool error.
+`cluster`, `get_cell_pool` and `update_cell_pool` act on the local cluster. An
+unknown cluster gives the tool error `unknown cluster: <name>`. A member that
+does not answer gives a tool error.
 
 `update_cell_pool` scales a pool. It writes only the dials the call names and
 removes nothing, so it is annotated `destructiveHint: false` and
