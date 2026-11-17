@@ -21075,6 +21075,9 @@
           },
           "404": {
             "description": "Unknown cluster specified in ?cluster=."
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
         "summary": "Lists brood operations, optionally filtered by namespace or cluster. Viewer+.",
@@ -21083,6 +21086,7 @@
         ]
       },
       "post": {
+        "description": "An unknown cluster in `clusters` or in a `cluster/namespace/name`\nentry answers 400 before any bus request. A BFF without a brood or\nwithout the brood operations store answers 503.\n",
         "operationId": "createBroodOperation",
         "requestBody": {
           "content": {
@@ -21133,6 +21137,9 @@
               }
             },
             "description": "All clusters failed or unreachable."
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
         "summary": "Creates a new brood operation. Operator+.",
@@ -21143,6 +21150,7 @@
     },
     "/api/v1/brood-operations/preview": {
       "post": {
+        "description": "An unknown cluster in `clusters` or in a `cluster/namespace/name`\nentry answers 400 before any bus request. A BFF without a brood or\nwithout the brood operations store answers 503.\n",
         "operationId": "previewBroodOperation",
         "requestBody": {
           "content": {
@@ -21183,6 +21191,9 @@
               }
             },
             "description": "All clusters unreachable."
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
         "summary": "Previews which controllers a brood operation would target. Viewer+.",
@@ -21232,6 +21243,9 @@
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
         "summary": "Deletes (cancels) a brood operation across all member clusters. Operator+.",
@@ -21271,6 +21285,9 @@
           },
           "502": {
             "description": "Run not found on reachable clusters but some clusters unreachable."
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
         "summary": "Gets a logical brood operation run (aggregated across clusters). Viewer+.",
@@ -21313,6 +21330,9 @@
           },
           "502": {
             "description": "Run unreachable (some clusters errored)."
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
         "summary": "SSE stream of brood operation status changes (BroodRun DTO). Viewer+.",
@@ -21375,6 +21395,9 @@
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
         "summary": "Toggles suspend on a brood operation across all member clusters. Operator+.",

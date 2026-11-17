@@ -22735,6 +22735,7 @@ type ListBroodOperationsResponse struct {
 	}
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
+	JSON503 *ComponentsResponsesServiceUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -22762,6 +22763,7 @@ type CreateBroodOperationResponse struct {
 	JSON403      *ComponentsResponsesForbidden
 	JSON409      *ComponentsSchemasBroodCreateFailure
 	JSON502      *ComponentsSchemasBroodCreateFailure
+	JSON503      *ComponentsResponsesServiceUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -22788,6 +22790,7 @@ type PreviewBroodOperationResponse struct {
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
 	JSON502      *ComponentsSchemasBroodCreateFailure
+	JSON503      *ComponentsResponsesServiceUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -22815,6 +22818,7 @@ type DeleteBroodOperationResponse struct {
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
 	JSON404 *ComponentsResponsesNotFound
+	JSON503 *ComponentsResponsesServiceUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -22840,6 +22844,7 @@ type GetBroodOperationResponse struct {
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -22864,6 +22869,7 @@ type StreamBroodOperationResponse struct {
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -22892,6 +22898,7 @@ type SuspendBroodOperationResponse struct {
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
 	JSON404 *ComponentsResponsesNotFound
+	JSON503 *ComponentsResponsesServiceUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -31006,6 +31013,13 @@ func ParseListBroodOperationsResponse(rsp *http.Response) (*ListBroodOperationsR
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
 	}
 
 	return response, nil
@@ -31067,6 +31081,13 @@ func ParseCreateBroodOperationResponse(rsp *http.Response) (*CreateBroodOperatio
 		}
 		response.JSON502 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
 	}
 
 	return response, nil
@@ -31121,6 +31142,13 @@ func ParsePreviewBroodOperationResponse(rsp *http.Response) (*PreviewBroodOperat
 		}
 		response.JSON502 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
 	}
 
 	return response, nil
@@ -31170,6 +31198,13 @@ func ParseDeleteBroodOperationResponse(rsp *http.Response) (*DeleteBroodOperatio
 		}
 		response.JSON404 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
 	}
 
 	return response, nil
@@ -31217,6 +31252,13 @@ func ParseGetBroodOperationResponse(rsp *http.Response) (*GetBroodOperationRespo
 		}
 		response.JSON404 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
 	}
 
 	return response, nil
@@ -31256,6 +31298,13 @@ func ParseStreamBroodOperationResponse(rsp *http.Response) (*StreamBroodOperatio
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
@@ -31312,6 +31361,13 @@ func ParseSuspendBroodOperationResponse(rsp *http.Response) (*SuspendBroodOperat
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 

@@ -4,6 +4,10 @@
     operationId: createBroodOperation
     tags: [broodops]
     summary: Creates a new brood operation. Operator+.
+    description: |
+      An unknown cluster in `clusters` or in a `cluster/namespace/name`
+      entry answers 400 before any bus request. A BFF without a brood or
+      without the brood operations store answers 503.
     requestBody:
       required: true
       content:
@@ -35,6 +39,8 @@
           application/json:
             schema:
               $ref: '../components/schemas.yaml#/BroodCreateFailure'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
   get:
     operationId: listBroodOperations
     tags: [broodops]
@@ -75,12 +81,18 @@
         $ref: '../components/responses.yaml#/Forbidden'
       "404":
         description: Unknown cluster specified in ?cluster=.
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
 
 /api/v1/brood-operations/preview:
   post:
     operationId: previewBroodOperation
     tags: [broodops]
     summary: Previews which controllers a brood operation would target. Viewer+.
+    description: |
+      An unknown cluster in `clusters` or in a `cluster/namespace/name`
+      entry answers 400 before any bus request. A BFF without a brood or
+      without the brood operations store answers 503.
     requestBody:
       required: true
       content:
@@ -106,6 +118,8 @@
           application/json:
             schema:
               $ref: '../components/schemas.yaml#/BroodCreateFailure'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
 
 /api/v1/brood-operations/{ns}/{name}:
   get:
@@ -130,6 +144,8 @@
         $ref: '../components/responses.yaml#/NotFound'
       "502":
         description: Run not found on reachable clusters but some clusters unreachable.
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
   delete:
     operationId: deleteBroodOperation
     tags: [broodops]
@@ -156,6 +172,8 @@
         $ref: '../components/responses.yaml#/Forbidden'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
 
 /api/v1/brood-operations/{ns}/{name}/suspend:
   post:
@@ -192,6 +210,8 @@
         $ref: '../components/responses.yaml#/Forbidden'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
 
 /api/v1/brood-operations/{ns}/{name}/stream:
   get:
@@ -217,3 +237,5 @@
         $ref: '../components/responses.yaml#/NotFound'
       "502":
         description: Run unreachable (some clusters errored).
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
