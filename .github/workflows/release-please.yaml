@@ -42,7 +42,7 @@ jobs:
       # creates the release, for example on its comment or label write to the
       # release pull request. The run check keeps the step idempotent: a push
       # that releases nothing finds the run of the current tag and exits.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: always()
 
       - name: Publish the release artifacts
