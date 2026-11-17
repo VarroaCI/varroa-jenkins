@@ -258,3 +258,72 @@ func TestHandleProvisioning_CascSeedKeepsRefusedDocument(t *testing.T) {
 		t.Errorf("pod-template casc hash = %q, want the hash of the written seed %q", last.CascContentHash, cascContentHash(seed))
 	}
 }
+
+// TestHandleConnected_RBACRefusalAdvancesConfigSeed drives a bundle change
+// whose push Jenkins accepts for config.yaml and refuses for rbac.yaml. The
+// status names the rbac section alone, and the seed takes the new config.yaml.
+func TestHandleConnected_RBACRefusalAdvancesConfigSeed(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconcilerWithTokenSigner(client)
+	tr := &captureTransport{}
+	rec.miteTransport = tr
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test", Namespace: "ns", UID: testUID, CreationTimestamp: metav1.NewTime(time.Now()),
+			Annotations: map[string]string{"varroa.dev/allow-admin-lockout": "true"},
+		},
+		Spec: v1alpha1.ControllerSpec{ComposedBundleRef: &v1alpha1.ComposedBundleRef{Name: "test-bundle"}},
+		Status: v1alpha1.ControllerStatus{
+			Phase:      v1alpha1.ControllerPhaseConnected,
+			Conditions: []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: "MiteConnected"}},
+		},
+	}
+	seedName := cascConfigMapName(testPrefix)
+	tick := func(results ...*mitev1.CommandResult) {
+		t.Helper()
+		tr.drainResults = results
+		if err := rec.reconcileController(context.Background(), cr); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		tr.drainResults = nil
+	}
+
+	tick()
+	if tr.lastDesired == nil || tr.lastDesired.RbacYaml == "" {
+		t.Fatal("expected a desired-state push with rbac.yaml")
+	}
+	tick(mkDSR(true, true, true, true, "", "", "", "", tr.lastDesired.DesiredStateHash))
+	acceptedRBAC := client.configMapData[seedName][cascSeedRBACKey]
+	if acceptedRBAC == "" {
+		t.Fatal("the seed holds no rbac.yaml after an accepted verdict")
+	}
+
+	client.configMapData["test-bundle-content"]["jenkins.yaml"] = "jenkins:\n  systemMessage: \"Changed\""
+	tick()
+	const rbacErr = "reload failed: reload config: Jenkins answered its error page: Error loading configuration Unclosed counted closure; rolled back to last-good"
+	tick(mkDSR(true, false, true, true, "", rbacErr, "", "", tr.lastDesired.DesiredStateHash))
+
+	ar := cr.Status.LastApplyResult
+	if ar == nil || ar.Succeeded {
+		t.Fatalf("lastApplyResult = %+v, want a failed apply", ar)
+	}
+	if config := ar.Sections[0]; config.Name != "config" || !config.OK || config.Error != "" {
+		t.Errorf("config section = %+v, want ok with no error", config)
+	}
+	if rbac := ar.Sections[1]; rbac.Name != "rbac" || rbac.OK || rbac.Error != rbacErr {
+		t.Errorf("rbac section = %+v, want the refusal text", rbac)
+	}
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionConfigApplyFailed); c == nil || c.Status != metav1.ConditionFalse {
+		t.Errorf("ConfigApplyFailed = %+v, want False", c)
+	}
+	seed := client.configMapData[seedName]
+	if !strings.Contains(seed[cascSeedConfigKey], "Changed") {
+		t.Errorf("config.yaml = %q, want the accepted new bundle", seed[cascSeedConfigKey])
+	}
+	if seed[cascSeedRBACKey] != acceptedRBAC {
+		t.Errorf("rbac.yaml = %q, want the accepted rbac.yaml", seed[cascSeedRBACKey])
+	}
+	if r := cr.Status.CascRefusal; r == nil || r.ConfigHash != "" || r.RBACHash == "" {
+		t.Errorf("cascRefusal = %+v, want the rbac.yaml digest alone", r)
+	}
+}

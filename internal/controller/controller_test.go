@@ -4323,7 +4323,7 @@ func TestRecordApplyResult(t *testing.T) {
 		}
 	})
 
-	t.Run("rbac-mirrors-config", func(t *testing.T) {
+	t.Run("rbac-refusal-is-its-own-section", func(t *testing.T) {
 		cr := &v1alpha1.Controller{
 			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID, CreationTimestamp: metav1.NewTime(time.Now())},
 			Spec:       v1alpha1.ControllerSpec{ComposedBundleRef: &v1alpha1.ComposedBundleRef{Name: "test-bundle"}},
@@ -4341,22 +4341,28 @@ func TestRecordApplyResult(t *testing.T) {
 			t.Fatal("expected LastApplyResult to be set")
 		}
 		ar := cr.Status.LastApplyResult
-		if !ar.Succeeded {
-			t.Error("expected Succeeded=true (rbac mirrors config, which succeeded)")
+		if ar.Succeeded {
+			t.Error("expected Succeeded=false (rbac was refused)")
+		}
+		if config := ar.Sections[0]; !config.OK || config.Error != "" {
+			t.Errorf("config section = %+v, want ok with no error", config)
 		}
 		rbac := ar.Sections[1]
 		if rbac.Name != "rbac" {
 			t.Errorf("expected section[1] name=rbac, got %q", rbac.Name)
 		}
-		if !rbac.OK {
-			t.Error("expected rbac.OK=true (mirrors ConfigSuccess=true)")
+		if rbac.OK {
+			t.Error("expected rbac.OK=false (RbacSuccess=false)")
 		}
-		if rbac.Error != "" {
-			t.Errorf("expected rbac.Error empty, got %q", rbac.Error)
+		if rbac.Error != "rbac error" {
+			t.Errorf("expected rbac.Error='rbac error', got %q", rbac.Error)
+		}
+		if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionConfigApplyFailed); c == nil || c.Status != metav1.ConditionFalse {
+			t.Errorf("ConfigApplyFailed = %+v, want False: a refused rbac.yaml does not blame config", c)
 		}
 	})
 
-	t.Run("config-failure-surfaces-on-rbac", func(t *testing.T) {
+	t.Run("config-failure-leaves-rbac-ok", func(t *testing.T) {
 		cr := &v1alpha1.Controller{
 			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID, CreationTimestamp: metav1.NewTime(time.Now())},
 			Spec:       v1alpha1.ControllerSpec{ComposedBundleRef: &v1alpha1.ComposedBundleRef{Name: "test-bundle"}},
@@ -4385,8 +4391,8 @@ func TestRecordApplyResult(t *testing.T) {
 			t.Errorf("expected config.Error='config apply failed', got %q", config.Error)
 		}
 		rbac := ar.Sections[1]
-		if rbac.OK {
-			t.Error("expected rbac.OK=false (mirrors config)")
+		if !rbac.OK {
+			t.Error("expected rbac.OK=true (RbacSuccess=true)")
 		}
 		if rbac.Error != "" {
 			t.Errorf("expected rbac.Error empty, got %q", rbac.Error)
