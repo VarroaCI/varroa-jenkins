@@ -242,3 +242,49 @@ func TestApplyResumeFailedGuardsOnInstance(t *testing.T) {
 		}
 	})
 }
+
+// TestApplyResumeFailedWithNoRunIsANoOp asserts a resume failure for a
+// run with no runs row inserts no row and answers no error, so the
+// consumer acknowledges it. The route reads no intent, so a run with no
+// intent gets the same answer. With an intent, a repeat of the envelope
+// leaves the intent row and the job's watermark unchanged.
+func TestApplyResumeFailedWithNoRunIsANoOp(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a run with an intent", func(t *testing.T) {
+		pool, db := setupLedgerPool(t)
+		g := NewIngester(pool, nil, nil)
+		const intentKey = "manual:resume-failed-no-run-1"
+		runID := seedGrantedIntent(t, pool, intentKey)
+		before := snapshotStartedRun(t, db, intentKey, runID.String())
+
+		env := newResumeFailedEnvelope(t, runID.String(), resumeFailedTarget, "RESUME_FAILED")
+		for i := 0; i < 2; i++ {
+			if res := applyResumeFailedEnvelope(t, g, env); res.ResumeFailedCleared {
+				t.Fatalf("delivery %d: ResumeFailedCleared = true with no runs row", i)
+			}
+		}
+		if n := countRows(t, pool, "runs", runID); n != 0 {
+			t.Fatalf("runs rows = %d, want 0", n)
+		}
+		assertStartedRunUnchanged(t, db, intentKey, runID.String(), before)
+	})
+
+	t.Run("a run with no intent", func(t *testing.T) {
+		pool, _ := setupLedgerPool(t)
+		g := NewIngester(pool, nil, nil)
+		runID := uuid.MustParse(newTestUUIDv7String())
+
+		res := applyResumeFailedEnvelope(t, g,
+			newResumeFailedEnvelope(t, runID.String(), resumeFailedTarget, "RESUME_FAILED"))
+		if res.ResumeFailedCleared {
+			t.Fatal("ResumeFailedCleared = true with no runs row")
+		}
+		if n := countRows(t, pool, "runs", runID); n != 0 {
+			t.Fatalf("runs rows = %d, want 0", n)
+		}
+		if n := countRows(t, pool, "run_intents", runID); n != 0 {
+			t.Fatalf("run_intents rows = %d, want 0", n)
+		}
+	})
+}
