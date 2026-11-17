@@ -289,6 +289,8 @@ The operator writes two kinds of VarroaRoleBinding. Do not edit them.
 
 The hash is the start of the SHA-256 of `<namespace>/<name>`. The labels `varroa.dev/tenant-agent-*` name a Tenant agent. The annotations `varroa.dev/broodschedule-*` name a schedule.
 
+The operator removes a Tenant agent binding when the agent is gone or not accepted. It removes only a binding whose name is the `tenantagent-<hash>` name of the agent that its labels name. A copy under another name stays, also when it carries these labels.
+
 The dashboard shows a `Tenant agent: <ns>/<name>` or `Brood schedule: <ns>/<name>` badge that links to the owner. The filter matches the binding name or the owner. The row action reads View, and the form is read-only. The operator replaces each change on its next pass. Delete stays.
 
 `varroactl get rolebindings` shows `OWNER` as `<kind>/<namespace>/<name>`, or `-`. `list_varroa_role_bindings` returns `owner`.
