@@ -8,7 +8,9 @@
 # checks that an empty ports list fails the render, that the default egress
 # groups render their wide explicit defaults, and that the NATS external
 # allow-list is required in full mode.
-# In hive mode, a bus.url whose entries name more than one port fails until
+# A release that deploys no NATS (hive mode, or nats.enabled=false) needs
+# networkPolicy.coreNatsEgress.cidrs, and every bus client policy carries that
+# rule. A bus.url whose entries name more than one port fails until
 # networkPolicy.coreNatsEgress.ports is set.
 # Empty lists come from a values file, because --set cannot write an empty list.
 # Guard: charts/varroa/templates/networkpolicy-guard.yaml.
@@ -322,6 +324,54 @@ for policy in np-operator np-gateway; do
   DOC=$(sed_extract "$policy" "$OUT")
   grep -q 'port: 30422' <<< "$DOC" && grep -q 'port: 4222' <<< "$DOC" && rc=0 || rc=1
   check "$policy carries both explicit core NATS ports" "$rc"
+done
+
+# ---------------------------------------------------------------------------
+# (5b) Full mode with nats.enabled=false: the release deploys no NATS, so
+#      each bus client policy carries the coreNatsEgress rule.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (5b) coreNatsEgress in full mode with nats.enabled=false ---"
+
+BUS_CLIENTS=(np-operator np-gateway np-bff np-recorder np-agentrunner)
+ALL_CLIENTS=(--set networkPolicy.enabled=true --set recordStore.enabled=true
+  --set agentRunner.enabled=true --set assistant.enabled=true)
+EXT_BUS=("${ALL_CLIENTS[@]}" --set nats.enabled=false)
+
+render "${EXT_BUS[@]}" --set bus.url=tls://ext.example:4222 -f "$TMP/empty-corenats.yaml"
+check "nats.enabled=false with empty coreNatsEgress list fails" "$([[ "$RC" -ne 0 ]] && echo 0 || echo 1)"
+grep -q 'networkPolicy.coreNatsEgress.cidrs must name the core NATS address' <<< "$OUT" && rc=0 || rc=1
+check "nats.enabled=false failure names coreNatsEgress.cidrs" "$rc"
+grep -q 'nats.enabled=false' <<< "$OUT" && rc=0 || rc=1
+check "nats.enabled=false failure names nats.enabled=false" "$rc"
+fail_messages="$fail_messages$OUT"
+
+render "${EXT_BUS[@]}" --set bus.url=tls://ext.example:7422 \
+  --set-string 'networkPolicy.coreNatsEgress.cidrs={203.0.113.9/32}'
+check "nats.enabled=false with pinned coreNats CIDR renders" "$RC"
+for policy in "${BUS_CLIENTS[@]}"; do
+  DOC=$(sed_extract "$policy" "$OUT")
+  grep -q 'cidr: 203.0.113.9/32' <<< "$DOC" && grep -q 'port: 7422' <<< "$DOC" && rc=0 || rc=1
+  check "nats.enabled=false: $policy allows the core NATS CIDR on port 7422" "$rc"
+  grep -q 'app.kubernetes.io/component: nats' <<< "$DOC" && rc=1 || rc=0
+  check "nats.enabled=false: $policy has no in-cluster NATS rule" "$rc"
+done
+
+render "${EXT_BUS[@]}" -f "$TMP/bus-list-mixed.yaml"
+check "nats.enabled=false with a mixed-port bus.url list fails" "$([[ "$RC" -ne 0 ]] && echo 0 || echo 1)"
+grep -q 'Set networkPolicy.coreNatsEgress.ports' <<< "$OUT" && rc=0 || rc=1
+check "nats.enabled=false mixed-port failure names coreNatsEgress.ports" "$rc"
+
+# With the in-cluster NATS, each bus client allows the NATS pods and
+# ignores coreNatsEgress.
+render "${ALL_CLIENTS[@]}" --set-string 'networkPolicy.coreNatsEgress.cidrs={203.0.113.9/32}'
+check "in-cluster NATS with coreNatsEgress set renders" "$RC"
+for policy in "${BUS_CLIENTS[@]}"; do
+  DOC=$(sed_extract "$policy" "$OUT")
+  grep -q 'app.kubernetes.io/component: nats' <<< "$DOC" && grep -q 'port: 4222' <<< "$DOC" && rc=0 || rc=1
+  check "in-cluster NATS: $policy allows the NATS pods on 4222" "$rc"
+  grep -q 'cidr: 203.0.113.9/32' <<< "$DOC" && rc=1 || rc=0
+  check "in-cluster NATS: $policy has no coreNatsEgress rule" "$rc"
 done
 
 # ---------------------------------------------------------------------------
