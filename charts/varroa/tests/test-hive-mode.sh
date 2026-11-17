@@ -9,6 +9,8 @@
 #   3. mode=hive with nats.enabled=true → failure mentioning nats.enabled=false
 #   4. Full default render → nats+bff+frontend present, no nats-external
 #   5. External exposure render → nats-external Service with correct selector and traffic policy
+#   7. bus.url is the only bus URL value: no -bus-url arg renders, and each
+#      retired component key (operator/gateway/bff .busURL) fails the render
 # =============================================================================
 set -euo pipefail
 
@@ -182,6 +184,41 @@ LIST_RENDER=$(helm template "$ROOT" \
 }
 n=$(grep -c "value: \"$LIST_URL\"" <<< "$LIST_RENDER" || true)
 if [[ "$n" == 2 ]]; then check "bus.url list renders unchanged for operator and gateway" 0; else check "bus.url list renders unchanged for operator and gateway" 1; fi
+
+# --- 7. bus.url is the only bus URL value ---
+echo ""
+echo "=== 7. bus.url is the only bus URL value ==="
+# The core NATS egress rule reads only bus.url. A -bus-url arg would win
+# over VARROA_BUS_URL in the gateway and the BFF and dial another address.
+if grep -q -- "-bus-url" <<< "$LIST_RENDER"; then check "Hive render: no -bus-url arg" 1; else check "Hive render: no -bus-url arg" 0; fi
+if grep -q -- "-bus-url" <<< "$FULL_RENDER"; then check "Full render: no -bus-url arg" 1; else check "Full render: no -bus-url arg" 0; fi
+n=$(grep -c 'value: "nats://release-name-nats:4222"' <<< "$FULL_RENDER" || true)
+if [[ "$n" == 3 ]]; then check "Full render: operator, gateway, and BFF use the in-cluster bus URL" 0; else check "Full render: operator, gateway, and BFF use the in-cluster bus URL (got $n)" 1; fi
+
+for component in operator gateway bff; do
+  if OUT=$(helm template "$ROOT" \
+    --set auth.oidc.clientSecret=test --set auth.dashboardUrl=https://example.com \
+    --set "$component.busURL=nats://other:4223" 2>&1); then
+    check "Full render: $component.busURL fails the render" 1
+  elif grep -q "$component.busURL is retired. Set bus.url instead." <<< "$OUT"; then
+    check "Full render: $component.busURL fails the render" 0
+  else
+    check "Full render: $component.busURL fails the render" 1
+  fi
+done
+
+if OUT=$(helm template "$ROOT" \
+  -f "$ROOT/values-hive.yaml" \
+  --set cluster.name=x \
+  --set bus.url=nats://h:4222 \
+  --set gateway.busURL=nats://other:4223 \
+  --set auth.oidc.clientSecret=s --set auth.dashboardUrl=https://example.com 2>&1); then
+  check "Hive render: gateway.busURL fails the render" 1
+elif grep -q "gateway.busURL is retired. Set bus.url instead." <<< "$OUT"; then
+  check "Hive render: gateway.busURL fails the render" 0
+else
+  check "Hive render: gateway.busURL fails the render" 1
+fi
 
 echo ""
 if [[ "$failures" -eq 0 ]]; then

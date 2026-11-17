@@ -327,13 +327,13 @@ auth-mode and local-accounts guards make auth.bffUrl a requirement here.
 {{- end -}}
 
 {{/*
-Bus URL resolution: per-tier value → global bus.url → tier-specific
-busURL → in-cluster default nats://<release>-nats:4222.
-Usage: {{ include "varroa.busURL" (dict "root" $ "tier" "operator") }}
+varroa.busURL gives the NATS bus URL of every bus client: bus.url, else the
+in-cluster default nats://<release>-nats:4222. No component has its own bus
+URL value, because the core NATS egress rule reads only bus.url.
+Usage: {{ include "varroa.busURL" $ }}
 */}}
 {{- define "varroa.busURL" -}}
-{{- $tier := .tier -}}{{- $root := .root -}}
-{{- $root.Values.bus.url | default (index $root.Values $tier "busURL") | default (printf "nats://%s-nats:4222" $root.Release.Name) -}}
+{{- .Values.bus.url | default (printf "nats://%s-nats:4222" .Release.Name) -}}
 {{- end -}}
 
 {{/*

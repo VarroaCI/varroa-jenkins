@@ -26,6 +26,18 @@ Validates mode + hive-mode prerequisites. Renders no objects.
 
 {{- end -}}
 
+{{- /*
+bus.url is the only bus URL value. The core NATS egress rule reads only
+bus.url, so a component with its own URL can dial an address that the rule
+blocks. Fail the render on a retired component key, so that its URL does
+not disappear without notice.
+*/ -}}
+{{- range $component := list "operator" "gateway" "bff" -}}
+{{- if hasKey (index $.Values $component | default dict) "busURL" -}}
+{{- fail (printf "%s.busURL is retired. Set bus.url instead. Every bus client reads bus.url." $component) -}}
+{{- end -}}
+{{- end -}}
+
 {{- /* nats.external.host is required when nats.external.enabled */ -}}
 {{- $external := .Values.nats.external | default dict -}}
 {{- if $external.enabled -}}

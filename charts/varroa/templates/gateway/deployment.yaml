@@ -34,9 +34,6 @@ spec:
             - "-grpc-port={{ .Values.gateway.service.grpcPort }}"
             - "-bus-ca-file=/etc/nats-creds/ca.crt"
             - "-bus-pass-file=/etc/nats-creds/gateway-password"
-            {{- if .Values.gateway.busURL }}
-            - "-bus-url={{ .Values.gateway.busURL }}"
-            {{- end }}
             - "-gateway-endpoint={{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-gateway") }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.gateway.service.grpcPort }}"
           ports:
             - name: grpc
@@ -66,7 +63,7 @@ spec:
             - name: GIT_CONFIG_NOSYSTEM
               value: "1"
             - name: VARROA_BUS_URL
-              value: {{ include "varroa.busURL" (dict "root" $ "tier" "gateway") | quote }}
+              value: {{ include "varroa.busURL" $ | quote }}
             - name: VARROA_CLUSTER_NAME
               value: {{ .Values.cluster.name | quote }}
             - name: VARROA_JETSTREAM_REPLICAS
