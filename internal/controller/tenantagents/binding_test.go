@@ -129,3 +129,100 @@ func TestTickSkipsForeignNamespace(t *testing.T) {
 		t.Fatalf("bindings = %d, want 0", n)
 	}
 }
+
+// agentLabels returns the labels that DesiredBinding writes for ns/name.
+func agentLabels(ns, name string) map[string]string {
+	return map[string]string{
+		v1alpha1.LabelTenantAgent:          "true",
+		v1alpha1.LabelTenantAgentNamespace: ns,
+		v1alpha1.LabelTenantAgentName:      name,
+	}
+}
+
+// TestTickPrunesOnlyOwnedBindings deletes a labelled binding only when
+// v1alpha1.VarroaRoleBindingOwner names a TenantAgent that is not accepted.
+func TestTickPrunesOnlyOwnedBindings(t *testing.T) {
+	cases := []struct {
+		name    string
+		binding *v1alpha1.VarroaRoleBinding
+		agent   bool
+		kept    bool
+	}{
+		{
+			name: "stale owned binding",
+			binding: &v1alpha1.VarroaRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.TenantAgentBindingName("ns-old", "gone"), Labels: agentLabels("ns-old", "gone")},
+			},
+			kept: false,
+		},
+		{
+			name: "copy of a stale binding under another name",
+			binding: &v1alpha1.VarroaRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: "gone-copy", Labels: agentLabels("ns-old", "gone")},
+			},
+			kept: true,
+		},
+		{
+			name: "copy of a live binding under another name",
+			binding: &v1alpha1.VarroaRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: "agent-a-copy", Labels: agentLabels("ns-a", "agent-a")},
+			},
+			agent: true,
+			kept:  true,
+		},
+		{
+			name: "derived name with the labels of another agent",
+			binding: &v1alpha1.VarroaRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.TenantAgentBindingName("ns-old", "gone"), Labels: agentLabels("ns-old", "other")},
+			},
+			kept: true,
+		},
+		{
+			name: "label without the owner labels",
+			binding: &v1alpha1.VarroaRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: "bare-label", Labels: map[string]string{v1alpha1.LabelTenantAgent: "true"}},
+			},
+			kept: true,
+		},
+		{
+			name: "brood schedule binding with the tenant-agent label",
+			binding: &v1alpha1.VarroaRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   v1alpha1.BroodScheduleBindingName("ns-b", "nightly"),
+					Labels: map[string]string{v1alpha1.LabelTenantAgent: "true"},
+					Annotations: map[string]string{
+						v1alpha1.AnnotationBroodScheduleNamespace: "ns-b",
+						v1alpha1.AnnotationBroodScheduleName:      "nightly",
+					},
+				},
+				Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "operator"},
+			},
+			kept: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := crdstore.NewFake()
+			crdstore.MustSeed(f,
+				&v1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "tenant-p"}, Spec: v1alpha1.TenantSpec{Namespaces: []string{"ns-a"}}},
+				tc.binding.DeepCopy(),
+			)
+			if tc.agent {
+				crdstore.MustSeed(f, tenantAgent("ns-a", "agent-a", "tenant-p"))
+			}
+			if err := newReconciler(f).Tick(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			names := map[string]bool{}
+			for _, b := range bindings(t, f) {
+				names[b.Name] = true
+			}
+			if names[tc.binding.Name] != tc.kept {
+				t.Errorf("binding %s kept = %v, want %v", tc.binding.Name, names[tc.binding.Name], tc.kept)
+			}
+			if live := v1alpha1.TenantAgentBindingName("ns-a", "agent-a"); tc.agent && !names[live] {
+				t.Errorf("binding %s of the accepted agent is missing", live)
+			}
+		})
+	}
+}

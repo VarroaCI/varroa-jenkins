@@ -48,33 +48,39 @@ func DesiredBinding(ta *v1alpha1.TenantAgent) *v1alpha1.VarroaRoleBinding {
 	}
 }
 
-// Tick applies one binding per accepted object and deletes each labelled
-// binding that no accepted object needs.
+// Tick applies one binding per accepted object. It deletes a binding only when
+// v1alpha1.VarroaRoleBindingOwner names a TenantAgent as its owner and that
+// TenantAgent is not accepted. The label is not proof of an owner, because a
+// copy of a generated binding keeps it. The label selector only narrows the list.
 func (r *Reconciler) Tick(ctx context.Context) error {
 	in, err := r.input(ctx)
 	if err != nil {
 		return err
 	}
 	verdicts := accept.Decide(in)
-	want := map[string]bool{}
+	want := map[types.NamespacedName]bool{}
 	for i := range in.TenantAgents {
 		ta := &in.TenantAgents[i]
-		v := verdicts[types.NamespacedName{Namespace: ta.Namespace, Name: ta.Name}]
-		if !v.Accepted {
+		key := types.NamespacedName{Namespace: ta.Namespace, Name: ta.Name}
+		if !verdicts[key].Accepted {
 			continue
 		}
 		b := DesiredBinding(ta)
 		if err := crdstore.Apply(ctx, r.Backend, b); err != nil {
 			return fmt.Errorf("apply binding for %s/%s: %w", ta.Namespace, ta.Name, err)
 		}
-		want[b.Name] = true
+		want[key] = true
 	}
 	bindings, err := crdstore.List[v1alpha1.VarroaRoleBinding](ctx, r.Backend, "", v1alpha1.LabelTenantAgent+"=true")
 	if err != nil {
 		return err
 	}
 	for _, b := range bindings {
-		if want[b.Name] {
+		owner, ok := v1alpha1.VarroaRoleBindingOwner(b)
+		if !ok || owner.Kind != v1alpha1.BindingOwnerTenantAgent {
+			continue
+		}
+		if want[types.NamespacedName{Namespace: owner.Namespace, Name: owner.Name}] {
 			continue
 		}
 		if err := crdstore.Delete[v1alpha1.VarroaRoleBinding](ctx, r.Backend, b.Name, ""); err != nil {
