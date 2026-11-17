@@ -576,12 +576,13 @@ func (s *Server) handlePutAgentUnattended(w http.ResponseWriter, r *http.Request
 		s.assistantStoreError(w, err)
 		return
 	}
-	// The control notice carries the current kill switch state, so the runner
-	// reloads the grant at once.
-	if settings, err := rt.Store.GetSettings(r.Context(), agent.ScopeGlobal); err == nil {
-		if err := publishControl(rt.Publish, settings.Paused, actor, now); err != nil {
-			s.deps.Logger.Error("tenant agent control notice", "error", err)
-		}
+	// The control notice carries the current kill switch state. It wakes the
+	// status ticker, which reads the grant from the row on its next pass.
+	settings, err := rt.Store.GetSettings(r.Context(), agent.ScopeGlobal)
+	if err != nil {
+		s.deps.Logger.Error("tenant agent control notice", "error", err)
+	} else if err := publishControl(rt.Publish, settings.Paused, actor, now); err != nil {
+		s.deps.Logger.Error("tenant agent control notice", "error", err)
 	}
 	granted := []string{}
 	if grant != nil {

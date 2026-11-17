@@ -23,6 +23,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/assistantconfig"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 	"github.com/varroaci/varroa-jenkins/internal/tenantagent/accept"
 )
@@ -522,6 +523,59 @@ func TestTenantAgentRoutes_Unattended409Empty(t *testing.T) {
 	rec := f.do(t, f.ops, http.MethodPut, "/agents/test-ns/ta-one/unattended", map[string]any{"enabled": true})
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"code":"nothing_to_grant"`) {
 		t.Errorf("status = %d body = %s", rec.Code, rec.Body)
+	}
+}
+
+// TestTenantAgentRoutes_UnattendedGrantPublishesControl pins the control notice
+// of a grant and of a removal. The notice carries the current kill switch state.
+// A refused grant publishes nothing.
+func TestTenantAgentRoutes_UnattendedGrantPublishesControl(t *testing.T) {
+	f := newTenantAgentFixture(t)
+	pub := &recordedPub{}
+	f.rt.Publish = pub.publish
+	steps := []struct {
+		name    string
+		pause   bool
+		enabled bool
+	}{
+		{"grant", false, true},
+		{"remove", false, false},
+		{"grant while paused", true, true},
+	}
+	for i, st := range steps {
+		if st.pause {
+			paused := true
+			if _, err := f.mem.PutSettings(context.Background(), agent.ScopeGlobal, store.SettingsPatch{Paused: &paused}, "aadmin"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		rec := f.do(t, f.ops, http.MethodPut, "/agents/test-ns/ta-one/unattended", map[string]any{"enabled": st.enabled})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d body = %s", st.name, rec.Code, rec.Body)
+		}
+		if len(pub.subjects) != i+1 {
+			t.Fatalf("%s: notices = %d, want %d", st.name, len(pub.subjects), i+1)
+		}
+		if pub.subjects[i] != bus.AssistantControlSubject {
+			t.Errorf("%s: subject = %q", st.name, pub.subjects[i])
+		}
+		var msg struct {
+			Paused    bool   `json:"paused"`
+			UpdatedBy string `json:"updated_by"`
+		}
+		if err := json.Unmarshal(pub.bodies[i], &msg); err != nil {
+			t.Fatal(err)
+		}
+		if msg.Paused != st.pause || msg.UpdatedBy != "ops" {
+			t.Errorf("%s: notice = %+v, want paused %v by ops", st.name, msg, st.pause)
+		}
+	}
+	f.source.items[0].Spec.UnattendedWrites = nil
+	if rec := f.do(t, f.ops, http.MethodPut, "/agents/test-ns/ta-one/unattended", map[string]any{"enabled": true}); rec.Code != http.StatusConflict {
+		t.Fatalf("empty grant: status = %d, want 409", rec.Code)
+	}
+	if len(pub.subjects) != len(steps) {
+		t.Errorf("a refused grant published a notice: notices = %d, want %d", len(pub.subjects), len(steps))
 	}
 }
 
