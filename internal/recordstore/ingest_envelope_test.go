@@ -6,8 +6,7 @@ import (
 	"time"
 )
 
-// TestIngestEnvelopeFieldNames asserts the envelope's JSON field names
-// and that every one of the fifteen kinds decodes.
+// TestIngestEnvelopeFieldNames asserts the envelope's JSON field names.
 func TestIngestEnvelopeFieldNames(t *testing.T) {
 	raw := `{
 		"schema_version": 1,
@@ -49,16 +48,23 @@ func TestIngestEnvelopeFieldNames(t *testing.T) {
 }
 
 // TestIngestEnvelopeEveryKindDecodes decodes a minimal envelope for each
-// of the sixteen kinds and asserts IsKnownKind agrees.
+// of the eighteen kinds and asserts IsKnownKind agrees. The list must hold
+// every kind that ingestKinds lists, and no other kind.
 func TestIngestEnvelopeEveryKindDecodes(t *testing.T) {
 	kinds := []string{
 		KindRunStarted, KindRunStage, KindRunCompleted, KindRunTests,
 		KindRunQuality, KindRunArtifacts, KindRunChanges, KindRunLog,
 		KindRunHeartbeat, KindRunSource, KindRunInput, KindRunTriggerFailed,
-		KindRunTriggerAccepted, KindRunResumeFailed, KindRunState, KindJobSchedules,
+		KindRunTriggerAccepted, KindRunResumeFailed, KindRunCommandRefused, KindRunState,
+		KindJobSchedules, KindJobBranches,
 	}
-	if len(kinds) != 16 {
-		t.Fatalf("expected exactly sixteen kinds, got %d", len(kinds))
+	distinct := make(map[string]bool, len(kinds))
+	for _, kind := range kinds {
+		distinct[kind] = true
+	}
+	if len(kinds) != 18 || len(distinct) != 18 || len(ingestKinds) != 18 {
+		t.Fatalf("kinds = %d (%d distinct), ingestKinds = %d, want eighteen of each",
+			len(kinds), len(distinct), len(ingestKinds))
 	}
 	for _, kind := range kinds {
 		t.Run(kind, func(t *testing.T) {
@@ -94,7 +100,7 @@ func TestIngestEnvelopeEveryKindDecodes(t *testing.T) {
 }
 
 // TestIngestEnvelopeUnknownKind asserts IsKnownKind rejects a kind
-// outside the eight-kind set.
+// outside the kind set.
 func TestIngestEnvelopeUnknownKind(t *testing.T) {
 	if IsKnownKind("run.frobnicated") {
 		t.Fatal("expected run.frobnicated to be unknown")

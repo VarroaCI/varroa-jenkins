@@ -10,7 +10,7 @@ import (
 )
 
 // TestApplyUnknownKindIsRejected asserts Apply returns ErrUnknownKind for
-// a kind outside the eight-kind set, with no database write.
+// a kind outside the kind set, with no database write.
 func TestApplyUnknownKindIsRejected(t *testing.T) {
 	t.Parallel()
 
