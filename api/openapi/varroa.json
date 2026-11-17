@@ -3192,6 +3192,7 @@
             "type": "string"
           },
           "pattern": {
+            "description": "Java regular expression that must match the full item name, such as payments/.*. The server refuses a pattern with a syntax error that it can find, such as an unclosed group or a glob *.",
             "minLength": 1,
             "type": "string"
           },
@@ -12446,6 +12447,7 @@
             "type": "string"
           },
           "pattern": {
+            "description": "Java regular expression that must match the full item name, such as payments/.*. The server refuses a pattern with a syntax error that it can find, such as an unclosed group or a glob *.",
             "minLength": 1,
             "type": "string"
           },

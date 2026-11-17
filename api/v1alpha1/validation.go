@@ -48,7 +48,8 @@ func IsJenkinsScopeType(t string) bool {
 	return false
 }
 
-// ValidateJenkinsScope checks a JenkinsScope with the CEL rules of the CRD. A
+// ValidateJenkinsScope checks a JenkinsScope with the CEL rules of the CRD. It
+// also runs checkJavaPattern on a Pattern scope, which CEL cannot express. A
 // nil scope is Global and valid. Change both together.
 func ValidateJenkinsScope(js *JenkinsScope) error {
 	if js == nil {
@@ -76,8 +77,13 @@ func ValidateJenkinsScope(js *JenkinsScope) error {
 			return fmt.Errorf("spec.jenkinsScope.folder must not start with /")
 		}
 	}
-	if js.Type == JenkinsScopePattern && js.Pattern == "" {
-		return fmt.Errorf("spec.jenkinsScope.pattern is required for a Pattern scope")
+	if js.Type == JenkinsScopePattern {
+		if js.Pattern == "" {
+			return fmt.Errorf("spec.jenkinsScope.pattern is required for a Pattern scope")
+		}
+		if reason := checkJavaPattern(js.Pattern); reason != "" {
+			return fmt.Errorf("spec.jenkinsScope.pattern %q is not a valid Java regex: %s", js.Pattern, reason)
+		}
 	}
 	return nil
 }

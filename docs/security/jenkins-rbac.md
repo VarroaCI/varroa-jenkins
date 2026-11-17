@@ -62,13 +62,27 @@ It also refuses a field that the type does not use, such as `propagate` on a `Gl
 A stored binding that breaks these rules grants nothing.
 Without `propagate`, a `Folder` scope covers the folder alone, as `None` does.
 
-Pattern scope matches item names with a regular expression:
+A `Pattern` scope takes a Java regular expression that must match the full item name:
 
 ```yaml
 jenkinsScope:
   type: Pattern
   pattern: "payments/.*-production"
 ```
+
+A pattern is not a glob. Write `.*` where a glob writes `*`.
+The Varroa API refuses a pattern with a syntax error that Java always refuses:
+
+- an unclosed group or class, or an unmatched `)`
+- a `*`, `+`, or `?` with nothing to repeat, such as `*-prod`
+- a `{` that does not start a count, such as `{a,b}`
+- an unknown construct after `(?`, such as `(?P<name>`
+- a trailing backslash
+
+A stored binding with such a pattern grants nothing.
+The Varroa API does not prove that Java compiles a pattern.
+If Jenkins refuses a pattern, each controller that the binding selects shows **Apply failed**, and no configuration change reaches it.
+The next restart of each selected controller also fails to boot.
 
 ## Link Varroa and Jenkins access
 

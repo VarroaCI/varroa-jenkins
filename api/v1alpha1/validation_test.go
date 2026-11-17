@@ -140,6 +140,9 @@ func TestValidateJenkinsScope(t *testing.T) {
 		{name: "Global with pattern", scope: &JenkinsScope{Type: "Global", Pattern: "x"}, wantErr: "only for a Pattern scope"},
 		{name: "Cluster type", scope: &JenkinsScope{Type: "Cluster"}, wantErr: "jenkinsScope.type"},
 		{name: "Folder with subtree lowercase", scope: &JenkinsScope{Type: "Folder", Folder: "payments", Propagate: "subtree"}, wantErr: "propagate"},
+		{name: "Pattern with unclosed group", scope: &JenkinsScope{Type: "Pattern", Pattern: "(payments"}, wantErr: "is not a valid Java regex: unclosed group"},
+		{name: "Pattern glob", scope: &JenkinsScope{Type: "Pattern", Pattern: "*-prod"}, wantErr: "dangling meta character '*'"},
+		{name: "Pattern with Java lookahead", scope: &JenkinsScope{Type: "Pattern", Pattern: "(?=payments/).*"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

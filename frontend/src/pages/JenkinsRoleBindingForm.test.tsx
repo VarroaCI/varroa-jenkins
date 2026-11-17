@@ -750,6 +750,30 @@ describe("JenkinsRoleBindingForm — Jenkins scope fields", () => {
     expect(savedJenkinsScope()).toEqual({ type: "Pattern", pattern: "payments/.*" });
   });
 
+  it("shows a Pattern hint that names a Java regular expression", async () => {
+    const user = userEvent.setup();
+    await fillCreateForm(user);
+    await user.selectOptions(screen.getAllByRole("combobox")[2], "Pattern");
+    expect(
+      screen.getByText("Enter a Java regular expression. It must match the full item name."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the server message when the save is refused", async () => {
+    mockCreateJenkinsRoleBinding.mockRejectedValueOnce(
+      new ApiError(400, "The request could not be completed.", {
+        error: 'spec.jenkinsScope.pattern "*" is not a valid Java regex: dangling meta character',
+      }),
+    );
+    const user = userEvent.setup();
+    await fillCreateForm(user);
+    await user.selectOptions(screen.getAllByRole("combobox")[2], "Pattern");
+    await user.type(screen.getByPlaceholderText("e.g. .*tenant-a.*"), "*");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText(/is not a valid Java regex/)).toBeInTheDocument();
+  });
+
   it("drops a stored propagate from a Global scope on save", async () => {
     mockParams.name = "my-jenkins-binding";
     mockGetJenkinsRoleBinding.mockResolvedValue(
