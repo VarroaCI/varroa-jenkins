@@ -24,15 +24,7 @@ spec:
           port: 8080
 {{- end }}
   egress:
-{{- if .Values.nats.enabled }}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: nats
-      ports:
-        - protocol: TCP
-          port: 4222
-{{- end }}
+{{ include "varroa.np.busEgress" . | nindent 4 }}
 {{ include "varroa.np.apiServerEgress" . | nindent 4 }}
     # The BFF MCP endpoint, the only path a Tenant agent session takes to a tool.
     - to:

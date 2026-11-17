@@ -93,7 +93,7 @@ An empty `coreNatsEgress` `ports` list takes the port of each `bus.url` entry. A
 | `pullThroughEgress` | `["0.0.0.0/0"]` on 443 | `updateCenter.pullThrough.enabled` is true | Fails the render while pull-through is on. |
 | `updateCenterRegistryEgress` | `[]` on 443 | `updateCenter.storage.type` is `oci` | Fails the render. |
 | `ociRegistryEgress` | Off, `[]` on 443 | `enabled` is true | Fails the render. |
-| `coreNatsEgress` | `[]` | Hive mode | Fails the render in hive mode. |
+| `coreNatsEgress` | `[]` | Hive mode, or `nats.enabled` is false | Fails the render. |
 | `recordStoreBlobEgress` | On, `[]` on 443 | `recordStore.blobs.mode` is `s3` | Fails the render. |
 | `recorderWebhookEgress` | Off, `[]` on 443 | `enabled` is true | Fails the render. |
 | `recordStorePostgresEgress` | On, `[]` on 5432 | `recordStore.enabled` is true | In `cnpg` mode, selects the CloudNativePG pods. In `external` mode, fails the render. |
@@ -140,6 +140,20 @@ Kubernetes NetworkPolicy matches IP addresses, not DNS names. Include every addr
 
 Every group in the table except `coreNatsEgress` refuses `ports: []` while it is on. Set the TCP ports that the group needs.
 
+### External NATS Bus
+
+With `nats.enabled: false`, the release deploys no NATS. The bus clients dial the NATS that `bus.url` names. Hive mode works the same way. The operator, gateway, BFF, recorder, and agent runner policies then allow `coreNatsEgress.cidrs` on the `bus.url` ports. Set the NATS endpoint addresses:
+
+```yaml
+bus:
+  url: tls://nats.example.com:4222
+nats:
+  enabled: false
+networkPolicy:
+  coreNatsEgress:
+    cidrs: ["203.0.113.20/32"]
+```
+
 ### External NATS Clients
 
 `nats.external.allowedCIDRs` is required when `networkPolicy.enabled` is true, full mode is active, and `nats.external.enabled` is true. An empty list fails the render. Set the member cluster source addresses. To admit every source, set `["0.0.0.0/0"]`.
@@ -156,7 +170,7 @@ With `networkPolicy.enabled: true`, an upgrade fails the render until you set th
 4. `nats.external.enabled` in full mode: set `nats.external.allowedCIDRs`.
 5. `networkPolicy.dexConnectorEgress.extraCIDRs` is removed. Move its entries to `networkPolicy.dexConnectorEgress.cidrs`.
 6. Update center with `updateCenter.storage.type: oci`: set `networkPolicy.updateCenterRegistryEgress.cidrs`.
-7. Hive mode: set `networkPolicy.coreNatsEgress.cidrs`. When the `bus.url` entries name more than one port, also set `networkPolicy.coreNatsEgress.ports`.
+7. Hive mode, or full mode with `nats.enabled: false`: set `networkPolicy.coreNatsEgress.cidrs`. When the `bus.url` entries name more than one port, also set `networkPolicy.coreNatsEgress.ports`.
 8. Record store with `recordStore.blobs.mode: s3`: set `networkPolicy.recordStoreBlobEgress.cidrs`.
 9. `networkPolicy.recorderWebhookEgress.enabled: true`: set `cidrs`, or set `["0.0.0.0/0"]` to allow every address.
 10. `pullThroughEgress`: no change.

@@ -38,7 +38,8 @@ mode: full
 # NATS bus URL. Every bus client (operator, gateway, BFF, recorder, and
 # varroa-agent) reads this one value. Empty = the in-cluster default
 # nats://<release>-nats:4222. REQUIRED in hive mode (the core's external
-# NATS endpoint, e.g. tls://nats.core.example.com:4222). A comma-separated
+# NATS endpoint, e.g. tls://nats.core.example.com:4222). With nats.enabled=false
+# in full mode, set it to the external NATS. A comma-separated
 # list names more than one core NATS server. With a core NodePort and
 # externalTrafficPolicy Local, list each node that runs a NATS pod. The
 # render fails on the retired keys operator.busURL, gateway.busURL, and
@@ -270,9 +271,11 @@ networkPolicy:
     cidrs: []
     # -- TCP ports to allow egress on (default 443 = HTTPS).
     ports: [443]
-  # Hive-mode egress to the core's external NATS endpoint (bus.url).
-  # Required in hive mode when networkPolicy.enabled is true.
-  # cidrs: [] fails the render in hive mode — pin to the core NATS endpoint IP(s).
+  # Egress to a NATS endpoint outside the release (bus.url). It applies in hive
+  # mode and in full mode with nats.enabled=false. The operator, gateway, BFF,
+  # recorder, and varroa-agent policies get this rule. With the in-cluster NATS,
+  # those policies allow the NATS pods on 4222, and this value has no effect.
+  # cidrs: [] fails the render while the rule applies. Pin the NATS endpoint IPs.
   # ports: [] takes the port of each bus.url entry, or 4222 for an entry without
   # a port. When the entries name more than one port, the render fails until
   # ports names each port.

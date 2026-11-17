@@ -81,6 +81,45 @@ networkpolicy-guard.yaml fails a bus.url with more than one port.
 {{- end -}}
 {{- end -}}
 
+{{- /*
+varroa.np.inClusterBus is true when this release deploys the NATS that its
+bus clients dial: full mode with nats.enabled. Hive mode, or full mode with
+nats.enabled=false, dials the NATS that bus.url names outside the release.
+*/ -}}
+{{- define "varroa.np.inClusterBus" -}}
+{{- if and (not (include "varroa.isHive" .)) .Values.nats.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{- /*
+varroa.np.busEgress gives the NATS egress rule of one bus client. Every bus
+client policy includes it, so each mode gives each client the same rule.
+With an in-cluster bus, the rule allows the NATS pods on 4222. Otherwise it
+allows networkPolicy.coreNatsEgress.cidrs on the core NATS ports.
+networkpolicy-guard.yaml fails an empty cidrs list in that case.
+*/ -}}
+{{- define "varroa.np.busEgress" -}}
+{{- if include "varroa.np.inClusterBus" . }}
+- to:
+  - podSelector:
+      matchLabels:
+        app.kubernetes.io/component: nats
+  ports:
+  - protocol: TCP
+    port: 4222
+{{- else if .Values.networkPolicy.coreNatsEgress.cidrs }}
+- to:
+{{- range .Values.networkPolicy.coreNatsEgress.cidrs }}
+  - ipBlock:
+      cidr: {{ . }}
+{{- end }}
+  ports:
+{{- range (include "varroa.np.coreNatsPorts" . | fromJsonArray) }}
+  - protocol: TCP
+    port: {{ . }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
 {{- if .Values.networkPolicy.enabled }}
 {{- $full := not (include "varroa.isHive" .) }}
 
@@ -153,15 +192,7 @@ spec:
           port: 9091
 {{- end }}
   egress:
-{{- if and $full .Values.nats.enabled }}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: nats
-      ports:
-        - protocol: TCP
-          port: 4222
-{{- end }}
+{{ include "varroa.np.busEgress" . | nindent 4 }}
 {{ include "varroa.np.apiServerEgress" . | nindent 4 }}
 {{- if and $full .Values.dex.enabled }}
     - to:
@@ -201,18 +232,6 @@ spec:
 {{- if and .Values.recordStore.enabled .Values.recordStore.blobs.s3.artifactSTS.enabled .Values.networkPolicy.recordStoreBlobEgress.cidrs }}
     # artifactSTS: operator calls STS AssumeRole on the blob store's endpoint
 {{ include "varroa.np.recordStoreBlobEgress" . | nindent 4 }}
-{{- end }}
-{{- if not $full }}
-    - to:
-{{- range .Values.networkPolicy.coreNatsEgress.cidrs }}
-        - ipBlock:
-            cidr: {{ . }}
-{{- end }}
-      ports:
-{{- range (include "varroa.np.coreNatsPorts" . | fromJsonArray) }}
-        - protocol: TCP
-          port: {{ . }}
-{{- end }}
 {{- end }}
     # executeGroovy: operator dispatches Groovy scripts directly to a target
     # controller's Jenkins on :8080 (bypasses the mite). Bimodal by managedNamespaces.
@@ -278,15 +297,7 @@ spec:
           port: {{ add (.Values.gateway.service.grpcPort | int) 1 }}
 {{- end }}
   egress:
-{{- if and $full .Values.nats.enabled }}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: nats
-      ports:
-        - protocol: TCP
-          port: 4222
-{{- end }}
+{{ include "varroa.np.busEgress" . | nindent 4 }}
 {{ include "varroa.np.apiServerEgress" . | nindent 4 }}
 {{ include "varroa.np.telemetryEgress" . | nindent 4 }}
 {{- /* A member gateway writes blobs straight to the core record store. */}}
@@ -294,18 +305,6 @@ spec:
 {{ include "varroa.np.recordStoreBlobEgress" . | nindent 4 }}
 {{- if eq .Values.recordStore.blobs.mode "postgres" }}
 {{ include "varroa.np.recordStorePostgresEgress" . | nindent 4 }}
-{{- end }}
-{{- end }}
-{{- if not $full }}
-    - to:
-{{- range .Values.networkPolicy.coreNatsEgress.cidrs }}
-        - ipBlock:
-            cidr: {{ . }}
-{{- end }}
-      ports:
-{{- range (include "varroa.np.coreNatsPorts" . | fromJsonArray) }}
-        - protocol: TCP
-          port: {{ . }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -403,15 +402,7 @@ spec:
           port: {{ .Values.bff.service.port }}
 {{- end }}
   egress:
-{{- if .Values.nats.enabled }}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: nats
-      ports:
-        - protocol: TCP
-          port: 4222
-{{- end }}
+{{ include "varroa.np.busEgress" . | nindent 4 }}
 {{ include "varroa.np.apiServerEgress" . | nindent 4 }}
 {{- if .Values.dex.enabled }}
     - to:
@@ -783,15 +774,7 @@ spec:
           port: 8080
 {{- end }}
   egress:
-{{- if .Values.nats.enabled }}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: nats
-      ports:
-        - protocol: TCP
-          port: 4222
-{{- end }}
+{{ include "varroa.np.busEgress" . | nindent 4 }}
 {{ include "varroa.np.recordStorePostgresEgress" . | nindent 4 }}
 {{ include "varroa.np.recordStoreBlobEgress" . | nindent 4 }}
 {{ include "varroa.np.recorderWebhookEgress" . | nindent 4 }}

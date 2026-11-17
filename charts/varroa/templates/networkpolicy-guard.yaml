@@ -5,8 +5,9 @@ the CIDRs it needs, when an egress group has an empty port list, or when
 the NATS external allow-list is empty. Every such group renders a rule only
 when its gate is on and its cidrs list is non-empty, so an empty list never
 opens every destination. An empty ports list would allow every port, so it
-fails too. In hive mode, a bus.url whose entries name more than one port
-fails while coreNatsEgress.ports is empty. Renders no objects. Only
+fails too. A release that deploys no NATS (hive mode, or nats.enabled=false)
+needs coreNatsEgress.cidrs, and a bus.url whose entries name more than one
+port fails while coreNatsEgress.ports is empty. Renders no objects. Only
 evaluated when networkPolicy.enabled. Each failure message names the value
 to set.
 */ -}}
@@ -27,11 +28,12 @@ to set.
 {{- fail "networkPolicy.ociRegistryEgress.cidrs must name the OCI registry address when the rule is enabled. Set [\"0.0.0.0/0\"] to allow every address." }}
 {{- end }}
 
-{{- if and (not $full) (empty (default list $np.coreNatsEgress.cidrs)) }}
-{{- fail "networkPolicy.coreNatsEgress.cidrs must name the core NATS address in hive mode. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- $externalBus := not (include "varroa.np.inClusterBus" .) }}
+{{- if and $externalBus (empty (default list $np.coreNatsEgress.cidrs)) }}
+{{- fail "networkPolicy.coreNatsEgress.cidrs must name the core NATS address when the release deploys no NATS (hive mode, or nats.enabled=false). Set [\"0.0.0.0/0\"] to allow every address." }}
 {{- end }}
 
-{{- if and (not $full) (empty (default list $np.coreNatsEgress.ports)) }}
+{{- if and $externalBus (empty (default list $np.coreNatsEgress.ports)) }}
 {{- $busPorts := include "varroa.np.busURLPorts" . | fromJsonArray }}
 {{- if gt (len $busPorts) 1 }}
 {{- fail (printf "bus.url names more than one NATS port (%s). An entry without a port uses 4222. Set networkPolicy.coreNatsEgress.ports to each port that the core NATS rule must allow." (join ", " $busPorts)) }}
