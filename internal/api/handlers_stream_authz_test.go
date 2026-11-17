@@ -114,6 +114,7 @@ func TestHandleControllerLogs_ForbiddenOutsideScope(t *testing.T) {
 	r := testResolver([]*v1alpha1.VarroaRole{role}, []*v1alpha1.VarroaRoleBinding{binding})
 	srv := NewServer(&Dependencies{
 		Authorizer: NewAuthorizer(r, false),
+		Brood:      newStoreBrood(nil),
 		Logger:     slog.Default(),
 	})
 
@@ -121,7 +122,7 @@ func TestHandleControllerLogs_ForbiddenOutsideScope(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/clusters/core/controllers/team-b/ctrl1/logs", nil).
 		WithContext(authContext(claims))
 	w := httptest.NewRecorder()
-	srv.handleControllerLogs(w, req, "", "team-b", "ctrl1")
+	srv.handleControllerLogs(w, req, "core", "team-b", "ctrl1")
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden, got %d: %s", w.Code, w.Body.String())
@@ -134,6 +135,7 @@ func TestHandleControllerLogs_AllowedInScope(t *testing.T) {
 	lb := logbuffer.New(100)
 	srv := NewServer(&Dependencies{
 		Authorizer: NewAuthorizer(r, false),
+		Brood:      newStoreBrood(nil),
 		LogBuffer:  lb,
 		Logger:     slog.Default(),
 	})
@@ -142,7 +144,7 @@ func TestHandleControllerLogs_AllowedInScope(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/clusters/core/controllers/team-a/ctrl1/logs", nil).
 		WithContext(authContext(claims))
 	w := httptest.NewRecorder()
-	srv.handleControllerLogs(w, req, "", "team-a", "ctrl1")
+	srv.handleControllerLogs(w, req, "core", "team-a", "ctrl1")
 
 	// Must not be 403 — the handler may 200 (empty logs from LogBuffer) or 501
 	// (remote cluster), but not forbidden.
@@ -178,6 +180,7 @@ func TestHandleControllerLogs_TicketAuthed_AllowedViaPreferredUsernameBinding(t 
 	lb := logbuffer.New(100)
 	srv := NewServer(&Dependencies{
 		Authorizer: NewAuthorizer(r, false),
+		Brood:      newStoreBrood(nil),
 		LogBuffer:  lb,
 		Logger:     slog.Default(),
 	})
@@ -252,6 +255,7 @@ func TestHandleControllerYAML_StripsWakeToken(t *testing.T) {
 		Authorizer: NewAuthorizer(r, false),
 		Client:     fc,
 		Store:      storeFromFake(fc),
+		Brood:      newStoreBrood(storeFromFake(fc)),
 		Logger:     slog.Default(),
 	})
 
@@ -259,7 +263,7 @@ func TestHandleControllerYAML_StripsWakeToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/clusters/core/controllers/team-a/ctrl1/yaml", nil).
 		WithContext(authContext(claims))
 	w := httptest.NewRecorder()
-	srv.handleControllerYAML(w, req, "", "team-a", "ctrl1")
+	srv.handleControllerYAML(w, req, "core", "team-a", "ctrl1")
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())

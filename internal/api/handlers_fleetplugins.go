@@ -60,10 +60,10 @@ func (s *Server) parseFleetPluginParams(w http.ResponseWriter, r *http.Request) 
 	namespace := r.URL.Query().Get("namespace")
 	claims := auth.ClaimsFromContext(r.Context())
 
-	// Step 3: Validate cluster against Brood.IsKnown.
+	// Step 3: Resolve the cluster. A missing brood or an unknown cluster refuses the call.
 	ctx := r.Context()
-	if cluster != "" && s.deps.Brood != nil && !s.deps.Brood.IsKnown(ctx, cluster) {
-		s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown cluster"})
+	if _, err := ResolveCluster(ctx, s.deps.Brood, cluster); err != nil {
+		s.writeClusterRefusal(w, err)
 		return nil
 	}
 
@@ -110,47 +110,29 @@ func (s *Server) fleetFanOut(ctx context.Context, p *fleetPluginParams) *fleetFa
 	var statuses []ClusterFanoutStatus
 	var enrichedRows []enriched
 
-	if s.deps.Brood != nil {
-		// Unfiltered call: namespace="" so we see all controllers.
-		cc, cs, err := s.deps.Brood.ListAll(ctx, p.namespace, "")
-		if err != nil {
-			s.deps.Logger.Error("list all controllers failed for fleet plugins", "error", err)
-		}
-		statuses = cs
+	// Unfiltered call: namespace="" so we see all controllers.
+	cc, cs, err := s.deps.Brood.ListAll(ctx, p.namespace, "")
+	if err != nil {
+		s.deps.Logger.Error("list all controllers failed for fleet plugins", "error", err)
+	}
+	statuses = cs
 
-		// Apply cluster query parameter to rows only.
-		for _, c := range cc {
-			if p.cluster != "" && c.Cluster != p.cluster {
-				continue
-			}
-			var pi *v1alpha1.PluginInventoryStatus
-			if c.CR.Status.PluginInventory != nil {
-				pi = c.CR.Status.PluginInventory
-			}
-			enrichedRows = append(enrichedRows, enriched{
-				cluster:   c.Cluster,
-				ns:        c.CR.Namespace,
-				name:      c.CR.Name,
-				phase:     c.CR.Status.Phase,
-				pluginInv: pi,
-			})
+	// Apply cluster query parameter to rows only.
+	for _, c := range cc {
+		if p.cluster != "" && c.Cluster != p.cluster {
+			continue
 		}
-	} else {
-		// Fallback: local-only via visibleControllers.
-		controllers, err := s.visibleControllers(ctx, p.claims, p.namespace)
-		if err != nil {
-			s.deps.Logger.Error("list controllers failed for fleet plugins", "error", err)
+		var pi *v1alpha1.PluginInventoryStatus
+		if c.CR.Status.PluginInventory != nil {
+			pi = c.CR.Status.PluginInventory
 		}
-		for _, cr := range controllers {
-			enrichedRows = append(enrichedRows, enriched{
-				cluster:   s.localCluster(),
-				ns:        cr.Namespace,
-				name:      cr.Name,
-				phase:     cr.Status.Phase,
-				pluginInv: cr.Status.PluginInventory,
-			})
-		}
-		statuses = []ClusterFanoutStatus{{Name: s.localCluster(), OK: true}}
+		enrichedRows = append(enrichedRows, enriched{
+			cluster:   c.Cluster,
+			ns:        c.CR.Namespace,
+			name:      c.CR.Name,
+			phase:     c.CR.Status.Phase,
+			pluginInv: pi,
+		})
 	}
 
 	// Step 6: Mark every non-local cluster ok: false with an explanatory error.
@@ -178,11 +160,7 @@ func (s *Server) fleetFanOut(ctx context.Context, p *fleetPluginParams) *fleetFa
 		}
 	}
 
-	// Step 7: Deny by default.
-	// This deliberately diverges from handleControllersFiltered (handlers.go:596),
-	// whose Brood branch admits every row when the authorizer is unwired. Copying
-	// that fallthrough into a surface whose purpose is disclosing where software
-	// is installed would be a disclosure bug.
+	// Step 7: Deny by default. Without an authorizer, the answer has no rows.
 	if s.deps.Authorizer == nil {
 		return &fleetFanOutResult{
 			statuses: finalStatuses,

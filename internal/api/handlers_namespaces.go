@@ -26,7 +26,7 @@ func (s *Server) HandleDeployableNamespaces(w http.ResponseWriter, r *http.Reque
 	var curatedDefault string
 	degraded := false
 
-	local := s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster()
+	local := cluster == s.deps.Brood.LocalCluster()
 	if local {
 		// Core-local input assembly: reusing the exact resolution from handleProvisioningConfigForCluster.
 		defaults, err := crdstore.Get[v1alpha1.ProvisioningDefaults](r.Context(), s.deps.Store, "varroa-defaults", "")

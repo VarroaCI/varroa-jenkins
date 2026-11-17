@@ -51,6 +51,7 @@ func TestControllerDiff_HeadlessInjectsDoorLocationURL(t *testing.T) {
 		srv := NewServer(&Dependencies{
 			Client:            client,
 			Store:             store,
+			Brood:             newStoreBrood(store),
 			Authorizer:        adminTestAuthorizer(),
 			OperatorNamespace: "varroa-system",
 			Logger:            slog.Default(),

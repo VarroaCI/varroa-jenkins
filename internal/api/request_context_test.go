@@ -353,6 +353,7 @@ func TestControllerEndpointCallersPassRequestContext(t *testing.T) {
 		crdstore.MustSeed(fake, reqCtxDefaults(), reqCtxController("c1"))
 		store := &reqCtxStore{Backend: fake}
 		srv := reqCtxServer(store)
+		srv.deps.Brood = newStoreBrood(store)
 		w := httptest.NewRecorder()
 		srv.HandleControllers(w, reqCtxRequest(http.MethodGet, "/controllers", ""))
 		if w.Code != http.StatusOK {
@@ -369,8 +370,9 @@ func TestControllerEndpointCallersPassRequestContext(t *testing.T) {
 		crdstore.MustSeed(fake, reqCtxDefaults(), reqCtxController("c1"))
 		store := &reqCtxStore{Backend: fake}
 		srv := reqCtxServer(store)
+		srv.deps.Brood = newStoreBrood(store)
 		w := httptest.NewRecorder()
-		srv.handleControllerDetail(w, reqCtxRequest(http.MethodGet, "/", ""), "", "ns1", "c1")
+		srv.handleControllerDetail(w, reqCtxRequest(http.MethodGet, "/", ""), "core", "ns1", "c1")
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 		}
@@ -405,6 +407,7 @@ func TestControllerListReadsProvisioningDefaultsOnce(t *testing.T) {
 		crdstore.MustSeed(fake, reqCtxDefaults(), reqCtxController("c1"), reqCtxController("c2"), reqCtxController("c3"))
 		counter := &defaultsGetCounter{Backend: fake}
 		srv := reqCtxServer(&reqCtxStore{Backend: counter})
+		srv.deps.Brood = newStoreBrood(counter)
 		w := httptest.NewRecorder()
 		srv.HandleControllers(w, reqCtxRequest(http.MethodGet, "/controllers", ""))
 		if w.Code != http.StatusOK {
@@ -425,6 +428,7 @@ func TestControllerListReadsProvisioningDefaultsOnce(t *testing.T) {
 		crdstore.MustSeed(fake, reqCtxDefaults(), hosted("c1"), hosted("c2"), hosted("c3"))
 		counter := &defaultsGetCounter{Backend: fake}
 		srv := reqCtxServer(&reqCtxStore{Backend: counter})
+		srv.deps.Brood = newStoreBrood(counter)
 		w := httptest.NewRecorder()
 		srv.HandleControllers(w, reqCtxRequest(http.MethodGet, "/controllers", ""))
 		if w.Code != http.StatusOK {
@@ -441,6 +445,7 @@ func TestControllerListReadsMissingDefaultsOnce(t *testing.T) {
 	crdstore.MustSeed(fake, reqCtxController("c1"), reqCtxController("c2"), reqCtxController("c3"))
 	counter := &defaultsGetCounter{Backend: fake}
 	srv := reqCtxServer(&reqCtxStore{Backend: counter})
+	srv.deps.Brood = newStoreBrood(counter)
 	w := httptest.NewRecorder()
 	srv.HandleControllers(w, reqCtxRequest(http.MethodGet, "/controllers", ""))
 	if w.Code != http.StatusOK {

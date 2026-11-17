@@ -84,6 +84,9 @@ func (f *fakeProvisioningClient) GetConfigMap(_ context.Context, name, _ string)
 func serveRoutedProvisioningConfig(deps *Dependencies, method string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, "/api/v1/clusters/core/provisioning/config", nil)
 	w := httptest.NewRecorder()
+	if deps.Brood == nil {
+		deps.Brood = newStoreBrood(deps.Store)
+	}
 	NewRouter(deps).ServeHTTP(w, req)
 	return w
 }
@@ -758,6 +761,7 @@ func TestDispatchProvisioningDefaultsLocalMissingAnswers404(t *testing.T) {
 	srv := NewServer(&Dependencies{
 		Logger:      slog.Default(),
 		ConfigBrood: NewBusConfigBrood("core", nil, nil, crdstore.NewFake(), slog.Default()),
+		Brood:       newStoreBrood(nil),
 	})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/clusters/core/provisioningdefaults/varroa-defaults", nil)
@@ -830,6 +834,7 @@ func TestDispatchProvisioningDefaultsPutConflictAnswers409(t *testing.T) {
 		Logger:      slog.Default(),
 		Authorizer:  adminTestAuthorizer(),
 		ConfigBrood: brood,
+		Brood:       newStoreBrood(nil, "member-b"),
 	})
 	w := httptest.NewRecorder()
 	body := `{"metadata":{"resourceVersion":"7"},"spec":{"rootDomain":"example.com"}}`

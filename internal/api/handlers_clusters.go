@@ -83,7 +83,7 @@ func (s *Server) handleClusters(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.deps.Brood == nil {
-		s.writeJSONError(w, http.StatusServiceUnavailable, "brood not configured")
+		s.writeJSONError(w, http.StatusServiceUnavailable, ErrBroodNotConfigured.Error())
 		return
 	}
 
@@ -144,7 +144,8 @@ var configDispatchRoutes = map[string]configDispatchFunc{
 }
 
 // handleClusterDispatch routes /clusters/{cluster}/controllers[...] paths.
-// Unknown clusters return 404. Unknown sub-resources return 404.
+// A server without a brood answers 503. Unknown clusters return 404. Unknown
+// sub-resources return 404.
 func (s *Server) handleClusterDispatch(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	if !strings.HasPrefix(path, "/clusters/") {
@@ -161,9 +162,9 @@ func (s *Server) handleClusterDispatch(w http.ResponseWriter, r *http.Request) {
 	}
 	cluster := segments[0]
 
-	// Validate cluster is known.
-	if s.deps.Brood != nil && !s.deps.Brood.IsKnown(r.Context(), cluster) {
-		s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown cluster"})
+	// Every /clusters/{cluster} route needs a brood and a known cluster.
+	if _, err := ResolveCluster(r.Context(), s.deps.Brood, cluster); err != nil {
+		s.writeClusterRefusal(w, err)
 		return
 	}
 
@@ -205,7 +206,7 @@ func (s *Server) handleClusterDispatch(w http.ResponseWriter, r *http.Request) {
 // uses the value of its own heartbeat. An unhealthy, unknown, or silent
 // member returns "", and the gate then grants no operator-namespace exemption.
 func (s *Server) ConfigOperatorNamespace(ctx context.Context, cluster string) string {
-	if s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster() {
+	if cluster == s.deps.Brood.LocalCluster() {
 		return s.deps.OperatorNamespace
 	}
 	clusters, err := s.deps.Brood.Clusters(ctx)
@@ -272,7 +273,7 @@ func (s *Server) dispatchControllers(w http.ResponseWriter, r *http.Request, clu
 			s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		if createOrPreflight && s.deps.Brood != nil {
+		if createOrPreflight {
 			if state, err := s.deps.Brood.StateOf(r.Context(), cluster); err == nil && state != bus.ClusterStateActive {
 				s.writeJSON(w, http.StatusConflict, map[string]string{"error": "cluster " + cluster + " is " + state})
 				return
@@ -339,11 +340,6 @@ func ActorFrom(claims *auth.Claims) string {
 }
 
 func (s *Server) handleDrainCreate(w http.ResponseWriter, r *http.Request, cluster string, claims *auth.Claims) {
-	if s.deps.Brood == nil {
-		s.writeJSONError(w, http.StatusServiceUnavailable, "brood not configured")
-		return
-	}
-
 	// Core guard: the core cluster cannot be drained.
 	if cluster == s.deps.Brood.LocalCluster() {
 		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the core cluster cannot be drained"})
@@ -372,11 +368,6 @@ func (s *Server) handleDrainCreate(w http.ResponseWriter, r *http.Request, clust
 }
 
 func (s *Server) handleDrainCancel(w http.ResponseWriter, r *http.Request, cluster string, claims *auth.Claims) {
-	if s.deps.Brood == nil {
-		s.writeJSONError(w, http.StatusServiceUnavailable, "brood not configured")
-		return
-	}
-
 	state, err := s.deps.Brood.DrainCancel(r.Context(), cluster, ActorFrom(claims))
 	if err != nil {
 		writeBroodError(w, err)
@@ -1396,7 +1387,7 @@ func (s *Server) handleControllerPlugins(w http.ResponseWriter, r *http.Request,
 	// to exist locally would return the LOCAL controller's inventory under the
 	// remote cluster's URL — the wrong controller's software list, presented as
 	// the right one.
-	if s.deps.Brood != nil && cluster != s.deps.Brood.LocalCluster() {
+	if cluster != s.deps.Brood.LocalCluster() {
 		s.writeJSONError(w, http.StatusNotImplemented,
 			"plugin inventory is available for the local cluster only")
 		return

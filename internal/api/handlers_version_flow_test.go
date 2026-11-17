@@ -291,6 +291,7 @@ func TestNormalVersionGuard(t *testing.T) {
 	srv := NewServer(&Dependencies{
 		Client:            client,
 		Store:             storeFromFake(client),
+		Brood:             newStoreBrood(storeFromFake(client)),
 		Authorizer:        adminTestAuthorizer(),
 		MiteRegistry:      &normalMiteTransport{},
 		OperatorNamespace: "test-ns",

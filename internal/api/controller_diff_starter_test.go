@@ -46,6 +46,7 @@ func TestControllerDiff_ResolvesStarterBundleForNilRef(t *testing.T) {
 	srv := NewServer(&Dependencies{
 		Client:            client,
 		Store:             store,
+		Brood:             newStoreBrood(store),
 		Authorizer:        adminTestAuthorizer(),
 		OperatorNamespace: "varroa-system",
 		Logger:            slog.Default(),
@@ -87,6 +88,7 @@ func TestControllerDTO_EffectiveBundleIsSeparateFromSpecRef(t *testing.T) {
 	srv := NewServer(&Dependencies{
 		Client:            client,
 		Store:             store,
+		Brood:             newStoreBrood(store),
 		Authorizer:        adminTestAuthorizer(),
 		OperatorNamespace: "varroa-system",
 		Logger:            slog.Default(),
@@ -166,6 +168,7 @@ func TestControllerDiff_HeadlessInjectsInClusterLocationURL(t *testing.T) {
 	srv := NewServer(&Dependencies{
 		Client:            client,
 		Store:             store,
+		Brood:             newStoreBrood(store),
 		Authorizer:        adminTestAuthorizer(),
 		OperatorNamespace: "varroa-system",
 		Logger:            slog.Default(),
@@ -240,6 +243,7 @@ func TestControllerDiff_RedactsAppliedAndIncoming(t *testing.T) {
 	srv := NewServer(&Dependencies{
 		Client:            client,
 		Store:             store,
+		Brood:             newStoreBrood(store),
 		Authorizer:        adminTestAuthorizer(),
 		OperatorNamespace: "varroa-system",
 		MiteRegistry:      &stubTransport{content: raw},

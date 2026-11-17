@@ -48,6 +48,7 @@ func newCatalogSourcesTestServer() (*Server, *scopeTestConfigBrood) {
 	srv := NewServer(&Dependencies{
 		Authorizer:  scopedDeveloperAuthorizer(),
 		ConfigBrood: brood,
+		Brood:       newStoreBrood(nil),
 		Logger:      slog.Default(),
 	})
 	return srv, brood
@@ -295,6 +296,7 @@ func TestDispatchCatalogSources_ScopedDeveloper_GetOperatorNamespaceAllowed(t *t
 	srv := NewServer(&Dependencies{
 		Authorizer:        scopedDeveloperAuthorizer(),
 		ConfigBrood:       &scopeTestConfigBrood{},
+		Brood:             newStoreBrood(nil),
 		OperatorNamespace: "varroa-system",
 		Logger:            slog.Default(),
 	})
@@ -319,6 +321,7 @@ func TestDispatchCatalogSources_ScopedDeveloper_ListFiltersNamespaces(t *testing
 	srv := NewServer(&Dependencies{
 		Authorizer:        scopedDeveloperAuthorizer(),
 		ConfigBrood:       brood,
+		Brood:             newStoreBrood(nil),
 		OperatorNamespace: "varroa-system",
 		Logger:            slog.Default(),
 	})
@@ -347,6 +350,7 @@ func TestDispatchCatalogItems_ScopedDeveloper_ListFiltersNamespaces(t *testing.T
 	srv := NewServer(&Dependencies{
 		Authorizer:        scopedDeveloperAuthorizer(),
 		ConfigBrood:       brood,
+		Brood:             newStoreBrood(nil),
 		OperatorNamespace: "varroa-system",
 		Logger:            slog.Default(),
 	})
