@@ -368,6 +368,11 @@ func (in *ControllerStatus) DeepCopyInto(out *ControllerStatus) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.CascRefusal != nil {
+		in, out := &in.CascRefusal, &out.CascRefusal
+		*out = new(CascRefusal)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.OverlayWarnings != nil {
 		in, out := &in.OverlayWarnings, &out.OverlayWarnings
 		*out = make([]OverlayWarning, len(*in))
@@ -3880,6 +3885,23 @@ func (in *BroodScheduleStatus) DeepCopy() *BroodScheduleStatus {
 		return nil
 	}
 	out := new(BroodScheduleStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// ---- CascRefusal ----
+
+// DeepCopyInto copies the receiver into out. CascRefusal holds only strings.
+func (in *CascRefusal) DeepCopyInto(out *CascRefusal) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of CascRefusal.
+func (in *CascRefusal) DeepCopy() *CascRefusal {
+	if in == nil {
+		return nil
+	}
+	out := new(CascRefusal)
 	in.DeepCopyInto(out)
 	return out
 }
