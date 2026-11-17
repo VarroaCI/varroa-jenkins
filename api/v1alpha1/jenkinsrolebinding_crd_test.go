@@ -21,6 +21,8 @@ func TestJenkinsScopeGoValidationMatchesCRD(t *testing.T) {
 		name      string
 		scope     v1alpha1.JenkinsScope
 		wantValid bool
+		// goOnly marks a scope that the CRD admits and only Go refuses.
+		goOnly bool
 	}{
 		{name: "Global", scope: v1alpha1.JenkinsScope{Type: "Global"}, wantValid: true},
 		{name: "Folder", scope: v1alpha1.JenkinsScope{Type: "Folder", Folder: "payments"}, wantValid: true},
@@ -33,6 +35,7 @@ func TestJenkinsScopeGoValidationMatchesCRD(t *testing.T) {
 		{name: "Global with folder", scope: v1alpha1.JenkinsScope{Type: "Global", Folder: "payments"}},
 		{name: "Pattern with folder", scope: v1alpha1.JenkinsScope{Type: "Pattern", Pattern: "x", Folder: "payments"}},
 		{name: "Folder with pattern", scope: v1alpha1.JenkinsScope{Type: "Folder", Folder: "payments", Pattern: "x"}},
+		{name: "Pattern that Java refuses", scope: v1alpha1.JenkinsScope{Type: "Pattern", Pattern: "(payments"}, goOnly: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,8 +50,8 @@ func TestJenkinsScopeGoValidationMatchesCRD(t *testing.T) {
 			errs := newHarness(t, crdFile).admit(t, jenkinsRoleBindingObject(m), nil)
 			crdValid := len(errs) == 0
 			goValid := v1alpha1.ValidateJenkinsScope(&tc.scope) == nil
-			if crdValid != tc.wantValid {
-				t.Errorf("CRD valid = %v, want %v: %v", crdValid, tc.wantValid, errs)
+			if crdValid != (tc.wantValid || tc.goOnly) {
+				t.Errorf("CRD valid = %v, want %v: %v", crdValid, tc.wantValid || tc.goOnly, errs)
 			}
 			if goValid != tc.wantValid {
 				t.Errorf("Go valid = %v, want %v", goValid, tc.wantValid)

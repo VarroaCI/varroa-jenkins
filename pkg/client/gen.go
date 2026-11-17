@@ -3394,7 +3394,9 @@ type ComponentsSchemasJenkinsRoleSpecRoleType string
 // ComponentsSchemasJenkinsScope Jenkins-level scope for a binding. A Folder scope needs folder and takes an optional propagate. A Pattern scope needs pattern. A Global scope takes no folder, propagate, or pattern.
 type ComponentsSchemasJenkinsScope struct {
 	// Folder Full Jenkins folder name, such as payments/backend. It must not start with /.
-	Folder    *string                                 `json:"folder,omitempty"`
+	Folder *string `json:"folder,omitempty"`
+
+	// Pattern Java regular expression that must match the full item name, such as payments/.*. The server refuses a pattern with a syntax error that it can find, such as an unclosed group or a glob *.
 	Pattern   *string                                 `json:"pattern,omitempty"`
 	Propagate *ComponentsSchemasJenkinsScopePropagate `json:"propagate,omitempty"`
 	Type      ComponentsSchemasJenkinsScopeType       `json:"type"`

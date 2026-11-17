@@ -203,6 +203,8 @@ export default function JenkinsRoleBindingForm() {
         setError(err.serverMessage);
       } else if (err instanceof ApiError && err.status === 409) {
         setError(isEdit ? JENKINS_ROLE_BINDING_CONFLICT_NOTE : "A Jenkins role binding with this name already exists.");
+      } else if (err instanceof ApiError && err.status === 400 && err.serverMessage) {
+        setError(err.serverMessage);
       } else {
         setError(err.message);
       }
@@ -466,6 +468,9 @@ export default function JenkinsRoleBindingForm() {
                       value={jenkinsScopePattern}
                       onChange={(e) => setJenkinsScopePattern(e.target.value)}
                     />
+                    <p className={styles.hint}>
+                      Enter a Java regular expression. It must match the full item name.
+                    </p>
                   </div>
                 )}
 

@@ -1073,6 +1073,10 @@ func (c *ConfigCRUD) HandleBindingsCreate(data []byte) []byte {
 	cr.APIVersion = "varroa.dev/v1alpha1"
 	cr.Kind = "JenkinsRoleBinding"
 
+	if err := v1alpha1.ValidateJenkinsScope(cr.Spec.JenkinsScope); err != nil {
+		return c.configReply(bus.ConfigApplyResponse{Error: err.Error(), Code: bus.CodeInvalid})
+	}
+
 	if err := crdstore.Create[v1alpha1.JenkinsRoleBinding](ctx, c.Store, &cr); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			return c.configReply(bus.ConfigApplyResponse{Error: "jenkinsrolebinding already exists", Code: bus.CodeConflict})
@@ -1110,6 +1114,10 @@ func (c *ConfigCRUD) HandleBindingsUpdate(data []byte) []byte {
 	cr.Name = req.Name
 	cr.APIVersion = "varroa.dev/v1alpha1"
 	cr.Kind = "JenkinsRoleBinding"
+
+	if err := v1alpha1.ValidateJenkinsScope(cr.Spec.JenkinsScope); err != nil {
+		return c.configReply(bus.ConfigApplyResponse{Error: err.Error(), Code: bus.CodeInvalid})
+	}
 
 	createOnly := cr.ResourceVersion == ""
 	if err := crdstore.ApplyAt[v1alpha1.JenkinsRoleBinding](ctx, c.Store, &cr); err != nil {

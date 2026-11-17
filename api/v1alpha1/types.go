@@ -3276,6 +3276,7 @@ type JenkinsRoleBindingSpec struct {
 // JenkinsScope defines the in-Jenkins scope for a binding. Each type takes only
 // its own fields: Folder takes folder and propagate, and Pattern takes pattern.
 // ValidateJenkinsScope states the same rules; change both together.
+// ValidateJenkinsScope also checks pattern syntax, which CEL cannot express.
 // +kubebuilder:validation:XValidation:rule="self.type != 'Folder' || (has(self.folder) && size(self.folder) > 0)",message="a Folder scope needs folder"
 // +kubebuilder:validation:XValidation:rule="!has(self.folder) || !self.folder.startsWith('/')",message="folder must not start with /"
 // +kubebuilder:validation:XValidation:rule="self.type != 'Pattern' || (has(self.pattern) && size(self.pattern) > 0)",message="a Pattern scope needs pattern"
@@ -3293,8 +3294,10 @@ type JenkinsScope struct {
 	// +kubebuilder:validation:Enum=None;Children;Subtree
 	// +optional
 	Propagate string `json:"propagate,omitempty"`
-	// Pattern is the raw regex over item full names. Required for Type=Pattern,
-	// and only for it.
+	// Pattern is a Java regular expression that must match the full item
+	// name. Required for Type=Pattern, and only for it. The Varroa API refuses
+	// a pattern with a syntax error that it can find, and a stored binding
+	// with such a pattern grants nothing.
 	// +optional
 	Pattern string `json:"pattern,omitempty"`
 }

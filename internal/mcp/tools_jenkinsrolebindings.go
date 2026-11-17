@@ -107,7 +107,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		mcp.WithString("cluster", mcp.Description(clusterArgDescription)),
 		mcp.WithObject("jenkinsScope", mcp.Description("Jenkins item limits. type is Global, Folder, or Pattern. "+
 			"A Folder scope needs folder, the full folder name with no leading slash, and takes an optional propagate: None, Children, or Subtree. "+
-			"A Pattern scope needs pattern, a regular expression over item full names. "+
+			"A Pattern scope needs pattern, a Java regular expression that must match the full item name, such as payments/.*. A glob such as * is refused. "+
 			"e.g. {\"type\":\"Folder\",\"folder\":\"payments\",\"propagate\":\"Subtree\"}. Omit the argument for Global scope.")),
 	)
 	addTool(mcpServer, kindCreateStrict, createJRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -350,7 +350,8 @@ func buildControllerScope(raw interface{}) (*v1alpha1.VarroaRoleBindingScope, er
 // The parse refuses an unknown key, a value that is not a
 // string, an unknown type, and a field that the type does not use. It then
 // runs v1alpha1.ValidateJenkinsScope, which refuses a folder that starts with
-// "/". An absent argument returns nil.
+// "/" and a pattern with a syntax error that Java always refuses. An absent
+// argument returns nil.
 func buildJenkinsScope(raw interface{}) (*v1alpha1.JenkinsScope, error) {
 	if raw == nil {
 		return nil, nil

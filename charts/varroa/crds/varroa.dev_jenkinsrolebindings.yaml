@@ -137,8 +137,10 @@ spec:
                     type: string
                   pattern:
                     description: |-
-                      Pattern is the raw regex over item full names. Required for Type=Pattern,
-                      and only for it.
+                      Pattern is a Java regular expression that must match the full item
+                      name. Required for Type=Pattern, and only for it. The Varroa API refuses
+                      a pattern with a syntax error that it can find, and a stored binding
+                      with such a pattern grants nothing.
                     type: string
                   propagate:
                     description: Propagate is "None", "Children", or "Subtree". Only
