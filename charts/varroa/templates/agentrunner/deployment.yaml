@@ -44,7 +44,7 @@ spec:
             - name: TMPDIR
               value: /tmp
             - name: VARROA_BUS_URL
-              value: {{ include "varroa.busURL" (dict "root" $ "tier" "bff") | quote }}
+              value: {{ include "varroa.busURL" $ | quote }}
             - name: VARROA_CLUSTER
               value: {{ .Values.cluster.name | quote }}
             - name: VARROA_BFF_URL
