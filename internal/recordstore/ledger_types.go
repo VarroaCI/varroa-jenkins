@@ -96,9 +96,9 @@ var ReasonCodes = []string{
 
 // markableVeto reports whether a veto with this reason code is permanent
 // for the run record. The set mirrors the plugin's VETOED_OTHER branch:
-// the plugin cancels the queue item on every veto but NOT_READY and
-// NOT_HOME, so no later event moves the run. NOT_READY retries, and
-// NOT_HOME forwards the item to the home slot. A replay or a restart is
+// the plugin cancels the queue item on every veto except NOT_READY,
+// CAPPED, and NOT_HOME, so no later event moves the run. NOT_READY and
+// CAPPED retry, and NOT_HOME forwards the item to the home slot. A replay or a restart is
 // the exception to NOT_HOME; markableVetoFor covers it. Change this set
 // and that plugin branch together.
 func markableVeto(code string) bool {
