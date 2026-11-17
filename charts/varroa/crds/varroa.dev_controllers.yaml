@@ -4057,6 +4057,22 @@ spec:
                   ApprovedPluginRollChecksum is a one-shot approval of the target checksum for a
                   pending plugin roll. Set by ApproveRestart, consumed and cleared on next reconcile.
                 type: string
+              cascRefusal:
+                description: |-
+                  CascRefusal names the next-boot CASC seed documents that the last live
+                  reload refused. The operator keeps a refused document out of the seed,
+                  so the next pod start uses the last accepted value of that document.
+                  It is nil when the last live reload accepted every seed document.
+                properties:
+                  configHash:
+                    description: ConfigHash is the digest of the refused config.yaml
+                      seed document.
+                    type: string
+                  rbacHash:
+                    description: RBACHash is the digest of the refused rbac.yaml seed
+                      document.
+                    type: string
+                type: object
               cell:
                 description: |-
                   Cell reports the placement and health of this Controller when it runs

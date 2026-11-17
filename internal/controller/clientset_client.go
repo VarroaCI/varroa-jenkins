@@ -3830,6 +3830,9 @@ func controllerStatusPatch(status *v1alpha1.ControllerStatus) map[string]interfa
 	if status.ApplyHistory != nil {
 		statusPatch["applyHistory"] = status.ApplyHistory
 	}
+	// cascRefusal is always sent: a merge patch keeps an omitted key, so a
+	// nil value must go out as null to clear a stale refusal.
+	statusPatch["cascRefusal"] = status.CascRefusal
 	// PluginInventory is always written whole to avoid the merge-patch
 	// omitempty trap — an omitted key is retained, not cleared.
 	statusPatch["pluginInventory"] = status.PluginInventory

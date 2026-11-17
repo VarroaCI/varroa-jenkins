@@ -559,6 +559,13 @@ type ControllerStatus struct {
 	// +optional
 	ApplyHistory []ApplyResult `json:"applyHistory,omitempty"`
 
+	// CascRefusal names the next-boot CASC seed documents that the last live
+	// reload refused. The operator keeps a refused document out of the seed,
+	// so the next pod start uses the last accepted value of that document.
+	// It is nil when the last live reload accepted every seed document.
+	// +optional
+	CascRefusal *CascRefusal `json:"cascRefusal,omitempty"`
+
 	// AppliedBundleHash is the ComposedBundle.status.ResolvedHash of the last SUCCESSFUL apply.
 	// It is the cross-sibling-comparable gate key (DesiredStateHash is per-controller and is NOT comparable).
 	// +optional
@@ -913,6 +920,18 @@ type ApplyResult struct {
 	// Sections is the per-section breakdown, always four entries in the
 	// fixed order: config, rbac, plugins, items.
 	Sections []ApplySectionResult `json:"sections"`
+}
+
+// CascRefusal identifies the next-boot CASC seed documents that a live reload
+// refused. Each value is the SHA-256 hex digest of one seed document. An empty
+// value means that the live reload did not refuse that document.
+type CascRefusal struct {
+	// ConfigHash is the digest of the refused config.yaml seed document.
+	// +optional
+	ConfigHash string `json:"configHash,omitempty"`
+	// RBACHash is the digest of the refused rbac.yaml seed document.
+	// +optional
+	RBACHash string `json:"rbacHash,omitempty"`
 }
 
 // PendingDeletion records a managed item whose deletion was deferred because a

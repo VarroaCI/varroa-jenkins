@@ -3681,26 +3681,25 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 
 	// Create per-controller CASC ConfigMap (next-boot seed).
 	cascCMName := cascConfigMapName(pre)
-	realmDoc := generateRealmDocument()
-	cascData := map[string]string{
-		"realm.yaml": realmDoc,
-		"config.yaml": func() string {
-			// Strip authorizationStrategy from the resolved JenkinsYAML;
-			// Varroa owns authz and delivers it separately as rbac.yaml.
-			if resolved != nil {
-				return injectProjectNamingStrategy(
-					stripAuthorizationStrategy(resolved.JenkinsYAML))
-			}
-			return ""
-		}(),
-	}
+	seedRBAC := ""
 	rbacYAML, humanAdmin, rbacErr := r.rbacGenerator.GenerateWithAdminCheck(cr)
 	if rbacErr != nil {
 		r.Logger.Warn("rbac generation failed during provisioning; omitting authz from CASC bundle", "error", rbacErr)
 	} else if !humanAdmin && !adminLockoutOverridden(cr) {
 		r.Logger.Info("rbac lockout guard withholding authz from CASC bundle during provisioning")
 	} else {
-		cascData["rbac.yaml"] = rbacYAML
+		seedRBAC = rbacYAML
+	}
+	cascData := cascSeedData(resolved, seedRBAC)
+	// A document that the live reload refused keeps its existing seed value,
+	// so this pod does not boot on a configuration that Jenkins refused.
+	if refusal := cr.Status.CascRefusal; refusal != nil {
+		existing, err := r.client.GetConfigMap(ctx, cascCMName, cr.Namespace)
+		if err != nil && !apierrors.IsNotFound(err) {
+			r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedCascConfigMapFailed, err.Error())
+			return fmt.Errorf("read casc configmap: %w", err)
+		}
+		cascData = cascSeedWithoutRefused(cascData, existing, refusal)
 	}
 	cascHash := cascContentHash(cascData)
 	{
@@ -4177,11 +4176,16 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	// each case's own asserted value, shadowing the receiver for the rest
 	// of the loop body.
 	recv := r
+	// seedResult is the newest desired-state result of this drain. The
+	// next-boot CASC seed advances on it once the desired state of this
+	// tick is built.
+	var seedResult *mitev1.DesiredStateResult
 	results := r.miteTransport.DrainResults(cr.Namespace, cr.Name)
 	for _, res := range results {
 		switch r := res.Result.(type) {
 		case *mitev1.CommandResult_DesiredState:
 			if r.DesiredState != nil {
+				seedResult = r.DesiredState
 				if r.DesiredState.ConfigSuccess {
 					cr.Status.ConfigHash = r.DesiredState.AppliedHash
 				}
@@ -4569,6 +4573,10 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		cr.Status.LastApplyResult.Hash == desiredHash {
 		cr.Status.AppliedBundleHash = targetBundleHash
 	}
+	// The seed advances only on a mite verdict for this desired state, never
+	// before the push. This runs before the convergence short-circuit, so a
+	// verdict that arrives inside the drift window still moves the seed.
+	r.advanceCascSeed(ctx, cr, resolvedBundle, desired, seedResult, logger)
 
 	// Set FirstConnectedAt on first handshake.
 	now := metav1Now()
@@ -4823,25 +4831,6 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 
 	// Post-boot updates use the reload path (write-then-reload).
 	desired.Reload = true
-
-	// Update the per-controller CASC ConfigMap with the current desired
-	// state so the next pod (re)start seeds the latest bundle.  The authz
-	// value here is the same one carried by desired.RbacYaml (generated
-	// once in buildDesiredStateCommand — no divergence).
-	cascCM := cascConfigMapName(controllerPrefix(cr))
-	cascData := map[string]string{
-		"realm.yaml":  generateRealmDocument(),
-		"config.yaml": injectProjectNamingStrategy(stripAuthorizationStrategy(resolvedBundle.JenkinsYAML)),
-	}
-	if desired.RbacYaml != "" {
-		cascData["rbac.yaml"] = desired.RbacYaml
-	}
-	if err := r.client.CreateOrUpdateConfigMap(ctx, cascCM, cr.Namespace, cascData); err != nil {
-		logger.Warn("failed to update CASC ConfigMap", "error", err)
-		// Non-fatal: the mite will still converge via the desired-state
-		// command.  The ConfigMap is the next-boot seed, not the live
-		// source.
-	}
 
 	// A push that goes out while a rehydration push is in flight carries
 	// the held bundle. The mite keeps only the newest desired state, so a
