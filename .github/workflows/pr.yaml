@@ -204,7 +204,8 @@ jobs:
         # The Varroa kinds have no published schema, so the varroa_kinds -skip list names each one.
         # Add each new Varroa kind of hack/localdev/manifests/ to that list, in apiVersion/Kind form.
         # A core resource with no schema fails the step, because the step does not pass -ignore-missing-schemas.
-        # The live localdev run checks the fields of the Varroa resources.
+        # The Test job validates the Varroa resources against charts/varroa/crds/.
+        # TestLocaldevManifestsMatchCRDs in api/v1alpha1 holds that check.
         # The kubeconform version is pinned. A new release can fail this step on code that did not change.
         # Bump it on purpose, in its own pull request.
         # The schema version is pinned to the chart floor, kubeVersion in charts/varroa/Chart.yaml.
