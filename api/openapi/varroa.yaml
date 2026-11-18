@@ -1854,8 +1854,8 @@ components:
       description: Request body to create or preview a brood operation.
       properties:
         clusters:
-          description: Target clusters, or ["all"] for all known clusters. Defaults
-            to the local cluster.
+          description: Target clusters, or ["all"] for the local cluster and every
+            member cluster. An absent field or an empty array selects the local cluster.
           items:
             type: string
           type: array
@@ -8405,8 +8405,8 @@ components:
       description: Request body to create or preview a brood operation.
       properties:
         clusters:
-          description: Target clusters, or ["all"] for all known clusters. Defaults
-            to the local cluster.
+          description: Target clusters, or ["all"] for the local cluster and every
+            member cluster. An absent field or an empty array selects the local cluster.
           items:
             type: string
           type: array
@@ -15825,7 +15825,11 @@ paths:
       description: |
         An unknown cluster in `clusters` or in a `cluster/namespace/name`
         entry answers 400 before any bus request. A BFF without a brood or
-        without the brood operations store answers 503.
+        without the brood operations store answers 503. `["all"]` expands to
+        the local cluster and every member cluster, healthy or not. A BFF that
+        cannot read the cluster list for `["all"]` answers 503. The local
+        `executeGroovy` policy answers 403 only when every target is on the
+        local cluster.
       operationId: createBroodOperation
       requestBody:
         content:
@@ -15990,7 +15994,9 @@ paths:
       description: |
         An unknown cluster in `clusters` or in a `cluster/namespace/name`
         entry answers 400 before any bus request. A BFF without a brood or
-        without the brood operations store answers 503.
+        without the brood operations store answers 503. `["all"]` expands to
+        the local cluster and every member cluster, healthy or not. A BFF that
+        cannot read the cluster list for `["all"]` answers 503.
       operationId: previewBroodOperation
       requestBody:
         content:

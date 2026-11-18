@@ -2522,7 +2522,7 @@
         "description": "Request body to create or preview a brood operation.",
         "properties": {
           "clusters": {
-            "description": "Target clusters, or [\"all\"] for all known clusters. Defaults to the local cluster.",
+            "description": "Target clusters, or [\"all\"] for the local cluster and every member cluster. An absent field or an empty array selects the local cluster.",
             "items": {
               "type": "string"
             },
@@ -11167,7 +11167,7 @@
         "description": "Request body to create or preview a brood operation.",
         "properties": {
           "clusters": {
-            "description": "Target clusters, or [\"all\"] for all known clusters. Defaults to the local cluster.",
+            "description": "Target clusters, or [\"all\"] for the local cluster and every member cluster. An absent field or an empty array selects the local cluster.",
             "items": {
               "type": "string"
             },
@@ -21086,7 +21086,7 @@
         ]
       },
       "post": {
-        "description": "An unknown cluster in `clusters` or in a `cluster/namespace/name`\nentry answers 400 before any bus request. A BFF without a brood or\nwithout the brood operations store answers 503.\n",
+        "description": "An unknown cluster in `clusters` or in a `cluster/namespace/name`\nentry answers 400 before any bus request. A BFF without a brood or\nwithout the brood operations store answers 503. `[\"all\"]` expands to\nthe local cluster and every member cluster, healthy or not. A BFF that\ncannot read the cluster list for `[\"all\"]` answers 503. The local\n`executeGroovy` policy answers 403 only when every target is on the\nlocal cluster.\n",
         "operationId": "createBroodOperation",
         "requestBody": {
           "content": {
@@ -21150,7 +21150,7 @@
     },
     "/api/v1/brood-operations/preview": {
       "post": {
-        "description": "An unknown cluster in `clusters` or in a `cluster/namespace/name`\nentry answers 400 before any bus request. A BFF without a brood or\nwithout the brood operations store answers 503.\n",
+        "description": "An unknown cluster in `clusters` or in a `cluster/namespace/name`\nentry answers 400 before any bus request. A BFF without a brood or\nwithout the brood operations store answers 503. `[\"all\"]` expands to\nthe local cluster and every member cluster, healthy or not. A BFF that\ncannot read the cluster list for `[\"all\"]` answers 503.\n",
         "operationId": "previewBroodOperation",
         "requestBody": {
           "content": {

@@ -3760,7 +3760,7 @@ CreateBroodRequest:
       type: array
       items:
         type: string
-      description: Target clusters, or ["all"] for all known clusters. Defaults to the local cluster.
+      description: Target clusters, or ["all"] for the local cluster and every member cluster. An absent field or an empty array selects the local cluster.
   additionalProperties: false
 
 BroodRunClusterStatus:

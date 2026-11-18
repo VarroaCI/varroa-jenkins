@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -187,6 +189,42 @@ func (s *Server) broodOpsOrUnavailable(w http.ResponseWriter) (BroodOps, bool) {
 	return s.deps.BroodOps, true
 }
 
+// partitionBroodTargets runs the targeting grammar on a create or preview
+// request. It returns the target clusters, local cluster first, and the spec
+// of each target cluster. ["all"] expands to the clusters of the brood.
+func (s *Server) partitionBroodTargets(ctx context.Context, req broodCreateRequest, local string) ([]string, map[string]v1alpha1.BroodOperationSpec, error) {
+	known := func(cluster string) bool {
+		return s.deps.Brood.IsKnown(ctx, cluster)
+	}
+	all := func() ([]string, error) {
+		infos, err := s.deps.Brood.Clusters(ctx)
+		if err != nil {
+			return nil, err
+		}
+		names := make([]string, 0, len(infos))
+		for _, c := range infos {
+			names = append(names, c.Name)
+		}
+		return names, nil
+	}
+	specs, err := validateAndPartition(req, local, known, all, s.deps.OperatorNamespace)
+	if err != nil {
+		return nil, nil, err
+	}
+	return orderBroodClusters(specs, local), specs, nil
+}
+
+// writeBroodTargetRefusal writes a partitionBroodTargets error: 503 when the
+// cluster list for ["all"] cannot be read, 400 for a grammar error.
+func (s *Server) writeBroodTargetRefusal(w http.ResponseWriter, err error) {
+	var listErr *broodClusterListError
+	if errors.As(err, &listErr) {
+		s.writeJSONError(w, http.StatusServiceUnavailable, listErr.Error())
+		return
+	}
+	s.writeJSONError(w, http.StatusBadRequest, err.Error())
+}
+
 // --- 4.3 Create ---
 
 // handleBroodCreate handles POST /brood-operations (operator+).
@@ -230,6 +268,13 @@ func (s *Server) handleBroodCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Grammar validation.
+	orderedClusters, specs, err := s.partitionBroodTargets(r.Context(), req, local)
+	if err != nil {
+		s.writeBroodTargetRefusal(w, err)
+		return
+	}
+
 	// Verb policy pre-check. This is UX, not enforcement: kubectl and GitOps
 	// create BroodOperation objects directly and never reach this handler, so
 	// the operator's gate is the real boundary. Checking here only spares the
@@ -243,7 +288,11 @@ func (s *Server) handleBroodCreate(w http.ResponseWriter, r *http.Request) {
 	// local policy to a fan-out would reject an operation a remote cluster
 	// permits — and could not have approved one it forbids anyway. Mixed
 	// outcomes surface per-cluster in the fan-out response instead.
-	if req.Spec.Action.Verb == v1alpha1.BroodVerbExecuteGroovy && localOnlyRequest(req, local) {
+	//
+	// The check reads the partitioned clusters, not req.Clusters. A
+	// cluster/ns/name entry and ["all"] name target clusters that
+	// req.Clusters does not hold.
+	if req.Spec.Action.Verb == v1alpha1.BroodVerbExecuteGroovy && len(orderedClusters) == 1 && orderedClusters[0] == local {
 		if defaults, dErr := crdstore.Get[v1alpha1.ProvisioningDefaults](
 			r.Context(), s.deps.Store, provisioningDefaultsName, ""); dErr == nil && defaults != nil {
 			if ok, why := defaults.Spec.BroodPolicy.ExecuteGroovyAllowed(ns); !ok {
@@ -251,21 +300,6 @@ func (s *Server) handleBroodCreate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-	}
-
-	// Grammar validation.
-	specs, err := validateAndPartition(req, local, func(cluster string) bool {
-		return s.deps.Brood.IsKnown(r.Context(), cluster)
-	}, s.deps.OperatorNamespace)
-	if err != nil {
-		s.writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// Gather ordered cluster list from specs keys.
-	orderedClusters := make([]string, 0, len(specs))
-	for c := range specs {
-		orderedClusters = append(orderedClusters, c)
 	}
 
 	// Mint name.
@@ -392,17 +426,10 @@ func (s *Server) handleBroodPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Grammar validation (same path as create).
-	specs, err := validateAndPartition(req, local, func(cluster string) bool {
-		return s.deps.Brood.IsKnown(r.Context(), cluster)
-	}, s.deps.OperatorNamespace)
+	orderedClusters, specs, err := s.partitionBroodTargets(r.Context(), req, local)
 	if err != nil {
-		s.writeJSONError(w, http.StatusBadRequest, err.Error())
+		s.writeBroodTargetRefusal(w, err)
 		return
-	}
-
-	orderedClusters := make([]string, 0, len(specs))
-	for c := range specs {
-		orderedClusters = append(orderedClusters, c)
 	}
 
 	// Fan-out preview.
@@ -1033,15 +1060,3 @@ func (s *Server) writeJSONErrorStatus(w http.ResponseWriter, status int, msg str
 // Mirrors the operator-side constant; the object is optional, so absence and
 // read failure both mean "no policy".
 const provisioningDefaultsName = "varroa-defaults"
-
-// localOnlyRequest reports whether a create request targets nothing but the
-// local cluster, which is the only case where the BFF's view of
-// ProvisioningDefaults is the same one that will enforce the operation.
-func localOnlyRequest(req broodCreateRequest, local string) bool {
-	for _, c := range req.Clusters {
-		if c != "" && c != local {
-			return false
-		}
-	}
-	return true
-}

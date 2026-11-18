@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"sort"
 	"strings"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -42,13 +43,25 @@ func isQualifiedName(name string) bool {
 	return len(parts) == 2
 }
 
+// broodClusterListError reports that the cluster list for ["all"] could not
+// be read. The handler answers 503 for it, not 400.
+type broodClusterListError struct {
+	err error
+}
+
+func (e *broodClusterListError) Error() string { return e.err.Error() }
+
+func (e *broodClusterListError) Unwrap() error { return e.err }
+
 // validateAndPartition validates the create request targeting grammar (§5) and
 // partitions per-cluster specs. Returns a map of cluster → BroodOperationSpec
 // or an error describing the first violation.
 //
 // known is a function that returns true for valid cluster names (local + members).
 // It checks each entry of clusters and the cluster of each cluster/ns/name entry.
-func validateAndPartition(req broodCreateRequest, localCluster string, known func(string) bool, operatorNS string) (map[string]v1alpha1.BroodOperationSpec, error) {
+// all lists the local cluster and every membership entry, healthy or not.
+// It runs only for ["all"]. Its error comes back as a *broodClusterListError.
+func validateAndPartition(req broodCreateRequest, localCluster string, known func(string) bool, all func() ([]string, error), operatorNS string) (map[string]v1alpha1.BroodOperationSpec, error) {
 	ns := req.Namespace
 	if ns == "" {
 		ns = operatorNS
@@ -56,12 +69,12 @@ func validateAndPartition(req broodCreateRequest, localCluster string, known fun
 
 	isTenantMode := ns != operatorNS
 
-	// Track whether the user explicitly set clusters (including empty array).
-	explicitClusters := req.Clusters != nil
+	// An empty clusters array is the same as an absent field.
+	explicitClusters := len(req.Clusters) > 0
 
 	// Normalize clusters.
 	clusters := req.Clusters
-	if !explicitClusters || len(clusters) == 0 {
+	if !explicitClusters {
 		clusters = []string{localCluster}
 	}
 
@@ -89,9 +102,6 @@ func validateAndPartition(req broodCreateRequest, localCluster string, known fun
 	if hasAll && hasExplicit {
 		return nil, fmt.Errorf(`"all" cannot be combined with explicit cluster entries`)
 	}
-
-	// Expand ["all"] — accepted, caller resolves membership.
-	_ = hasAll
 
 	// Parse names to determine targeting mode.
 	names := req.Spec.Targets.Names
@@ -141,6 +151,16 @@ func validateAndPartition(req broodCreateRequest, localCluster string, known fun
 		}
 	}
 
+	// Expand ["all"] to the local cluster and every membership entry, healthy
+	// or not. The rules below see the expanded set.
+	if hasAll {
+		members, err := all()
+		if err != nil {
+			return nil, &broodClusterListError{err: err}
+		}
+		clusters = expandAllClusters(localCluster, members)
+	}
+
 	// Rule: tenant mode with >1 cluster.
 	if isTenantMode && len(clusters) > 1 {
 		return nil, fmt.Errorf("tenant namespace mode supports at most one target cluster")
@@ -148,9 +168,6 @@ func validateAndPartition(req broodCreateRequest, localCluster string, known fun
 
 	// Rule: unknown cluster anywhere, in clusters or in a name qualifier.
 	for _, c := range clusters {
-		if c == "all" {
-			continue
-		}
 		if !known(c) {
 			return nil, fmt.Errorf("unknown cluster %q", c)
 		}
@@ -191,4 +208,35 @@ func validateAndPartition(req broodCreateRequest, localCluster string, known fun
 	}
 
 	return result, nil
+}
+
+// expandAllClusters returns the local cluster and each entry of members once,
+// local cluster first.
+func expandAllClusters(localCluster string, members []string) []string {
+	out := []string{localCluster}
+	seen := map[string]bool{localCluster: true}
+	for _, m := range members {
+		if m == "" || seen[m] {
+			continue
+		}
+		seen[m] = true
+		out = append(out, m)
+	}
+	return out
+}
+
+// orderBroodClusters returns the clusters of specs, local cluster first and the
+// others in name order. The fan-out response rows keep this order.
+func orderBroodClusters(specs map[string]v1alpha1.BroodOperationSpec, localCluster string) []string {
+	out := make([]string, 0, len(specs))
+	for c := range specs {
+		if c != localCluster {
+			out = append(out, c)
+		}
+	}
+	sort.Strings(out)
+	if _, ok := specs[localCluster]; ok {
+		out = append([]string{localCluster}, out...)
+	}
+	return out
 }

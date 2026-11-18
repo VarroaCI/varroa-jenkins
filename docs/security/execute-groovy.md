@@ -54,6 +54,10 @@ Configure every cluster separately. The target controller namespaces do not
 control this policy. A denied operation enters `Failed` and records the reason
 in `status.reason`.
 
+The API also refuses a denied create with 403 when every target is on the local
+cluster. When a run targets a member cluster, the operator of each target
+cluster decides.
+
 Policy is checked during reconciliation. Disabling the verb prevents new
 dispatches and skips remaining targets. Work already dispatched cannot be
 recalled, so up to the operation's `maxParallel` in-flight scripts may finish.
