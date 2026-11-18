@@ -328,12 +328,12 @@ connections:
   # NATS
 
   - component: nats
-    destination: Hive NATS (bus.url)
+    destination: External NATS (bus.url)
     hosts: []
-    purpose: Link a member cluster to the core bus.
+    purpose: Link a member cluster, or a release with nats.enabled false, to a NATS bus outside the release.
     protocol: NATS 4222, TLS
     control: bus.url
-    disable: 'Yes. Set bus.url to "".'
+    disable: 'Yes, in full mode. Set nats.enabled to true and bus.url to "". A hive member always needs this connection.'
 
   # varroactl
 

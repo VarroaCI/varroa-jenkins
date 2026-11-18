@@ -1,6 +1,6 @@
 {{- /*
 mode-guard.yaml
-Validates mode + hive-mode prerequisites. Renders no objects.
+Validates mode, the hive-mode prerequisites, and the bus URL. Renders no objects.
 */}}
 
 {{- $mode := .Values.mode | default "full" -}}
@@ -15,15 +15,19 @@ Validates mode + hive-mode prerequisites. Renders no objects.
 {{- fail "mode=hive requires cluster.name" -}}
 {{- end -}}
 
-{{- $busURL := .Values.bus.url | default "" -}}
-{{- if empty $busURL -}}
-{{- fail "mode=hive requires bus.url (the core's external NATS endpoint)" -}}
-{{- end -}}
-
 {{- if .Values.nats.enabled -}}
 {{- fail "mode=hive cannot deploy NATS; set nats.enabled=false (use -f values-hive.yaml)" -}}
 {{- end -}}
 
+{{- end -}}
+
+{{- /*
+A release that deploys no NATS (hive mode, or nats.enabled=false) has no
+in-cluster bus. An empty bus.url gives the default nats://<release>-nats:4222,
+and the chart renders no Service of that name. One rule covers both modes.
+*/ -}}
+{{- if and (not (include "varroa.inClusterBus" .)) (empty (trim (.Values.bus.url | default ""))) -}}
+{{- fail (printf "bus.url must name the NATS endpoint when the release deploys no NATS (hive mode, or nats.enabled=false). The default nats://%s-nats:4222 names a Service that this release does not render." .Release.Name) -}}
 {{- end -}}
 
 {{- /*
