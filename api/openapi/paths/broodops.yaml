@@ -7,7 +7,11 @@
     description: |
       An unknown cluster in `clusters` or in a `cluster/namespace/name`
       entry answers 400 before any bus request. A BFF without a brood or
-      without the brood operations store answers 503.
+      without the brood operations store answers 503. `["all"]` expands to
+      the local cluster and every member cluster, healthy or not. A BFF that
+      cannot read the cluster list for `["all"]` answers 503. The local
+      `executeGroovy` policy answers 403 only when every target is on the
+      local cluster.
     requestBody:
       required: true
       content:
@@ -92,7 +96,9 @@
     description: |
       An unknown cluster in `clusters` or in a `cluster/namespace/name`
       entry answers 400 before any bus request. A BFF without a brood or
-      without the brood operations store answers 503.
+      without the brood operations store answers 503. `["all"]` expands to
+      the local cluster and every member cluster, healthy or not. A BFF that
+      cannot read the cluster list for `["all"]` answers 503.
     requestBody:
       required: true
       content:

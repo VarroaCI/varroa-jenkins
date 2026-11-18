@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -208,6 +210,230 @@ func TestBroodHandlers_NoBroodOpsStore(t *testing.T) {
 			t.Fatalf("status = %d, want 403: %s", w.Code, w.Body.String())
 		}
 	})
+}
+
+// postBroodAsAdmin posts body to path on srv with admin claims.
+func postBroodAsAdmin(srv *Server, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{Subject: "admin", Groups: []string{"admins"}}))
+	w := httptest.NewRecorder()
+	srv.handleBroodOperations(w, req)
+	return w
+}
+
+// broodWithMembers returns a brood with the local cluster core and two
+// members. member-b is healthy and member-c is not.
+func broodWithMembers() *stubBrood {
+	return &stubBrood{localCluster: "core", members: []ClusterInfo{
+		{ClusterInfo: bus.ClusterInfo{Name: "member-c"}},
+		{ClusterInfo: bus.ClusterInfo{Name: "member-b"}, Healthy: true},
+	}}
+}
+
+// broodClusterRow is the cluster, ok, and error of one response row.
+type broodClusterRow struct {
+	Cluster string `json:"cluster"`
+	OK      bool   `json:"ok"`
+	Error   string `json:"error"`
+}
+
+// broodClusterRows decodes the clusters rows of a create or preview response.
+func broodClusterRows(t *testing.T, w *httptest.ResponseRecorder) []broodClusterRow {
+	t.Helper()
+	var resp struct {
+		Clusters []broodClusterRow `json:"clusters"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode %s: %v", w.Body.String(), err)
+	}
+	return resp.Clusters
+}
+
+// ["all"] expands to the local cluster and every member, healthy or not.
+// Create and preview fan out to the local cluster first.
+func TestBroodHandlers_ClustersAllExpands(t *testing.T) {
+	body := `{"spec":{"action":{"verb":"reconcile"},"targets":{"selector":{},"namespaces":["all"]}},"clusters":["all"]}`
+	want := []string{"core", "member-b", "member-c"}
+	for _, tc := range []struct {
+		path string
+		code int
+	}{
+		{"/brood-operations", http.StatusCreated},
+		{"/brood-operations/preview", http.StatusOK},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			ops := &countingBroodOps{}
+			srv := newBroodTestServer()
+			srv.deps.Brood = broodWithMembers()
+			srv.deps.BroodOps = ops
+			w := postBroodAsAdmin(srv, tc.path, body)
+			if w.Code != tc.code {
+				t.Fatalf("status = %d, want %d: %s", w.Code, tc.code, w.Body.String())
+			}
+			if !reflect.DeepEqual(ops.clusters, want) {
+				t.Errorf("fan-out clusters = %v, want %v", ops.clusters, want)
+			}
+			var got []string
+			for _, row := range broodClusterRows(t, w) {
+				got = append(got, row.Cluster)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("response clusters = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// An unreachable cluster gets the same response row and status in an ["all"]
+// create as in the explicit clusters list of the same brood.
+func TestBroodHandlers_ClustersAllUnreachableMember(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		unreachable []string
+		code        int
+	}{
+		{"one member unreachable", []string{"member-c"}, http.StatusCreated},
+		{"every cluster unreachable", []string{"core", "member-b", "member-c"}, http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			forms := []string{`["all"]`, `["core","member-b","member-c"]`}
+			rows := make([][]broodClusterRow, 0, len(forms))
+			for _, clusters := range forms {
+				ops := &countingBroodOps{unreachable: map[string]bool{}}
+				for _, c := range tc.unreachable {
+					ops.unreachable[c] = true
+				}
+				srv := newBroodTestServer()
+				srv.deps.Brood = broodWithMembers()
+				srv.deps.BroodOps = ops
+				body := `{"spec":{"action":{"verb":"reconcile"},"targets":{"selector":{},"namespaces":["all"]}},"clusters":` + clusters + `}`
+				w := postBroodAsAdmin(srv, "/brood-operations", body)
+				if w.Code != tc.code {
+					t.Fatalf("clusters %s: status = %d, want %d: %s", clusters, w.Code, tc.code, w.Body.String())
+				}
+				rows = append(rows, broodClusterRows(t, w))
+			}
+			if !reflect.DeepEqual(rows[0], rows[1]) {
+				t.Errorf("all rows = %+v, explicit rows = %+v", rows[0], rows[1])
+			}
+			for _, row := range rows[0] {
+				if row.Cluster == "member-c" && (row.OK || !strings.Contains(row.Error, "unreachable")) {
+					t.Errorf("member-c row = %+v, want ok false and an unreachable error", row)
+				}
+			}
+		})
+	}
+}
+
+// A failed cluster list read for ["all"] answers 503 before any fan-out.
+func TestBroodHandlers_ClustersAllListError(t *testing.T) {
+	body := `{"spec":{"action":{"verb":"reconcile"},"targets":{"selector":{},"namespaces":["all"]}},"clusters":["all"]}`
+	for _, path := range []string{"/brood-operations", "/brood-operations/preview"} {
+		t.Run(path, func(t *testing.T) {
+			ops := &countingBroodOps{}
+			srv := newBroodTestServer()
+			srv.deps.Brood = &stubBrood{localCluster: "core", clustersErr: errors.New("list clusters: directory down")}
+			srv.deps.BroodOps = ops
+			w := postBroodAsAdmin(srv, path, body)
+			if w.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, want 503: %s", w.Code, w.Body.String())
+			}
+			var resp map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp["error"] != "list clusters: directory down" {
+				t.Errorf("body = %s, want error %q", w.Body.String(), "list clusters: directory down")
+			}
+			if ops.creates != 0 || ops.previews != 0 {
+				t.Errorf("creates = %d, previews = %d, want none", ops.creates, ops.previews)
+			}
+		})
+	}
+}
+
+// An empty clusters array with cluster/ns/name entries partitions like an
+// absent clusters field.
+func TestBroodHandlers_EmptyClustersWithQualifiedNames(t *testing.T) {
+	body := `{"spec":{"action":{"verb":"reconcile"},"targets":{"names":["member-b/ns/ctrl-b","core/ns/ctrl-a"]}},"clusters":[]}`
+	for _, tc := range []struct {
+		path string
+		code int
+	}{
+		{"/brood-operations", http.StatusCreated},
+		{"/brood-operations/preview", http.StatusOK},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			ops := &countingBroodOps{}
+			srv := newBroodTestServer()
+			srv.deps.Brood = broodWithMembers()
+			srv.deps.BroodOps = ops
+			w := postBroodAsAdmin(srv, tc.path, body)
+			if w.Code != tc.code {
+				t.Fatalf("status = %d, want %d: %s", w.Code, tc.code, w.Body.String())
+			}
+			if want := []string{"core", "member-b"}; !reflect.DeepEqual(ops.clusters, want) {
+				t.Errorf("fan-out clusters = %v, want %v", ops.clusters, want)
+			}
+		})
+	}
+}
+
+// The local executeGroovy policy applies only when the partitioned clusters
+// hold the local cluster alone. A grammar refusal comes before it.
+func TestBroodHandlers_ExecuteGroovyPolicyLocalOnly(t *testing.T) {
+	const denied = "executeGroovy is disabled by ProvisioningDefaults.broodPolicy"
+	for _, tc := range []struct {
+		name     string
+		targets  string
+		clusters string
+		members  bool
+		code     int
+		wantErr  string
+	}{
+		{"local name", `{"names":["ns/ctrl-a"]}`, "", true, http.StatusForbidden, denied},
+		{"explicit local cluster", `{"names":["ns/ctrl-a"]}`, `["core"]`, true, http.StatusForbidden, denied},
+		{"local qualifier", `{"names":["core/ns/ctrl-a"]}`, "", true, http.StatusForbidden, denied},
+		{"member qualifier", `{"names":["member-b/ns/ctrl-b"]}`, "", true, http.StatusCreated, ""},
+		{"local and member qualifiers", `{"names":["core/ns/ctrl-a","member-b/ns/ctrl-b"]}`, "", true, http.StatusCreated, ""},
+		{"explicit member cluster", `{"names":["ns/ctrl-b"]}`, `["member-b"]`, true, http.StatusCreated, ""},
+		{"all with members", `{"selector":{},"namespaces":["all"]}`, `["all"]`, true, http.StatusCreated, ""},
+		{"all without members", `{"selector":{},"namespaces":["all"]}`, `["all"]`, false, http.StatusForbidden, denied},
+		{"unknown qualifier before policy", `{"names":["core/ns/ctrl-a","nope/ns/ctrl-b"]}`, "", true, http.StatusBadRequest, `unknown cluster "nope"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := crdstore.NewFake()
+			disabled := false
+			crdstore.MustSeed(st, &v1alpha1.ProvisioningDefaults{
+				ObjectMeta: metav1.ObjectMeta{Name: provisioningDefaultsName},
+				Spec: v1alpha1.ProvisioningDefaultsSpec{BroodPolicy: &v1alpha1.BroodPolicy{
+					ExecuteGroovy: &v1alpha1.ExecuteGroovyPolicy{Enabled: &disabled},
+				}},
+			})
+			ops := &countingBroodOps{}
+			srv := newBroodTestServer()
+			srv.deps.Store = st
+			srv.deps.BroodOps = ops
+			if tc.members {
+				srv.deps.Brood = broodWithMembers()
+			}
+			body := `{"spec":{"action":{"verb":"executeGroovy","groovy":{"script":"println(1)"}},"targets":` + tc.targets + `}`
+			if tc.clusters != "" {
+				body += `,"clusters":` + tc.clusters
+			}
+			body += `}`
+			w := postBroodAsAdmin(srv, "/brood-operations", body)
+			if w.Code != tc.code {
+				t.Fatalf("status = %d, want %d: %s", w.Code, tc.code, w.Body.String())
+			}
+			if tc.wantErr != "" {
+				var resp map[string]any
+				if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp["error"] != tc.wantErr {
+					t.Errorf("body = %s, want error %q", w.Body.String(), tc.wantErr)
+				}
+				if ops.creates != 0 {
+					t.Errorf("creates = %d, want none", ops.creates)
+				}
+			}
+		})
+	}
 }
 
 // TestBroodHandlers_PreviewOK verifies the preview endpoint works for viewers.
@@ -521,15 +747,28 @@ func TestValidStreamScope(t *testing.T) {
 // --- Stubs ---
 
 // stubBrood implements Brood for tests.
+// stubBrood knows its local cluster, dev-cluster, and each entry of members.
+// Clusters lists the local cluster and members, or fails with clustersErr.
 type stubBrood struct {
 	localCluster string
+	members      []ClusterInfo
+	clustersErr  error
 }
 
 func (s *stubBrood) LocalCluster() string { return s.localCluster }
 func (s *stubBrood) Clusters(ctx context.Context) ([]ClusterInfo, error) {
-	return []ClusterInfo{{ClusterInfo: bus.ClusterInfo{Name: s.localCluster}, Core: true, Healthy: true}}, nil
+	if s.clustersErr != nil {
+		return nil, s.clustersErr
+	}
+	self := ClusterInfo{ClusterInfo: bus.ClusterInfo{Name: s.localCluster}, Core: true, Healthy: true}
+	return append([]ClusterInfo{self}, s.members...), nil
 }
 func (s *stubBrood) IsKnown(ctx context.Context, cluster string) bool {
+	for _, m := range s.members {
+		if m.Name == cluster {
+			return true
+		}
+	}
 	return cluster == s.localCluster || cluster == "dev-cluster"
 }
 func (s *stubBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]ClusterController, []ClusterFanoutStatus, error) {
@@ -613,20 +852,38 @@ func (s *stubBroodOps) Preview(ctx context.Context, clusters []string, ns string
 	return results
 }
 
-// countingBroodOps counts the create and preview calls that reach the store.
+// countingBroodOps counts the create and preview calls that reach the store
+// and keeps the clusters of the last call. A cluster in unreachable answers
+// with the row of a cluster that does not reply.
 type countingBroodOps struct {
 	stubBroodOps
 	creates, previews int
+	clusters          []string
+	unreachable       map[string]bool
 }
 
 func (c *countingBroodOps) Create(ctx context.Context, clusters []string, ns, name string, specs map[string]v1alpha1.BroodOperationSpec, startedBy string) []ClusterCreateResult {
 	c.creates++
-	return c.stubBroodOps.Create(ctx, clusters, ns, name, specs, startedBy)
+	c.clusters = append([]string(nil), clusters...)
+	results := c.stubBroodOps.Create(ctx, clusters, ns, name, specs, startedBy)
+	for i, r := range results {
+		if c.unreachable[r.Cluster] {
+			results[i] = ClusterCreateResult{Cluster: r.Cluster, Error: "cluster " + r.Cluster + " unreachable: nats: timeout"}
+		}
+	}
+	return results
 }
 
 func (c *countingBroodOps) Preview(ctx context.Context, clusters []string, ns string, specs map[string]v1alpha1.BroodOperationSpec) []ClusterPreviewResult {
 	c.previews++
-	return c.stubBroodOps.Preview(ctx, clusters, ns, specs)
+	c.clusters = append([]string(nil), clusters...)
+	results := c.stubBroodOps.Preview(ctx, clusters, ns, specs)
+	for i, r := range results {
+		if c.unreachable[r.Cluster] {
+			results[i] = ClusterPreviewResult{Cluster: r.Cluster, Error: "cluster " + r.Cluster + " unreachable: nats: timeout"}
+		}
+	}
+	return results
 }
 
 // --- Test helpers ---

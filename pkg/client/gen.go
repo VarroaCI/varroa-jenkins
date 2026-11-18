@@ -2877,7 +2877,7 @@ type ComponentsSchemasCoverageTrendSeries struct {
 
 // ComponentsSchemasCreateBroodRequest Request body to create or preview a brood operation.
 type ComponentsSchemasCreateBroodRequest struct {
-	// Clusters Target clusters, or ["all"] for all known clusters. Defaults to the local cluster.
+	// Clusters Target clusters, or ["all"] for the local cluster and every member cluster. An absent field or an empty array selects the local cluster.
 	Clusters *[]string `json:"clusters,omitempty"`
 
 	// Namespace Target namespace. Defaults to operator namespace.
