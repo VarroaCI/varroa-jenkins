@@ -82,23 +82,14 @@ networkpolicy-guard.yaml fails a bus.url with more than one port.
 {{- end -}}
 
 {{- /*
-varroa.np.inClusterBus is true when this release deploys the NATS that its
-bus clients dial: full mode with nats.enabled. Hive mode, or full mode with
-nats.enabled=false, dials the NATS that bus.url names outside the release.
-*/ -}}
-{{- define "varroa.np.inClusterBus" -}}
-{{- if and (not (include "varroa.isHive" .)) .Values.nats.enabled -}}true{{- end -}}
-{{- end -}}
-
-{{- /*
 varroa.np.busEgress gives the NATS egress rule of one bus client. Every bus
 client policy includes it, so each mode gives each client the same rule.
-With an in-cluster bus, the rule allows the NATS pods on 4222. Otherwise it
-allows networkPolicy.coreNatsEgress.cidrs on the core NATS ports.
-networkpolicy-guard.yaml fails an empty cidrs list in that case.
+With an in-cluster bus (varroa.inClusterBus), the rule allows the NATS pods
+on 4222. Otherwise it allows networkPolicy.coreNatsEgress.cidrs on the core
+NATS ports. networkpolicy-guard.yaml fails an empty cidrs list in that case.
 */ -}}
 {{- define "varroa.np.busEgress" -}}
-{{- if include "varroa.np.inClusterBus" . }}
+{{- if include "varroa.inClusterBus" . }}
 - to:
   - podSelector:
       matchLabels:

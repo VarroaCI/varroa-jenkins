@@ -100,7 +100,7 @@ A build check fails when a source adds a host that this page does not list.
 
 | Destination | Purpose | Protocol | Control | Can a deny-all cluster disable it? |
 | --- | --- | --- | --- | --- |
-| Hive NATS (bus.url) | Link a member cluster to the core bus. | NATS 4222, TLS | bus.url | Yes. Set bus.url to "". |
+| External NATS (bus.url) | Link a member cluster, or a release with nats.enabled false, to a NATS bus outside the release. | NATS 4222, TLS | bus.url | Yes, in full mode. Set nats.enabled to true and bus.url to "". A hive member always needs this connection. |
 
 ## varroactl
 

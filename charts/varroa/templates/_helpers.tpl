@@ -329,11 +329,23 @@ auth-mode and local-accounts guards make auth.bffUrl a requirement here.
 {{/*
 varroa.busURL gives the NATS bus URL of every bus client: bus.url, else the
 in-cluster default nats://<release>-nats:4222. No component has its own bus
-URL value, because the core NATS egress rule reads only bus.url.
+URL value, because the core NATS egress rule reads only bus.url. The default
+applies only with varroa.inClusterBus. Otherwise mode-guard.yaml fails an
+empty bus.url.
 Usage: {{ include "varroa.busURL" $ }}
 */}}
 {{- define "varroa.busURL" -}}
 {{- .Values.bus.url | default (printf "nats://%s-nats:4222" .Release.Name) -}}
+{{- end -}}
+
+{{/*
+varroa.inClusterBus is true when this release deploys the NATS that its bus
+clients dial: full mode with nats.enabled. Hive mode, or full mode with
+nats.enabled=false, dials the NATS that bus.url names outside the release.
+mode-guard.yaml and the NetworkPolicy templates read this one decision.
+*/}}
+{{- define "varroa.inClusterBus" -}}
+{{- if and (not (include "varroa.isHive" .)) .Values.nats.enabled -}}true{{- end -}}
 {{- end -}}
 
 {{/*

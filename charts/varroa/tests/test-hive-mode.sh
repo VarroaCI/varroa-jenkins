@@ -11,6 +11,8 @@
 #   5. External exposure render → nats-external Service with correct selector and traffic policy
 #   7. bus.url is the only bus URL value: no -bus-url arg renders, and each
 #      retired component key (operator/gateway/bff .busURL) fails the render
+#   8. Full mode with nats.enabled=false deploys no NATS, so an empty bus.url
+#      fails the render with the same message as hive mode
 # =============================================================================
 set -euo pipefail
 
@@ -80,8 +82,11 @@ OUT=$(helm template "$ROOT" \
   -f "$ROOT/values-hive.yaml" \
   --set cluster.name=x \
   --set auth.oidc.clientSecret=s --set auth.dashboardUrl=https://example.com 2>&1 || true)
-grep -q "bus.url" <<< "$OUT"
-check "Missing bus.url fails mentioning bus.url" $?
+if grep -q "bus.url must name the NATS endpoint when the release deploys no NATS" <<< "$OUT"; then
+  check "Missing bus.url fails mentioning bus.url" 0
+else
+  check "Missing bus.url fails mentioning bus.url" 1
+fi
 
 # --- 3. mode=hive with nats.enabled=true ---
 echo ""
@@ -218,6 +223,39 @@ elif grep -q "gateway.busURL is retired. Set bus.url instead." <<< "$OUT"; then
   check "Hive render: gateway.busURL fails the render" 0
 else
   check "Hive render: gateway.busURL fails the render" 1
+fi
+
+# --- 8. Full mode without NATS needs bus.url ---
+echo ""
+echo "=== 8. Full mode with nats.enabled=false needs bus.url ==="
+# The default bus URL names the in-cluster NATS Service, which a release
+# without NATS does not render.
+NO_NATS=(--set nats.enabled=false --set auth.oidc.clientSecret=test --set auth.dashboardUrl=https://example.com)
+if OUT=$(helm template "$ROOT" "${NO_NATS[@]}" 2>&1); then
+  check "nats.enabled=false with an empty bus.url fails the render" 1
+elif grep -q "bus.url must name the NATS endpoint when the release deploys no NATS (hive mode, or nats.enabled=false)" <<< "$OUT" \
+  && grep -q "nats://release-name-nats:4222 names a Service that this release does not render" <<< "$OUT"; then
+  check "nats.enabled=false with an empty bus.url fails the render" 0
+else
+  check "nats.enabled=false with an empty bus.url fails the render" 1
+fi
+
+if OUT=$(helm template "$ROOT" "${NO_NATS[@]}" --set-string 'bus.url= ' 2>&1); then
+  check "nats.enabled=false with a blank bus.url fails the render" 1
+elif grep -q "bus.url must name the NATS endpoint" <<< "$OUT"; then
+  check "nats.enabled=false with a blank bus.url fails the render" 0
+else
+  check "nats.enabled=false with a blank bus.url fails the render" 1
+fi
+
+EXT_URL="tls://nats.example.com:4222"
+if EXT_BUS_RENDER=$(helm template "$ROOT" "${NO_NATS[@]}" --set "bus.url=$EXT_URL" 2>&1); then
+  check "nats.enabled=false with bus.url renders" 0
+  n=$(grep -c "value: \"$EXT_URL\"" <<< "$EXT_BUS_RENDER" || true)
+  if [[ "$n" == 3 ]]; then check "nats.enabled=false: operator, gateway, and BFF use bus.url" 0; else check "nats.enabled=false: operator, gateway, and BFF use bus.url (got $n)" 1; fi
+  if grep -q 'release-name-nats:4222' <<< "$EXT_BUS_RENDER"; then check "nats.enabled=false: no bus client uses the in-cluster default" 1; else check "nats.enabled=false: no bus client uses the in-cluster default" 0; fi
+else
+  check "nats.enabled=false with bus.url renders" 1
 fi
 
 echo ""

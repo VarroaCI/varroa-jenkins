@@ -356,6 +356,10 @@ for policy in "${BUS_CLIENTS[@]}"; do
   grep -q 'app.kubernetes.io/component: nats' <<< "$DOC" && rc=1 || rc=0
   check "nats.enabled=false: $policy has no in-cluster NATS rule" "$rc"
 done
+for policy in np-nats np-nats-clients; do
+  grep -q "^  name: release-name-$policy\$" <<< "$OUT" && rc=1 || rc=0
+  check "nats.enabled=false: no $policy policy renders" "$rc"
+done
 
 render "${EXT_BUS[@]}" -f "$TMP/bus-list-mixed.yaml"
 check "nats.enabled=false with a mixed-port bus.url list fails" "$([[ "$RC" -ne 0 ]] && echo 0 || echo 1)"

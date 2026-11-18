@@ -28,7 +28,7 @@ to set.
 {{- fail "networkPolicy.ociRegistryEgress.cidrs must name the OCI registry address when the rule is enabled. Set [\"0.0.0.0/0\"] to allow every address." }}
 {{- end }}
 
-{{- $externalBus := not (include "varroa.np.inClusterBus" .) }}
+{{- $externalBus := not (include "varroa.inClusterBus" .) }}
 {{- if and $externalBus (empty (default list $np.coreNatsEgress.cidrs)) }}
 {{- fail "networkPolicy.coreNatsEgress.cidrs must name the core NATS address when the release deploys no NATS (hive mode, or nats.enabled=false). Set [\"0.0.0.0/0\"] to allow every address." }}
 {{- end }}

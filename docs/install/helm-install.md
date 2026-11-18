@@ -88,7 +88,7 @@ Wait for all control-plane pods to become `Ready`. NATS cannot start until its v
 
 Gateway and BFF HPAs require the Kubernetes metrics API. Telemetry export remains inactive until `telemetry.endpoint` is set.
 
-Every bus client reads `bus.url`. An empty value uses the in-cluster NATS Service. No component has its own bus address value. Helm refuses `operator.busURL`, `gateway.busURL`, and `bff.busURL` at render time. With `nats.enabled: false`, set `bus.url` to your external NATS. With network policies on, also set `networkPolicy.coreNatsEgress.cidrs`. See [External NATS bus](network-policies.md#external-nats-bus).
+Every bus client reads `bus.url`. An empty value uses the in-cluster NATS Service. No component has its own bus address value. Helm refuses `operator.busURL`, `gateway.busURL`, and `bff.busURL` at render time. With `nats.enabled: false`, set `bus.url` to your external NATS. Helm refuses an empty `bus.url` in this configuration, because the release has no NATS Service. With network policies on, also set `networkPolicy.coreNatsEgress.cidrs`. See [External NATS bus](network-policies.md#external-nats-bus).
 
 The BFF and the gateway need the operator in the same release. The BFF reads the `varroa-mite-signing-key` Secret at start, and the gateway reads the `varroa-ca` Secret. Only the operator creates them. Helm refuses `bff.enabled: true` or `gateway.enabled: true` with `operator.enabled: false` at render time. A hive install renders no BFF, so the BFF check does not apply there.
 
