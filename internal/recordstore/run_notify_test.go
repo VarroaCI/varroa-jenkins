@@ -416,8 +416,8 @@ func TestRunNotifierEntryLife(t *testing.T) {
 }
 
 // TestNotificationForMapsEveryKind asserts the notification builder maps
-// every ingest kind, and answers false for the three kinds that publish
-// nothing.
+// every ingest kind, and answers false for each kind that publishes
+// nothing for a zero ApplyResult.
 func TestNotificationForMapsEveryKind(t *testing.T) {
 	buildNumber := int64(42)
 	success := "SUCCESS"
@@ -439,7 +439,10 @@ func TestNotificationForMapsEveryKind(t *testing.T) {
 		{KindRunTests, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunQuality, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunState, map[string]any{"build_number": 7}, "", "", "", 0, false},
-		{KindRunResumeFailed, map[string]any{"build_number": 7}, "run", "", "", 0, true},
+		// A zero ApplyResult is a resume failure that changed no row,
+		// which publishes nothing. TestNotificationForResumeFailed holds
+		// the cleared case.
+		{KindRunResumeFailed, RunResumeFailedPayload{Instance: "pod-a", ReasonCode: "RESUME_FAILED"}, "", "", "", 0, false},
 		// A zero ApplyResult is a skipped refusal notice, which publishes
 		// nothing. The stored case follows the table.
 		{KindRunCommandRefused, RunCommandRefusedPayload{Command: RefusedCommandCancel}, "", "", "", 0, false},
@@ -507,6 +510,62 @@ func TestNotificationForMapsEveryKind(t *testing.T) {
 	got, ok := notificationFor(notice, ApplyResult{CommandRefusedStored: true})
 	if !ok || got.Kind != "run" || got.Status != "" || got.RunID != notice.RunID {
 		t.Fatalf("stored run.command_refused = %+v, %v; want one run notification", got, ok)
+	}
+}
+
+// TestNotificationForResumeFailed asserts a run.resume_failed envelope
+// publishes one run notification only when its write cleared the
+// dispatch. A held code and a guard that matched no row change no stored
+// value, so each publishes nothing.
+func TestNotificationForResumeFailed(t *testing.T) {
+	cases := []struct {
+		name   string
+		code   string
+		res    ApplyResult
+		wantOK bool
+	}{
+		{
+			name:   "a cleared dispatch publishes",
+			code:   "RESUME_FAILED",
+			res:    ApplyResult{ResumeFailedCleared: true, ResumeFailedReason: "RESUME_FAILED", ResumeFailedInstance: "pod-a"},
+			wantOK: true,
+		},
+		{
+			name:   "a guard that matched no row publishes nothing",
+			code:   "RESUME_FAILED",
+			res:    ApplyResult{ResumeFailedReason: "RESUME_FAILED", ResumeFailedInstance: "pod-a"},
+			wantOK: false,
+		},
+		{
+			name:   "a held code publishes nothing",
+			code:   "RESUME_LOAD_FAILED",
+			res:    ApplyResult{ResumeFailedReason: "RESUME_LOAD_FAILED", ResumeFailedInstance: "pod-a"},
+			wantOK: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newTestEnvelope(t, uuid.MustParse(newTestUUIDv7String()),
+				"manual:notify-resume-failed", KindRunResumeFailed,
+				RunResumeFailedPayload{Instance: "pod-a", ReasonCode: tc.code})
+
+			got, ok := notificationFor(env, tc.res)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if !ok {
+				if got != (RunNotification{}) {
+					t.Fatalf("notification = %+v, want the zero value", got)
+				}
+				return
+			}
+			if got.Kind != "run" || got.Status != "" || got.Result != "" || got.BuildNumber != 0 {
+				t.Fatalf("got %+v, want one run notification with no status, result, or build number", got)
+			}
+			if got.RunID != env.RunID || got.Cluster != testCluster || got.Tenant != testTenant || got.JobPath != testJobPath {
+				t.Fatalf("got %+v, want the envelope's run and coordinates", got)
+			}
+		})
 	}
 }
 

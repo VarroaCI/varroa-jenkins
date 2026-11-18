@@ -288,3 +288,53 @@ func TestApplyResumeFailedWithNoRunIsANoOp(t *testing.T) {
 		}
 	})
 }
+
+// TestApplyResumeFailedPublishesOnlyAClearedRun asserts the early route
+// publishes one run notification for the write that clears the dispatch,
+// and none for a write that changes no row. Close flushes every held
+// notification, so the last count also catches a coalesced publish.
+func TestApplyResumeFailedPublishesOnlyAClearedRun(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+	notifier, sent, _ := newCaptureNotifier(t)
+	t.Cleanup(notifier.Close)
+	g.SetRunNotifier(notifier)
+
+	noRun := uuid.MustParse(newTestUUIDv7String())
+	applyResumeFailedEnvelope(t, g,
+		newResumeFailedEnvelope(t, noRun.String(), resumeFailedTarget, "RESUME_FAILED"))
+	if got := sent.count(); got != 0 {
+		t.Fatalf("published %d notifications for a run with no row, want 0", got)
+	}
+
+	runID, _, _ := seedRunWithDispatchedResume(t, pool, db)
+	applyResumeFailedEnvelope(t, g,
+		newResumeFailedEnvelope(t, runID.String(), "pod-earlier", "RESUME_FAILED"))
+	applyResumeFailedEnvelope(t, g,
+		newResumeFailedEnvelope(t, runID.String(), resumeFailedTarget, "RESUME_LOAD_FAILED"))
+	if got := sent.count(); got != 0 {
+		t.Fatalf("published %d notifications for a stale instance and a held code, want 0", got)
+	}
+
+	env := newResumeFailedEnvelope(t, runID.String(), resumeFailedTarget, "RESUME_FAILED")
+	if res := applyResumeFailedEnvelope(t, g, env); !res.ResumeFailedCleared {
+		t.Fatal("the record naming the target must re-arm the run")
+	}
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications for the cleared dispatch, want 1", got)
+	}
+	got := sent.payload(0)
+	if got.Kind != "run" || got.RunID != env.RunID || got.Status != "" || got.Result != "" {
+		t.Fatalf("published %+v, want one run notification for the run", got)
+	}
+
+	if res := applyResumeFailedEnvelope(t, g, env); res.ResumeFailedCleared {
+		t.Fatal("the repeat must change no row")
+	}
+	notifier.Close()
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications after the repeat, want 1", got)
+	}
+}
