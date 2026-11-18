@@ -91,11 +91,11 @@ type runLogState struct {
 	// hole belong to a log the new writer does not continue.
 	writer string
 
-	// jobPath is the run's job path, recorded from the first call that
-	// creates this state and never changed after. publishRunLogBestEffort
-	// resolves the run's tenant from it, so a best-effort envelope stamps
-	// the same tenant the ordered event group resolves through
-	// CellTenantResolver, never the cell's own synthetic tenant.
+	// jobPath is the run's job path. The first call that creates this
+	// state records it, and no call changes it after, so a reader needs
+	// no lock. publishRunLogBestEffort stamps it on each best-effort
+	// envelope and resolves the run's tenant from it. The ordered event
+	// group resolves the tenant the same way, through CellTenantResolver.
 	jobPath string
 
 	mu          sync.Mutex
@@ -580,12 +580,12 @@ func (h *BusHandler) warnStalledDrainLocked(runID string, st *runLogState, now t
 // backstops for a lost publish — the sweep marks a stalled run
 // not-finalized rather than leaving it unmarked forever.
 //
-// tenant is resolved the same way the ordered event group resolves it
-// (buildEnvelope, through CellTenantResolver), not stamped as the
-// cell's own synthetic tenant: applyRunLog's ON CONFLICT insert only
-// sets runs.tenant when this envelope is the first to create the row,
-// and never updates it later, so a wrong tenant here outlives every
-// later run.started envelope for the same run.
+// The envelope carries the run's job path and the tenant that the
+// ordered event group resolves through CellTenantResolver. The recorder
+// writes the run row from the intent, but it copies both envelope fields
+// into the live run notification. The BFF keys its stream on that tenant.
+// It drops a notification with an empty job path. Without the job path,
+// an open build page misses each finalized and incomplete change.
 func (h *BusHandler) publishRunLogBestEffort(ns, name, runID, jobPath string, payload map[string]interface{}) {
 	if h.publisher == nil {
 		return
@@ -603,6 +603,7 @@ func (h *BusHandler) publishRunLogBestEffort(ns, name, runID, jobPath string, pa
 		Cell:          name,
 		CellInstance:  h.lookupCellInstance(ns, name),
 		Tenant:        tenant,
+		JobPath:       jobPath,
 		OccurredAt:    time.Now().UTC(),
 		Payload:       payload,
 	}

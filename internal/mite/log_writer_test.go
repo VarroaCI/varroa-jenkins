@@ -1238,14 +1238,13 @@ func TestOnLogChunkFinalEntryDurableBeforeAckAndPublishesFinalized(t *testing.T)
 	}
 }
 
-// TestOnLogChunkBestEffortSummaryStampsResolvedTenant proves a
+// TestOnLogChunkBestEffortSummaryStampsJobPathAndResolvedTenant proves a
 // best-effort run.log envelope (the "finalized" marker here) stamps the
-// job's resolved tenant, not the cell's own synthetic
-// "<namespace>/<cell>" tenant — the same tenant the ordered event group
-// resolves through CellTenantResolver. A wrong tenant here would win
-// applyRunLog's ON CONFLICT insert forever whenever this envelope beats
-// run.started to the recorder.
-func TestOnLogChunkBestEffortSummaryStampsResolvedTenant(t *testing.T) {
+// run's job path and the job's resolved tenant, not the cell's own
+// synthetic "<namespace>/<cell>" tenant. The recorder copies both fields
+// into the live run notification, and the BFF stream drops a
+// notification with an empty job path.
+func TestOnLogChunkBestEffortSummaryStampsJobPathAndResolvedTenant(t *testing.T) {
 	sender := &recordingSender{}
 	owner := newFakeOwnerRequester()
 	runID := newTestRunID()
@@ -1254,23 +1253,23 @@ func TestOnLogChunkBestEffortSummaryStampsResolvedTenant(t *testing.T) {
 	h := newLogTestHandler(t, owner, sender)
 	h.publisher = pub
 	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{
-		"team-a/build": {tenant: "team-a", generation: 3},
+		"tenant-a/build": {tenant: "tenant-a", generation: 3},
 	}})
 
 	h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{
-		RunId: runID, Seq: 0, Data: nil, Final: true, CellInstance: "inst1", JobPath: "team-a/build",
+		RunId: runID, Seq: 0, Data: nil, Final: true, CellInstance: "inst1", JobPath: "tenant-a/build",
 	})
 	waitForLogAcks(t, sender, 1)
 
 	deadline := time.Now().Add(2 * time.Second)
 	var sawFinalized bool
-	var tenant string
+	var got ingestEnvelope
 	for time.Now().Before(deadline) {
 		if pub.publishedCount() > 0 {
 			env := pub.envelopeAt(pub.publishedCount() - 1)
 			if v, _ := env.Payload["finalized"].(bool); v {
 				sawFinalized = true
-				tenant = env.Tenant
+				got = env
 				break
 			}
 		}
@@ -1279,8 +1278,44 @@ func TestOnLogChunkBestEffortSummaryStampsResolvedTenant(t *testing.T) {
 	if !sawFinalized {
 		t.Fatal("expected a run.log publish with finalized true after the final entry became durable")
 	}
-	if tenant != "team-a" {
-		t.Fatalf("envelope tenant = %q, want the resolved job tenant %q, not the cell's synthetic tenant", tenant, "team-a")
+	if got.Kind != kindRunLog {
+		t.Fatalf("envelope kind = %q, want %q", got.Kind, kindRunLog)
+	}
+	if got.Tenant != "tenant-a" {
+		t.Fatalf("envelope tenant = %q, want the resolved job tenant %q, not the cell's synthetic tenant", got.Tenant, "tenant-a")
+	}
+	if got.JobPath != "tenant-a/build" {
+		t.Fatalf("envelope job_path = %q, want the chunk's job path %q", got.JobPath, "tenant-a/build")
+	}
+}
+
+// TestPublishRunLogBestEffortStampsJobPathOnUnresolvedTenant proves the
+// job path rides the envelope also when the resolver knows no tenant. The
+// tenant then falls back to the cell's synthetic "<namespace>/<cell>".
+func TestPublishRunLogBestEffortStampsJobPathOnUnresolvedTenant(t *testing.T) {
+	pub := &fakePublisher{}
+	h := newLogTestHandler(t, newFakeOwnerRequester(), &recordingSender{})
+	h.publisher = pub
+	h.SetCellTenantResolver(stubJobTenantResolver{})
+	runID := newTestRunID()
+
+	h.publishRunLogBestEffort("ns1", "cell1", runID, "tenant-b/deploy", map[string]interface{}{"incomplete": true})
+
+	if pub.publishedCount() != 1 {
+		t.Fatalf("published %d envelopes, want 1", pub.publishedCount())
+	}
+	env := pub.envelopeAt(0)
+	if env.Kind != kindRunLog || env.RunID != runID {
+		t.Fatalf("envelope kind=%q run_id=%q, want %q and %q", env.Kind, env.RunID, kindRunLog, runID)
+	}
+	if env.JobPath != "tenant-b/deploy" {
+		t.Fatalf("envelope job_path = %q, want %q", env.JobPath, "tenant-b/deploy")
+	}
+	if env.Tenant != "ns1/cell1" {
+		t.Fatalf("envelope tenant = %q, want the synthetic fallback %q", env.Tenant, "ns1/cell1")
+	}
+	if env.IntentKey != "" {
+		t.Fatalf("envelope intent_key = %q, want empty: the log writer holds no intent key", env.IntentKey)
 	}
 }
 
