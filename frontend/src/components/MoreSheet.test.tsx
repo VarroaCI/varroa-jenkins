@@ -54,6 +54,35 @@ function renderMoreSheet(route = "/") {
   return { ...result, onClose };
 }
 
+function mockPermissions(data: { global: object; scopes: unknown[]; tenants?: unknown[] }) {
+  vi.mocked(usePermissions).mockReturnValue({
+    data,
+    isLoading: false,
+    isError: false,
+    isSuccess: true,
+    status: "success" as const,
+    isPending: false,
+    dataUpdatedAt: 0,
+    errorUpdatedAt: 0,
+    failureCount: 0,
+    failureReason: null,
+    errorUpdateCount: 0,
+    isFetched: true,
+    isFetchedAfterMount: true,
+    isFetching: false,
+    isPlaceholderData: false,
+    isPaused: false,
+    isRefetching: false,
+    isStale: false,
+    isInitialLoading: false,
+    isLoadingError: false,
+    isRefetchError: false,
+    fetchStatus: "idle" as const,
+    promise: Promise.resolve(undefined),
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof usePermissions>);
+}
+
 describe("MoreSheet", () => {
   beforeEach(() => {
     vi.mocked(usePermissions).mockReturnValue(
@@ -80,9 +109,10 @@ describe("MoreSheet", () => {
     expect(screen.getByText("Manage")).toBeInTheDocument();
     expect(screen.getByText("Account")).toBeInTheDocument();
 
-    // Operate items — Pipelines, Cells, then Plugins, sidebar order
+    // Operate items — Pipelines, Cells, Tenant agents, then Plugins, sidebar order
     expect(screen.getByRole("link", { name: "Pipelines" })).toHaveAttribute("href", "/pipelines");
     expect(screen.getByRole("link", { name: "Cells" })).toHaveAttribute("href", "/cells");
+    expect(screen.getByRole("link", { name: "Tenant agents" })).toHaveAttribute("href", "/agents");
     expect(screen.getByRole("link", { name: "Plugins" })).toHaveAttribute("href", "/plugins");
 
     // Brood items
@@ -139,35 +169,6 @@ describe("MoreSheet", () => {
   });
 
   describe("pipelines gate", () => {
-    function mockPermissions(data: { global: object; scopes: unknown[]; tenants?: unknown[] }) {
-      vi.mocked(usePermissions).mockReturnValue({
-        data,
-        isLoading: false,
-        isError: false,
-        isSuccess: true,
-        status: "success" as const,
-        isPending: false,
-        dataUpdatedAt: 0,
-        errorUpdatedAt: 0,
-        failureCount: 0,
-        failureReason: null,
-        errorUpdateCount: 0,
-        isFetched: true,
-        isFetchedAfterMount: true,
-        isFetching: false,
-        isPlaceholderData: false,
-        isPaused: false,
-        isRefetching: false,
-        isStale: false,
-        isInitialLoading: false,
-        isLoadingError: false,
-        isRefetchError: false,
-        fetchStatus: "idle" as const,
-        promise: Promise.resolve(undefined),
-        refetch: vi.fn(),
-      } as unknown as ReturnType<typeof usePermissions>);
-    }
-
     // The gate reads grants only, never the pipelines API's own state, so an
     // admitted caller sees the row whether that API answers 200 or 503.
     it("lists Pipelines under Operate for a caller the gate admits, with no Plugins grant held", () => {
@@ -218,6 +219,39 @@ describe("MoreSheet", () => {
       expect(screen.getByRole("dialog")).toContainElement(
         screen.getByRole("link", { name: "Cells" }),
       );
+    });
+  });
+
+  describe("agents gate", () => {
+    it("places the Tenant agents row between Cells and Plugins", () => {
+      mockPermissions({ global: { "*": { "*": true } }, scopes: [], tenants: [] });
+      renderMoreSheet("/");
+      const routes = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
+      expect(routes.indexOf("/agents")).toBe(routes.indexOf("/cells") + 1);
+      expect(routes.indexOf("/plugins")).toBe(routes.indexOf("/agents") + 1);
+    });
+
+    // The Operate group visibility is the union of its rows gates, so a
+    // caller who holds the agent sessions grant alone still opens the group.
+    it("renders the Operate group for an agent sessions caller alone", () => {
+      mockPermissions({ global: { agentsessions: { read: true } }, scopes: [], tenants: [] });
+      renderMoreSheet("/");
+      expect(screen.getByText("Operate")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Tenant agents" })).toHaveAttribute("href", "/agents");
+      expect(screen.queryByRole("link", { name: "Pipelines" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Cells" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Plugins" })).not.toBeInTheDocument();
+    });
+
+    it("omits the Tenant agents row and the Operate group for a namespace-scoped grant", () => {
+      mockPermissions({
+        global: {},
+        scopes: [{ namespaces: ["ns-a"], hasControllerSelector: false, capabilities: { agentsessions: { read: true } } }],
+        tenants: [],
+      });
+      renderMoreSheet("/");
+      expect(screen.queryByRole("link", { name: "Tenant agents" })).not.toBeInTheDocument();
+      expect(screen.queryByText("Operate")).not.toBeInTheDocument();
     });
   });
 

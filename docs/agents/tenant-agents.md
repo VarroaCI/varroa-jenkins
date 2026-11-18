@@ -198,8 +198,9 @@ reason `budget_day`. The step limit is the `AssistantConfig` value `budgets.step
 - The Tenant home shows a Tenant agent card. The card shows the state label and the start time of the last session. The card is hidden when the Tenant has no
   accepted agent.
 - `/agents` lists every Tenant agent of the brood. The page and its **Tenant agents**
-  sidebar row need a cluster-wide `agentsessions:read` grant. A namespace-scoped
-  grant admits neither. The grant toggle needs `tenantagents:unattended`.
+  row need a cluster-wide `agentsessions:read` grant. The row is in the sidebar and,
+  on a phone, in the **More** sheet. A namespace-scoped grant admits neither the page
+  nor the row. The grant toggle needs `tenantagents:unattended`.
 
 A tenant reader sees the sessions and the capabilities. A tenant writer also
 decides approvals and cancels sessions. The page never shows a forge token or

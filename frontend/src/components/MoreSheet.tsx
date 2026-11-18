@@ -1,9 +1,9 @@
 import { useEffect, useRef, useCallback } from "react";
 import { NavLink } from "react-router-dom";
-import { Boxes, CircleUserRound, Clock3, Hexagon, PlugZap, Shield, Waypoints, Workflow } from "lucide-react";
+import { Bot, Boxes, CircleUserRound, Clock3, Hexagon, PlugZap, Shield, Waypoints, Workflow } from "lucide-react";
 import { NavIcon } from "./NavIcon";
 import { usePermissions, canSeePipelines } from "../hooks/usePermissions";
-import { canCatalogArea, canAdminArea, canCellsRow, canControllersRow } from "../lib/navPermissions";
+import { canCatalogArea, canAdminArea, canCellsRow, canAgentsRow, canControllersRow } from "../lib/navPermissions";
 import styles from "./MoreSheet.module.css";
 
 interface MoreSheetProps {
@@ -15,9 +15,10 @@ export function MoreSheet({ onClose }: MoreSheetProps) {
   const showPlugins = canControllersRow(permissions);
   const showPipelines = canSeePipelines(permissions);
   const showCells = canCellsRow(permissions);
-  // The group visibility is the union of its rows gates, or the Cells row
-  // stays hidden for a caller who holds that grant alone.
-  const showOperate = showPlugins || showPipelines || showCells;
+  const showAgents = canAgentsRow(permissions);
+  // The group visibility is the union of its rows gates, or a row stays
+  // hidden for a caller who holds the grant of that row alone.
+  const showOperate = showPlugins || showPipelines || showCells || showAgents;
   const showCatalog = canCatalogArea(permissions);
   const showAdmin = canAdminArea(permissions);
   const showManage = showCatalog || showAdmin;
@@ -77,7 +78,7 @@ export function MoreSheet({ onClose }: MoreSheetProps) {
     <>
       <div className={styles.scrim} onClick={onClose} />
       <div className={styles.sheet} role="dialog" aria-modal="true" aria-label="More navigation" ref={sheetRef}>
-        {/* Operate — hidden entirely when neither row's own gate passes */}
+        {/* Operate — hidden entirely when no row's own gate passes */}
         {showOperate && (
           <>
             <div className={styles.groupLabel}>Operate</div>
@@ -91,6 +92,12 @@ export function MoreSheet({ onClose }: MoreSheetProps) {
               <NavLink to="/cells" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Cells" onClick={handleNav}>
                 <span className={styles.rowIcon}><NavIcon icon={Hexagon} /></span>
                 <span className={styles.rowText}>Cells</span>
+              </NavLink>
+            )}
+            {showAgents && (
+              <NavLink to="/agents" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Tenant agents" onClick={handleNav}>
+                <span className={styles.rowIcon}><NavIcon icon={Bot} /></span>
+                <span className={styles.rowText}>Tenant agents</span>
               </NavLink>
             )}
             {showPlugins && (
