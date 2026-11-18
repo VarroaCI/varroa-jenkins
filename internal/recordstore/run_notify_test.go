@@ -417,7 +417,8 @@ func TestRunNotifierEntryLife(t *testing.T) {
 
 // TestNotificationForMapsEveryKind asserts the notification builder maps
 // every ingest kind, and answers false for each kind that publishes
-// nothing for a zero ApplyResult.
+// nothing for a zero ApplyResult. The cases must hold every kind that
+// ingestKinds lists, so a new kind fails here until it has a case.
 func TestNotificationForMapsEveryKind(t *testing.T) {
 	buildNumber := int64(42)
 	success := "SUCCESS"
@@ -452,6 +453,17 @@ func TestNotificationForMapsEveryKind(t *testing.T) {
 		{KindRunTriggerFailed, map[string]any{}, "run", "COMPLETED", "TRIGGER_FAILED", 0, true},
 		{KindRunArtifacts, map[string]any{}, "", "", "", 0, false},
 		{KindJobSchedules, map[string]any{}, "", "", "", 0, false},
+		{KindJobBranches, map[string]any{}, "", "", "", 0, false},
+	}
+
+	covered := make(map[string]bool, len(cases))
+	for _, tc := range cases {
+		covered[tc.kind] = true
+	}
+	for kind := range ingestKinds {
+		if !covered[kind] {
+			t.Errorf("no case for ingest kind %q", kind)
+		}
 	}
 
 	for _, tc := range cases {
