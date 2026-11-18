@@ -119,7 +119,15 @@ func notificationFor(env IngestEnvelope, res ApplyResult) (RunNotification, bool
 	// These kinds report facts about a run without changing a state a
 	// reader displays, so the notification carries the identity alone.
 	case KindRunHeartbeat, KindRunLog, KindRunChanges, KindRunTests,
-		KindRunQuality, KindRunResumeFailed:
+		KindRunQuality:
+		n.Kind = "run"
+	case KindRunResumeFailed:
+		// A held code, a repeat, a stale instance, and a run with no
+		// row each change no stored value, so each reports nothing.
+		// A cleared dispatch carries the identity alone.
+		if !res.ResumeFailedCleared {
+			return RunNotification{}, false
+		}
 		n.Kind = "run"
 	case KindRunState:
 		// A run-state push outcome changes no value a reader displays,
