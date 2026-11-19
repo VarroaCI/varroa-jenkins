@@ -69,6 +69,7 @@ Set `VITE_VARROA_BFF_URL=http://localhost:8080/api/v1` in `frontend/.env` to poi
 - **kubeconform is pinned in one place.** It is the `Validate localdev manifests` step of the Checks job in `.github/workflows/pr.yaml`. Bump it on purpose, in its own pull request. The step also passes `-kubernetes-version`, set to the chart floor in `charts/varroa/Chart.yaml`. Raise that value when the floor rises. A core resource with no schema fails the step. The `-skip` list of the step names each Varroa kind. Add each new Varroa kind of `hack/localdev/manifests/` to that list. `TestLocaldevManifestsMatchCRDs` in `api/v1alpha1` validates those kinds against `charts/varroa/crds/`.
 - **Import order.** The local prefix `github.com/varroaci/varroa-jenkins` goes last in import groups. Lint excludes the proto-generated code under `internal/mite/proto/mitev1/`.
 - **Frontend commands run from `frontend/`.** Do not assume the shell is already there.
+- **The Node build version is pinned in four places.** Three are the `node-version` of an `actions/setup-node` step: two in `.github/workflows/pr.yaml` and one in `.github/workflows/release.yaml`. The fourth is the `node:<major>-alpine` base of the `dist-source` stage in `frontend/Dockerfile`. Bump all four in one pull request. Use a Node LTS line that has not reached its end-of-life date.
 - **Wait on cluster state with a bounded poll**, not a fixed sleep: `for i in $(seq 1 30); do <check> && break; sleep 5; done`.
 
 ## CI
