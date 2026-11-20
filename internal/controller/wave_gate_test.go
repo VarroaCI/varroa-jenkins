@@ -159,6 +159,22 @@ func TestSiblingHealthyOn(t *testing.T) {
 		}
 	})
 
+	t.Run("only the rbac section refused", func(t *testing.T) {
+		s := healthy()
+		s.Status.LastApplyResult = applyResultRefusing("some-other-hash", "rbac")
+		if !siblingHealthyOn(s, target) {
+			t.Fatal("expected healthy: rbac does not come from the bundle")
+		}
+	})
+
+	t.Run("config section refused", func(t *testing.T) {
+		s := healthy()
+		s.Status.LastApplyResult = applyResultRefusing("some-other-hash", "config", "rbac")
+		if siblingHealthyOn(s, target) {
+			t.Fatal("expected not healthy (config refused)")
+		}
+	})
+
 	t.Run("succeeded false with correct AppliedBundleHash (mid-retry)", func(t *testing.T) {
 		// A sibling that succeeded on the target earlier, but then tried a NEWER
 		// hash that failed. AppliedBundleHash still shows the old target.
@@ -980,6 +996,74 @@ func TestGate_DrainingCanaryHoldsLaterWaves(t *testing.T) {
 	// This should hold the later wave (the gate checks Succeeded, not just hash match).
 	if cr.Status.Rollout == nil || !cr.Status.Rollout.Blocked {
 		t.Fatal("draining canary (Succeeded=false) should hold later wave")
+	}
+}
+
+// TestGate_RefusedRBACOnCanaryDoesNotHoldLaterWave pins that the wave gate
+// judges the bundle sections alone. A canary on the target that refused only
+// its rbac.yaml clears the gate. A refused config or items section holds it.
+func TestGate_RefusedRBACOnCanaryDoesNotHoldLaterWave(t *testing.T) {
+	for _, tc := range []struct {
+		refused  []string
+		wantHold bool
+	}{
+		{[]string{"rbac"}, false},
+		{[]string{"config"}, true},
+		{[]string{"items"}, true},
+	} {
+		t.Run(tc.refused[0], func(t *testing.T) {
+			client := newTestClientWithGateBundle()
+			client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-new"
+			rec, mites := newTestReconcilerForGate(client)
+
+			cr := newGateCtrl("ctl-wave1", 1, "hash-old", nil)
+			canary := freshSib("canary", 0, "hash-new", false)
+			canary.Status.LastApplyResult = applyResultRefusing("irrelevant", tc.refused...)
+			client.controllers = []*v1alpha1.Controller{cr, canary}
+			for _, c := range client.controllers {
+				crdstore.MustSeed(client.store, c)
+			}
+
+			mites.connect(cr.Name, cr.Namespace)
+			_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream); gate assertion below
+			held := cr.Status.Rollout != nil && cr.Status.Rollout.Blocked
+			if held != tc.wantHold {
+				t.Fatalf("held = %v, want %v (rollout %+v)", held, tc.wantHold, cr.Status.Rollout)
+			}
+		})
+	}
+}
+
+// TestGate_AppliedBundleHashAdvancesPastRefusedRBAC pins that a verdict for
+// the current desired state advances appliedBundleHash when only its rbac
+// section failed, and holds it when a bundle section failed.
+func TestGate_AppliedBundleHashAdvancesPastRefusedRBAC(t *testing.T) {
+	for _, tc := range []struct {
+		refused string
+		want    string
+	}{
+		{"rbac", "hash-xyz"},
+		{"config", ""},
+	} {
+		t.Run(tc.refused, func(t *testing.T) {
+			client := newTestClientWithGateBundle()
+			client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
+			rec, mites := newTestReconcilerForGate(client)
+			rec.miteTransport = &scriptedSendTransport{Transport: rec.miteTransport}
+
+			cr := newGateCtrl("ctl-rbac-refused", 0, "", nil)
+			mites.connect(cr.Name, cr.Namespace)
+			_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+			if cr.Status.DesiredStateHash == "" {
+				t.Fatal("expected DesiredStateHash to be set on the first tick")
+			}
+
+			cr.Status.LastApplyResult = applyResultRefusing(cr.Status.DesiredStateHash, tc.refused)
+			_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+			if cr.Status.AppliedBundleHash != tc.want {
+				t.Fatalf("AppliedBundleHash = %q, want %q", cr.Status.AppliedBundleHash, tc.want)
+			}
+		})
 	}
 }
 

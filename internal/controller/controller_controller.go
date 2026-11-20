@@ -4570,8 +4570,9 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	if err != nil {
 		return fmt.Errorf("build desired state: %w", err)
 	}
-	if cr.Status.LastApplyResult != nil &&
-		cr.Status.LastApplyResult.Succeeded &&
+	// The wave gate compares bundle versions, so only the bundle sections
+	// decide. A refused rbac.yaml does not hold the bundle back.
+	if bundleSectionsApplied(cr.Status.LastApplyResult) &&
 		cr.Status.LastApplyResult.Hash == desiredHash {
 		cr.Status.AppliedBundleHash = targetBundleHash
 	}
@@ -4641,7 +4642,11 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	// snapshot reports a different rbacHash the mite hasn't confirmed the
 	// push and we must retry regardless of the operator-side hash tracking.
 	// Always push on a reconnect (forcePush) so the fresh token reaches the mite.
-	rbacInSync := snapshot == nil || desired.RbacYaml == "" || snapshot.RbacHash == rbacH
+	// A refused rbac.yaml never reaches the snapshot. A refusal verdict for
+	// this desired state therefore counts as in sync, and the drift window
+	// limits the retries of the refused document.
+	rbacInSync := snapshot == nil || desired.RbacYaml == "" || snapshot.RbacHash == rbacH ||
+		rbacRefusedFor(cr.Status.LastApplyResult, desiredHash)
 	// Field 17 stays out of desiredHash, so an attached rehydration bundle
 	// bypasses the short-circuit on its own. A tick that attaches no
 	// bundle only sends the delivered state again, so it waits for the
@@ -7228,12 +7233,13 @@ func (r *Reconciler) bundleIdentOf(s *v1alpha1.Controller) bundleIdentity {
 }
 
 // siblingHealthyOn reports whether s is healthy on targetBundleHash:
-// same AppliedBundleHash, successful apply, and fresh mite heartbeat.
+// same AppliedBundleHash, every bundle section of the last apply applied,
+// and fresh mite heartbeat. A refused rbac section does not hold later waves.
 func siblingHealthyOn(s *v1alpha1.Controller, targetBundleHash string) bool {
 	if s.Status.AppliedBundleHash != targetBundleHash {
 		return false
 	}
-	if s.Status.LastApplyResult == nil || !s.Status.LastApplyResult.Succeeded {
+	if !bundleSectionsApplied(s.Status.LastApplyResult) {
 		return false
 	}
 	ms := s.Status.MiteStatus
