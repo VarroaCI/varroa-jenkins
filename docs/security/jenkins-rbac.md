@@ -84,7 +84,9 @@ The Varroa API does not prove that Java compiles a pattern.
 If Jenkins refuses a pattern, each controller that the binding selects shows **Apply failed**.
 The `rbac` section of `status.lastApplyResult` carries the Jenkins error, and the controller keeps its last accepted RBAC.
 Other configuration changes still apply.
-Until the apply succeeds, the controller still holds back later [rollout waves](../operations/rollout-waves.md).
+The refusal does not hold back later [rollout waves](../operations/rollout-waves.md) of a bundle.
+Varroa sends the refused RBAC again five minutes after each attempt.
+A change to a role, a binding, or the bundle sends it at once.
 A restart of a selected controller boots with the configuration that Jenkins last accepted.
 
 ## Link Varroa and Jenkins access

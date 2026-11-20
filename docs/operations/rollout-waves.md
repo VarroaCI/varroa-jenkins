@@ -15,8 +15,10 @@ A Connected earlier-wave controller clears the gate only when all three conditio
 | Condition | Cleared when |
 |---|---|
 | Bundle hash | Applied hash matches the target. |
-| Apply result | Last apply succeeded. |
+| Apply result | Last apply succeeded, or only its `rbac` section failed. |
 | Mite heartbeat | Mite connected, heartbeat newer than the stale threshold. |
+
+Jenkins RBAC comes from `JenkinsRole` and `JenkinsRoleBinding` objects, not from the bundle. A refused `rbac` section therefore does not hold back later waves. The controller still shows **Apply failed** until Jenkins accepts the RBAC.
 
 A controller whose apply succeeded but whose mite has gone quiet still blocks the wave, so check heartbeat freshness before assuming a stalled rollout is an apply failure.
 

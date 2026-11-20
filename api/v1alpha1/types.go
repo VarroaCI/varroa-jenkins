@@ -566,7 +566,9 @@ type ControllerStatus struct {
 	// +optional
 	CascRefusal *CascRefusal `json:"cascRefusal,omitempty"`
 
-	// AppliedBundleHash is the ComposedBundle.status.ResolvedHash of the last SUCCESSFUL apply.
+	// AppliedBundleHash is the ComposedBundle.status.ResolvedHash of the last apply whose bundle
+	// sections (config, plugins, items) succeeded. A refused rbac section does not hold it back,
+	// because RBAC does not come from the bundle.
 	// It is the cross-sibling-comparable gate key (DesiredStateHash is per-controller and is NOT comparable).
 	// +optional
 	AppliedBundleHash string `json:"appliedBundleHash,omitempty"`

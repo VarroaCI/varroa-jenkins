@@ -4399,6 +4399,32 @@ func TestRecordApplyResult(t *testing.T) {
 		}
 	})
 
+	// The mite applies no plugins: managed plugins converge through the pod
+	// roll. The plugins section is therefore always ok, and it only carries
+	// the reported text.
+	t.Run("plugins-section-always-ok", func(t *testing.T) {
+		cr := &v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID, CreationTimestamp: metav1.NewTime(time.Now())},
+			Spec:       v1alpha1.ControllerSpec{ComposedBundleRef: &v1alpha1.ComposedBundleRef{Name: "test-bundle"}},
+			Status: v1alpha1.ControllerStatus{
+				Phase:      v1alpha1.ControllerPhaseConnected,
+				Conditions: []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: "MiteConnected"}},
+			},
+		}
+		muteTransport.drainResults = []*mitev1.CommandResult{
+			mkDSR(true, true, false, true, "", "", "plugin text", "", "hash-plugins"),
+		}
+		_ = rec.reconcileController(context.Background(), cr)
+
+		ar := cr.Status.LastApplyResult
+		if ar == nil || !ar.Succeeded {
+			t.Fatalf("lastApplyResult = %+v, want a succeeded apply", ar)
+		}
+		if plugins := ar.Sections[2]; plugins.Name != "plugins" || !plugins.OK || plugins.Error != "plugin text" {
+			t.Errorf("plugins section = %+v, want ok with the reported text", plugins)
+		}
+	})
+
 	t.Run("truncation", func(t *testing.T) {
 		cr := &v1alpha1.Controller{
 			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID, CreationTimestamp: metav1.NewTime(time.Now())},
