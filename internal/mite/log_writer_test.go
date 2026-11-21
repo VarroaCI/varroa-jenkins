@@ -388,6 +388,128 @@ func TestOnLogChunkOwnershipTransferInvalidatesCache(t *testing.T) {
 	}
 }
 
+// TestOnLogChunkRefusedSenderCreatesNoRunState proves that a chunk the
+// owner check refuses leaves no run state behind. A refused sender must
+// not set the writer or the job path of the run's best-effort envelopes.
+func TestOnLogChunkRefusedSenderCreatesNoRunState(t *testing.T) {
+	cases := []struct {
+		name       string
+		answer     *ownerLookupResponse
+		lookupErr  error
+		wantStatus string
+		wantReason string
+	}{
+		{
+			name:       "foreign cell",
+			answer:     &ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "other-cell", Instance: "inst-other"},
+			wantStatus: logAckStatusRejected,
+			wantReason: logReasonForeignRun,
+		},
+		{
+			name:       "no ledger row",
+			wantStatus: logAckStatusRejected,
+			wantReason: logReasonForeignRun,
+		},
+		{
+			name:       "owner lookup failed",
+			lookupErr:  errors.New("deadline exceeded"),
+			wantStatus: logAckStatusBusy,
+			wantReason: logReasonOwnerLookupFail,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sender := &recordingSender{}
+			owner := newFakeOwnerRequester()
+			owner.err = tc.lookupErr
+			runID := newTestRunID()
+			if tc.answer != nil {
+				owner.setAnswer(runID, *tc.answer)
+			}
+			h := newLogTestHandler(t, owner, sender)
+
+			h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{
+				RunId: runID, Seq: 0, Data: []byte("x"), CellInstance: "inst1", JobPath: "tenant-b/deploy",
+			})
+			acks := waitForLogAcks(t, sender, 1)
+			if acks[0].Status != tc.wantStatus || acks[0].Reason != tc.wantReason {
+				t.Fatalf("expected %s %s, got %+v", tc.wantStatus, tc.wantReason, acks[0])
+			}
+
+			if _, exists := h.lookupRunState(runID); exists {
+				t.Fatal("expected no run state for a refused chunk")
+			}
+		})
+	}
+}
+
+// TestOnLogChunkRefusedFirstChunkKeepsTheOwnersRunState proves that the
+// first chunk of a run, sent by a cell that does not own the run, does
+// not set the run state. The owner's job path, its resolved tenant, and
+// its writer reach each best-effort envelope.
+func TestOnLogChunkRefusedFirstChunkKeepsTheOwnersRunState(t *testing.T) {
+	ownerSender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	pub := &fakePublisher{}
+	h := newLogTestHandler(t, owner, ownerSender)
+	h.publisher = pub
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{
+		"tenant-a/build":  {tenant: "tenant-a", generation: 3},
+		"tenant-b/deploy": {tenant: "tenant-b", generation: 5},
+	}})
+	refusedSender := registerLogTestSender(h, "ns1", "cell2")
+
+	h.OnLogChunk("cell2", "ns1", &mitev1.LogChunk{
+		RunId: runID, Seq: 0, Data: []byte("x"), CellInstance: "inst2", JobPath: "tenant-b/deploy",
+	})
+	if got := waitForLogAcks(t, refusedSender, 1)[0]; got.Status != logAckStatusRejected || got.Reason != logReasonForeignRun {
+		t.Fatalf("expected the non-owner's chunk REJECTED foreign-run, got %+v", got)
+	}
+
+	h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{
+		RunId: runID, Seq: 0, Data: nil, Final: true, CellInstance: "inst1", JobPath: "tenant-a/build",
+	})
+	if got := waitForLogAcks(t, ownerSender, 1)[0]; got.Status != logAckStatusStored {
+		t.Fatalf("expected the owner's chunk STORED, got %+v", got)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	var got ingestEnvelope
+	var sawFinalized bool
+	for time.Now().Before(deadline) && !sawFinalized {
+		for i := 0; i < pub.publishedCount(); i++ {
+			env := pub.envelopeAt(i)
+			if v, _ := env.Payload["finalized"].(bool); v {
+				got, sawFinalized = env, true
+				break
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !sawFinalized {
+		t.Fatal("expected a run.log publish with finalized true")
+	}
+	if got.JobPath != "tenant-a/build" || got.Tenant != "tenant-a" {
+		t.Fatalf("envelope job_path=%q tenant=%q, want the owner's %q and %q", got.JobPath, got.Tenant, "tenant-a/build", "tenant-a")
+	}
+	if got.Namespace != "ns1" || got.Cell != "cell1" {
+		t.Fatalf("envelope writer = %s/%s, want the owner ns1/cell1", got.Namespace, got.Cell)
+	}
+
+	st, ok := h.lookupRunState(runID)
+	if !ok {
+		t.Fatal("expected the owner's chunk to create the run state")
+	}
+	st.mu.Lock()
+	ns, name, jobPath := st.ns, st.name, st.jobPath
+	st.mu.Unlock()
+	if ns != "ns1" || name != "cell1" || jobPath != "tenant-a/build" {
+		t.Fatalf("run state writer=%s/%s job_path=%q, want ns1/cell1 and %q", ns, name, jobPath, "tenant-a/build")
+	}
+}
+
 // --- 3.3c: pending bounds ---
 
 // blockingAppendStore wraps a real store and blocks every Append call
