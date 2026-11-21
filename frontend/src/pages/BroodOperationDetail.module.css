@@ -1,4 +1,5 @@
 .table { composes: dataTable from "./tables.module.css"; }
+.tableScroll { composes: tableScroll from "./tables.module.css"; }
 /* Layout .content already supplies page padding and max-width. */
 .page { animation: fade .35s ease; }
 
