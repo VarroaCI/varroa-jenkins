@@ -65,9 +65,11 @@ type Ledger struct {
 	vetoNotifier    *RunNotifier
 	vetoActivityPub *activity.Publisher
 
-	// waitNotifier publishes a wait notification after each claim that
-	// writes or deletes a wait row. A nil notifier publishes nothing.
-	waitNotifier *RunNotifier
+	// notifier publishes a wait notification after each claim that
+	// writes or deletes a wait row, and a run notification after each
+	// claim that marks a runs row DUPLICATE. A nil notifier publishes
+	// nothing.
+	notifier *RunNotifier
 
 	// hold wires the grant hold. A nil hold (NewLedger's default, until
 	// SetGrantHold is called) holds no repeat claim.
@@ -97,12 +99,14 @@ func (l *Ledger) SetConcurrencyCancel(conn *bus.Conn, metrics *ConcurrencyMetric
 	l.concurrencyLogger = logger
 }
 
-// SetWaitNotifier wires the wait notification: after a claim commits a
-// change to its run_waits row, the ledger publishes a kind wait
-// notification on notifier. cmd/recorder calls this once, after NewLedger.
-// A Ledger this method never touches publishes no wait notification.
-func (l *Ledger) SetWaitNotifier(notifier *RunNotifier) {
-	l.waitNotifier = notifier
+// SetRunNotifier wires the claim notifications on notifier. After a claim
+// commits a change to its run_waits row, the ledger publishes a kind wait
+// notification. After a claim or a start mark commits a DUPLICATE mark of
+// a runs row, the ledger publishes that row's run notification.
+// cmd/recorder calls this once, after NewLedger. A Ledger this method
+// never touches publishes neither.
+func (l *Ledger) SetRunNotifier(notifier *RunNotifier) {
+	l.notifier = notifier
 }
 
 // notifyWait publishes the wait notification of one committed claim. A
@@ -110,9 +114,17 @@ func (l *Ledger) SetWaitNotifier(notifier *RunNotifier) {
 func (l *Ledger) notifyWait(req ClaimRequest, runID uuid.UUID, change waitChange) {
 	switch change {
 	case waitWritten:
-		l.waitNotifier.Notify(waitNotification(req, runID.String(), WaitStateWaiting))
+		l.notifier.Notify(waitNotification(req, runID.String(), WaitStateWaiting))
 	case waitCleared:
-		l.waitNotifier.Notify(waitNotification(req, runID.String(), WaitStateCleared))
+		l.notifier.Notify(waitNotification(req, runID.String(), WaitStateCleared))
+	}
+}
+
+// notifyDuplicate publishes the run notification of a DUPLICATE mark that
+// one committed claim or start mark wrote. A nil mark publishes nothing.
+func (l *Ledger) notifyDuplicate(marked *RunNotification) {
+	if marked != nil {
+		l.notifier.Notify(*marked)
 	}
 }
 
@@ -207,7 +219,7 @@ func (l *Ledger) claimAttempt(ctx context.Context, req ClaimRequest, runID uuid.
 			RunID: runID.String()}, false
 	}
 
-	resp, err := claimTx(ctx, tx, l.hold, reading, req, runID, createdAt, result.Incarnation)
+	resp, marked, err := claimTx(ctx, tx, l.hold, reading, req, runID, createdAt, result.Incarnation)
 	if errors.Is(err, errConsumerReadNeeded) {
 		return ClaimResponse{}, true
 	}
@@ -219,6 +231,7 @@ func (l *Ledger) claimAttempt(ctx context.Context, req ClaimRequest, runID uuid.
 		return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}, false
 	}
 	l.notifyWait(req, runID, verdict.Change)
+	l.notifyDuplicate(marked)
 	return resp, false
 }
 
@@ -237,9 +250,11 @@ func (l *Ledger) checkFence(ctx context.Context, tx pgx.Tx, req ClaimRequest) (F
 // claimTx runs the fast-path insert, then falls back to the existing-key
 // decision table when the key already exists. A nil hold holds no repeat
 // claim. reading is the hold's consumer reading, or nil when Claim has not
-// read it yet.
+// read it yet. The second answer is the run notification of a runs row
+// that the claim marked DUPLICATE, or nil. The caller publishes it after
+// the commit.
 func claimTx(ctx context.Context, tx pgx.Tx, hold *grantHold, reading *consumerReading, req ClaimRequest,
-	runID uuid.UUID, createdAt time.Time, incarnation string) (ClaimResponse, error) {
+	runID uuid.UUID, createdAt time.Time, incarnation string) (ClaimResponse, *RunNotification, error) {
 	var insertedRunID uuid.UUID
 	err := tx.QueryRow(ctx, `
 		INSERT INTO varroa.run_intents
@@ -257,11 +272,12 @@ func claimTx(ctx context.Context, tx pgx.Tx, hold *grantHold, reading *consumerR
 
 	switch {
 	case err == nil:
-		return grantNewIntent(ctx, tx, req, runID)
+		resp, err := grantNewIntent(ctx, tx, req, runID)
+		return resp, nil, err
 	case errors.Is(err, pgx.ErrNoRows):
 		return existingKeyDecision(ctx, tx, hold, reading, req, runID, createdAt, incarnation)
 	default:
-		return ClaimResponse{}, fmt.Errorf("insert intent: %w", err)
+		return ClaimResponse{}, nil, fmt.Errorf("insert intent: %w", err)
 	}
 }
 
@@ -300,9 +316,11 @@ type storedIntent struct {
 }
 
 // existingKeyDecision applies D2's decision table, in order, to the row
-// a repeated intent_key already holds.
+// a repeated intent_key already holds. The second answer is the run
+// notification of the requesting run's row when Row 4 marked it
+// DUPLICATE, or nil.
 func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, reading *consumerReading, req ClaimRequest,
-	reqRunID uuid.UUID, reqCreatedAt time.Time, incarnation string) (ClaimResponse, error) {
+	reqRunID uuid.UUID, reqCreatedAt time.Time, incarnation string) (ClaimResponse, *RunNotification, error) {
 	var row storedIntent
 	err := tx.QueryRow(ctx, `
 		SELECT run_id, created_at, cell_instance, placement_generation, state, build_number, granted_at,
@@ -313,13 +331,13 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 	`, req.IntentKey).Scan(&row.runID, &row.createdAt, &row.cellInstance, &row.placementGeneration, &row.state,
 		&row.buildNumber, &row.grantedAt, &row.startMarkedAt, &row.dbNow)
 	if err != nil {
-		return ClaimResponse{}, fmt.Errorf("read existing intent: %w", err)
+		return ClaimResponse{}, nil, fmt.Errorf("read existing intent: %w", err)
 	}
 
 	// Row 1: a lower generation is fenced, no matter which run_id the
 	// request carries.
 	if req.PlacementGeneration < row.placementGeneration {
-		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonFenced, RunID: row.runID.String()}, nil
+		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonFenced, RunID: row.runID.String()}, nil, nil
 	}
 
 	// Row 2: the stored run_id equals the request's run_id. A started run
@@ -334,20 +352,21 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 	if row.runID == reqRunID {
 		started, err := intentStarted(ctx, tx, row)
 		if err != nil {
-			return ClaimResponse{}, err
+			return ClaimResponse{}, nil, err
 		}
 		if started || (row.startMarkedAt != nil && storedOwner(row) != req.CellInstance) {
-			return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, nil
+			return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, nil, nil
 		}
 		held, message, err := hold.holds(ctx, tx, req, row, reading)
 		if err != nil {
-			return ClaimResponse{}, err
+			return ClaimResponse{}, nil, err
 		}
 		if held {
 			return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonNotReady, Message: message,
-				RunID: row.runID.String()}, nil
+				RunID: row.runID.String()}, nil, nil
 		}
-		return reanswerSameRun(ctx, tx, req, row, incarnation)
+		resp, err := reanswerSameRun(ctx, tx, req, row, incarnation)
+		return resp, nil, err
 	}
 
 	// Row 3: a higher generation on an unstarted GRANTED intent transfers
@@ -356,18 +375,20 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 	if req.PlacementGeneration > row.placementGeneration && row.state == stateGranted && row.startMarkedAt == nil {
 		exists, err := runsRowExists(ctx, tx, row.runID)
 		if err != nil {
-			return ClaimResponse{}, err
+			return ClaimResponse{}, nil, err
 		}
 		if !exists {
-			return transferIntent(ctx, tx, req, reqRunID, reqCreatedAt, incarnation)
+			resp, err := transferIntent(ctx, tx, req, reqRunID, reqCreatedAt, incarnation)
+			return resp, nil, err
 		}
 	}
 
 	// Row 4: every other case is a duplicate.
-	if err := markDuplicateClaim(ctx, tx, reqRunID, reqCreatedAt); err != nil {
-		return ClaimResponse{}, err
+	marked, err := markDuplicateClaim(ctx, tx, reqRunID, reqCreatedAt)
+	if err != nil {
+		return ClaimResponse{}, nil, err
 	}
-	return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, nil
+	return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, marked, nil
 }
 
 // markDuplicateClaim marks the requesting run's accepted-trigger row
@@ -382,15 +403,26 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 //
 // The guard is the row's own state: only a QUEUED row that records no
 // build is marked, so a real run of that identifier is never touched.
-func markDuplicateClaim(ctx context.Context, tx pgx.Tx, runID uuid.UUID, createdAt time.Time) error {
-	if _, err := tx.Exec(ctx, `
+//
+// It answers the run notification of the row it marked, built from that
+// row's own identity, so the caller publishes it after the commit. It
+// answers nil when the guard matched no row.
+func markDuplicateClaim(ctx context.Context, tx pgx.Tx, runID uuid.UUID, createdAt time.Time) (*RunNotification, error) {
+	var cluster, tenant, jobPath string
+	err := tx.QueryRow(ctx, `
 		UPDATE varroa.runs
 		SET status = 'DUPLICATE', ended_at = COALESCE(ended_at, now())
 		WHERE created_at = $1 AND run_id = $2 AND status = 'QUEUED' AND `+noBuildRecordedSQL+`
-	`, createdAt, runID); err != nil {
-		return fmt.Errorf("mark duplicate claim for run %s: %w", runID, err)
+		RETURNING cluster, tenant, job_path
+	`, createdAt, runID).Scan(&cluster, &tenant, &jobPath)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("mark duplicate claim for run %s: %w", runID, err)
 	}
-	return nil
+	marked := duplicateNotification(cluster, tenant, jobPath, runID.String())
+	return &marked, nil
 }
 
 // intentStarted reports whether the run a stored intent names has

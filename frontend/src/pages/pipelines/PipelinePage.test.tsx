@@ -811,6 +811,16 @@ describe("PipelinePage — live run events", () => {
     await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(2));
   });
 
+  it("refetches both reads for a duplicate event", async () => {
+    renderPage();
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
+
+    emit({ type: "run", data: notification({ status: "DUPLICATE" }) });
+
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(2));
+  });
+
   it("refetches nothing for an event of another job", async () => {
     renderPage();
     await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));

@@ -157,6 +157,18 @@ type ApplyResult struct {
 	// into the payload and changes no terminal column, so its notification
 	// carries no status and no result.
 	CompletedOwner bool
+
+	// RunDuplicate reports whether a stored run.trigger_accepted, a
+	// run.started, or an owner run.completed write left the envelope's own
+	// run DUPLICATE. Its notification then carries the status DUPLICATE
+	// in place of the kind's own status.
+	RunDuplicate bool
+
+	// MarkedDuplicate is the run notification of another run that the
+	// duplicate backstop of a run.started write marked DUPLICATE. It
+	// carries the marked row's own identity. It is nil when the backstop
+	// marked no other run.
+	MarkedDuplicate *RunNotification
 }
 
 // Ingester applies one IngestEnvelope to the record tables inside a
@@ -253,17 +265,20 @@ func (g *Ingester) ActivityPublisher() *activity.Publisher {
 }
 
 // notify publishes one ingest envelope's live notifications: the run
-// notification the kind earns, and one lock notification per fleet lock
-// the write released. It publishes nothing for a nil notifier or a
-// failed write. The two families are independent facts about one
-// commit, so a write that earns no run notification still publishes the
-// lock notifications it owes.
+// notification the kind earns, the run notification of another run the
+// write marked DUPLICATE, and one lock notification per fleet lock the
+// write released. It publishes nothing for a nil notifier or a failed
+// write. The families are independent facts about one commit, so a write
+// that earns no run notification still publishes the others it owes.
 func (g *Ingester) notify(env IngestEnvelope, res ApplyResult, err error) {
 	if err != nil || g.notifier == nil {
 		return
 	}
 	if n, ok := notificationFor(env, res); ok {
 		g.notifier.Notify(n)
+	}
+	if res.MarkedDuplicate != nil {
+		g.notifier.Notify(*res.MarkedDuplicate)
 	}
 	for _, lock := range res.ReleasedFleetLocks {
 		g.notifier.Notify(lockNotification(lock.Cluster, lock.Tenant, lock.JobPath, lock.LockName, env.RunID, FleetLockStateReleased))
@@ -375,6 +390,8 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 	}
 	result.ReleasedFleetLocks = dispatched.releasedFleetLocks
 	result.CompletedOwner = dispatched.completedOwner
+	result.RunDuplicate = dispatched.runDuplicate
+	result.MarkedDuplicate = dispatched.markedDuplicate
 	publishActivityAfterCommit(g.activityPub, &dispatched.activity)
 
 	if dispatched.action != nil && g.conn != nil {
@@ -507,6 +524,13 @@ type dispatchResult struct {
 	// completedOwner is true when a run.completed write was the run's real
 	// terminal write. Apply copies it onto its ApplyResult.
 	completedOwner bool
+
+	// runDuplicate is true when a run.started or an owner run.completed
+	// write left its own run DUPLICATE. markedDuplicate is the
+	// notification of another run that the duplicate backstop marked.
+	// Apply copies both onto its ApplyResult.
+	runDuplicate    bool
+	markedDuplicate *RunNotification
 }
 
 // applyOnce runs one attempt of env's write in its own transaction.
@@ -543,7 +567,7 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 	case KindRunStage:
 		return dispatchResult{}, applyRunStage(ctx, tx, intent, env)
 	case KindRunCompleted:
-		owner, payload, releasedLocks, err := applyRunCompleted(ctx, tx, intent, env)
+		owner, status, payload, releasedLocks, err := applyRunCompleted(ctx, tx, intent, env)
 		if err != nil {
 			return dispatchResult{}, err
 		}
@@ -559,6 +583,7 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 			stateCleanupFiles:  files,
 			releasedFleetLocks: releasedLocks,
 			completedOwner:     true,
+			runDuplicate:       status == StatusDuplicate,
 		}
 		if payload.Result != nil {
 			// The fan-out round is the one part of the terminal path

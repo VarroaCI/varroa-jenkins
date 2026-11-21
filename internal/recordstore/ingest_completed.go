@@ -54,19 +54,23 @@ const summaryCompletedGuardSQL = `$15::text IS NOT NULL
 // releasedLocks names every fleet lock the owner arm deleted, one entry
 // per row, so the caller publishes one lock notification per released
 // row. A foreign completion releases nothing and answers no entry.
-func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) (owner bool, payload RunCompletedPayload, releasedLocks []ReleasedFleetLock, err error) {
+//
+// status is the row's stored status after the write. An owner write on a
+// DUPLICATE row keeps that status and still stores the result, so the
+// caller reports DUPLICATE, never COMPLETED.
+func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) (owner bool, status string, payload RunCompletedPayload, releasedLocks []ReleasedFleetLock, err error) {
 	if unmarshalErr := json.Unmarshal(env.Payload, &payload); unmarshalErr != nil {
-		return false, RunCompletedPayload{}, nil, fmt.Errorf("%w: decode run.completed payload: %v", ErrMalformedEnvelope, unmarshalErr)
+		return false, "", RunCompletedPayload{}, nil, fmt.Errorf("%w: decode run.completed payload: %v", ErrMalformedEnvelope, unmarshalErr)
 	}
 
 	owner = intent.cellInstance != nil && *intent.cellInstance != "" && env.CellInstance == *intent.cellInstance
 
 	envelopeJSON, err := json.Marshal(env)
 	if err != nil {
-		return false, RunCompletedPayload{}, nil, fmt.Errorf("marshal envelope: %w", err)
+		return false, "", RunCompletedPayload{}, nil, fmt.Errorf("marshal envelope: %w", err)
 	}
 
-	_, err = tx.Exec(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO varroa.runs (
 			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
 			status, result, ended_at, duration_ms, scm_revision, payload, summary
@@ -137,14 +141,15 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 			                  THEN jsonb_build_object('inputs_seq',
 			                           GREATEST($16::bigint, COALESCE((runs.payload->>'inputs_seq')::bigint, $16::bigint)))
 			                  ELSE '{}'::jsonb END
+		RETURNING status
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
 		intent.cellValue(), intent.tenant, intent.jobPath,
 		payload.Result, payload.EndedAt, payload.DurationMs, string(envelopeJSON),
 		owner, payload.SCMRevision, payload.Summary, payload.Seq,
-	)
+	).Scan(&status)
 	if err != nil {
-		return false, RunCompletedPayload{}, nil, fmt.Errorf("upsert completed run: %w", err)
+		return false, "", RunCompletedPayload{}, nil, fmt.Errorf("upsert completed run: %w", err)
 	}
 
 	// The fleet lock's first release confirmation (design.md D11): a
@@ -157,11 +162,11 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 	if owner {
 		releasedLocks, err = deleteFleetLocksForRun(ctx, tx, intent.runID.String())
 		if err != nil {
-			return false, RunCompletedPayload{}, nil, err
+			return false, "", RunCompletedPayload{}, nil, err
 		}
 	}
 
-	return owner, payload, releasedLocks, nil
+	return owner, status, payload, releasedLocks, nil
 }
 
 // ReleasedFleetLock is one fleet_locks row a terminal run.completed

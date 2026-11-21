@@ -16,7 +16,7 @@ func TestClaim_CappedClaimPublishesWaitOnChangeOnly(t *testing.T) {
 	seedCapPolicy(t, db, capTenantLimitOne)
 	notifier, sent, _ := newCaptureNotifier(t)
 	ledger := NewLedger(pool, nil)
-	ledger.SetWaitNotifier(notifier)
+	ledger.SetRunNotifier(notifier)
 
 	first := capRequest("cell-a")
 	mustGrant(t, ledger, first)
@@ -59,7 +59,7 @@ func TestClaim_UncappedTenantPublishesNoWait(t *testing.T) {
 	seedCapPolicy(t, db, map[string]any{})
 	notifier, sent, _ := newCaptureNotifier(t)
 	ledger := NewLedger(pool, nil)
-	ledger.SetWaitNotifier(notifier)
+	ledger.SetRunNotifier(notifier)
 
 	mustGrant(t, ledger, capRequest("cell-a"))
 	notifier.Close()
@@ -78,7 +78,7 @@ func TestClaim_RemovedLimitPublishesWaitCleared(t *testing.T) {
 	seedCapPolicy(t, db, capTenantLimitOne)
 	notifier, sent, _ := newCaptureNotifier(t)
 	ledger := NewLedger(pool, nil)
-	ledger.SetWaitNotifier(notifier)
+	ledger.SetRunNotifier(notifier)
 
 	mustGrant(t, ledger, capRequest("cell-a"))
 	waiting := capRequest("cell-a")
