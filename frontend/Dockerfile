@@ -5,7 +5,7 @@ ARG FRONTEND_DIST=source
 
 # Stage 1: Build
 # The dist tree does not depend on the target arch. The stage runs on the build platform.
-FROM --platform=$BUILDPLATFORM node:24-alpine AS dist-source
+FROM --platform=$BUILDPLATFORM node:26-alpine AS dist-source
 
 WORKDIR /app
 
