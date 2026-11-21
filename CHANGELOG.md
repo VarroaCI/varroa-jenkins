@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.10.1](https://github.com/VarroaCI/varroa-jenkins/compare/v0.10.0...v0.10.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* **api:** expand clusters all and accept an empty clusters array with qualified names ([bbe2f89](https://github.com/VarroaCI/varroa-jenkins/commit/bbe2f897a8dcdeb6eb1cf3d4deff16f0dcffff10))
+* **api:** refuse a Pattern scope that Java cannot compile ([e771001](https://github.com/VarroaCI/varroa-jenkins/commit/e77100192d4a5a732cee680f8678d97404d2099e))
+* **api:** refuse an unknown qualifier cluster and a missing brood operations store ([53cbb3f](https://github.com/VarroaCI/varroa-jenkins/commit/53cbb3f4eda8884bd5a927db22ec74bd55283737))
+* **api:** refuse cluster routes without a brood ([96e5cda](https://github.com/VarroaCI/varroa-jenkins/commit/96e5cda781734d138d62ee144b41eb84674134b9))
+* **api:** resolve the cluster of five more surfaces with ResolveCluster ([30b6e31](https://github.com/VarroaCI/varroa-jenkins/commit/30b6e3166cc940e3cee1fa97dde500742b45474b))
+* **chart:** allow NATS egress from bus.url when the release deploys no NATS ([e716164](https://github.com/VarroaCI/varroa-jenkins/commit/e71616444cbe5cd4f5a2184dbc8ff7c634897791))
+* **chart:** fail an empty bus.url when the release deploys no NATS ([0412a28](https://github.com/VarroaCI/varroa-jenkins/commit/0412a28d3f1d492ace0db62f9e323d9a591e2352))
+* **chart:** make bus.url the only bus URL value ([6b6a0ed](https://github.com/VarroaCI/varroa-jenkins/commit/6b6a0ed2165695477bcc2e44508db2bec99d674d))
+* **chart:** renew the NATS certificates before they expire ([e1f2f64](https://github.com/VarroaCI/varroa-jenkins/commit/e1f2f640083339f073fbf7931a04287a14ff1131))
+* **controller:** keep a refused JCasC document out of the CASC seed ([5e511a2](https://github.com/VarroaCI/varroa-jenkins/commit/5e511a27b06dc1f394d204da731aeb9b9716fde9))
+* **controller:** stop a refused rbac.yaml from holding waves and pushes ([3928fde](https://github.com/VarroaCI/varroa-jenkins/commit/3928fde8a710db90e01edb8fa66bfdddffa30b30))
+* **frontend:** add the Tenant agents row to the phone More sheet ([833734c](https://github.com/VarroaCI/varroa-jenkins/commit/833734cf34f9be62845155e45abc3d873ca7733e))
+* **frontend:** hide a sidebar group that has no visible row ([ebea9d8](https://github.com/VarroaCI/varroa-jenkins/commit/ebea9d8d134b32b507d7ccacce24eb3694cb9a55))
+* **frontend:** hide the Controllers row from a caller who reads no controller ([2fe025d](https://github.com/VarroaCI/varroa-jenkins/commit/2fe025d65df838a35bb88c129c2e48f8f5e872f5))
+* **frontend:** put the brood operation target tables in the shared scroll wrapper ([8315ed0](https://github.com/VarroaCI/varroa-jenkins/commit/8315ed0358a72e701e52249b2cd22796b992a6a3))
+* **frontend:** run the test workers without Node Web Storage ([68933bc](https://github.com/VarroaCI/varroa-jenkins/commit/68933bc55153cf030a410a159d93ecf0be3898d8))
+* **frontend:** show each cluster row in the brood operation preview ([3e8ed8e](https://github.com/VarroaCI/varroa-jenkins/commit/3e8ed8ed4cc8e37bf7ee682c7645943268ce7074))
+* **mcp:** correct the empty-scope refusal text and sync the scope specs ([b5fd53f](https://github.com/VarroaCI/varroa-jenkins/commit/b5fd53f7fc3158440cd848f60fefbc619f1170c1))
+* **mite:** create the log run state only after the owner check ([e692c52](https://github.com/VarroaCI/varroa-jenkins/commit/e692c522776ff6252d4273a08dc74afb0cc8b5f3))
+* **mite:** drop a finished run's log state and refuse a chunk of an abandoned run ([ea06aed](https://github.com/VarroaCI/varroa-jenkins/commit/ea06aedfb4d6d03d0b866780d9076467cbc3f431))
+* **mite:** give config.yaml and rbac.yaml separate reload verdicts ([e20827f](https://github.com/VarroaCI/varroa-jenkins/commit/e20827f99cb1c7a598339939e2816afad34e7bd5))
+* **mite:** mark a completed run terminal only for its owner ([13a9abe](https://github.com/VarroaCI/varroa-jenkins/commit/13a9abe6c4e6274c918f607d3f1cc06fd562cc53))
+* **mite:** stamp the job path on the gateway run.log envelope ([1a214b1](https://github.com/VarroaCI/varroa-jenkins/commit/1a214b1b717441d2fd27ab6b89c9a35446ef602e))
+* **recordstore:** publish a DUPLICATE run notification for each duplicate mark ([7c59cd4](https://github.com/VarroaCI/varroa-jenkins/commit/7c59cd48021e85504f436e1c91f0a1f0e50c1f48))
+* **recordstore:** publish a run notification for each interrupted mark ([fb31bf0](https://github.com/VarroaCI/varroa-jenkins/commit/fb31bf07df9672836faad2752865ef36f6422281))
+* **recordstore:** publish no run notification for a resume failure that changes no row ([0b256fe](https://github.com/VarroaCI/varroa-jenkins/commit/0b256feb1f28d47ab535ddf406a6632e2906633f))
+* **recordstore:** publish no terminal hint for a foreign run completion ([2347407](https://github.com/VarroaCI/varroa-jenkins/commit/2347407e6eafdbfb14c1df89d9e6e8d9dd241f0b))
+* **recordstore:** publish no trigger notification for a skipped write ([56fc3f9](https://github.com/VarroaCI/varroa-jenkins/commit/56fc3f9461de28ea5dd2a28550ae30d498915ff4))
+* **tenantagents:** prune only a binding that the owner rule gives to a TenantAgent ([475457d](https://github.com/VarroaCI/varroa-jenkins/commit/475457d0db5ef9fc027fd2843365d9f56f401443))
+
 ## [0.10.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.9.1...v0.10.0) (2026-11-16)
 
 
