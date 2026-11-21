@@ -1,10 +1,15 @@
-import { useEffect, useRef, useCallback } from "react";
+import { Fragment, useEffect, useRef, useCallback } from "react";
 import { NavLink } from "react-router-dom";
-import { Bot, Boxes, CircleUserRound, Clock3, Hexagon, PlugZap, Shield, Waypoints, Workflow } from "lucide-react";
 import { NavIcon } from "./NavIcon";
-import { usePermissions, canSeePipelines } from "../hooks/usePermissions";
-import { canCatalogArea, canAdminArea, canCellsRow, canAgentsRow, canControllersRow } from "../lib/navPermissions";
+import { usePermissions } from "../hooks/usePermissions";
+import { NAV_GROUPS, PROFILE_ROW, navRowVisible, type NavRowGroup } from "../lib/navRows";
 import styles from "./MoreSheet.module.css";
+
+// The sheet carries every table row the tab bar does not, then the Account group.
+const SHEET_GROUPS: readonly NavRowGroup[] = [
+  ...NAV_GROUPS.map((group) => ({ label: group.label, rows: group.rows.filter((row) => !row.tab) })),
+  { label: "Account", rows: [PROFILE_ROW] },
+];
 
 interface MoreSheetProps {
   onClose: () => void;
@@ -12,16 +17,6 @@ interface MoreSheetProps {
 
 export function MoreSheet({ onClose }: MoreSheetProps) {
   const { data: permissions } = usePermissions();
-  const showPlugins = canControllersRow(permissions);
-  const showPipelines = canSeePipelines(permissions);
-  const showCells = canCellsRow(permissions);
-  const showAgents = canAgentsRow(permissions);
-  // The group visibility is the union of its rows gates, or a row stays
-  // hidden for a caller who holds the grant of that row alone.
-  const showOperate = showPlugins || showPipelines || showCells || showAgents;
-  const showCatalog = canCatalogArea(permissions);
-  const showAdmin = canAdminArea(permissions);
-  const showManage = showCatalog || showAdmin;
   const sheetRef = useRef<HTMLDivElement>(null);
 
   const handleNav = useCallback(() => {
@@ -78,73 +73,23 @@ export function MoreSheet({ onClose }: MoreSheetProps) {
     <>
       <div className={styles.scrim} onClick={onClose} />
       <div className={styles.sheet} role="dialog" aria-modal="true" aria-label="More navigation" ref={sheetRef}>
-        {/* Operate — hidden entirely when no row's own gate passes */}
-        {showOperate && (
-          <>
-            <div className={styles.groupLabel}>Operate</div>
-            {showPipelines && (
-              <NavLink to="/pipelines" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Pipelines" onClick={handleNav}>
-                <span className={styles.rowIcon}><NavIcon icon={Waypoints} /></span>
-                <span className={styles.rowText}>Pipelines</span>
-              </NavLink>
-            )}
-            {showCells && (
-              <NavLink to="/cells" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Cells" onClick={handleNav}>
-                <span className={styles.rowIcon}><NavIcon icon={Hexagon} /></span>
-                <span className={styles.rowText}>Cells</span>
-              </NavLink>
-            )}
-            {showAgents && (
-              <NavLink to="/agents" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Tenant agents" onClick={handleNav}>
-                <span className={styles.rowIcon}><NavIcon icon={Bot} /></span>
-                <span className={styles.rowText}>Tenant agents</span>
-              </NavLink>
-            )}
-            {showPlugins && (
-              <NavLink to="/plugins" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Plugins" onClick={handleNav}>
-                <span className={styles.rowIcon}><NavIcon icon={PlugZap} /></span>
-                <span className={styles.rowText}>Plugins</span>
-              </NavLink>
-            )}
-          </>
-        )}
-
-        {/* Brood */}
-        <div className={styles.groupLabel}>Brood</div>
-        <NavLink to="/brood-operations" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Operations" onClick={handleNav}>
-          <span className={styles.rowIcon}><NavIcon icon={Workflow} /></span>
-          <span className={styles.rowText}>Operations</span>
-        </NavLink>
-        <NavLink to="/brood-schedules" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Schedules" onClick={handleNav}>
-          <span className={styles.rowIcon}><NavIcon icon={Clock3} /></span>
-          <span className={styles.rowText}>Schedules</span>
-        </NavLink>
-
-        {/* Manage — hidden if neither door is visible */}
-        {showManage && (
-          <>
-            <div className={styles.groupLabel}>Manage</div>
-            {showCatalog && (
-              <NavLink to="/catalog" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Catalog" onClick={handleNav}>
-                <span className={styles.rowIcon}><NavIcon icon={Boxes} /></span>
-                <span className={styles.rowText}>Catalog</span>
-              </NavLink>
-            )}
-            {showAdmin && (
-              <NavLink to="/settings" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Admin & access" onClick={handleNav}>
-                <span className={styles.rowIcon}><NavIcon icon={Shield} /></span>
-                <span className={styles.rowText}>Admin & access</span>
-              </NavLink>
-            )}
-          </>
-        )}
-
-        {/* Account */}
-        <div className={styles.groupLabel}>Account</div>
-        <NavLink to="/profile" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="My profile" onClick={handleNav}>
-          <span className={styles.rowIcon}><NavIcon icon={CircleUserRound} /></span>
-          <span className={styles.rowText}>My profile</span>
-        </NavLink>
+        {SHEET_GROUPS.map((group) => {
+          // A group shows when one of its rows shows, so a caller who holds
+          // the grant of one row alone still reaches that row.
+          const rows = group.rows.filter((row) => navRowVisible(row, permissions));
+          if (rows.length === 0) return null;
+          return (
+            <Fragment key={group.label}>
+              <div className={styles.groupLabel}>{group.label}</div>
+              {rows.map((row) => (
+                <NavLink key={row.to} to={row.to} end={row.end} className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label={row.label} onClick={handleNav}>
+                  <span className={styles.rowIcon}><NavIcon icon={row.icon} /></span>
+                  <span className={styles.rowText}>{row.label}</span>
+                </NavLink>
+              ))}
+            </Fragment>
+          );
+        })}
       </div>
     </>
   );
