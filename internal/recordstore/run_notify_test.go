@@ -449,8 +449,10 @@ func TestNotificationForMapsEveryKind(t *testing.T) {
 		{KindRunCommandRefused, RunCommandRefusedPayload{Command: RefusedCommandCancel}, "", "", "", 0, false},
 		{KindRunSource, RunSourcePayload{Seq: 0}, "run", "", "", 0, true},
 		{KindRunInput, RunInputPayload{Seq: inputSeqPtr(3), Inputs: runInputSet("input-1")}, "input", "", "", 0, true},
-		{KindRunTriggerAccepted, map[string]any{}, "run", "QUEUED", "", 0, true},
-		{KindRunTriggerFailed, map[string]any{}, "run", "COMPLETED", "TRIGGER_FAILED", 0, true},
+		// A zero ApplyResult is a skipped trigger write, which publishes
+		// nothing. TestNotificationForTriggerKinds holds the stored cases.
+		{KindRunTriggerAccepted, map[string]any{}, "", "", "", 0, false},
+		{KindRunTriggerFailed, map[string]any{}, "", "", "", 0, false},
 		{KindRunArtifacts, map[string]any{}, "", "", "", 0, false},
 		{KindJobSchedules, map[string]any{}, "", "", "", 0, false},
 		{KindJobBranches, map[string]any{}, "", "", "", 0, false},
@@ -573,6 +575,71 @@ func TestNotificationForResumeFailed(t *testing.T) {
 			}
 			if got.Kind != "run" || got.Status != "" || got.Result != "" || got.BuildNumber != 0 {
 				t.Fatalf("got %+v, want one run notification with no status, result, or build number", got)
+			}
+			if got.RunID != env.RunID || got.Cluster != testCluster || got.Tenant != testTenant || got.JobPath != testJobPath {
+				t.Fatalf("got %+v, want the envelope's run and coordinates", got)
+			}
+		})
+	}
+}
+
+// TestNotificationForTriggerKinds asserts a run.trigger_accepted or a
+// run.trigger_failed envelope publishes one run notification only when its
+// write stored a row. A skipped write changed no stored value, so it
+// publishes nothing.
+func TestNotificationForTriggerKinds(t *testing.T) {
+	cases := []struct {
+		name       string
+		kind       string
+		res        ApplyResult
+		wantOK     bool
+		wantStatus string
+		wantResult string
+	}{
+		{
+			name:       "a stored accept publishes a queued run",
+			kind:       KindRunTriggerAccepted,
+			res:        ApplyResult{TriggerAcceptedStored: true},
+			wantOK:     true,
+			wantStatus: "QUEUED",
+		},
+		{
+			name: "a skipped accept publishes nothing",
+			kind: KindRunTriggerAccepted,
+			res:  ApplyResult{},
+		},
+		{
+			name:       "a stored failure publishes a completed run",
+			kind:       KindRunTriggerFailed,
+			res:        ApplyResult{TriggerFailedReason: "JOB_NOT_FOUND", TriggerFailedStored: true},
+			wantOK:     true,
+			wantStatus: "COMPLETED",
+			wantResult: "TRIGGER_FAILED",
+		},
+		{
+			name: "a skipped failure publishes nothing",
+			kind: KindRunTriggerFailed,
+			res:  ApplyResult{TriggerFailedReason: "JOB_NOT_FOUND"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newTestEnvelope(t, uuid.MustParse(newTestUUIDv7String()),
+				"manual:notify-"+tc.kind, tc.kind, map[string]any{})
+
+			got, ok := notificationFor(env, tc.res)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if !ok {
+				if got != (RunNotification{}) {
+					t.Fatalf("notification = %+v, want the zero value", got)
+				}
+				return
+			}
+			if got.Kind != "run" || got.Status != tc.wantStatus || got.Result != tc.wantResult || got.BuildNumber != 0 {
+				t.Fatalf("got %s/%q/%q/%d, want run/%q/%q/0",
+					got.Kind, got.Status, got.Result, got.BuildNumber, tc.wantStatus, tc.wantResult)
 			}
 			if got.RunID != env.RunID || got.Cluster != testCluster || got.Tenant != testTenant || got.JobPath != testJobPath {
 				t.Fatalf("got %+v, want the envelope's run and coordinates", got)
