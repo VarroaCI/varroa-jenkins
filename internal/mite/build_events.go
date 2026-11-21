@@ -1560,7 +1560,7 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 		// The log writer's finalize deadline anchors on this moment, so
 		// it must be recorded before the ordered envelope group below
 		// reads the gateway's own incompleteness and finalized knowledge.
-		h.markRunTerminal(ns, name, evt.RunId, evt.JobPath, millisToTime(evt.CompletedAtMillis))
+		h.markCompletedRunTerminal(ns, name, evt)
 	}
 
 	kps, err := h.buildPayloadGroup(evt)
@@ -1586,4 +1586,35 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 		return fmt.Errorf("build event queue full for %s/%s: no room within the publish wait", ns, name)
 	}
 	return nil
+}
+
+// markCompletedRunTerminal sets the log finalize deadline of a COMPLETED
+// event's run, but only when checkOwner matches the sender to the run's
+// owner. The sender instance is the registered one, which the event's
+// envelope also carries. The record store keeps a completion from any
+// other instance out of the run's terminal state, so such a completion
+// must not start the deadline of the owner's log or create its state.
+// A failed lookup marks nothing: the owner's next chunk reads the
+// ledger again, and that answer carries the run's status and anchor.
+//
+// On an owner-cache miss the lookup blocks the read loop for at most
+// ownerLookupTimeout, the same bound OnLogChunk has. It holds no lock
+// while it calls checkOwner. markRunTerminal then takes h.logMu and
+// st.mu in its own order.
+func (h *BusHandler) markCompletedRunTerminal(ns, name string, evt *mitev1.BuildEvent) {
+	if h.logStore == nil {
+		return
+	}
+	instance := h.lookupCellInstance(ns, name)
+	decision, _ := h.checkOwner(context.Background(), h.cluster, ns, name, instance, evt.RunId)
+	switch decision {
+	case ownerMatched:
+		h.markRunTerminal(ns, name, evt.RunId, evt.JobPath, millisToTime(evt.CompletedAtMillis))
+	case ownerForeign:
+		h.log().Info("completed event from a cell that does not own the run, its log deadline is not set",
+			"controller", ns+"/"+name, "cell_instance", instance, "run_id", evt.RunId)
+	default:
+		h.log().Warn("owner lookup failed for a completed event, its log deadline waits for the next chunk",
+			"controller", ns+"/"+name, "cell_instance", instance, "run_id", evt.RunId)
+	}
 }
