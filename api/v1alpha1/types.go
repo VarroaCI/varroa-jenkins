@@ -1135,7 +1135,7 @@ const (
 const (
 	// ReasonReconcileBlocked is the parent/namespace anchor for the
 	// ReconcileBlocked reason family. markReconcileBlocked always sets
-	// Reason to one of the 19 site-specific sub-reasons below, never
+	// Reason to one of the site-specific sub-reasons below, never
 	// this bare parent string — it exists as a namespacing/doc anchor.
 	ReasonReconcileBlocked = "ReconcileBlocked"
 	// ReasonReconcileBlockedBundleUnreadable is set when the effective ComposedBundle is not found or unreadable.
@@ -1154,7 +1154,8 @@ const (
 	ReasonReconcileBlockedPluginsConfigMapFailed = "PluginsConfigMapFailed"
 	// ReasonReconcileBlockedInitConfigMapFailed is set when the init ConfigMap write fails.
 	ReasonReconcileBlockedInitConfigMapFailed = "InitConfigMapFailed"
-	// ReasonReconcileBlockedCascConfigMapFailed is set when the CASC ConfigMap write fails.
+	// ReasonReconcileBlockedCascConfigMapFailed is set when the CASC ConfigMap write fails,
+	// or when the read of the existing seed fails with an error other than NotFound.
 	ReasonReconcileBlockedCascConfigMapFailed = "CascConfigMapFailed"
 	// ReasonReconcileBlockedStatefulSetCreateFailed is set when the StatefulSet create/update fails.
 	ReasonReconcileBlockedStatefulSetCreateFailed = "StatefulSetCreateFailed"

@@ -107,11 +107,11 @@ func jenkinsUpstreamStamp(off bool) string {
 const resourcesSourceAnnotation = "varroa.dev/resources-source"
 
 // cascContentHashAnnotation stamps a hash of the CASC ConfigMap payload on
-// the pod template (not the object metadata), so a content change rolls the
-// pod: the init container that copies CASC content onto the PVC runs once at
-// pod creation and never reruns on a plain container restart, so a
-// crash-looping pod that never gets recreated would otherwise read the
-// stale copy forever.
+// the pod template, not on the object metadata. A content change therefore
+// rolls the pod. The casc-seed init container copies the ConfigMap into the
+// casc-bundle emptyDir only at pod start. A container restart keeps the
+// emptyDir and does not run the init container again. Without the roll, a
+// crash-looping pod reads the stale copy until Kubernetes recreates the pod.
 const cascContentHashAnnotation = "varroa.dev/casc-content-hash"
 
 // artifactSecretHashAnnotation stamps a content hash of the projected
