@@ -153,6 +153,146 @@ func TestApplySupersededStartPublishesNothing(t *testing.T) {
 	}
 }
 
+// TestApplyTriggerFailedRedeliveryPublishesOnce asserts a redelivered
+// run.trigger_failed publishes no second notification, because its insert
+// stored no row.
+func TestApplyTriggerFailedRedeliveryPublishesOnce(t *testing.T) {
+	t.Parallel()
+
+	pool, _ := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	g.SetRunNotifier(notifier)
+	ctx := context.Background()
+
+	runID := newTestUUIDv7String()
+	env := newTriggerFailedEnvelope(t, runID, "manual:notify-tf-redelivery")
+	if _, err := g.Apply(ctx, env); err != nil {
+		t.Fatalf("apply the first delivery: %v", err)
+	}
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications for the first delivery, want 1", got)
+	}
+	if got := sent.payload(0); got.Kind != "run" || got.Status != "COMPLETED" || got.Result != "TRIGGER_FAILED" {
+		t.Fatalf("published %+v, want one completed TRIGGER_FAILED run notification", got)
+	}
+
+	if _, err := g.Apply(ctx, env); err != nil {
+		t.Fatalf("apply the redelivery: %v", err)
+	}
+	flushRun(notifier, runID)
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications after the redelivery, want 1", got)
+	}
+}
+
+// TestApplyTriggerFailedForALiveRunKeepsHeldNotifications asserts a
+// run.trigger_failed for a run id that a live run holds publishes nothing.
+// A terminal hint would drop the held notification of the live run.
+func TestApplyTriggerFailedForALiveRunKeepsHeldNotifications(t *testing.T) {
+	t.Parallel()
+
+	pool, _ := setupLedgerPool(t)
+	const key = "manual:notify-tf-live"
+	runID := seedGrantedIntent(t, pool, key)
+	g := NewIngester(pool, nil, nil)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	g.SetRunNotifier(notifier)
+	ctx := context.Background()
+
+	buildNumber := int64(4)
+	started := newTestEnvelope(t, runID, key, KindRunStarted, RunStartedPayload{BuildNumber: &buildNumber})
+	if _, err := g.Apply(ctx, started); err != nil {
+		t.Fatalf("apply run.started: %v", err)
+	}
+	// The injected clock never moves, so the second stage write falls
+	// inside the stage slot's interval and is held.
+	for _, status := range []string{"IN_PROGRESS", "SUCCESS"} {
+		stage := newTestEnvelope(t, runID, key, KindRunStage, RunStagePayload{
+			StageID: "node-1", Name: "Build", NodeType: "stage", Status: status,
+		})
+		if _, err := g.Apply(ctx, stage); err != nil {
+			t.Fatalf("apply run.stage %s: %v", status, err)
+		}
+	}
+	if got := sent.count(); got != 2 {
+		t.Fatalf("published %d notifications before the failed trigger, want 2", got)
+	}
+
+	res, err := g.Apply(ctx, newTriggerFailedEnvelope(t, runID.String(), key))
+	if err != nil {
+		t.Fatalf("apply run.trigger_failed: %v", err)
+	}
+	if res.TriggerFailedStored {
+		t.Fatal("the envelope reports a stored row, but a live run already holds that run id")
+	}
+	if got := sent.count(); got != 2 {
+		t.Fatalf("published %d notifications after the failed trigger, want 2", got)
+	}
+
+	flushRun(notifier, runID.String())
+	if got := sent.count(); got != 3 {
+		t.Fatalf("published %d notifications after the flush, want 3", got)
+	}
+	for i := range sent.count() {
+		if got := sent.payload(i); got.Status == "COMPLETED" || got.Result != "" {
+			t.Fatalf("notification %d = %+v, want no terminal hint for a live run", i, got)
+		}
+	}
+	if got := sent.payload(2); got.Kind != "stage" {
+		t.Fatalf("flushed %+v, want the held stage notification", got)
+	}
+}
+
+// TestApplyTriggerAcceptedPublishesOnlyAStoredWrite asserts a
+// run.trigger_accepted publishes for an insert and for a move to a newer
+// cell, and publishes nothing for a redelivery or an older accept.
+func TestApplyTriggerAcceptedPublishesOnlyAStoredWrite(t *testing.T) {
+	t.Parallel()
+
+	pool, _ := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	g.SetRunNotifier(notifier)
+	ctx := context.Background()
+
+	runID := newTestUUIDv7String()
+	older := newTriggerAcceptedEnvelope(t, runID, "manual:"+runID)
+	older.Cell, older.CellInstance = "cell-b", "pod-b"
+	older.OccurredAt = older.OccurredAt.Add(-time.Minute)
+	newer := newTriggerAcceptedEnvelope(t, runID, "manual:"+runID)
+
+	// The injected clock never moves, so each stored write after the
+	// first is held. The flush after each step publishes what it holds.
+	steps := []struct {
+		name      string
+		env       IngestEnvelope
+		wantCount int
+	}{
+		{"the first accept stores a row", older, 1},
+		{"a redelivery stores nothing", older, 1},
+		{"a newer accept moves the row", newer, 2},
+		{"an older accept stores nothing", older, 2},
+	}
+	for _, step := range steps {
+		if _, err := g.Apply(ctx, step.env); err != nil {
+			t.Fatalf("%s: apply run.trigger_accepted: %v", step.name, err)
+		}
+		flushRun(notifier, runID)
+		if got := sent.count(); got != step.wantCount {
+			t.Fatalf("%s: published %d notifications, want %d", step.name, got, step.wantCount)
+		}
+	}
+	for i := range sent.count() {
+		if got := sent.payload(i); got.Kind != "run" || got.Status != "QUEUED" || got.Result != "" {
+			t.Fatalf("notification %d = %+v, want a queued run notification", i, got)
+		}
+	}
+}
+
 // TestApplyRunStagePublishesOneNotification asserts a committed run.stage
 // publishes exactly one stage notification.
 func TestApplyRunStagePublishesOneNotification(t *testing.T) {

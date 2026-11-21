@@ -157,9 +157,20 @@ func notificationFor(env IngestEnvelope, res ApplyResult) (RunNotification, bool
 		}
 		n.Kind = "run"
 	case KindRunTriggerAccepted:
+		// A write the conflict clause skipped changed no stored value,
+		// so it reports nothing, like a skipped refusal notice.
+		if !res.TriggerAcceptedStored {
+			return RunNotification{}, false
+		}
 		n.Kind = "run"
 		n.Status = "QUEUED"
 	case KindRunTriggerFailed:
+		// A write the conflict clause skipped changed no stored value,
+		// so it reports nothing. Its terminal hint would drop the held
+		// notifications of a live run that holds the run id.
+		if !res.TriggerFailedStored {
+			return RunNotification{}, false
+		}
 		n.Kind = "run"
 		n.Status = "COMPLETED"
 		n.Result = "TRIGGER_FAILED"
