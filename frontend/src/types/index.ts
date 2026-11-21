@@ -2522,7 +2522,8 @@ export interface RunNotification {
   /** Present on a started run; absent on every other frame. */
   build_number?: number;
   /** Empty when the write changed no run state. A page reads it only to
-   * decide whether an aggregate query refetches. */
+   * decide whether an aggregate query refetches. A terminal frame carries
+   * COMPLETED or DUPLICATE. */
   status?: string;
   /** Empty unless the run ended. No page renders it. */
   result?: string;

@@ -615,9 +615,22 @@ func TestNotificationForRunCompleted(t *testing.T) {
 			wantTerminal: true,
 		},
 		{
+			name:         "an owner write on a duplicate row publishes DUPLICATE and the result",
+			payload:      RunCompletedPayload{Result: &success},
+			res:          ApplyResult{CompletedOwner: true, RunDuplicate: true},
+			wantStatus:   StatusDuplicate,
+			wantResult:   "SUCCESS",
+			wantTerminal: true,
+		},
+		{
 			name:    "a foreign write publishes the identity alone",
 			payload: RunCompletedPayload{Result: &success},
 			res:     ApplyResult{},
+		},
+		{
+			name:    "a foreign write on a duplicate row publishes the identity alone",
+			payload: RunCompletedPayload{Result: &success},
+			res:     ApplyResult{RunDuplicate: true},
 		},
 		{
 			name:    "a foreign write with no result publishes the identity alone",
@@ -648,6 +661,55 @@ func TestNotificationForRunCompleted(t *testing.T) {
 	}
 }
 
+// TestNotificationForRunStartedDuplicate asserts a run.started write that
+// leaves its own run DUPLICATE publishes that status with the build
+// number, and that the notification is terminal.
+func TestNotificationForRunStartedDuplicate(t *testing.T) {
+	buildNumber := int64(42)
+	env := newTestEnvelope(t, uuid.MustParse(newTestUUIDv7String()),
+		"manual:notify-started-duplicate", KindRunStarted, RunStartedPayload{BuildNumber: &buildNumber})
+
+	got, ok := notificationFor(env, ApplyResult{RunDuplicate: true})
+	if !ok {
+		t.Fatal("ok = false, want one run notification")
+	}
+	if got.Kind != "run" || got.Status != StatusDuplicate || got.Result != "" || got.BuildNumber != buildNumber {
+		t.Fatalf("got %s/%q/%q/%d, want run/%q/\"\"/%d",
+			got.Kind, got.Status, got.Result, got.BuildNumber, StatusDuplicate, buildNumber)
+	}
+	if !isTerminalNotification(got) {
+		t.Fatalf("got %+v, want a terminal notification", got)
+	}
+	if got.RunID != env.RunID || got.Cluster != testCluster || got.Tenant != testTenant || got.JobPath != testJobPath {
+		t.Fatalf("got %+v, want the envelope's run and coordinates", got)
+	}
+}
+
+// TestRunNotifierDuplicatePublishesAtOnce asserts a DUPLICATE notification
+// is terminal: it publishes at once and drops the held state of its run.
+func TestRunNotifierDuplicatePublishesAtOnce(t *testing.T) {
+	n, sent, _ := newCaptureNotifier(t)
+	defer n.Close()
+
+	n.Notify(notifyOne("run-1", "run", "QUEUED"))
+	n.Notify(notifyOne("run-1", "stage", ""))
+	n.Notify(notifyOne("run-1", "stage", ""))
+	if got := sent.count(); got != 2 {
+		t.Fatalf("published %d notifications before the mark, want 2", got)
+	}
+
+	n.Notify(duplicateNotification(testCluster, testTenant, testJobPath, "run-1"))
+	if got := sent.count(); got != 3 {
+		t.Fatalf("published %d notifications after the mark, want 3", got)
+	}
+	if got := sent.payload(2); got.Status != StatusDuplicate || got.Result != "" || got.Kind != "run" {
+		t.Fatalf("published %+v, want a run/DUPLICATE notification", got)
+	}
+	if got := entryCount(n); got != 0 {
+		t.Fatalf("held %d entries after the mark, want 0", got)
+	}
+}
+
 // TestNotificationForTriggerKinds asserts a run.trigger_accepted or a
 // run.trigger_failed envelope publishes one run notification only when its
 // write stored a row. A skipped write changed no stored value, so it
@@ -667,6 +729,13 @@ func TestNotificationForTriggerKinds(t *testing.T) {
 			res:        ApplyResult{TriggerAcceptedStored: true},
 			wantOK:     true,
 			wantStatus: "QUEUED",
+		},
+		{
+			name:       "a stored accept of a taken key publishes a duplicate run",
+			kind:       KindRunTriggerAccepted,
+			res:        ApplyResult{TriggerAcceptedStored: true, RunDuplicate: true},
+			wantOK:     true,
+			wantStatus: StatusDuplicate,
 		},
 		{
 			name: "a skipped accept publishes nothing",

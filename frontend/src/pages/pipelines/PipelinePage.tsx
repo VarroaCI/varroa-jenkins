@@ -384,7 +384,8 @@ export default function PipelinePage() {
       } else if (ev.type === "run") {
         refetchRuns = true;
         // A terminal run moves the health values and the Last 30 days card.
-        if (ev.data.status === "COMPLETED") refetchJob = true;
+        // A DUPLICATE run is terminal too.
+        if (ev.data.status === "COMPLETED" || ev.data.status === "DUPLICATE") refetchJob = true;
       }
       // The page drops a stage frame: the table and the job read carry no
       // stage value.

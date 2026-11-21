@@ -108,7 +108,7 @@ func notificationFor(env IngestEnvelope, res ApplyResult) (RunNotification, bool
 			return RunNotification{}, false
 		}
 		n.Kind = "run"
-		n.Status = "RUNNING"
+		n.Status = runOrDuplicate("RUNNING", res)
 		n.BuildNumber = startedBuildNumber(env)
 	case KindRunCompleted:
 		n.Kind = "run"
@@ -117,7 +117,7 @@ func notificationFor(env IngestEnvelope, res ApplyResult) (RunNotification, bool
 		// terminal hint would drop the held notifications of a run that
 		// is still live on its owner.
 		if res.CompletedOwner {
-			n.Status = "COMPLETED"
+			n.Status = runOrDuplicate("COMPLETED", res)
 			n.Result = completedResult(env)
 		}
 	case KindRunStage:
@@ -169,7 +169,7 @@ func notificationFor(env IngestEnvelope, res ApplyResult) (RunNotification, bool
 			return RunNotification{}, false
 		}
 		n.Kind = "run"
-		n.Status = "QUEUED"
+		n.Status = runOrDuplicate("QUEUED", res)
 	case KindRunTriggerFailed:
 		// A write the conflict clause skipped changed no stored value,
 		// so it reports nothing. Its terminal hint would drop the held
@@ -186,6 +186,32 @@ func notificationFor(env IngestEnvelope, res ApplyResult) (RunNotification, bool
 		return RunNotification{}, false
 	}
 	return n, true
+}
+
+// runOrDuplicate answers the status hint of a write that sets a run
+// state. A write that leaves the envelope's own run DUPLICATE reports
+// DUPLICATE in place of status, because the stored row keeps that status
+// for good.
+func runOrDuplicate(status string, res ApplyResult) string {
+	if res.RunDuplicate {
+		return StatusDuplicate
+	}
+	return status
+}
+
+// duplicateNotification builds the run notification of one runs row that
+// a write moved to DUPLICATE. cluster, tenant, jobPath, and runID are the
+// marked row's own values, never the caller's request. Seq and At stay
+// zero, because Notify stamps both under its own lock.
+func duplicateNotification(cluster, tenant, jobPath, runID string) RunNotification {
+	return RunNotification{
+		Kind:    "run",
+		Cluster: cluster,
+		Tenant:  tenant,
+		JobPath: jobPath,
+		RunID:   runID,
+		Status:  StatusDuplicate,
+	}
 }
 
 // startedBuildNumber reads the build number from a run.started payload. A
@@ -330,9 +356,9 @@ func (r *RunNotifier) Notify(n RunNotification) {
 }
 
 // isTerminalNotification reports whether a notification reports a state
-// the run cannot leave.
+// the run cannot leave. A DUPLICATE row never changes its status again.
 func isTerminalNotification(n RunNotification) bool {
-	return n.Status == "COMPLETED" || n.Result != ""
+	return n.Status == "COMPLETED" || n.Status == StatusDuplicate || n.Result != ""
 }
 
 // fire is the slot's timer callback. A timer that fired before a stop can

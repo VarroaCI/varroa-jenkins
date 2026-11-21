@@ -163,7 +163,9 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 
 	if status != StatusQueued && status != StatusRunning {
 		// The arriving run is no longer live: an out-of-order run.completed
-		// already finished it. The duplicate backstop does not apply.
+		// already finished it, or the backstop already marked it. The
+		// duplicate backstop does not apply.
+		res.runDuplicate = status == StatusDuplicate
 		return res, nil
 	}
 
@@ -171,9 +173,19 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 	if payload.SCMRevision != nil {
 		revision = *payload.SCMRevision
 	}
-	action, err := runDuplicateBackstop(ctx, tx, intent, revision)
+	action, marked, err := runDuplicateBackstop(ctx, tx, intent, revision)
+	if err != nil {
+		return dispatchResult{}, err
+	}
 	res.action = action
-	return res, err
+	// The arriving run's own notification reports its mark, so only a
+	// mark of another run needs a notification of its own.
+	if marked != nil && marked.RunID == intent.runID.String() {
+		res.runDuplicate = true
+	} else {
+		res.markedDuplicate = marked
+	}
+	return res, nil
 }
 
 // takeUnstartedGrant frees number for the arriving run when another

@@ -24,15 +24,19 @@ const scmIntentKeyPrefix = string(IntentSchemeSCM) + ":"
 // hashtextextended computes over the tuple, joined with a unit separator
 // so two different tuples with the same concatenation never collide. The
 // lock is transaction-scoped and needs no unlock.
-func runDuplicateBackstop(ctx context.Context, tx pgx.Tx, intent *intentRow, revision string) (*LedgerAction, error) {
+//
+// It also answers the run notification of the row it marked, built from
+// that row's own identity, so the caller publishes it after the commit.
+// Both answers are nil when it marks no row.
+func runDuplicateBackstop(ctx context.Context, tx pgx.Tx, intent *intentRow, revision string) (*LedgerAction, *RunNotification, error) {
 	if revision == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	arrivingSCM := strings.HasPrefix(intent.intentKey, scmIntentKeyPrefix)
 
 	key := intent.cluster + "\x1f" + intent.tenant + "\x1f" + intent.jobPath + "\x1f" + revision
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
-		return nil, fmt.Errorf("take duplicate backstop lock: %w", err)
+		return nil, nil, fmt.Errorf("take duplicate backstop lock: %w", err)
 	}
 
 	var otherRunID uuid.UUID
@@ -47,34 +51,35 @@ func runDuplicateBackstop(ctx context.Context, tx pgx.Tx, intent *intentRow, rev
 	`, intent.cluster, intent.tenant, intent.jobPath, revision, intent.runID, arrivingSCM, scmIntentKeyPrefix).Scan(&otherRunID, &otherCreatedAt)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return nil, nil
+		return nil, nil, nil
 	case err != nil:
-		return nil, fmt.Errorf("find live revision duplicate: %w", err)
+		return nil, nil, fmt.Errorf("find live revision duplicate: %w", err)
 	}
 
 	newerRunID, newerCreatedAt := newerOf(intent.runID, intent.createdAt, otherRunID, otherCreatedAt)
 
 	var cell *string
 	var buildNumber *int64
-	var jobPath, namespace string
+	var cluster, tenant, jobPath, namespace string
 	err = tx.QueryRow(ctx, `
 		UPDATE varroa.runs
 		SET status = 'DUPLICATE'
 		WHERE run_id = $1 AND created_at = $2 AND status IN ('QUEUED', 'RUNNING')
-		RETURNING cell, build_number, job_path, namespace
-	`, newerRunID, newerCreatedAt).Scan(&cell, &buildNumber, &jobPath, &namespace)
+		RETURNING cell, build_number, cluster, tenant, job_path, namespace
+	`, newerRunID, newerCreatedAt).Scan(&cell, &buildNumber, &cluster, &tenant, &jobPath, &namespace)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		// Another transaction already resolved this pair; nothing to publish.
-		return nil, nil
+		return nil, nil, nil
 	case err != nil:
-		return nil, fmt.Errorf("mark duplicate run: %w", err)
+		return nil, nil, fmt.Errorf("mark duplicate run: %w", err)
 	}
 
 	controller := ""
 	if cell != nil {
 		controller = *cell
 	}
+	marked := duplicateNotification(cluster, tenant, jobPath, newerRunID.String())
 	return &LedgerAction{
 		Kind:        LedgerActionCancelRun,
 		Cluster:     intent.cluster,
@@ -84,7 +89,7 @@ func runDuplicateBackstop(ctx context.Context, tx pgx.Tx, intent *intentRow, rev
 		RunID:       newerRunID.String(),
 		JobPath:     jobPath,
 		BuildNumber: buildNumber,
-	}, nil
+	}, &marked, nil
 }
 
 // newerOf orders two (created_at, run_id) pairs by design's total order

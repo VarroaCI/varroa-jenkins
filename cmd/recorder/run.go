@@ -193,7 +193,7 @@ func run(ctx context.Context, cfg Config) error {
 	}
 	runNotifier := recordstore.NewRunNotifier(busConn, logger)
 	ledger.SetVetoMarking(runNotifier, activityPub)
-	ledger.SetWaitNotifier(runNotifier)
+	ledger.SetRunNotifier(runNotifier)
 	backstopCfg := recordstore.BackstopConfig{
 		MaxSweepPending:    cfg.SweepMaxPending,
 		ConfirmedGoneGrace: confirmedGoneGrace,

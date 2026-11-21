@@ -49,19 +49,22 @@ func (l *Ledger) MarkStart(ctx context.Context, req ClaimRequest, runID uuid.UUI
 			HomeSlot: result.HomeSlot}
 	}
 
-	resp, err := markStartTx(ctx, tx, req, runID)
+	resp, marked, err := markStartTx(ctx, tx, req, runID)
 	if err != nil {
 		return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}
 	}
+	l.notifyDuplicate(marked)
 	return resp
 }
 
 // markStartTx reads the intent under FOR UPDATE and stores the mark when
-// the request names the stored run and the stored owner.
-func markStartTx(ctx context.Context, tx pgx.Tx, req ClaimRequest, runID uuid.UUID) (ClaimResponse, error) {
+// the request names the stored run and the stored owner. The second
+// answer is the run notification of the requesting run's row when the
+// answer marked it DUPLICATE, or nil.
+func markStartTx(ctx context.Context, tx pgx.Tx, req ClaimRequest, runID uuid.UUID) (ClaimResponse, *RunNotification, error) {
 	var row storedIntent
 	err := tx.QueryRow(ctx, `
 		SELECT run_id, cell_instance, placement_generation, state, build_number, start_marked_at
@@ -73,9 +76,9 @@ func markStartTx(ctx context.Context, tx pgx.Tx, req ClaimRequest, runID uuid.UU
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonInvalidKey,
-			Message: "no grant holds this intent key"}, nil
+			Message: "no grant holds this intent key"}, nil, nil
 	case err != nil:
-		return ClaimResponse{}, fmt.Errorf("read intent for start mark: %w", err)
+		return ClaimResponse{}, nil, fmt.Errorf("read intent for start mark: %w", err)
 	}
 
 	if row.runID != runID {
@@ -84,29 +87,30 @@ func markStartTx(ctx context.Context, tx pgx.Tx, req ClaimRequest, runID uuid.UU
 		// duplicate claim's row does.
 		_, createdAt, err := parseRunUUIDv7(req.RunID)
 		if err != nil {
-			return ClaimResponse{}, fmt.Errorf("parse run id of a duplicate start mark: %w", err)
+			return ClaimResponse{}, nil, fmt.Errorf("parse run id of a duplicate start mark: %w", err)
 		}
-		if err := markDuplicateClaim(ctx, tx, runID, createdAt); err != nil {
-			return ClaimResponse{}, err
+		marked, err := markDuplicateClaim(ctx, tx, runID, createdAt)
+		if err != nil {
+			return ClaimResponse{}, nil, err
 		}
-		return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, nil
+		return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, marked, nil
 	}
 	if storedOwner(row) != req.CellInstance {
 		// The same run moved to another owner, which builds it. Its row is
 		// that build's own row, so the answer writes nothing.
-		return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, nil
+		return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, nil, nil
 	}
 	if req.PlacementGeneration < row.placementGeneration {
-		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonFenced, RunID: row.runID.String()}, nil
+		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonFenced, RunID: row.runID.String()}, nil, nil
 	}
 	buildNumber := derefInt64(row.buildNumber)
 	if row.state == stateConsumed || row.startMarkedAt != nil {
-		return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, nil
+		return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, nil, nil
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE varroa.run_intents SET start_marked_at = now() WHERE intent_key = $1
 	`, req.IntentKey); err != nil {
-		return ClaimResponse{}, fmt.Errorf("store start mark: %w", err)
+		return ClaimResponse{}, nil, fmt.Errorf("store start mark: %w", err)
 	}
-	return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, nil
+	return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, nil, nil
 }

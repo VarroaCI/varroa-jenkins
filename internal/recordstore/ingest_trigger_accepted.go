@@ -3,7 +3,10 @@ package recordstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // RunTriggerAcceptedPayload is the part of a run.trigger_accepted
@@ -63,7 +66,11 @@ func (g *Ingester) applyTriggerAccepted(ctx context.Context, env IngestEnvelope)
 		_ = tx.Rollback(ctx)
 	}()
 
-	tag, err := tx.Exec(ctx, `
+	// The statement answers the stored status, because the insert can
+	// store DUPLICATE in place of QUEUED. A write the conflict clause
+	// skips answers no row.
+	var status string
+	err = tx.QueryRow(ctx, `
 		INSERT INTO varroa.runs (
 			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
 			status, ended_at, actor, payload
@@ -88,12 +95,17 @@ func (g *Ingester) applyTriggerAccepted(ctx context.Context, env IngestEnvelope)
 		  AND COALESCE(runs.payload ? 'accepted_at', false)
 		  AND (runs.namespace, runs.cell) IS DISTINCT FROM (EXCLUDED.namespace, EXCLUDED.cell)
 		  AND (runs.payload->>'accepted_at')::timestamptz < $10::timestamptz
+		RETURNING status
 	`,
 		runID, createdAt, env.IntentKey, env.Cluster, env.Namespace, env.Cell, env.Tenant, env.JobPath,
 		nullableString(payload.Actor),
 		env.OccurredAt, env.CellInstance,
-	)
-	if err != nil {
+	).Scan(&status)
+	stored := true
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		stored = false
+	case err != nil:
 		return ApplyResult{}, fmt.Errorf("insert accepted trigger run: %w", err)
 	}
 
@@ -102,6 +114,7 @@ func (g *Ingester) applyTriggerAccepted(ctx context.Context, env IngestEnvelope)
 	}
 
 	return ApplyResult{
-		TriggerAcceptedStored: tag.RowsAffected() > 0,
+		TriggerAcceptedStored: stored,
+		RunDuplicate:          status == StatusDuplicate,
 	}, nil
 }

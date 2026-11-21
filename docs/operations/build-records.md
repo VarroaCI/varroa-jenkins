@@ -148,6 +148,8 @@ A page treats a notification as a hint and refetches the record.
 
 The recorder coalesces each kind of a run on its own. A change waits at most 500 milliseconds, and a newer change of the same kind replaces it. A change of another kind never replaces it. A terminal state publishes at once.
 
+A terminal state is `COMPLETED` or `DUPLICATE`. The record store marks a run `DUPLICATE` when another run holds its intent key, or when an earlier run of the same revision is still live. The recorder then publishes one notification with the status `DUPLICATE` for that run.
+
 With a closed stream, the build page reads a live run's record every 3 seconds.
 
 ## Activity history
