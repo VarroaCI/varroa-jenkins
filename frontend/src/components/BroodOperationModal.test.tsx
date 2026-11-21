@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/render-utils";
 import { BroodOperationModal } from "./BroodOperationModal";
@@ -78,6 +78,126 @@ describe("BroodOperationModal", () => {
       expect.arrayContaining(["default/ctrl-a", "team-b/ctrl-b"]),
     );
     expect(body.clusters).toEqual(["core"]);
+  });
+
+  it("previews every cluster row of the response, in response order", async () => {
+    const user = userEvent.setup();
+    mockPreviewBroodOperation.mockResolvedValue({
+      clusters: [
+        { cluster: "core", ok: true, targets: [
+          { namespace: "default", name: "ctrl-a", wave: 0, applicable: true },
+        ]},
+        { cluster: "member-b", ok: true, targets: [
+          { namespace: "default", name: "ctrl-m", wave: 1, applicable: false, reason: "not Connected" },
+        ]},
+      ],
+    });
+    renderModal({ targets: ["core/default/ctrl-a", "member-b/default/ctrl-m"] });
+
+    await user.click(screen.getByText("Preview"));
+
+    const core = await screen.findByRole("region", { name: "Cluster: core" });
+    const member = screen.getByRole("region", { name: "Cluster: member-b" });
+    expect(within(core).getByText("ctrl-a")).toBeInTheDocument();
+    expect(within(core).queryByText("ctrl-m")).not.toBeInTheDocument();
+    expect(within(member).getByText("ctrl-m")).toBeInTheDocument();
+    expect(within(member).getByText("not Connected")).toBeInTheDocument();
+    const order = screen.getAllByRole("region", { name: /^Cluster: / })
+      .map((r) => within(r).getByText(/^Cluster: /).textContent);
+    expect(order).toEqual(["Cluster: core", "Cluster: member-b"]);
+  });
+
+  it("shows a cluster error next to a cluster with targets", async () => {
+    const user = userEvent.setup();
+    mockPreviewBroodOperation.mockResolvedValue({
+      clusters: [
+        { cluster: "core", ok: true, targets: [
+          { namespace: "default", name: "ctrl-a", wave: 0, applicable: true },
+        ]},
+        { cluster: "member-b", ok: false, error: "cluster member-b unreachable: nats: timeout" },
+      ],
+    });
+    renderModal({ targets: ["core/default/ctrl-a", "member-b/default/ctrl-m"] });
+
+    await user.click(screen.getByText("Preview"));
+
+    const member = await screen.findByRole("region", { name: "Cluster: member-b" });
+    expect(within(member).getByText("cluster member-b unreachable: nats: timeout")).toBeInTheDocument();
+    expect(within(member).queryByRole("table")).not.toBeInTheDocument();
+    const core = screen.getByRole("region", { name: "Cluster: core" });
+    expect(within(core).getByRole("table")).toBeInTheDocument();
+    expect(within(core).getByText("ctrl-a")).toBeInTheDocument();
+  });
+
+  it("shows a no-match note for a cluster row without targets", async () => {
+    const user = userEvent.setup();
+    // The server omits an empty targets list.
+    mockPreviewBroodOperation.mockResolvedValue({
+      clusters: [
+        { cluster: "core", ok: true },
+        { cluster: "member-b", ok: true, targets: [
+          { namespace: "default", name: "ctrl-m", wave: 0, applicable: true },
+        ]},
+      ],
+    });
+    renderModal({ targets: ["core/default/ctrl-a", "member-b/default/ctrl-m"] });
+
+    await user.click(screen.getByText("Preview"));
+
+    const core = await screen.findByRole("region", { name: "Cluster: core" });
+    expect(within(core).getByText("No controllers match.")).toBeInTheDocument();
+    expect(within(core).queryByRole("table")).not.toBeInTheDocument();
+    const member = screen.getByRole("region", { name: "Cluster: member-b" });
+    expect(within(member).getByText("ctrl-m")).toBeInTheDocument();
+  });
+
+  it("shows a one-cluster preview without a cluster name", async () => {
+    const user = userEvent.setup();
+    mockPreviewBroodOperation.mockResolvedValue({
+      clusters: [{ cluster: "core", ok: true, targets: [
+        { namespace: "default", name: "ctrl-a", wave: 0, applicable: true },
+      ]}],
+    });
+    renderModal();
+
+    await user.click(screen.getByText("Preview"));
+
+    expect(await screen.findByText("ctrl-a")).toBeInTheDocument();
+    expect(screen.queryByText("Cluster: core")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Cluster:/ })).not.toBeInTheDocument();
+  });
+
+  it("shows a no-match note for a one-cluster preview without targets", async () => {
+    const user = userEvent.setup();
+    mockPreviewBroodOperation.mockResolvedValue({ clusters: [{ cluster: "core", ok: true }] });
+    renderModal();
+
+    await user.click(screen.getByText("Preview"));
+
+    expect(await screen.findByText("No controllers match.")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("puts each preview table in the shared scroll wrapper", async () => {
+    const user = userEvent.setup();
+    mockPreviewBroodOperation.mockResolvedValue({
+      clusters: [
+        { cluster: "core", ok: true, targets: [
+          { namespace: "default", name: "ctrl-a", wave: 0, applicable: true },
+        ]},
+        { cluster: "member-b", ok: true, targets: [
+          { namespace: "default", name: "ctrl-m", wave: 0, applicable: true },
+        ]},
+      ],
+    });
+    renderModal({ targets: ["core/default/ctrl-a", "member-b/default/ctrl-m"] });
+
+    await user.click(screen.getByText("Preview"));
+
+    await screen.findByText("ctrl-m");
+    const tables = screen.getAllByRole("table");
+    expect(tables).toHaveLength(2);
+    tables.forEach((t) => expect(t.parentElement?.className).toMatch(/tableScroll/));
   });
 
   it("shows the preview error when the preview call fails", async () => {

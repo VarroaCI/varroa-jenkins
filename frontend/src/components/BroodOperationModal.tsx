@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { previewBroodOperation, createBroodOperation, getProvisioningConfig } from "../api/client";
 import { Button } from "./Button";
@@ -6,7 +6,7 @@ import VersionPicker from "./VersionPicker";
 import { broodTargetShape } from "../lib/broodTargets";
 import { parseClearableInt, clampClearableInt } from "../lib/numericInput";
 import { useCatalogItems } from "../hooks/useCatalog";
-import type { BroodVerb, BroodOrder, BroodFailurePolicy, BroodPreviewTarget, BroodRun, BroodAction } from "../types";
+import type { BroodVerb, BroodOrder, BroodFailurePolicy, BroodPreviewSection, BroodRun, BroodAction } from "../types";
 import styles from "./BroodOperationModal.module.css";
 
 interface BroodOperationModalProps {
@@ -23,7 +23,7 @@ export function BroodOperationModal({ targets, onClose, onSubmitted, embedded = 
   const [maxParallel, setMaxParallel] = useState<number | "">(1);
   const [order, setOrder] = useState<BroodOrder>("rolloutWave");
   const [failurePolicy, setFailurePolicy] = useState<BroodFailurePolicy>("FailTidy");
-  const [preview, setPreview] = useState<BroodPreviewTarget[] | null>(null);
+  const [preview, setPreview] = useState<BroodPreviewSection[] | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
@@ -175,7 +175,7 @@ export function BroodOperationModal({ targets, onClose, onSubmitted, embedded = 
         clusters: shape.clusters,
       });
       if (previewRequestRef.current !== requestId || !mountedRef.current) return;
-      setPreview(result.clusters[0]?.targets ?? null);
+      setPreview(result.clusters);
     } catch (e: any) {
       if (previewRequestRef.current !== requestId || !mountedRef.current) return;
       setError(e.message ?? "Preview failed");
@@ -538,22 +538,11 @@ export function BroodOperationModal({ targets, onClose, onSubmitted, embedded = 
         </Button>
 
         {preview && (
-          <table className={styles.broodTable}>
-            <thead>
-              <tr><th>Namespace</th><th>Name</th><th>Wave</th><th>Applicable</th><th>Reason</th></tr>
-            </thead>
-            <tbody>
-              {preview.map((t, i) => (
-                <tr key={i}>
-                  <td>{t.namespace}</td>
-                  <td>{t.name}</td>
-                  <td>{t.wave}</td>
-                  <td>{t.applicable ? "yes" : "no"}</td>
-                  <td>{t.reason ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className={styles.previewClusters}>
+            {preview.map((section) => (
+              <PreviewCluster key={section.cluster} section={section} named={preview.length > 1} />
+            ))}
+          </div>
         )}
       </div>
 
@@ -588,5 +577,42 @@ export function BroodOperationModal({ targets, onClose, onSubmitted, embedded = 
         {content}
       </div>
     </div>
+  );
+}
+
+// PreviewCluster renders one row of the preview response: the targets of one
+// cluster, or the error of that cluster. A response with one row shows no
+// cluster name.
+function PreviewCluster({ section, named }: { section: BroodPreviewSection; named: boolean }) {
+  const nameId = useId();
+  const targets = section.targets ?? [];
+  return (
+    <section className={styles.previewCluster} aria-labelledby={named ? nameId : undefined}>
+      {named && <div id={nameId} className={styles.previewClusterName}>{`Cluster: ${section.cluster}`}</div>}
+      {!section.ok ? (
+        <span className={styles.previewClusterError}>{section.error || "The cluster did not answer."}</span>
+      ) : targets.length === 0 ? (
+        <span className={styles.groovyMuted}>No controllers match.</span>
+      ) : (
+        <div className={styles.tableScroll}>
+          <table className={styles.broodTable}>
+            <thead>
+              <tr><th>Namespace</th><th>Name</th><th>Wave</th><th>Applicable</th><th>Reason</th></tr>
+            </thead>
+            <tbody>
+              {targets.map((t) => (
+                <tr key={`${t.namespace}/${t.name}`}>
+                  <td>{t.namespace}</td>
+                  <td>{t.name}</td>
+                  <td>{t.wave}</td>
+                  <td>{t.applicable ? "yes" : "no"}</td>
+                  <td>{t.reason ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
