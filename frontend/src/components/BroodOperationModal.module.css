@@ -34,7 +34,7 @@
 
 .broodForm {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -62,10 +62,36 @@
   margin-bottom: 12px;
 }
 
+.previewClusters {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.previewCluster {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.previewClusterName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.previewClusterError {
+  color: var(--bad-text);
+  font-size: 13px;
+}
+
+.tableScroll { composes: tableScroll from "../pages/tables.module.css"; }
+
 .broodTable {
   width: 100%;
+  min-width: 420px;
   border-collapse: collapse;
-  margin-top: 8px;
   font-size: 12px;
 }
 
