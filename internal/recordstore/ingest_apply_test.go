@@ -293,6 +293,173 @@ func TestApplyTriggerAcceptedPublishesOnlyAStoredWrite(t *testing.T) {
 	}
 }
 
+// TestApplyForeignRunCompletedKeepsHeldNotifications asserts a run.completed
+// from an instance that does not own the run publishes no terminal hint. The
+// run is still live on its owner, so its held notifications stay.
+func TestApplyForeignRunCompletedKeepsHeldNotifications(t *testing.T) {
+	t.Parallel()
+
+	pool, _ := setupLedgerPool(t)
+	const key = "manual:notify-completed-foreign-live"
+	runID := seedGrantedIntent(t, pool, key)
+	g := NewIngester(pool, nil, nil)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	g.SetRunNotifier(notifier)
+	ctx := context.Background()
+
+	buildNumber := int64(4)
+	started := newTestEnvelope(t, runID, key, KindRunStarted, RunStartedPayload{BuildNumber: &buildNumber})
+	if _, err := g.Apply(ctx, started); err != nil {
+		t.Fatalf("apply run.started: %v", err)
+	}
+	// The injected clock never moves, so the second stage write falls
+	// inside the stage slot's interval and is held.
+	for _, status := range []string{"IN_PROGRESS", "SUCCESS"} {
+		stage := newTestEnvelope(t, runID, key, KindRunStage, RunStagePayload{
+			StageID: "node-1", Name: "Build", NodeType: "stage", Status: status,
+		})
+		if _, err := g.Apply(ctx, stage); err != nil {
+			t.Fatalf("apply run.stage %s: %v", status, err)
+		}
+	}
+	if got := sent.count(); got != 2 {
+		t.Fatalf("published %d notifications before the foreign completion, want 2", got)
+	}
+
+	foreign := newTestEnvelope(t, runID, key, KindRunCompleted, RunCompletedPayload{Result: strPtr("FAILURE")})
+	foreign.CellInstance = "pod-b"
+	res, err := g.Apply(ctx, foreign)
+	if err != nil {
+		t.Fatalf("apply the foreign run.completed: %v", err)
+	}
+	if res.CompletedOwner {
+		t.Fatal("the result reports an owner write, but pod-b does not own the run")
+	}
+	// The run slot published run.started inside the same interval, so the
+	// identity-only notification of the foreign completion is held too.
+	if got := sent.count(); got != 2 {
+		t.Fatalf("published %d notifications after the foreign completion, want 2", got)
+	}
+
+	flushRun(notifier, runID.String())
+	if got := sent.count(); got != 4 {
+		t.Fatalf("published %d notifications after the flush, want 4", got)
+	}
+	for i := range sent.count() {
+		if got := sent.payload(i); got.Status == "COMPLETED" || got.Result != "" {
+			t.Fatalf("notification %d = %+v, want no terminal hint for a live run", i, got)
+		}
+	}
+	// flushRun flushes the slots in kind order: run, then stage.
+	if got := sent.payload(2); got.Kind != "run" || got.Status != "" {
+		t.Fatalf("flushed %+v, want the identity-only run notification", got)
+	}
+	if got := sent.payload(3); got.Kind != "stage" {
+		t.Fatalf("flushed %+v, want the held stage notification", got)
+	}
+}
+
+// TestApplyRunCompletedPublishesATerminalHintOnlyForTheOwner asserts each
+// run.completed path of one run publishes the notification its write
+// earns. An owner write publishes a terminal hint, also on a redelivery. A
+// foreign write publishes the identity alone, also before the run has a
+// row and after the run ended.
+func TestApplyRunCompletedPublishesATerminalHintOnlyForTheOwner(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	const key = "manual:notify-completed-paths"
+	runID := seedGrantedIntent(t, pool, key)
+	g := NewIngester(pool, nil, nil)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	g.SetRunNotifier(notifier)
+	ctx := context.Background()
+
+	owner := newTestEnvelope(t, runID, key, KindRunCompleted, RunCompletedPayload{Result: strPtr("SUCCESS")})
+	foreign := newTestEnvelope(t, runID, key, KindRunCompleted, RunCompletedPayload{Result: strPtr("FAILURE")})
+	foreign.CellInstance = "pod-b"
+
+	steps := []struct {
+		name       string
+		env        IngestEnvelope
+		wantOwner  bool
+		wantStatus string
+		wantResult string
+		wantRow    string
+	}{
+		{"a foreign completion with no run row", foreign, false, "", "", StatusQueued},
+		{"the owner completion", owner, true, StatusCompleted, "SUCCESS", StatusCompleted},
+		{"a redelivery of the owner completion", owner, true, StatusCompleted, "SUCCESS", StatusCompleted},
+		{"a foreign completion after the end", foreign, false, "", "", StatusCompleted},
+	}
+	for i, step := range steps {
+		res, err := g.Apply(ctx, step.env)
+		if err != nil {
+			t.Fatalf("%s: apply run.completed: %v", step.name, err)
+		}
+		if res.CompletedOwner != step.wantOwner {
+			t.Fatalf("%s: CompletedOwner = %v, want %v", step.name, res.CompletedOwner, step.wantOwner)
+		}
+		flushRun(notifier, runID.String())
+		if got := sent.count(); got != i+1 {
+			t.Fatalf("%s: published %d notifications, want %d", step.name, got, i+1)
+		}
+		if got := sent.payload(i); got.Kind != "run" || got.Status != step.wantStatus || got.Result != step.wantResult {
+			t.Fatalf("%s: published %+v, want run/%q/%q", step.name, got, step.wantStatus, step.wantResult)
+		}
+		var status string
+		var result *string
+		if err := db.QueryRow(`SELECT status, result FROM varroa.runs WHERE run_id = $1`, runID).
+			Scan(&status, &result); err != nil {
+			t.Fatalf("%s: read runs row: %v", step.name, err)
+		}
+		if status != step.wantRow {
+			t.Fatalf("%s: runs.status = %q, want %q", step.name, status, step.wantRow)
+		}
+		if step.wantRow == StatusCompleted && (result == nil || *result != "SUCCESS") {
+			t.Fatalf("%s: runs.result = %v, want the owner's SUCCESS", step.name, result)
+		}
+	}
+}
+
+// TestApplyRunCompletedAfterAHeartbeatLostMark asserts a foreign completion
+// of a heartbeat-lost run publishes no terminal hint, and the owner's later
+// completion publishes the real result.
+func TestApplyRunCompletedAfterAHeartbeatLostMark(t *testing.T) {
+	t.Parallel()
+
+	g, _, runID, intentKey := markHeartbeatLost(t)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	g.SetRunNotifier(notifier)
+	ctx := context.Background()
+
+	foreign := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{Result: strPtr("FAILURE")})
+	foreign.CellInstance = "pod-z"
+	if _, err := g.Apply(ctx, foreign); err != nil {
+		t.Fatalf("apply the foreign run.completed: %v", err)
+	}
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications for the foreign completion, want 1", got)
+	}
+	if got := sent.payload(0); got.Kind != "run" || got.Status != "" || got.Result != "" {
+		t.Fatalf("published %+v, want an identity-only run notification", got)
+	}
+
+	owner := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{Result: strPtr("SUCCESS")})
+	if _, err := g.Apply(ctx, owner); err != nil {
+		t.Fatalf("apply the owner run.completed: %v", err)
+	}
+	if got := sent.count(); got != 2 {
+		t.Fatalf("published %d notifications after the owner completion, want 2", got)
+	}
+	if got := sent.payload(1); got.Kind != "run" || got.Status != StatusCompleted || got.Result != "SUCCESS" {
+		t.Fatalf("published %+v, want a completed SUCCESS run notification", got)
+	}
+}
+
 // TestApplyRunStagePublishesOneNotification asserts a committed run.stage
 // publishes exactly one stage notification.
 func TestApplyRunStagePublishesOneNotification(t *testing.T) {

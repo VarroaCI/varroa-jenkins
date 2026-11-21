@@ -150,6 +150,13 @@ type ApplyResult struct {
 	// write released, one entry per deleted row, so notify publishes one
 	// lock notification per row. Every other kind releases none.
 	ReleasedFleetLocks []ReleasedFleetLock
+
+	// CompletedOwner reports whether a run.completed envelope came from
+	// the instance that owns the run. Only that write sets the terminal
+	// columns. A completion from any other instance merges an audit fact
+	// into the payload and changes no terminal column, so its notification
+	// carries no status and no result.
+	CompletedOwner bool
 }
 
 // Ingester applies one IngestEnvelope to the record tables inside a
@@ -367,6 +374,7 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 		result.RefusedInput = true
 	}
 	result.ReleasedFleetLocks = dispatched.releasedFleetLocks
+	result.CompletedOwner = dispatched.completedOwner
 	publishActivityAfterCommit(g.activityPub, &dispatched.activity)
 
 	if dispatched.action != nil && g.conn != nil {
@@ -495,6 +503,10 @@ type dispatchResult struct {
 	// its ApplyResult, the same two-hop path supersededStart and
 	// refusedSource already take.
 	releasedFleetLocks []ReleasedFleetLock
+
+	// completedOwner is true when a run.completed write was the run's real
+	// terminal write. Apply copies it onto its ApplyResult.
+	completedOwner bool
 }
 
 // applyOnce runs one attempt of env's write in its own transaction.
@@ -546,6 +558,7 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 			stateCleanup:       intent.runID.String(),
 			stateCleanupFiles:  files,
 			releasedFleetLocks: releasedLocks,
+			completedOwner:     true,
 		}
 		if payload.Result != nil {
 			// The fan-out round is the one part of the terminal path

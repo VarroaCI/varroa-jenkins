@@ -112,8 +112,14 @@ func notificationFor(env IngestEnvelope, res ApplyResult) (RunNotification, bool
 		n.BuildNumber = startedBuildNumber(env)
 	case KindRunCompleted:
 		n.Kind = "run"
-		n.Status = "COMPLETED"
-		n.Result = completedResult(env)
+		// A completion from an instance that does not own the run changes
+		// no terminal column, so it carries the identity alone. Its
+		// terminal hint would drop the held notifications of a run that
+		// is still live on its owner.
+		if res.CompletedOwner {
+			n.Status = "COMPLETED"
+			n.Result = completedResult(env)
+		}
 	case KindRunStage:
 		n.Kind = "stage"
 	// These kinds report facts about a run without changing a state a
