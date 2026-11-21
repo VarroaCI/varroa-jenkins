@@ -247,7 +247,8 @@ func TestRunBackstopRoundFiresHomeRowBelowGeneration(t *testing.T) {
 // interrupted sweep runs inside the same round as the backstop schedule,
 // under the same advisory lock: a silent run on a confirmed-dead cell is
 // marked interrupted by a bare RunBackstopRound call, with no separate
-// sweep call.
+// sweep call. The mark sends one run notification through the round's
+// RunNotifier.
 func TestRunBackstopRoundRunsInterruptedSweepInSameRound(t *testing.T) {
 	t.Parallel()
 
@@ -268,7 +269,9 @@ func TestRunBackstopRoundRunsInterruptedSweepInSameRound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
-	cfg := BackstopConfig{MaxSweepPending: DefaultSweepMaxPending, SweepMetrics: sweepMetrics}
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	cfg := BackstopConfig{MaxSweepPending: DefaultSweepMaxPending, SweepMetrics: sweepMetrics, RunNotifier: notifier}
 
 	if _, err := RunBackstopRound(context.Background(), pool, conn, cfg); err != nil {
 		t.Fatalf("RunBackstopRound: %v", err)
@@ -280,6 +283,19 @@ func TestRunBackstopRoundRunsInterruptedSweepInSameRound(t *testing.T) {
 	}
 	if status != "COMPLETED" || result != "INTERRUPTED" {
 		t.Fatalf("status=%q result=%q, want COMPLETED/INTERRUPTED", status, result)
+	}
+
+	var runs []RunNotification
+	for i := 0; i < sent.count(); i++ {
+		if got := sent.payload(i); got.Kind == "run" {
+			runs = append(runs, got)
+		}
+	}
+	if len(runs) != 1 {
+		t.Fatalf("run notifications = %+v, want one", runs)
+	}
+	if got := runs[0]; got.RunID != runID.String() || got.Status != StatusCompleted || got.Result != "INTERRUPTED" {
+		t.Fatalf("notification = %+v, want the marked run COMPLETED with INTERRUPTED", got)
 	}
 }
 

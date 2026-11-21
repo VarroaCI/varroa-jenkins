@@ -644,8 +644,12 @@ func markedStatusLabel(status string) string {
 // fires here, and neither does the heartbeat-lost test. The confirmed
 // test does fire here, because a pod read proves the loss and needs no
 // heartbeat window.
-func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, activityPub *activity.Publisher, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, cluster, tenant string,
+//
+// Each mark sends one run notification through notifier after its
+// commit. The notification names the runs row that the marking read. A
+// nil notifier publishes nothing.
+func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, activityPub *activity.Publisher, notifier *RunNotifier,
+	metrics *InterruptedMetrics, actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, cluster, tenant string,
 	row tenantPlacementLivenessRow, now time.Time, grace time.Duration, dashboardURL string, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -677,6 +681,15 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 			continue
 		}
 		metrics.addMarked(ctx, "announce", markedStatusLabel(c.status))
+		notifier.Notify(RunNotification{
+			Kind:    "run",
+			Cluster: c.cluster,
+			Tenant:  c.tenant,
+			JobPath: c.jobPath,
+			RunID:   c.runID.String(),
+			Status:  StatusCompleted,
+			Result:  "INTERRUPTED",
+		})
 		if reason == ReasonCellLost {
 			metrics.addCellLoss(ctx, "announce")
 		}
@@ -721,8 +734,12 @@ func sweepConsumerSkip(info *nats.ConsumerInfo, maxPending uint64, now time.Time
 // reads any run, then applies the confirmed, moved, and silent tests to
 // every QUEUED or RUNNING run fleet-wide, marking and publishing for
 // each one that qualifies. It answers how many runs it marked.
-func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, activityPub *activity.Publisher, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, maxPending uint64, now time.Time,
+//
+// Each mark sends one run notification through notifier after its
+// commit. The notification names the runs row that the sweep read. A nil
+// notifier publishes nothing.
+func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, activityPub *activity.Publisher, notifier *RunNotifier,
+	metrics *InterruptedMetrics, actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, maxPending uint64, now time.Time,
 	grace time.Duration, dashboardURL string, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -767,6 +784,15 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 			continue
 		}
 		metrics.addMarked(ctx, "sweep", markedStatusLabel(c.status))
+		notifier.Notify(RunNotification{
+			Kind:    "run",
+			Cluster: c.cluster,
+			Tenant:  c.tenant,
+			JobPath: c.jobPath,
+			RunID:   c.runID.String(),
+			Status:  StatusCompleted,
+			Result:  "INTERRUPTED",
+		})
 		if reason == ReasonCellLost {
 			metrics.addCellLoss(ctx, "sweep")
 		}
