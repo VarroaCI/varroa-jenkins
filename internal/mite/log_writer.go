@@ -78,7 +78,9 @@ const (
 // runLogState is the gateway's per-run blob-writer state: the append
 // pipeline's write progress, its pending queue, and the run's
 // incompleteness and finalization knowledge. One instance lives for as
-// long as the run has pending or unacknowledged work.
+// long as the run has pending or unacknowledged work. evictRunState then
+// replaces it with a logRunTombstone: after the final entry is durable
+// and acknowledged, or after abandonRun ends the run.
 type runLogState struct {
 	// ns and name name the run's current writer. The call that creates
 	// this state sets them, and adoptWriter moves them to each writer it
@@ -151,6 +153,15 @@ type runLogState struct {
 
 	terminal   bool
 	deadlineAt time.Time
+
+	// evicted is true once evictRunState dropped this state from
+	// h.logRuns. A goroutine that still holds the state starts no
+	// heartbeat and sets no deadline on it.
+	evicted bool
+
+	// deadlineTimer is the timer markRunTerminal schedules for a deadline
+	// in the future. evictRunState stops it.
+	deadlineTimer *time.Timer
 
 	heartbeatCancel context.CancelFunc
 
@@ -232,7 +243,7 @@ func (h *BusHandler) sendLogAck(ns, name, runID string, ackSeq int64, status, re
 }
 
 // lookupRunState returns the run's state, or ok false when no call has
-// created it. It never creates a state.
+// created it or evictRunState dropped it. It never creates a state.
 func (h *BusHandler) lookupRunState(runID string) (*runLogState, bool) {
 	h.logMu.Lock()
 	defer h.logMu.Unlock()
@@ -245,18 +256,31 @@ func (h *BusHandler) lookupRunState(runID string) (*runLogState, bool) {
 // calls it only after checkOwner admits the sender: OnLogChunk for a
 // chunk, and markCompletedRunTerminal for a COMPLETED event. A refused
 // sender therefore never creates the state.
+//
+// It returns nil when the run has a tombstone. A new state for a
+// finished run would open its log again, and the tombstone already
+// answers each later chunk.
 func (h *BusHandler) getOrCreateRunState(runID, ns, name, jobPath string) *runLogState {
 	h.logMu.Lock()
 	defer h.logMu.Unlock()
+	if st, ok := h.logRuns[runID]; ok {
+		return st
+	}
+	if _, ok := h.tombstonesLocked().get(runID, time.Now()); ok {
+		return nil
+	}
+	return h.newRunStateLocked(runID, ns, name, jobPath)
+}
+
+// newRunStateLocked creates and stores the state of a run that has
+// neither a state nor a tombstone. The caller must hold h.logMu.
+func (h *BusHandler) newRunStateLocked(runID, ns, name, jobPath string) *runLogState {
 	if h.logRuns == nil {
 		h.logRuns = make(map[string]*runLogState)
 	}
-	st, ok := h.logRuns[runID]
-	if !ok {
-		appendCtx, appendCancel := context.WithCancel(context.Background())
-		st = &runLogState{ns: ns, name: name, jobPath: jobPath, ackSeq: -1, adoptedThrough: -1, appendCtx: appendCtx, appendCancel: appendCancel}
-		h.logRuns[runID] = st
-	}
+	appendCtx, appendCancel := context.WithCancel(context.Background())
+	st := &runLogState{ns: ns, name: name, jobPath: jobPath, ackSeq: -1, adoptedThrough: -1, appendCtx: appendCtx, appendCancel: appendCancel}
+	h.logRuns[runID] = st
 	return st
 }
 
@@ -289,15 +313,11 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 	}
 
 	// A run past its finalize deadline rejects each chunk before the
-	// owner lookup. This check reads the state and never creates it.
-	if st, ok := h.lookupRunState(chunk.RunId); ok {
-		st.mu.Lock()
-		rejected := st.rejectedForever
-		st.mu.Unlock()
-		if rejected {
-			h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusRejected, logReasonFinalizeDeadline, 0)
-			return
-		}
+	// owner lookup. This check reads the state or the tombstone and never
+	// creates either.
+	if h.runRejectedForever(chunk.RunId) {
+		h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusRejected, logReasonFinalizeDeadline, 0)
+		return
 	}
 
 	decision, tuple := h.checkOwner(ctx, h.cluster, ns, name, chunk.CellInstance, chunk.RunId)
@@ -311,23 +331,65 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 		return
 	}
 
-	// Only an admitted sender creates the run state. The first creator
-	// sets the writer and the job path that each best-effort envelope
-	// carries.
-	st := h.getOrCreateRunState(chunk.RunId, ns, name, chunk.JobPath)
-
 	if tuple.status != "" && isTerminalRunStatus(tuple.status) && tuple.anchorUnixMs > 0 {
-		h.markRunTerminal(ns, name, chunk.RunId, chunk.JobPath, time.UnixMilli(tuple.anchorUnixMs))
+		anchor := time.UnixMilli(tuple.anchorUnixMs)
+		// A run past its deadline, with no state and no tombstone, gets
+		// the release that a restarted gateway gives. The gateway creates
+		// nothing for it. A new state could only abandon the run at once,
+		// and its incomplete marker could claim a loss that the stored log
+		// does not have. A short log still gets its marker: no envelope
+		// set finalized true for it, so the recorder's finalizeStaleLogs
+		// sweep marks it incomplete with not-finalized.
+		if !time.Now().Before(anchor.Add(h.runFinalizeWait())) && !h.hasRunLogRecord(chunk.RunId) {
+			h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusRejected, logReasonFinalizeDeadline, 0)
+			return
+		}
+		h.markRunTerminal(ns, name, chunk.RunId, chunk.JobPath, anchor)
 	}
 
+	h.enqueueLogChunk(ns, name, chunk)
+}
+
+// enqueueLogChunk queues an admitted chunk on its run's append pipeline.
+// The caller has admitted the sender through checkOwner. Only such a
+// sender creates the run state, and the first creator sets the writer and
+// the job path that each best-effort envelope carries.
+//
+// One critical section (h.logMu outermost, then st.mu) holds the state
+// lookup, the tombstone answer, and the rejectedForever check. The same
+// section holds the per-run bound, the gateway-wide budget, and the
+// enqueue that spends them. Two concurrent chunks can therefore never
+// both pass a check that only one slot remains for. This section also
+// sees an abandon or an eviction that lands after the earlier checks in
+// OnLogChunk. No chunk therefore enters the queue of a run that
+// abandonRun already cleared.
+//
+// A state that this call creates holds nothing until its chunk enters
+// the queue. A BUSY answer therefore drops that state again, so a mite
+// that never sends the chunk again leaves no state behind.
+func (h *BusHandler) enqueueLogChunk(ns, name string, chunk *mitev1.LogChunk) {
 	size := int64(len(chunk.Data))
 
-	// The per-run bound, the gateway-wide budget, and the enqueue that
-	// spends them all happen under one critical section (h.logMu
-	// outermost, then st.mu), so two concurrent chunks can never both
-	// pass a check that only one slot remains for.
 	h.logMu.Lock()
+	st := h.logRuns[chunk.RunId]
+	created := false
+	if st == nil {
+		if t, ok := h.tombstonesLocked().get(chunk.RunId, time.Now()); ok {
+			ans := h.answerFromTombstoneLocked(chunk.RunId, ns, name, chunk, t)
+			h.logMu.Unlock()
+			h.sendFinishedRunAnswer(ns, name, chunk, ans)
+			return
+		}
+		st = h.newRunStateLocked(chunk.RunId, ns, name, chunk.JobPath)
+		created = true
+	}
 	st.mu.Lock()
+	if st.rejectedForever {
+		st.mu.Unlock()
+		h.logMu.Unlock()
+		h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusRejected, logReasonFinalizeDeadline, 0)
+		return
+	}
 	overRun := len(st.queue)+1 > perRunPendingMaxChunks || st.queueBytes+size > perRunPendingMaxBytes
 	overBudget := h.logTotalPendingBytes+size > h.logPendingMaxBytesOrDefault()
 	if overBudget {
@@ -346,8 +408,17 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 			pauseMS = h.gatewayBudgetPauseMSLocked(time.Now(), h.logTotalPendingBytes+size-h.logPendingMaxBytesOrDefault())
 			reason = logReasonGatewayBudgetFul
 		}
+		var dropCancel context.CancelFunc
+		if created {
+			delete(h.logRuns, chunk.RunId)
+			st.evicted = true
+			dropCancel = st.appendCancel
+		}
 		st.mu.Unlock()
 		h.logMu.Unlock()
+		if dropCancel != nil {
+			dropCancel()
+		}
 		h.answerBusy(ns, name, chunk, reason, pauseMS)
 		return
 	}
@@ -473,15 +544,30 @@ func isTerminalRunStatus(status string) bool {
 // the same call. Starting the heartbeat first means that cancellation
 // always finds one to stop, instead of racing a later, unconditional
 // start into overwriting an abandoned run's cleared state.
+//
+// A run with a tombstone is finished, so the call changes nothing. The
+// state can also be evicted after the lookup: the call then sets no
+// deadline on it.
 func (h *BusHandler) markRunTerminal(ns, name, runID, jobPath string, anchor time.Time) {
 	st := h.getOrCreateRunState(runID, ns, name, jobPath)
+	if st == nil {
+		return
+	}
 	st.mu.Lock()
-	if st.terminal {
+	if st.terminal || st.evicted {
 		st.mu.Unlock()
 		return
 	}
 	st.terminal = true
 	st.deadlineAt = anchor.Add(h.runFinalizeWait())
+	if st.rejectedForever {
+		// abandonRun ended the run before this mark, and the state kept
+		// the rejection. The run needs no heartbeat and no deadline, so a
+		// tombstone takes the state's place from now on.
+		st.mu.Unlock()
+		h.evictRunState(runID, st)
+		return
+	}
 	deadline := st.deadlineAt
 	cancel := st.appendCancel
 	st.mu.Unlock()
@@ -492,7 +578,16 @@ func (h *BusHandler) markRunTerminal(ns, name, runID, jobPath string, anchor tim
 		if d := time.Until(deadline); d <= 0 {
 			h.runDeadlineFired(runID, st, cancel)
 		} else {
-			time.AfterFunc(d, func() { h.runDeadlineFired(runID, st, cancel) })
+			timer := time.AfterFunc(d, func() { h.runDeadlineFired(runID, st, cancel) })
+			st.mu.Lock()
+			evicted := st.evicted
+			if !evicted {
+				st.deadlineTimer = timer
+			}
+			st.mu.Unlock()
+			if evicted {
+				timer.Stop()
+			}
 		}
 	}
 }
@@ -529,10 +624,10 @@ func (h *BusHandler) runDeadlineFired(runID string, st *runLogState, cancel cont
 }
 
 // startHeartbeat starts the writer-heartbeat goroutine for a run, unless
-// one is already running.
+// one is already running or the state is evicted.
 func (h *BusHandler) startHeartbeat(ns, name, runID string, st *runLogState) {
 	st.mu.Lock()
-	if st.heartbeatCancel != nil {
+	if st.heartbeatCancel != nil || st.evicted {
 		st.mu.Unlock()
 		return
 	}
@@ -638,28 +733,37 @@ func (h *BusHandler) publishRunLogBestEffort(ns, name, runID, jobPath string, pa
 }
 
 // runIncompleteness returns the gateway's own incompleteness knowledge
-// for runID: set on a rejected chunk and on a sequence gap.
+// for runID: set on a rejected chunk and on a sequence gap. It reads the
+// run's tombstone when the state is gone.
 func (h *BusHandler) runIncompleteness(runID string) (bool, string) {
 	h.logMu.Lock()
 	st, ok := h.logRuns[runID]
-	h.logMu.Unlock()
 	if !ok {
-		return false, ""
+		t, found := h.tombstonesLocked().get(runID, time.Now())
+		h.logMu.Unlock()
+		if !found || !t.incomplete {
+			return false, ""
+		}
+		return true, t.incompleteReason
 	}
+	h.logMu.Unlock()
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	return st.incomplete, st.incompleteReason
 }
 
 // runFinalized reports whether the gateway has durably written the
-// logindex 'final' entry for runID.
+// logindex 'final' entry for runID. It reads the run's tombstone when
+// the state is gone.
 func (h *BusHandler) runFinalized(runID string) bool {
 	h.logMu.Lock()
 	st, ok := h.logRuns[runID]
-	h.logMu.Unlock()
 	if !ok {
-		return false
+		t, found := h.tombstonesLocked().get(runID, time.Now())
+		h.logMu.Unlock()
+		return found && t.finalDurable
 	}
+	h.logMu.Unlock()
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	return st.finalDurable
@@ -707,13 +811,19 @@ const (
 // drainRun is the run's single append-pipeline goroutine: one append in
 // flight per run, chunks processed strictly in queue order. It exits
 // once the queue empties, and restarts (from OnLogChunk) on the next
-// arrival.
+// arrival. A run whose final entry is durable, with nothing pending,
+// then gives its state up to evictRunState: the final chunk's STORED ack
+// already went out inside appendChunk.
 func (h *BusHandler) drainRun(ctx context.Context, runID string, st *runLogState) {
 	for {
 		st.mu.Lock()
 		if len(st.queue) == 0 {
 			st.draining = false
+			finished := st.finishedLocked()
 			st.mu.Unlock()
+			if finished {
+				h.evictRunState(runID, st)
+			}
 			return
 		}
 		item := st.queue[0]
@@ -735,6 +845,10 @@ func (h *BusHandler) drainRun(ctx context.Context, runID string, st *runLogState
 			return
 		}
 		now := time.Now()
+		// The backing array outlives the slice head, so the slot is
+		// cleared before the slice moves past it. Otherwise the array
+		// keeps the dequeued chunk and its bytes alive.
+		st.queue[0] = queuedLogChunk{}
 		st.queue = st.queue[1:]
 		st.queueBytes -= size
 		st.lastDequeue = now
@@ -1796,10 +1910,11 @@ func (h *BusHandler) appendRecoveredEntry(ctx context.Context, runID string, seq
 // pending queue, releases every sequence whose log bytes are durable but
 // whose index entry never got to flush because the hole below it never
 // filled, answers REJECTED{finalize-deadline} for all of them, stops the
-// heartbeat, and publishes the incomplete marker. st.rejectedForever
-// then makes OnLogChunk answer the same REJECTED to every later arrival
-// for this run, including one that was answered BUSY and never entered
-// the pending queue.
+// heartbeat, and publishes the incomplete marker. st.rejectedForever,
+// and then the tombstone that evictRunState leaves, make OnLogChunk
+// answer the same REJECTED to every later arrival for this run,
+// including one that was answered BUSY and never entered the pending
+// queue.
 //
 // It is idempotent, and callers rely on that: the drain goroutine calls
 // it when its own append hits the deadline, and runDeadlineFired's idle
@@ -1878,6 +1993,11 @@ func (h *BusHandler) abandonRun(runID string, st *runLogState) {
 	h.publishRunLogBestEffort(ns, name, runID, st.jobPath, map[string]interface{}{
 		"incomplete": true, "incomplete_reason": reason,
 	})
+
+	// Every abandoned and stranded sequence has its REJECTED ack now. The
+	// tombstone gives each later chunk the same answer. A run with no
+	// terminal mark keeps this state until markRunTerminal evicts it.
+	h.evictRunState(runID, st)
 }
 
 // runCreatedAtFromUUIDv7 decodes the Unix-millisecond timestamp inside a
