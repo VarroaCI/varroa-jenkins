@@ -79,3 +79,14 @@ export function navRowVisible(row: NavRow, perms: Permissions | undefined): bool
       return canAdminArea(perms);
   }
 }
+
+/**
+ * visibleNavGroups keeps the visible rows of each group, in table order. It
+ * leaves out a group with no visible row, so no surface shows an empty group
+ * label. A caller who holds the grant of one row alone still gets its group.
+ */
+export function visibleNavGroups(groups: readonly NavRowGroup[], perms: Permissions | undefined): NavRowGroup[] {
+  return groups
+    .map((group) => ({ label: group.label, rows: group.rows.filter((row) => navRowVisible(row, perms)) }))
+    .filter((group) => group.rows.length > 0);
+}

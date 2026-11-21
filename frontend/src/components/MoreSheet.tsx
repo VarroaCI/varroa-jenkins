@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useCallback } from "react";
 import { NavLink } from "react-router-dom";
 import { NavIcon } from "./NavIcon";
 import { usePermissions } from "../hooks/usePermissions";
-import { NAV_GROUPS, PROFILE_ROW, navRowVisible, type NavRowGroup } from "../lib/navRows";
+import { NAV_GROUPS, PROFILE_ROW, visibleNavGroups, type NavRowGroup } from "../lib/navRows";
 import styles from "./MoreSheet.module.css";
 
 // The sheet carries every table row the tab bar does not, then the Account group.
@@ -73,23 +73,17 @@ export function MoreSheet({ onClose }: MoreSheetProps) {
     <>
       <div className={styles.scrim} onClick={onClose} />
       <div className={styles.sheet} role="dialog" aria-modal="true" aria-label="More navigation" ref={sheetRef}>
-        {SHEET_GROUPS.map((group) => {
-          // A group shows when one of its rows shows, so a caller who holds
-          // the grant of one row alone still reaches that row.
-          const rows = group.rows.filter((row) => navRowVisible(row, permissions));
-          if (rows.length === 0) return null;
-          return (
-            <Fragment key={group.label}>
-              <div className={styles.groupLabel}>{group.label}</div>
-              {rows.map((row) => (
-                <NavLink key={row.to} to={row.to} end={row.end} className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label={row.label} onClick={handleNav}>
-                  <span className={styles.rowIcon}><NavIcon icon={row.icon} /></span>
-                  <span className={styles.rowText}>{row.label}</span>
-                </NavLink>
-              ))}
-            </Fragment>
-          );
-        })}
+        {visibleNavGroups(SHEET_GROUPS, permissions).map((group) => (
+          <Fragment key={group.label}>
+            <div className={styles.groupLabel}>{group.label}</div>
+            {group.rows.map((row) => (
+              <NavLink key={row.to} to={row.to} end={row.end} className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label={row.label} onClick={handleNav}>
+                <span className={styles.rowIcon}><NavIcon icon={row.icon} /></span>
+                <span className={styles.rowText}>{row.label}</span>
+              </NavLink>
+            ))}
+          </Fragment>
+        ))}
       </div>
     </>
   );

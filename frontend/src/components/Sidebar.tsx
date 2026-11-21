@@ -5,7 +5,7 @@ import { Pulse } from "./Pulse";
 import { NavIcon } from "./NavIcon";
 import { usePermissions } from "../hooks/usePermissions";
 import { canControllersRow } from "../lib/navPermissions";
-import { NAV_GROUPS, PROFILE_ROW, navRowVisible } from "../lib/navRows";
+import { NAV_GROUPS, PROFILE_ROW, visibleNavGroups } from "../lib/navRows";
 import { useControllers } from "../hooks/useControllers";
 import styles from "./Sidebar.module.css";
 
@@ -49,7 +49,7 @@ export function Sidebar({ collapsed = false, onToggle = () => {} }: SidebarProps
 
   return <aside className={`${styles.sidebar} ${collapsed ? styles.collapsed : ""}`}>
     <a href="/" className={styles.brand}><div className={styles.brandMark}><svg viewBox="0 0 34 34" width="34" height="34" aria-hidden="true"><polygon points="17,2 30,9.5 30,24.5 17,32 4,24.5 4,9.5" fill="var(--accent)" /><polygon points="17,9 24,13 24,21 17,25 10,21 10,13" fill="var(--surface)" /><circle cx="17" cy="17" r="2.6" fill="var(--accent)" /></svg></div><div><div className={styles.brandName}>Varroa</div><div className={styles.brandSub}>Jenkins control plane</div></div></a>
-    {NAV_GROUPS.map((group) => <div key={group.label}><div className={styles.navLabel}>{group.label}</div>{group.rows.filter((item) => navRowVisible(item, permissions)).map((item) => {
+    {visibleNavGroups(NAV_GROUPS, permissions).map((group) => <div key={group.label}><div className={styles.navLabel}>{group.label}</div>{group.rows.map((item) => {
       const itemCount = item.count === "controllers" ? controllersCount : undefined;
       return <NavLink key={item.to} to={item.to} end={item.end} aria-label={itemCount !== undefined ? `${item.label}, ${itemCount}` : item.label} className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ""}`} onMouseEnter={handleFlyoutShow(item.label, itemCount)} onMouseLeave={handleFlyoutHide} onFocus={handleFlyoutShow(item.label, itemCount)} onBlur={handleFlyoutHide}><span className={styles.ic}><NavIcon icon={item.icon} /></span><span className={styles.navText}>{item.label}</span>{itemCount !== undefined && <span className={styles.navCount}>{itemCount}</span>}{item.door && <ChevronRight className={styles.doorChevron} aria-hidden={true} size={14} />}</NavLink>;
     })}</div>)}
