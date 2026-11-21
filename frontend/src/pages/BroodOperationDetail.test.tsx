@@ -364,6 +364,33 @@ describe("BroodOperationDetail", () => {
     expect(screen.queryByText("Output")).not.toBeInTheDocument();
   });
 
+  it("puts the target table of each cluster in the shared scroll wrapper", async () => {
+    const twoClusters = {
+      ...clusterOp,
+      clusters: [
+        clusterOp.clusters[0],
+        {
+          ...clusterOp.clusters[0],
+          cluster: "member-b",
+          op: {
+            ...clusterOp.clusters[0].op!,
+            status: {
+              ...clusterOp.clusters[0].op!.status,
+              targets: [{ namespace: "test-ns", name: "ctrl-m", wave: 0, state: "Pending" as const }],
+            },
+          },
+        },
+      ],
+    };
+    mockGet.mockResolvedValue(twoClusters);
+    renderWithProviders(<BroodOperationDetail />);
+
+    await screen.findByText("ctrl-m");
+    const tables = screen.getAllByRole("table");
+    expect(tables).toHaveLength(2);
+    tables.forEach((t) => expect(t.parentElement?.className).toMatch(/tableScroll/));
+  });
+
   describe("whole-operation failure reason", () => {
     function withReason(reason?: string) {
       return {

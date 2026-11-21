@@ -219,40 +219,42 @@ function ClusterSection({ cluster }: { cluster: BroodRunCluster }) {
           {targets.length === 0 && <p>No targets resolved yet.</p>}
           {targets.length > 0 && (
             <Card>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Namespace</th>
-                    <th>Name</th>
-                    <th>Wave</th>
-                    <th>State</th>
-                    <th>Reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {targets.map((t) => (
-                    <Fragment key={`${t.namespace}/${t.name}`}>
-                      <tr>
-                        <td>{t.namespace}</td>
-                        <td>{t.name}</td>
-                        <td>{t.wave}</td>
-                        <td><StateBadge state={t.state} /></td>
-                        <td>{t.reason ?? "—"}</td>
-                      </tr>
-                      {t.output && (
-                        <tr className={styles.outputRow}>
-                          <td colSpan={5}>
-                            <details>
-                              <summary className={styles.outputSummary}>Output</summary>
-                              <pre className={styles.outputPre}>{t.output}</pre>
-                            </details>
-                          </td>
+              <div className={styles.tableScroll}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Namespace</th>
+                      <th>Name</th>
+                      <th>Wave</th>
+                      <th>State</th>
+                      <th>Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {targets.map((t) => (
+                      <Fragment key={`${t.namespace}/${t.name}`}>
+                        <tr>
+                          <td>{t.namespace}</td>
+                          <td>{t.name}</td>
+                          <td>{t.wave}</td>
+                          <td><StateBadge state={t.state} /></td>
+                          <td>{t.reason ?? "—"}</td>
                         </tr>
-                      )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
+                        {t.output && (
+                          <tr className={styles.outputRow}>
+                            <td colSpan={5}>
+                              <details>
+                                <summary className={styles.outputSummary}>Output</summary>
+                                <pre className={styles.outputPre}>{t.output}</pre>
+                              </details>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </Card>
           )}
         </>
