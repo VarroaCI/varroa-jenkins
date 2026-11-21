@@ -6,7 +6,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../test/render-utils";
 import { Sidebar } from "../components/Sidebar";
 import { TabBar } from "../components/TabBar";
-import { NAV_GROUPS, PROFILE_ROW, TAB_ROWS, navRowVisible, type NavRow } from "./navRows";
+import { NAV_GROUPS, PROFILE_ROW, TAB_ROWS, navRowVisible, visibleNavGroups, type NavRow } from "./navRows";
 import type { Permissions } from "../types/auth";
 
 vi.mock("../hooks/usePermissions", async () => {
@@ -47,13 +47,14 @@ function renderSurfaces() {
   const sidebarHrefs = hrefs(sidebar);
   const sidebarHasRow = (row: NavRow) => linkFor(sidebar, row) !== null;
   const sidebarRows = [...ALL_ROWS, PROFILE_ROW].filter(sidebarHasRow);
+  const sidebarLabels = NAV_GROUPS.map((group) => group.label).filter((label) => within(sidebar).queryByText(label) !== null);
   cleanup();
 
   renderIn(<TabBar />);
   fireEvent.click(screen.getByRole("button", { name: "More" }));
   const bar = screen.getByRole("navigation", { name: "Primary" });
   const sheet = screen.getByRole("dialog", { name: "More navigation" });
-  return { sidebarHrefs, sidebarRows, bar, sheet };
+  return { sidebarHrefs, sidebarRows, sidebarLabels, bar, sheet };
 }
 
 // linkFor finds the link of one row inside one surface. The label check keeps
@@ -116,12 +117,37 @@ describe("navigation row table", () => {
   it.each(PERMISSION_SETS)("shows the same rows in the same order on the sidebar and on the phone for %s", (_name, perms) => {
     mockPermissionsData(perms);
     const visible = (row: NavRow) => navRowVisible(row, perms);
-    const { sidebarHrefs, bar, sheet } = renderSurfaces();
+    const { sidebarHrefs, sidebarLabels, bar, sheet } = renderSurfaces();
 
     // The sidebar: the brand link, the visible rows in table order, then the foot row.
     expect(sidebarHrefs).toEqual(["/", ...ALL_ROWS.filter(visible).map((row) => row.to), PROFILE_ROW.to]);
+    // The sidebar shows a group label only when the group has a visible row.
+    expect(sidebarLabels).toEqual(NAV_GROUPS.filter((group) => group.rows.some(visible)).map((group) => group.label));
     // The phone: the tab bar and the sheet split the same visible rows, in table order.
     expect(hrefs(bar)).toEqual(TAB_ROWS.filter(visible).map((row) => row.to));
     expect(hrefs(sheet)).toEqual([...SHEET_ROWS.filter(visible).map((row) => row.to), PROFILE_ROW.to]);
+  });
+});
+
+describe("visibleNavGroups", () => {
+  const labels = (perms: Permissions | undefined) => visibleNavGroups(NAV_GROUPS, perms).map((group) => group.label);
+
+  it("keeps every group and every row for a full-permission caller", () => {
+    const full: Permissions = { global: { "*": { "*": true } }, scopes: [] };
+    expect(visibleNavGroups(NAV_GROUPS, full)).toEqual(NAV_GROUPS.map((group) => ({ label: group.label, rows: [...group.rows] })));
+  });
+
+  it("leaves out the Manage group for a caller with neither door", () => {
+    expect(labels({ global: { controllers: { read: true } }, scopes: [] })).toEqual(["Operate", "Brood"]);
+  });
+
+  it("leaves out the Manage group while the permissions read has not answered", () => {
+    expect(labels(undefined)).toEqual(["Operate", "Brood"]);
+  });
+
+  it("keeps a group for the grant of one row alone, with that row only", () => {
+    const groups = visibleNavGroups(NAV_GROUPS, { global: { provisioningdefaults: { update: true } }, scopes: [] });
+    expect(groups.map((group) => group.label)).toEqual(["Operate", "Brood", "Manage"]);
+    expect(groups[2].rows.map((row) => row.label)).toEqual(["Admin & access"]);
   });
 });

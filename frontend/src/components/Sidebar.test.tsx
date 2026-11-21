@@ -118,10 +118,35 @@ describe("Sidebar", () => {
   });
 
   it("renders group labels Operate, Brood, Manage", () => {
+    // The catalog read admits the Catalog row, so each group has a row.
+    mockPermissionsData({ global: { controllers: { read: true }, catalogitems: { read: true } }, scopes: [] });
     renderSidebar("/");
     expect(screen.getByText("Operate")).toBeInTheDocument();
     expect(screen.getByText("Brood")).toBeInTheDocument();
     expect(screen.getByText("Manage")).toBeInTheDocument();
+  });
+
+  describe("empty group", () => {
+    it("hides the Manage label for a caller with neither the Catalog door nor the Admin door", () => {
+      renderSidebar("/");
+      expect(screen.getByText("Operate")).toBeInTheDocument();
+      expect(screen.getByText("Brood")).toBeInTheDocument();
+      expect(screen.queryByText("Manage")).not.toBeInTheDocument();
+    });
+
+    it("hides the Manage label while the permissions read has not answered", () => {
+      mockPermissionsData(undefined);
+      renderSidebar("/");
+      expect(screen.getByText("Operate")).toBeInTheDocument();
+      expect(screen.getByText("Brood")).toBeInTheDocument();
+      expect(screen.queryByText("Manage")).not.toBeInTheDocument();
+    });
+
+    it("hides the Manage rule in the collapsed rail for a caller with neither door", () => {
+      renderSidebarCollapsed("/");
+      expect(screen.getByText("Brood")).toBeInTheDocument();
+      expect(screen.queryByText("Manage")).not.toBeInTheDocument();
+    });
   });
 
   it("does NOT render retired group labels Configuration, Access, Administration", () => {
