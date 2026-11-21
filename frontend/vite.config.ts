@@ -21,6 +21,12 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
+    // Node 25 and later define their own localStorage and sessionStorage
+    // globals. Vitest 4 keeps them and does not copy the jsdom storage.
+    // Without --localstorage-file, the Node localStorage is undefined. This
+    // flag removes the Node storage in each test worker, so jsdom supplies it.
+    // Node 22.4 and later accept the flag. Keep it while Vitest is at 4.
+    execArgv: ["--no-experimental-webstorage"],
     // A few heavyweight userEvent "marathon" tests (ControllerDetail health
     // probes, ControllerWizard full-deploy, ComposedBundleEdit drafts) run
     // close to the 5s default. Under `npm run coverage` the v8 instrumentation
