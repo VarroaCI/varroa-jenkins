@@ -432,7 +432,10 @@ func TestNotificationForMapsEveryKind(t *testing.T) {
 		wantOK     bool
 	}{
 		{KindRunStarted, RunStartedPayload{BuildNumber: &buildNumber}, "run", "RUNNING", "", 42, true},
-		{KindRunCompleted, RunCompletedPayload{Result: &success}, "run", "COMPLETED", "SUCCESS", 0, true},
+		// A zero ApplyResult is a foreign completion, which carries the
+		// identity alone. TestNotificationForRunCompleted holds the owner
+		// cases.
+		{KindRunCompleted, RunCompletedPayload{Result: &success}, "run", "", "", 0, true},
 		{KindRunStage, RunStagePayload{StageID: "node-1", Name: "Build", NodeType: "stage", Status: "IN_PROGRESS"}, "stage", "", "", 0, true},
 		{KindRunHeartbeat, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunLog, map[string]any{"build_number": 7}, "run", "", "", 0, true},
@@ -575,6 +578,68 @@ func TestNotificationForResumeFailed(t *testing.T) {
 			}
 			if got.Kind != "run" || got.Status != "" || got.Result != "" || got.BuildNumber != 0 {
 				t.Fatalf("got %+v, want one run notification with no status, result, or build number", got)
+			}
+			if got.RunID != env.RunID || got.Cluster != testCluster || got.Tenant != testTenant || got.JobPath != testJobPath {
+				t.Fatalf("got %+v, want the envelope's run and coordinates", got)
+			}
+		})
+	}
+}
+
+// TestNotificationForRunCompleted asserts a run.completed envelope publishes
+// a terminal hint only for the owner's write. A foreign write changes no
+// terminal column, so its run notification carries the identity alone.
+func TestNotificationForRunCompleted(t *testing.T) {
+	success := "SUCCESS"
+	cases := []struct {
+		name         string
+		payload      RunCompletedPayload
+		res          ApplyResult
+		wantStatus   string
+		wantResult   string
+		wantTerminal bool
+	}{
+		{
+			name:         "an owner write publishes the result",
+			payload:      RunCompletedPayload{Result: &success},
+			res:          ApplyResult{CompletedOwner: true},
+			wantStatus:   "COMPLETED",
+			wantResult:   "SUCCESS",
+			wantTerminal: true,
+		},
+		{
+			name:         "an owner write with no result publishes the status",
+			payload:      RunCompletedPayload{},
+			res:          ApplyResult{CompletedOwner: true},
+			wantStatus:   "COMPLETED",
+			wantTerminal: true,
+		},
+		{
+			name:    "a foreign write publishes the identity alone",
+			payload: RunCompletedPayload{Result: &success},
+			res:     ApplyResult{},
+		},
+		{
+			name:    "a foreign write with no result publishes the identity alone",
+			payload: RunCompletedPayload{},
+			res:     ApplyResult{},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newTestEnvelope(t, uuid.MustParse(newTestUUIDv7String()),
+				"manual:notify-run-completed", KindRunCompleted, tc.payload)
+
+			got, ok := notificationFor(env, tc.res)
+			if !ok {
+				t.Fatal("ok = false, want one run notification")
+			}
+			if got.Kind != "run" || got.Status != tc.wantStatus || got.Result != tc.wantResult || got.BuildNumber != 0 {
+				t.Fatalf("got %s/%q/%q/%d, want run/%q/%q/0",
+					got.Kind, got.Status, got.Result, got.BuildNumber, tc.wantStatus, tc.wantResult)
+			}
+			if terminal := isTerminalNotification(got); terminal != tc.wantTerminal {
+				t.Fatalf("terminal = %v, want %v", terminal, tc.wantTerminal)
 			}
 			if got.RunID != env.RunID || got.Cluster != testCluster || got.Tenant != testTenant || got.JobPath != testJobPath {
 				t.Fatalf("got %+v, want the envelope's run and coordinates", got)
