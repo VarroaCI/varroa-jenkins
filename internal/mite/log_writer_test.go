@@ -469,10 +469,28 @@ func TestOnLogChunkRefusedFirstChunkKeepsTheOwnersRunState(t *testing.T) {
 	}
 
 	h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{
-		RunId: runID, Seq: 0, Data: nil, Final: true, CellInstance: "inst1", JobPath: "tenant-a/build",
+		RunId: runID, Seq: 0, Data: []byte("y"), CellInstance: "inst1", JobPath: "tenant-a/build",
 	})
 	if got := waitForLogAcks(t, ownerSender, 1)[0]; got.Status != logAckStatusStored {
 		t.Fatalf("expected the owner's chunk STORED, got %+v", got)
+	}
+
+	st, ok := h.lookupRunState(runID)
+	if !ok {
+		t.Fatal("expected the owner's chunk to create the run state")
+	}
+	st.mu.Lock()
+	ns, name, jobPath := st.ns, st.name, st.jobPath
+	st.mu.Unlock()
+	if ns != "ns1" || name != "cell1" || jobPath != "tenant-a/build" {
+		t.Fatalf("run state writer=%s/%s job_path=%q, want ns1/cell1 and %q", ns, name, jobPath, "tenant-a/build")
+	}
+
+	h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{
+		RunId: runID, Seq: 1, Data: nil, Final: true, CellInstance: "inst1", JobPath: "tenant-a/build",
+	})
+	if got := waitForLogAcks(t, ownerSender, 2)[1]; got.Status != logAckStatusStored || got.AckSeq != 1 {
+		t.Fatalf("expected the owner's final chunk STORED at ack_seq 1, got %+v", got)
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -496,17 +514,6 @@ func TestOnLogChunkRefusedFirstChunkKeepsTheOwnersRunState(t *testing.T) {
 	}
 	if got.Namespace != "ns1" || got.Cell != "cell1" {
 		t.Fatalf("envelope writer = %s/%s, want the owner ns1/cell1", got.Namespace, got.Cell)
-	}
-
-	st, ok := h.lookupRunState(runID)
-	if !ok {
-		t.Fatal("expected the owner's chunk to create the run state")
-	}
-	st.mu.Lock()
-	ns, name, jobPath := st.ns, st.name, st.jobPath
-	st.mu.Unlock()
-	if ns != "ns1" || name != "cell1" || jobPath != "tenant-a/build" {
-		t.Fatalf("run state writer=%s/%s job_path=%q, want ns1/cell1 and %q", ns, name, jobPath, "tenant-a/build")
 	}
 }
 
@@ -1636,11 +1643,7 @@ func TestOnLogChunkIndexConflictAbandonsWithGatewayGapBeforeTheDeadline(t *testi
 		t.Fatalf("expected the chunk rejected once the run is abandoned, got %+v", acks[0])
 	}
 	assertRunGatewayGap(t, h, runID)
-	st := h.getOrCreateRunState(runID, "ns1", "cell1", "")
-	st.mu.Lock()
-	rejected := st.rejectedForever
-	st.mu.Unlock()
-	if !rejected {
+	if !h.runRejectedForever(runID) {
 		t.Fatal("expected the run abandoned")
 	}
 }
@@ -2523,9 +2526,12 @@ func TestOnLogChunkSmallBudgetStoresEveryChunkOfAChattyBuild(t *testing.T) {
 	deadline := time.Now().Add(finalizeWait + time.Second)
 	for !h.runFinalized(runID) {
 		if time.Now().After(deadline) {
-			h.logMu.Lock()
-			st := h.logRuns[runID]
-			h.logMu.Unlock()
+			incomplete, reason := h.runIncompleteness(runID)
+			st, ok := h.lookupRunState(runID)
+			if !ok {
+				t.Fatalf("run state evicted before the final entry (rejected=%v incomplete=%v reason=%q)",
+					h.runRejectedForever(runID), incomplete, reason)
+			}
 			st.mu.Lock()
 			defer st.mu.Unlock()
 			t.Fatalf("stored through seq %d of %d before the finalize deadline (incomplete=%v reason=%q)",

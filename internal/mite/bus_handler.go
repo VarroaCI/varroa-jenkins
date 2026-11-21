@@ -287,12 +287,16 @@ type BusHandler struct {
 	imperativeInFlightMax int
 	imperativeSlotRecheck time.Duration
 
-	// logMu guards logRuns and the gateway-wide pending-bytes counter,
-	// kept separate from mu so a log append never contends with the
-	// heartbeat/presence path.
+	// logMu guards logRuns, logDone, and the gateway-wide pending-bytes
+	// counter, kept separate from mu so a log append never contends with
+	// the heartbeat/presence path.
 	logMu                sync.Mutex
 	logRuns              map[string]*runLogState // keyed by run_id
 	logTotalPendingBytes int64
+	// logDone holds a tombstone for each finished run whose state the log
+	// writer dropped. A later chunk of that run gets its answer from the
+	// tombstone. Nil until the first drop.
+	logDone *logTombstones
 	// logBudgetCrossedAt is when the gateway-wide pending budget was
 	// first found crossed, zeroed once it drops back under. While the
 	// drain makes no progress, the BUSY pause grows from this moment.
