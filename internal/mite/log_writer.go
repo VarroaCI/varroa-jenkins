@@ -230,9 +230,20 @@ func (h *BusHandler) sendLogAck(ns, name, runID string, ackSeq int64, status, re
 	}
 }
 
+// lookupRunState returns the run's state, or ok false when no call has
+// created it. It never creates a state.
+func (h *BusHandler) lookupRunState(runID string) (*runLogState, bool) {
+	h.logMu.Lock()
+	defer h.logMu.Unlock()
+	st, ok := h.logRuns[runID]
+	return st, ok
+}
+
 // getOrCreateRunState returns the run's state, creating it on first
-// touch. ns, name, and jobPath are recorded from the first call, which
-// is always the sender the ownership check has already admitted.
+// touch. The first call records ns, name, and jobPath. OnLogChunk calls
+// it only after checkOwner admits the sender, so a refused sender never
+// creates the state. OnBuildEvent creates it through markRunTerminal for
+// a COMPLETED event, and that path reads no owner.
 func (h *BusHandler) getOrCreateRunState(runID, ns, name, jobPath string) *runLogState {
 	h.logMu.Lock()
 	defer h.logMu.Unlock()
@@ -276,14 +287,16 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 		return
 	}
 
-	st := h.getOrCreateRunState(chunk.RunId, ns, name, chunk.JobPath)
-
-	st.mu.Lock()
-	rejected := st.rejectedForever
-	st.mu.Unlock()
-	if rejected {
-		h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusRejected, logReasonFinalizeDeadline, 0)
-		return
+	// A run past its finalize deadline rejects each chunk before the
+	// owner lookup. This check reads the state and never creates it.
+	if st, ok := h.lookupRunState(chunk.RunId); ok {
+		st.mu.Lock()
+		rejected := st.rejectedForever
+		st.mu.Unlock()
+		if rejected {
+			h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusRejected, logReasonFinalizeDeadline, 0)
+			return
+		}
 	}
 
 	decision, tuple := h.checkOwner(ctx, h.cluster, ns, name, chunk.CellInstance, chunk.RunId)
@@ -296,6 +309,11 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 		h.answerBusy(ns, name, chunk, logReasonOwnerLookupFail, logBusyPauseMS)
 		return
 	}
+
+	// Only an admitted sender creates the run state. The first creator
+	// sets the writer and the job path that each best-effort envelope
+	// carries.
+	st := h.getOrCreateRunState(chunk.RunId, ns, name, chunk.JobPath)
 
 	if tuple.status != "" && isTerminalRunStatus(tuple.status) && tuple.anchorUnixMs > 0 {
 		h.markRunTerminal(ns, name, chunk.RunId, chunk.JobPath, time.UnixMilli(tuple.anchorUnixMs))
