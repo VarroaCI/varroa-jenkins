@@ -80,9 +80,10 @@ const (
 // incompleteness and finalization knowledge. One instance lives for as
 // long as the run has pending or unacknowledged work.
 type runLogState struct {
-	// ns and name name the run's current writer: set by the first call
-	// that creates this state, and moved to a new writer by appendChunk.
-	// abandonRun answers and publishes for that writer.
+	// ns and name name the run's current writer. The call that creates
+	// this state sets them, and adoptWriter moves them to each writer it
+	// adopts, the first one too. abandonRun answers and publishes for
+	// that writer.
 	ns, name string
 
 	// writer is the "ns/name/cell_instance" of the cell whose chunks
@@ -240,10 +241,10 @@ func (h *BusHandler) lookupRunState(runID string) (*runLogState, bool) {
 }
 
 // getOrCreateRunState returns the run's state, creating it on first
-// touch. The first call records ns, name, and jobPath. OnLogChunk calls
-// it only after checkOwner admits the sender, so a refused sender never
-// creates the state. OnBuildEvent creates it through markRunTerminal for
-// a COMPLETED event, and that path reads no owner.
+// touch. The first call records ns, name, and jobPath. Every caller
+// calls it only after checkOwner admits the sender: OnLogChunk for a
+// chunk, and markCompletedRunTerminal for a COMPLETED event. A refused
+// sender therefore never creates the state.
 func (h *BusHandler) getOrCreateRunState(runID, ns, name, jobPath string) *runLogState {
 	h.logMu.Lock()
 	defer h.logMu.Unlock()
@@ -1246,6 +1247,7 @@ func (h *BusHandler) adoptWriter(ctx context.Context, runID, ns, name string, st
 	st.mu.Lock()
 	if st.writer == "" || st.writer == writer {
 		st.writer = writer
+		st.ns, st.name = ns, name
 		st.mu.Unlock()
 		return true, appendDone
 	}
