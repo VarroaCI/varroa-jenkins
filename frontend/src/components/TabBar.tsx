@@ -1,10 +1,11 @@
 import { useState, useRef, useCallback } from "react";
 import { NavLink } from "react-router-dom";
-import { Activity, LayoutDashboard, MoreHorizontal, Network, Server } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import { NavIcon } from "./NavIcon";
 import { useControllers } from "../hooks/useControllers";
 import { usePermissions } from "../hooks/usePermissions";
 import { canControllersRow } from "../lib/navPermissions";
+import { TAB_ROWS, navRowVisible } from "../lib/navRows";
 import { MoreSheet } from "./MoreSheet";
 import styles from "./TabBar.module.css";
 
@@ -25,25 +26,13 @@ export function TabBar() {
   return (
     <>
       <nav className={styles.tabBar} aria-label="Primary">
-        <NavLink to="/" end aria-label="Overview" className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ""}`}>
-          <span className={styles.tabIcon}><NavIcon icon={LayoutDashboard} /></span>
-          <span className={styles.tabLabel}>Overview</span>
-        </NavLink>
-        {showControllers && (
-          <NavLink to="/controllers" aria-label="Controllers" className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ""}`}>
-            <span className={styles.tabIcon}><NavIcon icon={Server} /></span>
-            <span className={styles.tabLabel}>Controllers</span>
-            {controllersCount !== undefined && <span className={styles.tabCount}>{controllersCount}</span>}
+        {TAB_ROWS.filter((row) => navRowVisible(row, permissions)).map((row) => (
+          <NavLink key={row.to} to={row.to} end={row.end} aria-label={row.label} className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ""}`}>
+            <span className={styles.tabIcon}><NavIcon icon={row.icon} /></span>
+            <span className={styles.tabLabel}>{row.label}</span>
+            {row.count === "controllers" && controllersCount !== undefined && <span className={styles.tabCount}>{controllersCount}</span>}
           </NavLink>
-        )}
-        <NavLink to="/clusters" aria-label="Clusters" className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ""}`}>
-          <span className={styles.tabIcon}><NavIcon icon={Network} /></span>
-          <span className={styles.tabLabel}>Clusters</span>
-        </NavLink>
-        <NavLink to="/activity" aria-label="Activity" className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ""}`}>
-          <span className={styles.tabIcon}><NavIcon icon={Activity} /></span>
-          <span className={styles.tabLabel}>Activity</span>
-        </NavLink>
+        ))}
         <button
           ref={moreBtnRef}
           className={styles.tab}
