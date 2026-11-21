@@ -145,8 +145,9 @@ func subscribeClusterActions(t *testing.T, conn *bus.Conn) chan LedgerAction {
 
 // TestSweepEndsASilentRunOnALiveOwner asserts the sweep ends a RUNNING
 // run silent past the window on a live owner, with the heartbeat-lost
-// reason and one activity row. It publishes no cancel and no retry, it
-// counts the skipped retry, and it deletes no run-state objects.
+// reason, one activity row, and one run notification. It publishes no
+// cancel and no retry, it counts the skipped retry, and it deletes no
+// run-state objects.
 func TestSweepEndsASilentRunOnALiveOwner(t *testing.T) {
 	t.Parallel()
 
@@ -165,14 +166,22 @@ func TestSweepEndsASilentRunOnALiveOwner(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 	store := &prefixRecordingStore{}
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, metrics, nil, store,
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, notifier, metrics, nil, store,
 		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
 	if marked != 1 {
 		t.Fatalf("marked = %d, want 1", marked)
+	}
+	if sent.count() != 1 {
+		t.Fatalf("notifications = %d, want 1", sent.count())
+	}
+	if got := sent.payload(0); got.RunID != runID.String() || got.Status != StatusCompleted || got.Result != "INTERRUPTED" {
+		t.Fatalf("notification = %+v, want the run COMPLETED with INTERRUPTED", got)
 	}
 
 	var status, result, reason string
@@ -223,7 +232,7 @@ func TestSweepLeavesASilentRunOnALiveOwnerInsideTheWindow(t *testing.T) {
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil, nil,
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil, nil, nil,
 		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
@@ -252,7 +261,7 @@ func TestMarkMovedRunsForTenantSkipsHeartbeatLost(t *testing.T) {
 
 	fresh := time.Now()
 	row := resolveLivenessMembers(tenantPlacementLivenessRow{cellInstance: "pod-a", cellAlive: true, cellAliveAt: &fresh})
-	marked, err := MarkMovedRunsForTenant(context.Background(), pool, nil, nil, nil, nil, nil, testCluster, testTenant,
+	marked, err := MarkMovedRunsForTenant(context.Background(), pool, nil, nil, nil, nil, nil, nil, testCluster, testTenant,
 		row, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("MarkMovedRunsForTenant: %v", err)

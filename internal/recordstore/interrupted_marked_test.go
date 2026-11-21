@@ -257,7 +257,7 @@ func TestEndMarkedLostIntentSupersedesAnAcceptedRow(t *testing.T) {
 		t.Fatalf("reason=%q accepted=%v, want %q and no accepted keys", reason, accepted, ReasonCellRolled)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil, nil,
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil, nil, nil,
 		DefaultSweepMaxPending, time.Now().UTC(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)

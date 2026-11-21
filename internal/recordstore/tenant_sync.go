@@ -43,8 +43,9 @@ const maxDeadInstances = 10
 //
 // grace is the confirmed-gone grace the announce hook's own marking,
 // fleet-lock release, and intent re-fire apply. notifier publishes the
-// lock notifications the announce hook's fleet-lock release owes, and a
-// nil notifier publishes nothing. logs reads a moved run's stored
+// run notification of each run that the announce marks. It also
+// publishes the lock notifications that the announce hook's fleet-lock
+// release owes. A nil notifier publishes nothing. logs reads a moved run's stored
 // console log for the resume action the announce hook's takeover
 // publishes, and a nil logs sends no log sequence.
 func RegisterTenantSyncResponder(mp metric.MeterProvider, conn *bus.Conn, activityPub *activity.Publisher, pool *pgxpool.Pool, grace time.Duration,
@@ -219,8 +220,9 @@ type tenantPlacementRow struct {
 // metrics feed that marking; a nil metrics counts nothing. activityPub
 // sends the activity row of each run that the announce marks, after its
 // commit. A nil activityPub publishes nothing. notifier
-// carries the lock notifications of the fleet-lock move and release,
-// and a nil notifier publishes nothing.
+// carries the run notification of each run that the announce marks. It
+// also carries the lock notifications of the fleet-lock move and release.
+// A nil notifier publishes nothing.
 func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, activityPub *activity.Publisher, pool *pgxpool.Pool, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, logs LogIndexReader, grace time.Duration,
 	notifier *RunNotifier, dashboardURL string, logger *slog.Logger, req TenantSyncRequest) (TenantSyncResponse, error) {
@@ -417,7 +419,7 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, activityPub *
 
 	var interruptedMarked int
 	if old.cell != req.Cell || old.cellInstance != req.CellInstance || len(derived) > 0 {
-		n, markErr := MarkMovedRunsForTenant(ctx, pool, conn, activityPub, metrics, actionMetrics, stateDeleter,
+		n, markErr := MarkMovedRunsForTenant(ctx, pool, conn, activityPub, notifier, metrics, actionMetrics, stateDeleter,
 			req.Cluster, req.Tenant, row, time.Now(), grace, dashboardURL, logger)
 		if markErr != nil {
 			logger.Error("interrupted-run marking after announce failed",

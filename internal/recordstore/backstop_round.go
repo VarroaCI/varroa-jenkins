@@ -43,9 +43,11 @@ type BackstopConfig struct {
 	ActionMetrics *ActionMetrics
 	// ClaimExpiryMetrics counts the runs the claim-expiry sweep marks.
 	ClaimExpiryMetrics *ClaimExpiryMetrics
-	// RunNotifier publishes the live notification of each run the
-	// claim-expiry sweep marks, and of each fleet lock the release check
-	// deletes. A nil RunNotifier publishes nothing.
+	// RunNotifier publishes the live notification of each run that the
+	// end of marked lost runs, the interrupted sweep, or the claim-expiry
+	// sweep marks. It also publishes the notification of each fleet lock
+	// that the holder move or the release check changes. A nil
+	// RunNotifier publishes nothing.
 	RunNotifier *RunNotifier
 	// ActivityPublisher sends each activity row that the round writes, after
 	// its commit. A nil ActivityPublisher writes the rows and publishes
@@ -136,7 +138,7 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 		logger.Warn("lock wait exceeded round failed", "error", err)
 	}
 
-	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.ActivityPublisher, cfg.SweepMetrics, cfg.ActionMetrics,
+	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.ActivityPublisher, cfg.RunNotifier, cfg.SweepMetrics, cfg.ActionMetrics,
 		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, cfg.DashboardURL, logger); err != nil {
 		logger.Warn("interrupted sweep failed", "error", err)
 	}

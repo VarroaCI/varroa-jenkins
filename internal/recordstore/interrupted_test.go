@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -884,7 +885,7 @@ func TestSweepInterruptedRunsMarksASilentRun(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -916,6 +917,72 @@ func TestSweepInterruptedRunsMarksASilentRun(t *testing.T) {
 	}
 }
 
+// TestSweepInterruptedRunsNotifiesEachMarkedRun asserts the sweep sends one
+// run notification for each run that it marks, a RUNNING run and a QUEUED
+// run alike. Each notification names the run row that the sweep read, on
+// that row's own tenant subject. A second round marks nothing and sends
+// nothing.
+func TestSweepInterruptedRunsNotifiesEachMarkedRun(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runningID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
+
+	past := time.Now().Add(-17 * time.Minute)
+	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2`, past, runningID); err != nil {
+		t.Fatalf("backdate heartbeat_received_at: %v", err)
+	}
+	queuedID := seedAcceptedOnlyRunRowInstance(t, db, "pod-a", past)
+	seedTenantPlacementLiveness(t, db, "pod-a", false, &past, &past, nil)
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	freshenSweepConsumer(t, conn)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, notifier, nil, nil, nil,
+		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	if err != nil {
+		t.Fatalf("SweepInterruptedRuns: %v", err)
+	}
+	if marked != 2 {
+		t.Fatalf("marked = %d, want 2", marked)
+	}
+
+	if sent.count() != 2 {
+		t.Fatalf("notifications = %d, want 2", sent.count())
+	}
+	wantSubject := bus.RunNotifySubject(testCluster, testTenant)
+	seen := map[string]bool{}
+	for i := 0; i < sent.count(); i++ {
+		got := sent.payload(i)
+		if got.Kind != "run" || got.Cluster != testCluster || got.Tenant != testTenant || got.JobPath != testJobPath ||
+			got.Status != StatusCompleted || got.Result != "INTERRUPTED" {
+			t.Fatalf("notification = %+v, want a run notification of the marked row, COMPLETED with INTERRUPTED", got)
+		}
+		if subject := sent.subject(i); subject != wantSubject {
+			t.Fatalf("subject = %q, want %q", subject, wantSubject)
+		}
+		seen[got.RunID] = true
+	}
+	if !seen[runningID.String()] || !seen[queuedID.String()] {
+		t.Fatalf("notified runs = %v, want %s and %s", seen, runningID, queuedID)
+	}
+
+	again, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, notifier, nil, nil, nil,
+		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	if err != nil {
+		t.Fatalf("second SweepInterruptedRuns: %v", err)
+	}
+	if again != 0 {
+		t.Fatalf("second round marked = %d, want 0", again)
+	}
+	if sent.count() != 2 {
+		t.Fatalf("notifications after the second round = %d, want 2", sent.count())
+	}
+}
+
 // TestSweepInterruptedRunsSkipsOnPendingBacklog asserts the sweep reads
 // no run and counts a skip when the consumer's pending count is at or
 // above maxPending.
@@ -940,7 +1007,7 @@ func TestSweepInterruptedRunsSkipsOnPendingBacklog(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, metrics, nil, nil, 1, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, 1, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -983,7 +1050,7 @@ func TestSweepInterruptedRunsSkipsOnStaleConsumer(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1130,7 +1197,7 @@ func TestSweepMarksQueuedRunWithDeadAcceptingInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1195,7 +1262,7 @@ func TestSweepLeavesQueuedRunWithLiveAcceptingInstanceAlone(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1237,7 +1304,7 @@ func TestSweepSkipsQueuedPlaceholderWithNoOwningInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1295,7 +1362,7 @@ func TestSweepMarksClaimedQueuedRunThroughIntentInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(ctx, pool, conn, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(ctx, pool, conn, nil, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1343,6 +1410,53 @@ func TestMarkMovedRunsForTenantMarksQueuedRunOfOldCell(t *testing.T) {
 	}
 	if status != StatusCompleted || result != "INTERRUPTED" || reason != ReasonCellRolled {
 		t.Fatalf("status=%q result=%q reason=%q, want COMPLETED/INTERRUPTED/%q", status, result, reason, ReasonCellRolled)
+	}
+}
+
+// TestMarkMovedRunsForTenantNotifiesTheMarkedRun asserts the announce
+// hook's marking sends one run notification through the responder's
+// notifier for the run that it marks. The notification names the run row
+// that the marking read.
+func TestMarkMovedRunsForTenantNotifiesTheMarkedRun(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	past := time.Now().UTC().Add(-6 * time.Minute)
+	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-old", past)
+
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	body, err := json.Marshal(TenantSyncRequest{
+		Kind: TenantSyncKindAnnounce, Cluster: testCluster, Tenant: testTenant,
+		Namespace: testNamespace, Cell: "cell-a", Generation: 1, CellInstance: "pod-new",
+		DeadInstances: []TenantSyncDeadInstance{{Instance: "pod-old", LastSeenAt: past}},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	var resp TenantSyncResponse
+	if err := json.Unmarshal(handleTenantSync(conn, nil, slog.Default(), pool, nil, nil, nil, nil, testGrace, notifier, "", body),
+		&resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.InterruptedMarked != 1 {
+		t.Fatalf("InterruptedMarked = %d, want 1", resp.InterruptedMarked)
+	}
+
+	var runs []RunNotification
+	for i := 0; i < sent.count(); i++ {
+		if got := sent.payload(i); got.Kind == "run" {
+			runs = append(runs, got)
+		}
+	}
+	if len(runs) != 1 {
+		t.Fatalf("run notifications = %+v, want one", runs)
+	}
+	if got := runs[0]; got.RunID != runID.String() || got.Cluster != testCluster || got.Tenant != testTenant ||
+		got.JobPath != testJobPath || got.Status != StatusCompleted || got.Result != "INTERRUPTED" {
+		t.Fatalf("notification = %+v, want the marked run COMPLETED with INTERRUPTED", got)
 	}
 }
 
@@ -1490,7 +1604,7 @@ func TestSweepMarksCellLostAndCountsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, metrics, nil, nil,
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil,
 		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
@@ -1538,7 +1652,7 @@ func TestSweepMarksCellLostOnAnIdleConsumer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, metrics, nil, nil,
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil,
 		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
