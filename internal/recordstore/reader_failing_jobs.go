@@ -96,7 +96,7 @@ func (r *pgReader) FailingJobs(ctx context.Context, q FailingJobsQuery) (Failing
 		SELECT DISTINCT r.cluster, r.tenant, r.job_path FROM scopes s
 		JOIN varroa.runs r ON r.cluster = s.cluster AND r.tenant = s.tenant
 			AND (s.patterns IS NULL OR r.job_path ~ ANY(s.patterns))
-		WHERE r.created_at >= $2 AND r.result = 'FAILURE' AND `+recordsBuildRunSQL+`
+		WHERE r.created_at >= $2 AND r.result = 'FAILURE' AND `+historyRunRunSQL+`
 	),
 	newest AS (
 		SELECT j.cluster, j.tenant, j.job_path, n.run_id, n.created_at, n.result
@@ -105,13 +105,13 @@ func (r *pgReader) FailingJobs(ctx context.Context, q FailingJobsQuery) (Failing
 	SELECT n.run_id::text, p.run_id::text, p.build_number, p.created_at, p.ended_at,
 		(SELECT count(*) FROM varroa.runs r
 			WHERE r.cluster = n.cluster AND r.tenant = n.tenant AND r.job_path = n.job_path
-				AND r.result = 'FAILURE' AND `+recordsBuildRunSQL+`
+				AND r.result = 'FAILURE' AND `+historyRunRunSQL+`
 				AND (p.created_at IS NULL OR r.created_at > p.created_at))
 	FROM newest n
 	LEFT JOIN LATERAL (
 		SELECT r.run_id, r.build_number, r.created_at, r.ended_at FROM varroa.runs r
 		WHERE r.cluster = n.cluster AND r.tenant = n.tenant AND r.job_path = n.job_path
-			AND r.result = 'SUCCESS' AND r.created_at < n.created_at AND `+recordsBuildRunSQL+`
+			AND r.result = 'SUCCESS' AND r.created_at < n.created_at AND `+historyRunRunSQL+`
 		ORDER BY r.created_at DESC, r.run_id DESC LIMIT 1
 	) p ON true
 	WHERE n.result = 'FAILURE' AND n.created_at >= $2

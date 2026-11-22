@@ -24,14 +24,26 @@ func CountsTowardPassRate(result string) bool {
 // statement that joins two relations uses this form.
 const countedResultRunSQL = `r.result IS NOT NULL AND r.result NOT IN ('` + resultInterrupted + `', '` + resultNotBuilt + `')`
 
+// historyRunSQL matches a row of its job's build history: the row records a
+// build, and its status is not DUPLICATE. A DUPLICATE run builds a revision
+// that an older live run also builds, and the recorder cancels it. The older
+// run gives the outcome of that revision. Every job and fleet aggregate reads
+// only history rows, so a DUPLICATE run changes no count, rate, trend, or
+// last run. A run list, a search, and the run's own read keep the row. The
+// predicate names its columns without a table qualifier.
+const historyRunSQL = `(` + recordsBuildSQL + ` AND status <> '` + StatusDuplicate + `')`
+
+// historyRunRunSQL is historyRunSQL qualified by the alias "r".
+const historyRunRunSQL = `(` + recordsBuildRunSQL + ` AND r.status <> '` + StatusDuplicate + `')`
+
 // newestCountedRunSQL is the lateral body that finds the newest counted
-// build run of one job. It reads the job from the outer alias "j", which
+// history run of one job. It reads the job from the outer alias "j", which
 // names the cluster, tenant, and job_path columns. The failing-jobs read
 // and the held-run rule of the run groups read both use it, so the two
 // reads agree on which run a job holds.
 const newestCountedRunSQL = `SELECT r.run_id, r.created_at, r.result FROM varroa.runs r
 	WHERE r.cluster = j.cluster AND r.tenant = j.tenant AND r.job_path = j.job_path
-		AND ` + countedResultRunSQL + ` AND ` + recordsBuildRunSQL + `
+		AND ` + countedResultRunSQL + ` AND ` + historyRunRunSQL + `
 	ORDER BY r.created_at DESC, r.run_id DESC LIMIT 1`
 
 // newestCountedRunBeforeSQL is newestCountedRunSQL limited to the runs created
@@ -40,5 +52,5 @@ const newestCountedRunSQL = `SELECT r.run_id, r.created_at, r.result FROM varroa
 // A run created at or after the window end is not held in that window.
 const newestCountedRunBeforeSQL = `SELECT r.run_id, r.created_at, r.result FROM varroa.runs r
 	WHERE r.cluster = j.cluster AND r.tenant = j.tenant AND r.job_path = j.job_path
-		AND r.created_at < $3 AND ` + countedResultRunSQL + ` AND ` + recordsBuildRunSQL + `
+		AND r.created_at < $3 AND ` + countedResultRunSQL + ` AND ` + historyRunRunSQL + `
 	ORDER BY r.created_at DESC, r.run_id DESC LIMIT 1`

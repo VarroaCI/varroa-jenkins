@@ -585,42 +585,26 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 			completedOwner:     true,
 			runDuplicate:       status == StatusDuplicate,
 		}
-		if payload.Result != nil {
-			// The fan-out round is the one part of the terminal path
-			// that is not idempotent, so it runs behind its own
-			// at-most-once claim in this same transaction.
-			claimed, claimErr := claimFanoutRound(ctx, tx, intent.createdAt, intent.runID)
-			if claimErr != nil {
-				return dispatchResult{}, claimErr
+		if payload.Result == nil {
+			return res, nil
+		}
+		// A DUPLICATE run builds a revision that an older live run also
+		// builds, and that run gives the revision's outcome. The
+		// completion of a DUPLICATE run therefore writes no outcome
+		// effect. The cleanup above and the source-gone status end still
+		// run, because the run can hold its own locks, run state, and
+		// pending commit status.
+		if status != StatusDuplicate {
+			if err := g.applyCompletionOutcome(ctx, tx, intent, env, payload, &res); err != nil {
+				return dispatchResult{}, err
 			}
-			if claimed {
-				res.fanout = &FanoutProducer{
-					Cluster: intent.cluster,
-					Tenant:  intent.tenant,
-					JobPath: intent.jobPath,
-					RunID:   intent.runID.String(),
-					Result:  *payload.Result,
-				}
+		}
+		if payload.SourceGone {
+			action, err := sourceGoneEndStatus(ctx, tx, intent, *payload.Result)
+			if err != nil {
+				return dispatchResult{}, err
 			}
-			// The webhook outbox row shares this transaction, so a
-			// rolled-back terminal write enqueues nothing.
-			enqueued, enqErr := enqueueWebhookDelivery(ctx, tx, intent, payload, g.webhookDashboardURL)
-			if enqErr != nil {
-				return dispatchResult{}, enqErr
-			}
-			res.webhookEnqueued = enqueued
-			if payload.Result != nil && isBuildFailure(*payload.Result) {
-				if err := insertActivityForPublish(ctx, tx, buildFailedEvent(intent, payload, env), &res.activity); err != nil {
-					return dispatchResult{}, err
-				}
-			}
-			if payload.SourceGone {
-				action, err := sourceGoneEndStatus(ctx, tx, intent, *payload.Result)
-				if err != nil {
-					return dispatchResult{}, err
-				}
-				res.action = action
-			}
+			res.action = action
 		}
 		return res, nil
 	case KindRunTests:
@@ -652,6 +636,39 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 	default:
 		return dispatchResult{}, fmt.Errorf("%w: %s", ErrUnknownKind, env.Kind)
 	}
+}
+
+// applyCompletionOutcome writes the outcome effects of one owner
+// run.completed that carries a result: the fan-out claim, the completion
+// webhook row, and the build.failed activity row. It writes them in the
+// terminal write's own transaction, so a rolled-back completion writes
+// none of them. The caller checks payload.Result first.
+func (g *Ingester) applyCompletionOutcome(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope,
+	payload RunCompletedPayload, res *dispatchResult) error {
+	// The fan-out round is the one part of the terminal path that is not
+	// idempotent, so it runs behind its own at-most-once claim.
+	claimed, err := claimFanoutRound(ctx, tx, intent.createdAt, intent.runID)
+	if err != nil {
+		return err
+	}
+	if claimed {
+		res.fanout = &FanoutProducer{
+			Cluster: intent.cluster,
+			Tenant:  intent.tenant,
+			JobPath: intent.jobPath,
+			RunID:   intent.runID.String(),
+			Result:  *payload.Result,
+		}
+	}
+	enqueued, err := enqueueWebhookDelivery(ctx, tx, intent, payload, g.webhookDashboardURL)
+	if err != nil {
+		return err
+	}
+	res.webhookEnqueued = enqueued
+	if isBuildFailure(*payload.Result) {
+		return insertActivityForPublish(ctx, tx, buildFailedEvent(intent, payload, env), &res.activity)
+	}
+	return nil
 }
 
 // readRunStateFiles reads the run's mesh file list inside tx for the

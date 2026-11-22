@@ -54,7 +54,7 @@ const runGroupsWindowCTE = scopesRelation + `,
 		FROM scopes s
 		JOIN varroa.runs r ON r.cluster = s.cluster AND r.tenant = s.tenant
 			AND (s.patterns IS NULL OR r.job_path ~ ANY(s.patterns))
-		WHERE r.created_at >= $2 AND r.created_at < $3 AND r.result IS NOT NULL AND ` + recordsBuildRunSQL + `
+		WHERE r.created_at >= $2 AND r.created_at < $3 AND r.result IS NOT NULL AND ` + historyRunRunSQL + `
 	),
 	jobs AS (SELECT DISTINCT cluster, tenant, job_path FROM win),
 	held AS (

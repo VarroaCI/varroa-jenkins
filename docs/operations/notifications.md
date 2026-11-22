@@ -57,7 +57,8 @@ administrator sets it.
 ## Which runs send a webhook
 
 The record store sends one webhook for each completion of a run that has a
-result. A redelivered completion sends nothing new.
+result. A redelivered completion sends nothing new. A
+[duplicate run](build-records.md#a-duplicate-run) sends no webhook.
 
 The backstop can also end a run with the synthetic result `INTERRUPTED`.
 That end sends one delivery with `synthetic: true`. A later real completion

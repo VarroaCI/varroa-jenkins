@@ -57,7 +57,9 @@ const summaryCompletedGuardSQL = `$15::text IS NOT NULL
 //
 // status is the row's stored status after the write. An owner write on a
 // DUPLICATE row keeps that status and still stores the result, so the
-// caller reports DUPLICATE, never COMPLETED.
+// caller reports DUPLICATE, never COMPLETED. The caller then runs the
+// cleanup and no outcome effect: no fan-out round, no webhook row, and
+// no build.failed row.
 func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) (owner bool, status string, payload RunCompletedPayload, releasedLocks []ReleasedFleetLock, err error) {
 	if unmarshalErr := json.Unmarshal(env.Payload, &payload); unmarshalErr != nil {
 		return false, "", RunCompletedPayload{}, nil, fmt.Errorf("%w: decode run.completed payload: %v", ErrMalformedEnvelope, unmarshalErr)

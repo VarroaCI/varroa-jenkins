@@ -67,21 +67,21 @@ type RunsOverview struct {
 }
 
 // overviewScopedCTE gives the runs that the overview counts as the relation
-// scoped. It holds every run of the scopes created since $2, the start of the
-// prior window. It also holds every older live run, so the live counts need no
-// time bound. The two halves are disjoint by created_at, so no run appears
+// scoped. It holds every history run (historyRunRunSQL) of the scopes created
+// since $2, the start of the prior window. It also holds every older live run,
+// so the live counts need no time bound. The two halves are disjoint by created_at, so no run appears
 // twice. The statement that uses it must bind $1 to scopesJSON and $2 to the
 // prior-window start.
 const overviewScopedCTE = `scoped AS (
 	SELECT r.* FROM scopes s
 	JOIN varroa.runs r ON r.cluster = s.cluster AND r.tenant = s.tenant
 		AND (s.patterns IS NULL OR r.job_path ~ ANY(s.patterns))
-	WHERE r.created_at >= $2 AND ` + recordsBuildRunSQL + `
+	WHERE r.created_at >= $2 AND ` + historyRunRunSQL + `
 	UNION ALL
 	SELECT r.* FROM scopes s
 	JOIN varroa.runs r ON r.cluster = s.cluster AND r.tenant = s.tenant
 		AND (s.patterns IS NULL OR r.job_path ~ ANY(s.patterns))
-	WHERE r.created_at < $2 AND r.status IN ('RUNNING', 'QUEUED') AND ` + recordsBuildRunSQL + `
+	WHERE r.created_at < $2 AND r.status IN ('RUNNING', 'QUEUED') AND ` + historyRunRunSQL + `
 )`
 
 // RunsOverview answers the aggregate read of the pipelines overview. It
@@ -205,7 +205,7 @@ func (r *pgReader) RunsOverview(ctx context.Context, q RunsOverviewQuery) (RunsO
 		FROM varroa.runs r
 		WHERE r.cluster = s.cluster AND r.tenant = s.tenant
 			AND (s.patterns IS NULL OR r.job_path ~ ANY(s.patterns))
-			AND ` + recordsBuildRunSQL + `
+			AND ` + historyRunRunSQL + `
 		ORDER BY r.created_at DESC, r.run_id DESC
 		LIMIT ` + fmt.Sprint(RecentResultsSize) + `
 	) rec

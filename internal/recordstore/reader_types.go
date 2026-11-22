@@ -235,7 +235,7 @@ const jobSummaryTrendSize = 10
 // from exactly this window.
 const JobHealthWindow = 10
 
-// HealthRun is one finished build run of a job, as the health window
+// HealthRun is one finished history run of a job, as the health window
 // and the job trend read it. A nil pointer field means the run did not
 // record that value.
 type HealthRun struct {
@@ -250,12 +250,13 @@ type HealthRun struct {
 
 // JobSummary is one job's run-history summary, derived only from record
 // data: no job definition, no trigger state, and no job that has never
-// run. The pipelines API joins the catalog for those. LastRun is the
-// newest run regardless of status. DurationTrendMs holds the most
+// run. The pipelines API joins the catalog for those. Every field reads
+// only history runs (historyRunSQL). LastRun is the newest history run
+// regardless of status. DurationTrendMs holds the most
 // recent runs' duration_ms, newest first, for at most
 // jobSummaryTrendSize runs, skipping a run with no duration yet.
 // RecentRuns holds the job's most recent JobHealthWindow finished
-// build runs, newest first; a run with no result yet (QUEUED or
+// history runs, newest first; a run with no result yet (QUEUED or
 // RUNNING) is not finished and never appears here.
 // MedianQueueWaitMs is nil when the tenant's job has no run in the
 // window with both queued_at and started_at set. ListJobSummaries

@@ -138,7 +138,7 @@ started it.
 
 | Trigger | Activity type | Produced by |
 |---|---|---|
-| `run.failed` | `build.failed` | The recorder, at the owner's completion event. |
+| `run.failed` | `build.failed` | The recorder, at the owner's completion event. A duplicate run sends none. |
 | `run.interrupted` | `build.interrupted` | The recorder, at the synthetic end of a run. |
 | `cron.missed` | `build.scheduled.backstop` | The recorder, when it fires a missed cron run. |
 | `signature.refused` | `cell.signature_refused` | The operator, for a refused script signature. |
