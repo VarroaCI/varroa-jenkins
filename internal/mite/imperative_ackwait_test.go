@@ -56,8 +56,9 @@ func connectResultMite(t *testing.T, addr string, certAuth *ca.CA) (mitev1.Mite_
 }
 
 // heartbeatAckWait sets a two-second imperative ack wait and a 100ms
-// in-progress interval. The margin between the two must absorb a
-// scheduler stall on a loaded race-detector run.
+// in-progress interval. The margin between the two must absorb a scheduler
+// stall and a forward step of the wall clock. The server measures the ack
+// wait on the wall clock.
 func heartbeatAckWait(h *BusHandler) {
 	h.imperativeAckWait = 2 * time.Second
 	h.imperativeProgressEvery = 100 * time.Millisecond
@@ -180,30 +181,69 @@ func seedProgressMessage(t *testing.T, conn *bus.Conn, sub *nats.Subscription, s
 	return bustest.FetchOne(t, sub, bustest.PresenceWait)
 }
 
-// redeliveredIDs fetches for wait and answers the command ids the stream
-// delivered again.
-func redeliveredIDs(t *testing.T, conn *bus.Conn, sub *nats.Subscription, wait time.Duration) map[string]bool {
+// progressWait bounds each wait of the progress test on an event that must
+// come. The wait ends when the event comes, so a pass costs no more time.
+const progressWait = 10 * time.Second
+
+// progressMarks subscribes to the acknowledgement subject of msg. Each
+// in-progress acknowledgement that the gateway sends for msg arrives on the
+// subscription. The subscription and the gateway share one connection, so
+// the server sees the subscription before any acknowledgement.
+func progressMarks(t *testing.T, conn *bus.Conn, msg *nats.Msg) *nats.Subscription {
 	t.Helper()
-	ids := map[string]bool{}
-	deadline := time.Now().Add(wait)
+	marks, err := conn.NATSConn().SubscribeSync(msg.Reply)
+	if err != nil {
+		t.Fatalf("subscribe to %s: %v", msg.Reply, err)
+	}
+	t.Cleanup(func() { _ = marks.Unsubscribe() })
+	return marks
+}
+
+// awaitProgressMarks waits for n in-progress acknowledgements on marks.
+func awaitProgressMarks(t *testing.T, marks *nats.Subscription, n int, what string) {
+	t.Helper()
+	deadline := time.Now().Add(progressWait)
+	for got := 0; got < n; got++ {
+		m, err := marks.NextMsg(time.Until(deadline))
+		if err != nil {
+			t.Fatalf("%s: %d of %d in-progress acknowledgements: %v", what, got, n, err)
+		}
+		if string(m.Data) != "+WPI" {
+			t.Fatalf("%s: acknowledgement %q, want +WPI", what, m.Data)
+		}
+	}
+}
+
+// awaitRedelivery fetches until the stream delivers commandID again.
+func awaitRedelivery(t *testing.T, conn *bus.Conn, sub *nats.Subscription, commandID, what string) {
+	t.Helper()
+	deadline := time.Now().Add(progressWait)
 	for time.Now().Before(deadline) {
 		msgs, err := conn.DrainConsumer(sub, 4)
 		if err != nil && !errors.Is(err, nats.ErrTimeout) {
 			t.Fatalf("fetch: %v", err)
 		}
 		for _, m := range msgs {
-			if imp := pendingCommand(m); imp != nil {
-				ids[imp.CommandId] = true
+			if imp := pendingCommand(m); imp != nil && imp.CommandId == commandID {
+				return
 			}
 		}
 	}
-	return ids
+	t.Fatal(what)
 }
 
 // TestImperativeProgressOnlyTouchesOwnToken files two pending commands under
-// two connection tokens. The heartbeat of one token must keep only its own
-// command from a repeat, and a stopped heartbeat must leave its command to the
+// two connection tokens. The heartbeat of one token must mark only its own
+// command in progress, and a stopped heartbeat must leave its command to the
 // ack wait.
+//
+// The test reads the acknowledgements on the wire. It does not assert that
+// the marked command never repeats. The server measures the ack wait on the
+// wall clock. A forward clock step larger than the margin after a mark
+// expires a marked command. A clock sync on the test host can step the clock
+// by more than this test's 750ms margin.
+// TestPendingImperativeHeartbeatPreventsRedelivery covers the repeat end to
+// end with a wider margin.
 func TestImperativeProgressOnlyTouchesOwnToken(t *testing.T) {
 	h, conn := newTriggerFailedHandler(t, &fakePublisher{}, triggerFailedResolver())
 	h.imperativeAckWait = time.Second
@@ -227,6 +267,8 @@ func TestImperativeProgressOnlyTouchesOwnToken(t *testing.T) {
 	}
 	own := seedProgressMessage(t, conn, sub, subject, "cmd-own")
 	other := seedProgressMessage(t, conn, sub, subject, "cmd-other")
+	ownMarks := progressMarks(t, conn, own)
+	otherMarks := progressMarks(t, conn, other)
 	key := triggerFailedNS + "/" + triggerFailedCell
 	h.mu.Lock()
 	h.pendingAcks[key] = map[string]pendingImperative{
@@ -236,25 +278,31 @@ func TestImperativeProgressOnlyTouchesOwnToken(t *testing.T) {
 	h.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		h.markImperativesInProgress(ctx, triggerFailedNS, triggerFailedCell, 7)
 	}()
 
-	got := redeliveredIDs(t, conn, sub, 3*time.Second)
-	if got["cmd-own"] {
-		t.Fatal("the heartbeat did not keep its own command from a repeat")
-	}
-	if !got["cmd-other"] {
-		t.Fatal("another token's command did not repeat after its ack wait")
-	}
+	awaitProgressMarks(t, ownMarks, 2, "the heartbeat did not mark its own command in progress")
+	awaitRedelivery(t, conn, sub, "cmd-other", "another token's command did not repeat after its ack wait")
 
 	cancel()
-	<-done
-	if got := redeliveredIDs(t, conn, sub, 3*time.Second); !got["cmd-own"] {
-		t.Fatal("a stopped heartbeat did not leave its command to the ack wait")
+	select {
+	case <-done:
+	case <-time.After(progressWait):
+		t.Fatal("the heartbeat did not stop with its context")
 	}
+	// The flush round trip puts every acknowledgement that the stopped
+	// heartbeat sent into the subscription queue before the count below.
+	if err := conn.NATSConn().Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if n, _, err := otherMarks.Pending(); err != nil || n != 0 {
+		t.Fatalf("the heartbeat marked another token's command in progress %d times (err %v)", n, err)
+	}
+	awaitRedelivery(t, conn, sub, "cmd-own", "a stopped heartbeat did not leave its command to the ack wait")
 }
 
 // TestForwardImperativeTerminatesUndecodableMessage checks that a message that
