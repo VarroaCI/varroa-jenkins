@@ -2,6 +2,7 @@ package mite
 
 import (
 	"context"
+	"errors"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -592,6 +593,7 @@ func TestOnLogChunkMovedWriterRepeatPastTheDeadlineStaysStored(t *testing.T) {
 	if got := waitForLogAcks(t, sender, before+1)[before]; got.Status != logAckStatusStored || got.AckSeq != 1 {
 		t.Fatalf("expected STORED ack_seq 1 for the moved writer's repeat, got %+v", got)
 	}
+	waitForCompareIdle(t, h)
 	assertFinishedLogKept(t, h, runID)
 	if got := pub.publishedCount(); got != published {
 		t.Fatalf("published %d envelopes for the repeat, want 0", got-published)
@@ -621,6 +623,7 @@ func TestOnLogChunkMovedWriterRepeatUnderAFullBudgetLeavesNoState(t *testing.T) 
 	if got := waitForLogAcks(t, sender, before+1)[before]; got.Status != logAckStatusStored || got.AckSeq != 1 {
 		t.Fatalf("expected STORED ack_seq 1 for the moved writer's repeat, got %+v", got)
 	}
+	waitForCompareIdle(t, h)
 	assertFinishedLogKept(t, h, runID)
 }
 
@@ -691,16 +694,23 @@ func TestOnLogChunkMovedWriterOnARejectedTombstoneIsRejected(t *testing.T) {
 // TestOnLogChunkMovedWriterDifferingRepeatMarksTheGapOnce proves that a
 // moved writer's chunk with other bytes than the stored part gets STORED
 // at the final entry and marks the run gateway-gap. A second differing
-// chunk publishes no second marker. The stored log does not change.
+// chunk publishes no second marker and reads no stored part. The stored
+// log does not change.
 func TestOnLogChunkMovedWriterDifferingRepeatMarksTheGapOnce(t *testing.T) {
 	sender := &recordingSender{}
 	owner := newFakeOwnerRequester()
 	runID := newTestRunID()
 	owner.setAnswer(runID, ownerAnswer())
 	pub := &fakePublisher{}
-	h := newLogTestHandler(t, owner, sender)
+	base, err := blob.Open(context.Background(), "file://"+t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("open blob store: %v", err)
+	}
+	reads := &atomic.Int32{}
+	h := newLogTestHandlerOnStore(t, owner, sender, base)
 	h.publisher = pub
 	storeFinalizedRun(t, h, sender, runID)
+	h.logStore = countingReadStore{Store: base, reads: reads}
 	moveOwnerToInst2(h, owner, runID)
 
 	for i, c := range []struct {
@@ -711,6 +721,10 @@ func TestOnLogChunkMovedWriterDifferingRepeatMarksTheGapOnce(t *testing.T) {
 		h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: c.seq, Data: []byte(c.data), CellInstance: "inst2", JobPath: "tenant-a/build"})
 		if got := waitForLogAcks(t, sender, before+1)[before]; got.Status != logAckStatusStored || got.AckSeq != 1 {
 			t.Fatalf("chunk %d: expected STORED ack_seq 1, got %+v", i, got)
+		}
+		waitForCompareIdle(t, h)
+		if n := reads.Load(); n != 1 {
+			t.Fatalf("chunk %d: stored-part reads = %d, want 1", i, n)
 		}
 		assertRunGatewayGap(t, h, runID)
 		if n := gatewayGapPublishes(pub); n != 1 {
@@ -818,5 +832,262 @@ func TestLogTombstonesExpireAndStayBounded(t *testing.T) {
 	}
 	if _, ok := s.get("c", t0.Add(2*ttl+time.Second)); ok || s.len() != 0 {
 		t.Fatal("expected every tombstone expired")
+	}
+}
+
+// gatedStampStore holds each PartStamp read until release closes, and
+// records how many reads ran at once. A nil release holds nothing. err,
+// when set, fails every read after the hold.
+type gatedStampStore struct {
+	blob.Store
+	release chan struct{}
+	err     error
+
+	mu          sync.Mutex
+	inFlight    int
+	maxInFlight int
+	reads       int
+}
+
+func (g *gatedStampStore) PartStamp(ctx context.Context, key string, seq int64) (blob.Stamp, error) {
+	g.mu.Lock()
+	g.inFlight++
+	g.reads++
+	if g.inFlight > g.maxInFlight {
+		g.maxInFlight = g.inFlight
+	}
+	g.mu.Unlock()
+	defer func() {
+		g.mu.Lock()
+		g.inFlight--
+		g.mu.Unlock()
+	}()
+	if g.release != nil {
+		select {
+		case <-g.release:
+		case <-ctx.Done():
+			return blob.Stamp{}, ctx.Err()
+		}
+	}
+	if g.err != nil {
+		return blob.Stamp{}, g.err
+	}
+	return g.Store.PartStamp(ctx, key, seq)
+}
+
+// counts returns the reads in flight, the highest number in flight at
+// once, and the reads in total.
+func (g *gatedStampStore) counts() (inFlight, maxInFlight, reads int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.inFlight, g.maxInFlight, g.reads
+}
+
+// compareQueueState returns the repeats that wait for a compare and the
+// compare workers that run.
+func compareQueueState(h *BusHandler) (queued, running int) {
+	h.logCompareMu.Lock()
+	defer h.logCompareMu.Unlock()
+	return len(h.logCompareQueue), h.logCompareRunning
+}
+
+// sendMovedRepeat sends a repeat of seq 0 of runID from the moved writer
+// ns1/cell1/inst2.
+func sendMovedRepeat(h *BusHandler, runID, data string) {
+	h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 0, Data: []byte(data), CellInstance: "inst2", JobPath: "tenant-a/build"})
+}
+
+// assertStoredAtFinalEntry asserts that the sender received exactly want
+// acks after the first before acks, each STORED at ack_seq 1, the final
+// entry that storeFinalizedRun writes.
+func assertStoredAtFinalEntry(t *testing.T, sender *recordingSender, before, want int) {
+	t.Helper()
+	acks := sender.logAcks()[before:]
+	if len(acks) != want {
+		t.Fatalf("acks = %d, want %d", len(acks), want)
+	}
+	for i, got := range acks {
+		if got.Status != logAckStatusStored || got.AckSeq != 1 {
+			t.Fatalf("ack %d = %+v, want STORED ack_seq 1", i, got)
+		}
+	}
+}
+
+// TestOnLogChunkMovedWriterCompareReadErrorMarksNothing proves the read
+// error path of the compare. The repeat gets STORED, the failed read
+// marks no gap and publishes nothing, and the finished log stays
+// finalized and complete.
+func TestOnLogChunkMovedWriterCompareReadErrorMarksNothing(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerAnswer())
+	pub := &fakePublisher{}
+	h := newLogTestHandler(t, owner, sender)
+	h.publisher = pub
+	storeFinalizedRun(t, h, sender, runID)
+	published := pub.publishedCount()
+
+	gated := &gatedStampStore{Store: h.logStore, err: errors.New("store unreachable")}
+	h.logStore = gated
+	moveOwnerToInst2(h, owner, runID)
+	before := len(sender.logAcks())
+	sendMovedRepeat(h, runID, "other bytes")
+
+	waitForLogAcks(t, sender, before+1)
+	waitForCompareIdle(t, h)
+	assertStoredAtFinalEntry(t, sender, before, 1)
+	if _, _, reads := gated.counts(); reads != 1 {
+		t.Fatalf("stored-part reads = %d, want 1", reads)
+	}
+	if got := pub.publishedCount(); got != published {
+		t.Fatalf("published %d envelopes after a failed read, want 0", got-published)
+	}
+	assertFinishedLogKept(t, h, runID)
+}
+
+// TestOnLogChunkMovedWriterRepeatsHoldTheCompareLimit proves the
+// gateway-wide compare limit. A burst of repeats, as a replay after a
+// move sends, gets one STORED ack per repeat at once. Only the worker
+// limit of reads runs at a time while the store holds them, the rest
+// wait in the queue, and every repeat is compared once the store answers.
+func TestOnLogChunkMovedWriterRepeatsHoldTheCompareLimit(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerAnswer())
+	pub := &fakePublisher{}
+	h := newLogTestHandler(t, owner, sender)
+	h.publisher = pub
+	h.logCompareWorkersMax = 2
+	h.logCompareQueueCap = 16
+	storeFinalizedRun(t, h, sender, runID)
+
+	gated := &gatedStampStore{Store: h.logStore, release: make(chan struct{})}
+	h.logStore = gated
+	moveOwnerToInst2(h, owner, runID)
+	const repeats = 10
+	before := len(sender.logAcks())
+	for i := 0; i < repeats; i++ {
+		sendMovedRepeat(h, runID, "a")
+	}
+
+	assertStoredAtFinalEntry(t, sender, before, repeats)
+	waitFor(t, func() bool {
+		inFlight, _, _ := gated.counts()
+		return inFlight == 2
+	}, 2*time.Second, "the compare workers did not start their reads")
+	if queued, running := compareQueueState(h); queued != repeats-2 || running != 2 {
+		t.Fatalf("queued=%d running=%d while the store holds the reads, want %d and 2", queued, running, repeats-2)
+	}
+
+	close(gated.release)
+	waitForCompareIdle(t, h)
+	if _, maxInFlight, reads := gated.counts(); maxInFlight != 2 || reads != repeats {
+		t.Fatalf("max reads in flight = %d, reads = %d, want 2 and %d", maxInFlight, reads, repeats)
+	}
+	assertStoredAtFinalEntry(t, sender, before, repeats)
+	if n := gatewayGapPublishes(pub); n != 0 {
+		t.Fatalf("gateway-gap marker published %d times for repeats of the stored bytes, want 0", n)
+	}
+	assertFinishedLogKept(t, h, runID)
+}
+
+// TestOnLogChunkMovedWriterRepeatOverAFullCompareQueueIsNotCompared
+// proves what a full compare queue loses. The repeat over the bound gets
+// STORED like every other repeat, reads no stored part, and counts one
+// skip. Its bytes differ from the stored part, so the run misses the
+// gateway-gap marker of that repeat.
+func TestOnLogChunkMovedWriterRepeatOverAFullCompareQueueIsNotCompared(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerAnswer())
+	pub := &fakePublisher{}
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := newGatewayMetrics(mp)
+	if err != nil {
+		t.Fatalf("newGatewayMetrics: %v", err)
+	}
+	h := newLogTestHandler(t, owner, sender)
+	h.metrics = metrics
+	h.publisher = pub
+	h.logCompareWorkersMax = 1
+	h.logCompareQueueCap = 1
+	storeFinalizedRun(t, h, sender, runID)
+
+	gated := &gatedStampStore{Store: h.logStore, release: make(chan struct{})}
+	h.logStore = gated
+	moveOwnerToInst2(h, owner, runID)
+	before := len(sender.logAcks())
+	sendMovedRepeat(h, runID, "a")
+	waitFor(t, func() bool {
+		inFlight, _, _ := gated.counts()
+		return inFlight == 1
+	}, 2*time.Second, "the compare worker did not start its read")
+	sendMovedRepeat(h, runID, "a")
+	sendMovedRepeat(h, runID, "lost bytes")
+
+	assertStoredAtFinalEntry(t, sender, before, 3)
+	if queued, running := compareQueueState(h); queued != 1 || running != 1 {
+		t.Fatalf("queued=%d running=%d, want 1 and 1", queued, running)
+	}
+	if got := collectGatewaySums(t, reader)["varroa.gateway.log.compare.skipped"]; got != 1 {
+		t.Fatalf("varroa.gateway.log.compare.skipped = %d, want 1", got)
+	}
+
+	close(gated.release)
+	waitForCompareIdle(t, h)
+	if _, _, reads := gated.counts(); reads != 2 {
+		t.Fatalf("stored-part reads = %d, want 2", reads)
+	}
+	if n := gatewayGapPublishes(pub); n != 0 {
+		t.Fatalf("gateway-gap marker published %d times, want 0: the differing repeat was not compared", n)
+	}
+	assertFinishedLogKept(t, h, runID)
+}
+
+// TestOnLogChunkMovedWriterRepeatOnAnExpiredTombstoneReadsNothing proves
+// that a repeat whose tombstone expires while it waits in the compare
+// queue reads no stored part and marks nothing. Its bytes differ, so this
+// is one of the cases in which a differing repeat marks no gap.
+func TestOnLogChunkMovedWriterRepeatOnAnExpiredTombstoneReadsNothing(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerAnswer())
+	pub := &fakePublisher{}
+	h := newLogTestHandler(t, owner, sender)
+	h.publisher = pub
+	h.logCompareWorkersMax = 1
+	h.logCompareQueueCap = 4
+	storeFinalizedRun(t, h, sender, runID)
+
+	gated := &gatedStampStore{Store: h.logStore, release: make(chan struct{})}
+	h.logStore = gated
+	moveOwnerToInst2(h, owner, runID)
+	before := len(sender.logAcks())
+	sendMovedRepeat(h, runID, "a")
+	waitFor(t, func() bool {
+		inFlight, _, _ := gated.counts()
+		return inFlight == 1
+	}, 2*time.Second, "the compare worker did not start its read")
+	sendMovedRepeat(h, runID, "lost bytes")
+	assertStoredAtFinalEntry(t, sender, before, 2)
+	if queued, _ := compareQueueState(h); queued != 1 {
+		t.Fatalf("queued = %d, want 1", queued)
+	}
+
+	h.logMu.Lock()
+	h.tombstonesLocked().expire(time.Now().Add(logTombstoneTTL + time.Minute))
+	h.logMu.Unlock()
+	close(gated.release)
+	waitForCompareIdle(t, h)
+
+	if _, _, reads := gated.counts(); reads != 1 {
+		t.Fatalf("stored-part reads = %d, want 1: the repeat on the expired tombstone must read nothing", reads)
+	}
+	if n := gatewayGapPublishes(pub); n != 0 {
+		t.Fatalf("gateway-gap marker published %d times, want 0", n)
 	}
 }

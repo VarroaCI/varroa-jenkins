@@ -119,6 +119,24 @@ func (c *ownerCache) get(runID string) (ownerCacheEntry, bool) {
 	return item.entry, true
 }
 
+// peek returns the cached decision for runID like get, but it does not
+// move the entry to the front of the LRU order. The idle sweep reads the
+// cache through peek, so its rounds never keep an idle run's entry in
+// the cache ahead of a live run's entry.
+func (c *ownerCache) peek(runID string) (ownerCacheEntry, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el, ok := c.entries[runID]
+	if !ok {
+		return ownerCacheEntry{}, false
+	}
+	entry := el.Value.(*ownerCacheItem).entry
+	if time.Now().After(entry.expires) {
+		return ownerCacheEntry{}, false
+	}
+	return entry, true
+}
+
 // set stores or replaces the decision for runID, evicting the least
 // recently used entry when the cache is at its bound.
 func (c *ownerCache) set(runID string, entry ownerCacheEntry) {

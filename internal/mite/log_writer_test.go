@@ -133,7 +133,40 @@ func newLogTestHandlerOnStore(t *testing.T, owner *fakeOwnerRequester, sender *r
 		logStore:       store,
 	}
 	h.buildWorkers[ns+"/"+name] = &registeredBuildWorker{token: 0, worker: &buildEventWorker{send: sender.send}}
+	// A moved writer's compare read runs after its ack. The test must not
+	// end, and remove the store's directory, while a compare still reads.
+	t.Cleanup(func() {
+		if !compareIdleWithin(h, 2*time.Second) {
+			t.Error("the moved-writer compares did not finish")
+		}
+	})
 	return h
+}
+
+// compareIdleWithin polls until no moved-writer compare is queued or
+// running, and reports whether that happened within timeout.
+func compareIdleWithin(h *BusHandler, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		h.logCompareMu.Lock()
+		idle := len(h.logCompareQueue) == 0 && h.logCompareRunning == 0
+		h.logCompareMu.Unlock()
+		if idle {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// waitForCompareIdle waits until every queued moved-writer compare ran.
+func waitForCompareIdle(t *testing.T, h *BusHandler) {
+	t.Helper()
+	if !compareIdleWithin(h, 2*time.Second) {
+		t.Fatal("the moved-writer compares did not finish")
+	}
 }
 
 // newTestRunID returns a fresh UUIDv7 string, so every test run gets a

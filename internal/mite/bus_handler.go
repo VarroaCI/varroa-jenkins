@@ -205,7 +205,9 @@ type BusHandler struct {
 	// conn; tests substitute a fake.
 	publisher buildEventPublisher
 	// ledger is the claim request-reply seam. Defaults to conn; tests
-	// substitute a fake.
+	// substitute a fake before they start the goroutine that reads it.
+	// NewBusHandler sets it, and nothing changes it while the gateway
+	// serves: the idle sweep reads it with no lock.
 	ledger ledgerRequester
 	// buildPublishRetryDelay is the starting retry delay for a rejected
 	// build-event publish. Zero means defaultPublishRetryDelay; tests
@@ -214,7 +216,10 @@ type BusHandler struct {
 
 	// logStore is the blob store the log writer appends console-log
 	// chunks and index entries to. Nil (the default) makes OnLogChunk a
-	// no-op: the record store is disabled. Wired by SetLogStore.
+	// no-op: the record store is disabled. Wired by SetLogStore, once,
+	// before the gateway serves. Nothing changes it after, because every
+	// log path and the idle sweep read it with no lock. The same rule
+	// holds for logPendingMaxBytes, logFinalizeWait, and ownerCache.
 	logStore blob.Store
 	// logPendingMaxBytes is the gateway-wide pending budget
 	// (VARROA_GATEWAY_LOG_PENDING_BYTES). <= 0 means the default.
@@ -305,6 +310,28 @@ type BusHandler struct {
 	// The gateway-budget BUSY pause is the time this rate needs to free
 	// a refused chunk's bytes.
 	logDrain logDrainMeter
+
+	// logNow is the clock of each run state's activity stamp and of the
+	// idle sweep. Nil means time.Now; tests step it.
+	logNow func() time.Time
+	// logSweepStop stops the idle sweep and waits for its round to end.
+	// SetLogStore sets it before the gateway serves; Close calls it.
+	logSweepStop func()
+	// logIdleSweepLookupsMax overrides logIdleSweepLookups when above
+	// zero. Only a test sets it.
+	logIdleSweepLookupsMax int
+
+	// logCompareMu guards the compare queue of moved-writer repeats and
+	// its worker count. It is a leaf lock: no other lock is taken while
+	// it is held.
+	logCompareMu      sync.Mutex
+	logCompareQueue   []movedWriterCompare
+	logCompareRunning int
+	// logCompareWorkersMax and logCompareQueueCap override
+	// logCompareWorkers and logCompareQueueMax when above zero. Only a
+	// test sets them.
+	logCompareWorkersMax int
+	logCompareQueueCap   int
 
 	Logger *slog.Logger
 }
@@ -400,10 +427,14 @@ func NewBusHandler(mp metric.MeterProvider, cluster string, conn *bus.Conn, snap
 	return h, nil
 }
 
-// Close shuts down the content sweeper goroutine. Must be called before the
-// BusHandler is discarded to avoid goroutine leaks.
+// Close shuts down the content sweeper goroutine and the log idle sweep.
+// Must be called before the BusHandler is discarded to avoid goroutine
+// leaks.
 func (h *BusHandler) Close() {
 	close(h.contentDone)
+	if h.logSweepStop != nil {
+		h.logSweepStop()
+	}
 }
 
 // putPresence writes a fresh presence record with a blind Put (no read-modify-
