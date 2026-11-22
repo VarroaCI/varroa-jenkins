@@ -38,6 +38,8 @@ describe("runGlyph", () => {
     ["an unstable run", row({ result: "UNSTABLE" }), "unstable"],
     ["an aborted run", row({ result: "ABORTED" }), "aborted"],
     ["an interrupted run", row({ result: "INTERRUPTED" }), "interrupted"],
+    ["a duplicate run", row({ status: "DUPLICATE", result: undefined }), "duplicate"],
+    ["a duplicate run with a stored result", row({ status: "DUPLICATE", result: "ABORTED" }), "duplicate"],
     ["an unknown result", row({ result: undefined }), "other"],
   ])("%s", (_name, r, want) => {
     expect(runGlyph(r)).toBe(want);
@@ -97,6 +99,11 @@ describe("runTiming", () => {
     expect(runTiming(row({ result: "INTERRUPTED", interruptedReason: "cell-lost" }), NOW)).toBe(
       "interrupted · cell-lost",
     );
+  });
+
+  it("shows a dash, not a queue or a running time, for a duplicate run with no duration", () => {
+    const r = row({ status: "DUPLICATE", result: undefined, durationMs: undefined });
+    expect(runTiming(r, NOW)).toBe("—");
   });
 
   it("shows only the duration of a completed run", () => {

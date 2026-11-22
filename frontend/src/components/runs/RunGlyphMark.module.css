@@ -25,4 +25,5 @@
 .running { color: var(--info-text); background: var(--info-soft); }
 .queued { color: var(--idle-text); background: var(--idle-soft); }
 .waiting { color: var(--honey); background: var(--honey-soft); }
+.duplicate { color: var(--text-2); background: var(--surface-3); }
 .other { color: var(--text-2); background: var(--surface-3); }

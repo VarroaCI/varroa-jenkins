@@ -61,6 +61,12 @@ import { NotesCard } from "./NotesCard";
 import { useAssistant } from "../../components/assistant/AssistantProvider";
 import { TargetApprovalsCard } from "../../components/assistant/TargetApprovalsCard";
 import { useOptionalAuth } from "../../context/AuthContext";
+import {
+  DUPLICATE_RUN_NOTE,
+  isTerminalRunStatus,
+  runGlyph,
+  runGlyphLabel,
+} from "../../components/runs/runGlyph";
 import styles from "./BuildPage.module.css";
 
 /** The frames the run log stream carries. */
@@ -239,11 +245,16 @@ const RESULT_TONE: Record<string, "ok" | "bad" | "warn" | "idle"> = {
   INTERRUPTED: "bad",
 };
 
+/**
+ * describeRunState names the header pill. A COMPLETED run shows its result.
+ * Any other status shows the label of its own status mark, so a DUPLICATE
+ * run with a stored result still reads Duplicate. A status with no mark
+ * shows its own name.
+ */
 function describeRunState(run: RunDetail): { label: string; tone: "ok" | "bad" | "warn" | "idle" } {
   if (run.status !== "COMPLETED") {
-    return run.status === "RUNNING"
-      ? { label: "Running", tone: "idle" }
-      : { label: "Queued", tone: "idle" };
+    const glyph = runGlyph({ status: run.status });
+    return { label: glyph === "other" ? run.status : runGlyphLabel(glyph), tone: "idle" };
   }
   if (run.result && RESULT_LABELS[run.result]) {
     return { label: RESULT_LABELS[run.result], tone: RESULT_TONE[run.result] };
@@ -252,7 +263,7 @@ function describeRunState(run: RunDetail): { label: string; tone: "ok" | "bad" |
 }
 
 function isTerminal(run: RunDetail): boolean {
-  return run.status === "COMPLETED" || run.status === "DUPLICATE";
+  return isTerminalRunStatus(run.status);
 }
 
 function isPaletteOpen(): boolean {
@@ -794,6 +805,8 @@ export default function BuildPage() {
           </div>
         )}
       </div>
+
+      {run.status === "DUPLICATE" && <div className={styles.duplicateNotice}>{DUPLICATE_RUN_NOTE}</div>}
 
       {/* A missing start time is the never-started signal. A real run can
           hold a null build number after a number conflict, but every real

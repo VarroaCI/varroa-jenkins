@@ -483,3 +483,15 @@ func TestGetRunViewRendersQualityLine(t *testing.T) {
 		t.Fatal("get_run view does not render the quality line")
 	}
 }
+
+// TestGetRunViewShowsDuplicateStatus asserts that the run card shows the
+// DUPLICATE status in place of a stored result.
+func TestGetRunViewShowsDuplicateStatus(t *testing.T) {
+	src, err := uiFS.ReadFile("ui/get_run.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `sc.status === "DUPLICATE" ? sc.status : (sc.result || sc.status)`) {
+		t.Fatal("get_run view lets a stored result hide the DUPLICATE status")
+	}
+}

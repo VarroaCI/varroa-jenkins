@@ -36,7 +36,9 @@ function RunResult({ tenant, head }: { tenant: string; head: JobBranchHead }) {
   if (!head.lastRun) {
     return <span className={styles.dim}>No builds</span>;
   }
-  const label = head.lastRun.result ?? head.lastRun.status;
+  // A DUPLICATE run shows its status in place of any stored result.
+  const label =
+    head.lastRun.status === "DUPLICATE" ? head.lastRun.status : (head.lastRun.result ?? head.lastRun.status);
   return (
     <Link to={runHref(tenant, head.jobPath, head.lastRun.runId)} className={`${styles.headLink} ${styles.result}`}>
       {label}

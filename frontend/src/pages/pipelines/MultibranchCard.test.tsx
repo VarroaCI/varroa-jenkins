@@ -112,6 +112,19 @@ describe("MultibranchCard", () => {
     expect(result.getAttribute("href")).toBe("/pipelines/alpha/alpha%2Fapp%2Fmain/run-main");
   });
 
+  it("names a duplicate latest run DUPLICATE, not its stored result", async () => {
+    mockListJobBranches.mockResolvedValue({
+      ...inventory,
+      branches: [
+        { ...inventory.branches[0], lastRun: { runId: "run-main", status: "DUPLICATE", result: "ABORTED" } },
+      ],
+    });
+    renderCard();
+
+    expect(await screen.findByRole("link", { name: "DUPLICATE" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "ABORTED" })).not.toBeInTheDocument();
+  });
+
   it("states when the cell has not exported the job yet", async () => {
     mockListJobBranches.mockResolvedValue({
       jobPath: "alpha/app",

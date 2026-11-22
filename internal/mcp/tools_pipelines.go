@@ -630,7 +630,7 @@ var runListOutputSchema = listOutputSchema("Fleet run row.", []schemaField{
 	{Name: "changeSummary", Type: "string", Desc: "Subject of the newest commit of the run. Absent when the run has no recorded change."},
 	{Name: "buildNumber", Type: "integer", Desc: "Jenkins build number, once assigned."},
 	{Name: "jobPath", Type: "string", Desc: "Full job path."},
-	{Name: "status", Type: "string", Desc: "QUEUED, RUNNING, or COMPLETED."},
+	{Name: "status", Type: "string", Desc: "QUEUED, RUNNING, COMPLETED, or DUPLICATE. A DUPLICATE run repeats a live run of the same trigger or revision, and Varroa stops it."},
 	{Name: "result", Type: "string", Desc: "SUCCESS, FAILURE, UNSTABLE, or ABORTED, once known."},
 	{Name: "pendingInput", Type: "boolean", Desc: "True while a RUNNING run waits for an input answer."},
 	{Name: "canWrite", Type: "boolean", Desc: "True when the caller may write the run's job."},

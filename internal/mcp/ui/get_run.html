@@ -181,7 +181,9 @@ function renderCard(root, sc, meta) {
   if (present(sc.buildNumber)) title += " #" + sc.buildNumber;
   root.appendChild(el("h1", "", title));
   var line = el("p", "sub");
-  if (present(sc.result || sc.status)) line.appendChild(pill(sc.result || sc.status));
+  /* A DUPLICATE run shows its status in place of any stored result. */
+  var state = sc.status === "DUPLICATE" ? sc.status : (sc.result || sc.status);
+  if (present(state)) line.appendChild(pill(state));
   if (present(sc.interruptedReason)) line.appendChild(pill(sc.interruptedReason, "bad"));
   root.appendChild(line);
   var up = sc.upstream;

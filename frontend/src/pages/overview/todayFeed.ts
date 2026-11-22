@@ -1,5 +1,6 @@
 import type { ActivityEvent, FleetRunGroup, FleetRunRow, FleetTriggerKind } from "../../types";
 import { repeatKey } from "../../components/activityTimeline.util";
+import { runGlyphLabel } from "../../components/runs/runGlyph";
 import { runActorText } from "../../components/runs/runRowText";
 import { stripTenantFolder } from "../pipelines/jobPath";
 import { hhmm } from "./attentionItems";
@@ -69,6 +70,12 @@ export function resultWord(result?: string): string {
   return RESULT_WORDS[result] ?? result.toLowerCase().replace(/_/g, " ");
 }
 
+/** runWord names one run in the words of the feed. A DUPLICATE run reads duplicate, whatever its result. */
+export function runWord(r: { status: string; result?: string }): string {
+  if (r.status === "DUPLICATE") return runGlyphLabel("duplicate").toLowerCase();
+  return resultWord(r.result);
+}
+
 /** isHumanRun reports whether a person started the run. */
 export function isHumanRun(r: FleetRunRow): boolean {
   return HUMAN_TRIGGERS.includes(r.trigger.kind);
@@ -84,7 +91,7 @@ export function groupTitle(g: FleetRunGroup): string {
   const job = `${g.tenant} / ${jobName(g)}`;
   if (g.runs >= 2) return `${job} ran ${g.runs} times`;
   const build = g.newest.buildNumber !== undefined ? ` #${g.newest.buildNumber}` : "";
-  return `${job}${build} ${resultWord(g.newest.result)}`;
+  return `${job}${build} ${runWord(g.newest)}`;
 }
 
 /** groupDetail names the actor and duration of one run, or the pass and failure counts of a fold. */

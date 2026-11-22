@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { InitialEntry } from "react-router-dom";
 import BuildPage, { testsSummary } from "./BuildPage";
 import { ApiError } from "../../hooks/useApi";
+import { DUPLICATE_RUN_NOTE } from "../../components/runs/runGlyph";
 import type { RunDetail, RunInput, RunScript, RunTestListResponse } from "../../types";
 
 const mockGetRun = vi.fn();
@@ -1814,5 +1815,58 @@ describe("BuildPage — concurrency wait", () => {
     expect(
       await screen.findByText("Waiting on the tenant cap of cell cell-a: 2 of 3 builds running."),
     ).toBeInTheDocument();
+  });
+});
+
+describe("BuildPage — a duplicate run", () => {
+  it("names the state Duplicate with its note, in the pill and the title, and offers Re-run but no Cancel", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({ status: "DUPLICATE", result: undefined, buildNumber: undefined, startedAt: undefined, durationMs: undefined }),
+    );
+    renderPage();
+    await screen.findByText(/Build #\?/);
+
+    expect(screen.getByText("Duplicate")).toBeInTheDocument();
+    expect(screen.queryByText("Queued")).not.toBeInTheDocument();
+    expect(screen.getByText(DUPLICATE_RUN_NOTE)).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toMatch(/^Duplicate · #\? /));
+    expect(screen.queryByRole("button", { name: /Cancel/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Re-run/ })).toBeEnabled();
+  });
+
+  it("keeps the Duplicate state for a duplicate run that stores a result", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ status: "DUPLICATE", result: "ABORTED" }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.getByText("Duplicate")).toBeInTheDocument();
+    expect(screen.queryByText("Aborted")).not.toBeInTheDocument();
+  });
+
+  it("shows no duplicate note for a completed run", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.queryByText(DUPLICATE_RUN_NOTE)).not.toBeInTheDocument();
+  });
+
+  it("runs no poll for a duplicate run while the stream is closed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockGetRun.mockResolvedValue(baseRun({ status: "DUPLICATE", result: undefined }));
+      tenantStreamReady("closed");
+      renderPage();
+      await screen.findByText(/Build #42/);
+      const settled = mockGetRun.mock.calls.length;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(9_000);
+      });
+
+      expect(mockGetRun.mock.calls.length).toBe(settled);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

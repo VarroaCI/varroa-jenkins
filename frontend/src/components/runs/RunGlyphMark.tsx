@@ -1,4 +1,4 @@
-import { runGlyph, runGlyphLabel, type RunGlyph, type RunState } from "./runGlyph";
+import { DUPLICATE_RUN_NOTE, runGlyph, runGlyphLabel, type RunGlyph, type RunState } from "./runGlyph";
 import styles from "./RunGlyphMark.module.css";
 
 const GLYPH_MARK: Record<RunGlyph, string> = {
@@ -10,6 +10,7 @@ const GLYPH_MARK: Record<RunGlyph, string> = {
   running: "●",
   queued: "○",
   waiting: "?",
+  duplicate: "=",
   other: "·",
 };
 
@@ -24,7 +25,12 @@ export function RunGlyphMark({ run, size = "md" }: RunGlyphMarkProps) {
   const glyph = runGlyph(run);
   const sizeClass = size === "sm" ? styles.sm : "";
   return (
-    <span role="img" aria-label={runGlyphLabel(glyph)} className={`${styles.glyph} ${sizeClass} ${styles[glyph]}`}>
+    <span
+      role="img"
+      aria-label={runGlyphLabel(glyph)}
+      title={glyph === "duplicate" ? DUPLICATE_RUN_NOTE : undefined}
+      className={`${styles.glyph} ${sizeClass} ${styles[glyph]}`}
+    >
       {GLYPH_MARK[glyph]}
     </span>
   );

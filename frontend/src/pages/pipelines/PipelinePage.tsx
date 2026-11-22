@@ -25,6 +25,7 @@ import { JobBadgeCard } from "./JobBadgeCard";
 import { forgeFileHref, forgeTreeHref } from "./forgeLink";
 import { RevisionLink } from "./RevisionLink";
 import { TRIGGER_LABEL, changeRequestLabel, queueWaitMs, safeWebUrl, waitCountText } from "./runMeta";
+import { DUPLICATE_RUN_NOTE, isTerminalRunStatus } from "../../components/runs/runGlyph";
 import type {
   ChangeRequest,
   RunNotification,
@@ -93,7 +94,18 @@ function PrChip({ changeRequest }: { changeRequest: ChangeRequest }) {
   );
 }
 
-function ResultBadge({ result }: { result?: string }) {
+/**
+ * ResultBadge shows a run's result code. A DUPLICATE run shows its status
+ * in place of any stored result, so it never reads as a live run.
+ */
+function ResultBadge({ status, result }: { status: string; result?: string }) {
+  if (status === "DUPLICATE") {
+    return (
+      <span className={`${styles.resultBadge} ${styles.resultIdle}`} title={DUPLICATE_RUN_NOTE}>
+        DUPLICATE
+      </span>
+    );
+  }
   if (!result) return <span className={styles.dim}>—</span>;
   const cls = RESULT_CLASS[result] ?? styles.resultIdle;
   return <span className={`${styles.resultBadge} ${cls}`}>{result}</span>;
@@ -383,9 +395,9 @@ export default function PipelinePage() {
         refetchJob = true;
       } else if (ev.type === "run") {
         refetchRuns = true;
-        // A terminal run moves the health values and the Last 30 days card.
-        // A DUPLICATE run is terminal too.
-        if (ev.data.status === "COMPLETED" || ev.data.status === "DUPLICATE") refetchJob = true;
+        // A terminal run (COMPLETED or DUPLICATE) moves the health values
+        // and the Last 30 days card.
+        if (isTerminalRunStatus(ev.data.status ?? "")) refetchJob = true;
       }
       // The page drops a stage frame: the table and the job read carry no
       // stage value.
@@ -646,7 +658,7 @@ export default function PipelinePage() {
                       </Link>
                     </td>
                     <td>
-                      <ResultBadge result={run.result} />
+                      <ResultBadge status={run.status} result={run.result} />
                     </td>
                     <td>
                       {run.branch ? (

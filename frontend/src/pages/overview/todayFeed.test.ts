@@ -52,6 +52,14 @@ describe("todayFeed", () => {
     expect(groupDetail(g)).toBe("Started by nathan · 30s");
   });
 
+  it("names a single duplicate run duplicate, not its stored result", () => {
+    const g = group({
+      passed: 0,
+      newest: run({ runId: "run-41", buildNumber: 41, status: "DUPLICATE", result: "ABORTED" }),
+    });
+    expect(groupTitle(g)).toBe("payments / release #41 duplicate");
+  });
+
   it("folds single machine passes into the other runs row with tenant counts", () => {
     const groups = [
       group({ newest: run({ runId: "a", buildNumber: 1 }), tenant: "payments" }),
