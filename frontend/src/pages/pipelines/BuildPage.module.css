@@ -133,6 +133,15 @@
   font-size: 13.5px;
 }
 
+/* A DUPLICATE run's note uses the idle pair of the status pill: it is neither an error nor a success. */
+.duplicateNotice {
+  background: var(--idle-soft);
+  color: var(--idle-text);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13.5px;
+}
+
 .refusalNotice {
   display: flex;
   flex-wrap: wrap;

@@ -68,6 +68,21 @@ describe("TenantRail", () => {
     expect(within(row).getByLabelText("Running")).toBeInTheDocument();
   });
 
+  it("strip names a duplicate run Duplicate, with or without a stored result", () => {
+    renderRail([
+      tenant({
+        recent: [
+          { runId: "a", status: "DUPLICATE" },
+          { runId: "b", status: "DUPLICATE", result: "ABORTED" },
+        ],
+      }),
+    ]);
+    const row = screen.getByRole("button", { name: /^pay/ }).closest("li") as HTMLElement;
+    expect(within(row).getAllByLabelText("Duplicate")).toHaveLength(2);
+    expect(within(row).queryByLabelText("Aborted")).not.toBeInTheDocument();
+    expect(within(row).queryByLabelText("No result")).not.toBeInTheDocument();
+  });
+
   it("meta line names a member cluster", () => {
     renderRail([tenant({ name: "shop", clusters: ["core", "edge"], runs24h: 9, running: 2 })]);
     const row = screen.getByRole("button", { name: /^shop/ }).closest("li") as HTMLElement;

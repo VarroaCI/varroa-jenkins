@@ -6,6 +6,7 @@ import { createTestQueryClient } from "../../test/render-utils";
 import { ApiError } from "../../hooks/useApi";
 import type { RunNotification } from "../../types";
 import PipelinePage from "./PipelinePage";
+import { DUPLICATE_RUN_NOTE } from "../../components/runs/runGlyph";
 
 const mockGetPipelineJob = vi.fn();
 const mockListRuns = vi.fn();
@@ -314,6 +315,18 @@ describe("PipelinePage", () => {
     const table = await screen.findByRole("table");
     expect(within(table).getByText("INTERRUPTED")).toBeInTheDocument();
     expect(within(table).queryByText("Interrupted")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["with no result", undefined],
+    ["with a stored result", "ABORTED"],
+  ])("shows the DUPLICATE badge and its note for a duplicate run %s", async (_name, result) => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+    mockListRuns.mockResolvedValue({ items: [runFixture({ status: "DUPLICATE", result })] });
+    renderPage();
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("DUPLICATE")).toHaveAttribute("title", DUPLICATE_RUN_NOTE);
+    expect(within(table).queryByText("ABORTED")).not.toBeInTheDocument();
   });
 
   it("omits the build health row for a multibranch job", async () => {

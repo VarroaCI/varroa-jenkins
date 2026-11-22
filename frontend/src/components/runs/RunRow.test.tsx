@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { FleetRunRow } from "../../types";
 import { RunRow } from "./RunRow";
+import { DUPLICATE_RUN_NOTE } from "./runGlyph";
 import styles from "./RunRow.module.css";
 
 const NOW = Date.parse("2026-10-30T12:00:00Z");
@@ -91,6 +92,23 @@ describe("RunRow", () => {
     await user.click(screen.getByRole("button", { name: /Actions for/ }));
     expect(screen.getByRole("menuitem", { name: "Re-run" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Cancel" })).not.toBeInTheDocument();
+  });
+
+  it("marks a duplicate run Duplicate, with its note, and offers Re-run but no Cancel", async () => {
+    const user = userEvent.setup();
+    renderRow(row({ status: "DUPLICATE", result: undefined, buildNumber: undefined, durationMs: undefined }));
+    const mark = screen.getByRole("img", { name: "Duplicate" });
+    expect(mark).toHaveAttribute("title", DUPLICATE_RUN_NOTE);
+    expect(screen.queryByText(/queued|running/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Actions for/ }));
+    expect(screen.getByRole("menuitem", { name: "Re-run" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Cancel" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the Duplicate mark for a duplicate run that stores a result", () => {
+    renderRow(row({ status: "DUPLICATE", result: "ABORTED" }));
+    expect(screen.getByRole("img", { name: "Duplicate" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Aborted" })).not.toBeInTheDocument();
   });
 
   it("hides every write action when canWrite is false", async () => {

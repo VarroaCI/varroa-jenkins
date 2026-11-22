@@ -58,7 +58,7 @@ A pipelines tenant is a Tenant on a cell. `get_tenant_cell` returns its cell, it
 - Placement reasons include `TenantPlaced`, `AwaitingCell`, `CellCapReached`, `CellNotReady`, `SlotPending`, `StandbyPending`, `MembersApplied`, and `MembersStale`.
 - Tenant warning reasons include `ItemsHeld`, `ItemsApplyFailed`, `BundleKeysIgnored`, `PodTemplateSkipped`, `CredentialSkipped`, and `BranchScanFailed`.
 
-A run has a `status`: `QUEUED`, `RUNNING`, or `COMPLETED`. A completed run has a `result`, such as `SUCCESS`, `FAILURE`, `ABORTED`, or `INTERRUPTED`. `TRIGGER_FAILED` means no build exists, and `triggerError` gives the cause. An `INTERRUPTED` run names its `interruptedReason`: `cell-lost`, `cell-rolled`, `tenant-moved`, `start-lost`, `heartbeat-lost`, `resume-timeout`, or `resume-failed`.
+A run has a `status`: `QUEUED`, `RUNNING`, `COMPLETED`, or `DUPLICATE`. A completed run has a `result`, such as `SUCCESS`, `FAILURE`, `ABORTED`, or `INTERRUPTED`. `TRIGGER_FAILED` means no build exists, and `triggerError` gives the cause. An `INTERRUPTED` run names its `interruptedReason`: `cell-lost`, `cell-rolled`, `tenant-moved`, `start-lost`, `heartbeat-lost`, `resume-timeout`, or `resume-failed`.
 
 ## Pipeline arguments
 

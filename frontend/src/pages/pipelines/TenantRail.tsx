@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
 import type { PipelinesOverviewTenant, RecentRunResult } from "../../types";
 import { plural } from "../../lib/plural";
+import { runGlyphLabel } from "../../components/runs/runGlyph";
 import styles from "./TenantRail.module.css";
 
 /** STRIP_CELLS is the number of result cells each rail row draws. */
@@ -25,11 +26,13 @@ interface StripCell {
 /**
  * stripCell classifies one recent run for the rail strip. A success is ok.
  * A failure, a trigger failure, or an interrupted run is failed. A run in
- * progress is running. Any other result is idle.
+ * progress is running. A DUPLICATE run is idle whatever its result. Any
+ * other result is idle.
  */
 export function stripCell(run: RecentRunResult): StripCell {
   if (run.status === "RUNNING") return { kind: "running", label: "Running" };
   if (run.status === "QUEUED") return { kind: "running", label: "Queued" };
+  if (run.status === "DUPLICATE") return { kind: "idle", label: runGlyphLabel("duplicate") };
   switch (run.result) {
     case "SUCCESS":
       return { kind: "ok", label: "Success" };

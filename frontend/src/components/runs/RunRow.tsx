@@ -5,6 +5,7 @@ import type { FleetRunRow } from "../../types";
 import { age } from "../activityTimeline.util";
 import { runActorText, runHref, runSecondLine, runTiming, runTitle } from "./runRowText";
 import { RunGlyphMark } from "./RunGlyphMark";
+import { isTerminalRunStatus } from "./runGlyph";
 import styles from "./RunRow.module.css";
 
 export interface RunRowProps {
@@ -26,7 +27,7 @@ export function RunRow({ run, now, localCluster, onRerun, onCancel, nested = fal
   const [menuOpen, setMenuOpen] = useState(false);
   const href = runHref(run.tenant, run.jobPath ?? "", run.runId);
   const started = run.startedAt ?? run.queuedAt ?? run.createdAt;
-  const canRerun = run.canWrite && run.status === "COMPLETED";
+  const canRerun = run.canWrite && isTerminalRunStatus(run.status);
   const canCancel = run.canWrite && (run.status === "QUEUED" || run.status === "RUNNING");
 
   const closeMenu = () => setMenuOpen(false);
