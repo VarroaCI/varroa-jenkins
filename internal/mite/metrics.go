@@ -21,6 +21,9 @@ type gatewayMetrics struct {
 	logChunksRejected metric.Int64Counter
 	logChunksBusy     metric.Int64Counter
 	logAppendRetries  metric.Int64Counter
+	// logCompareSkipped counts a moved writer's repeat on a finished log
+	// that got no stored-part compare, because the compare queue was full.
+	logCompareSkipped metric.Int64Counter
 	runStateBytes     metric.Int64Counter
 	runStateRejected  metric.Int64Counter
 
@@ -56,6 +59,8 @@ func newGatewayMetrics(mp metric.MeterProvider) (gatewayMetrics, error) {
 			"Console-log chunks the gateway answered BUSY, by reason"},
 		{&m.logAppendRetries, "varroa.gateway.log.append.retries",
 			"Blob store append retries for console-log chunks and index entries"},
+		{&m.logCompareSkipped, "varroa.gateway.log.compare.skipped",
+			"Moved-writer repeats of a finished log the gateway did not compare with the stored part, because the compare queue was full"},
 		{&m.runStateBytes, "varroa.gateway.run_state.bytes",
 			"Inflated bytes of run-state objects the gateway stored"},
 		{&m.runStateRejected, "varroa.gateway.run_state.rejected",

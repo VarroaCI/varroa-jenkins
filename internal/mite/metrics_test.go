@@ -110,6 +110,7 @@ func TestNewGatewayMetricsCreatesEveryInstrumentOnTheGatewayMeter(t *testing.T) 
 	m.logChunksRejected.Add(ctx, 1)
 	m.logChunksBusy.Add(ctx, 1)
 	m.logAppendRetries.Add(ctx, 1)
+	m.logCompareSkipped.Add(ctx, 1)
 	m.runStateBytes.Add(ctx, 1)
 	m.runStateRejected.Add(ctx, 1)
 	m.miteStreamConnections.Add(ctx, 1)
@@ -134,6 +135,7 @@ func TestNewGatewayMetricsCreatesEveryInstrumentOnTheGatewayMeter(t *testing.T) 
 		"varroa.gateway.log.append.retries",
 		"varroa.gateway.log.chunk.busy",
 		"varroa.gateway.log.chunk.rejected",
+		"varroa.gateway.log.compare.skipped",
 		"varroa.gateway.resume_failed",
 		"varroa.gateway.run_state.bytes",
 		"varroa.gateway.run_state.rejected",

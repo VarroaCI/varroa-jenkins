@@ -80,7 +80,9 @@ const (
 // incompleteness and finalization knowledge. One instance lives for as
 // long as the run has pending or unacknowledged work. evictRunState then
 // replaces it with a logRunTombstone: after the final entry is durable
-// and acknowledged, or after abandonRun ends the run.
+// and acknowledged, or after abandonRun ends the run. The idle sweep
+// (log_idle_sweep.go) drops a state whose run ended, or moved to another
+// writer, without this gateway's knowledge.
 type runLogState struct {
 	// ns and name name the run's current writer. The call that creates
 	// this state sets them, and adoptWriter moves them to each writer it
@@ -114,6 +116,19 @@ type runLogState struct {
 	// lastStallWarn is when warnStalledDrainLocked last warned for
 	// this run. It bounds the warning to one per heartbeat interval.
 	lastStallWarn time.Time
+
+	// lastActivity is when this state was created, or when a chunk last
+	// entered or left its queue, on h.logClock. activitySeq counts the
+	// same events. The idle sweep reads the owner only for a state that
+	// shows no activity for logIdleSweepAfter. It drops the state only
+	// when activitySeq still holds the value that the sweep read before
+	// its owner read, so a chunk that arrives during that read keeps the
+	// state.
+	lastActivity time.Time
+	activitySeq  uint64
+	// lastSwept is when the idle sweep last read the owner for this
+	// state. The sweep reads the states with the oldest value first.
+	lastSwept time.Time
 
 	offset int64 // running byte count appended to logs/<run_id>
 
@@ -197,7 +212,16 @@ func (st *runLogState) hasHeartbeatWorkLocked() bool {
 // writer heartbeat and the abandon deadline both read, and the run-owner
 // cache's bound. Called once from cmd/gateway/main.go when the record
 // store is enabled; a nil store (the default) makes OnLogChunk a no-op.
+//
+// It must run once, before the gateway serves. Every stream read loop,
+// every drain, and the idle sweep read these fields with no lock, so a
+// second call would race all of them. A second call therefore panics.
+// The idle sweep that the first call starts sets logSweepStop, which
+// marks the first call.
 func (h *BusHandler) SetLogStore(store blob.Store, pendingMaxBytes int64, finalizeWait time.Duration, ownerCacheSize int) {
+	if h.logSweepStop != nil {
+		panic("mite: SetLogStore called a second time")
+	}
 	h.logStore = store
 	if pendingMaxBytes <= 0 {
 		pendingMaxBytes = defaultLogPendingMaxBytes
@@ -208,6 +232,16 @@ func (h *BusHandler) SetLogStore(store blob.Store, pendingMaxBytes int64, finali
 	}
 	h.logFinalizeWait = finalizeWait
 	h.ownerCache = newOwnerCache(ownerCacheSize)
+	h.startLogIdleSweep(logIdleSweepInterval)
+}
+
+// logClock returns the time on the log writer's clock: h.logNow when a
+// test set it, and time.Now otherwise.
+func (h *BusHandler) logClock() time.Time {
+	if h.logNow != nil {
+		return h.logNow()
+	}
+	return time.Now()
 }
 
 // currentSender returns the send function of the controller's current
@@ -279,7 +313,10 @@ func (h *BusHandler) newRunStateLocked(runID, ns, name, jobPath string) *runLogS
 		h.logRuns = make(map[string]*runLogState)
 	}
 	appendCtx, appendCancel := context.WithCancel(context.Background())
-	st := &runLogState{ns: ns, name: name, jobPath: jobPath, ackSeq: -1, adoptedThrough: -1, appendCtx: appendCtx, appendCancel: appendCancel}
+	st := &runLogState{
+		ns: ns, name: name, jobPath: jobPath, ackSeq: -1, adoptedThrough: -1,
+		appendCtx: appendCtx, appendCancel: appendCancel, lastActivity: h.logClock(),
+	}
 	h.logRuns[runID] = st
 	return st
 }
@@ -425,6 +462,8 @@ func (h *BusHandler) enqueueLogChunk(ns, name string, chunk *mitev1.LogChunk) {
 
 	st.queue = append(st.queue, queuedLogChunk{chunk: chunk, ns: ns, name: name, admitted: time.Now()})
 	st.queueBytes += size
+	st.lastActivity = h.logClock()
+	st.activitySeq++
 	draining := st.draining
 	st.draining = true
 	h.logTotalPendingBytes += size
@@ -852,6 +891,8 @@ func (h *BusHandler) drainRun(ctx context.Context, runID string, st *runLogState
 		st.queue = st.queue[1:]
 		st.queueBytes -= size
 		st.lastDequeue = now
+		st.lastActivity = h.logClock()
+		st.activitySeq++
 		st.mu.Unlock()
 		h.logMu.Lock()
 		h.logTotalPendingBytes -= size
@@ -1996,7 +2037,8 @@ func (h *BusHandler) abandonRun(runID string, st *runLogState) {
 
 	// Every abandoned and stranded sequence has its REJECTED ack now. The
 	// tombstone gives each later chunk the same answer. A run with no
-	// terminal mark keeps this state until markRunTerminal evicts it.
+	// terminal mark keeps this state until markRunTerminal or the idle
+	// sweep evicts it.
 	h.evictRunState(runID, st)
 }
 
