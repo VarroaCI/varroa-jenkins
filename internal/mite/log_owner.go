@@ -279,3 +279,33 @@ func (h *BusHandler) checkOwner(ctx context.Context, cluster, namespace, cell, i
 	}
 	return decideOwner(entry, cluster, namespace, cell, instance), entry.tuple
 }
+
+// checkOwnerForCompletion answers whether the caller owns runID, for a
+// COMPLETED event. The answer comes from a ledger request that this call
+// sends. It never comes from a cached entry, and it never joins a lookup
+// already in flight, which can predate the event. A move with no claim,
+// such as a resume, leaves the old owner's cached match in place for up
+// to ownerMatchTTL, and the old owner is the sender most likely to send a
+// stale completion. The answer replaces the cached entry with the
+// lifetime doLookup gives it, so the chunk path keeps a fresh match for
+// the whole ownerMatchTTL with no new request.
+//
+// fresh is false when the request failed. The decision is then
+// ownerMatched when a cached entry matches the caller, the answer the
+// chunk path gives in the same state, and ownerUnknown otherwise. A
+// failed request never answers ownerForeign. A call costs one ledger
+// request, bounded by ownerLookupTimeout.
+func (h *BusHandler) checkOwnerForCompletion(ctx context.Context, cluster, namespace, cell, instance, runID string) (decision ownerDecision, tuple ownerTuple, fresh bool) {
+	if h.ownerCache == nil {
+		return ownerUnknown, ownerTuple{}, false
+	}
+	cached, hasCached := h.ownerCache.get(runID)
+	entry, err := h.ownerCache.doLookup(ctx, h.ledger, runID, cluster, namespace, cell, instance)
+	if err != nil {
+		if hasCached && decideOwner(cached, cluster, namespace, cell, instance) == ownerMatched {
+			return ownerMatched, cached.tuple, false
+		}
+		return ownerUnknown, ownerTuple{}, false
+	}
+	return decideOwner(entry, cluster, namespace, cell, instance), entry.tuple, true
+}

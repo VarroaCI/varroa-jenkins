@@ -21,6 +21,10 @@ import (
 // stored reason of logReasonLossRank or higher, and the incomplete flag
 // with it: a second completion of one run can report a complete log after
 // the first one recorded a loss, and the loss stays true.
+//
+// The merge has no owner check, and its rules do not bound a summary from
+// a cell instance that does not own the run. The gateway sends such an
+// instance's completion with only its own log facts.
 func applyRunLog(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO varroa.runs (
