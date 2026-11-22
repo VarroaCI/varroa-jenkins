@@ -106,10 +106,10 @@ func (r *pgReader) jobSummaries(ctx context.Context, cluster, tenant, jobPath st
 // fixed no matter how many runs a job has, and a run with no result
 // yet (QUEUED or RUNNING) never enters it.
 //
-// A row that records no build can still pass the result-is-not-null
-// filter — a TRIGGER_FAILED row always does — so the lateral subquery
-// needs its own exclusion. Without it a mixed job shows a false fail
-// dot.
+// A row outside the job's history can still pass the result-is-not-null
+// filter. A TRIGGER_FAILED row always does, and so does an owner-completed
+// DUPLICATE row. The lateral subquery therefore carries historyRunRunSQL.
+// Without it a mixed job shows a false fail dot.
 func addJobRecentRuns(
 	ctx context.Context, db rowQuerier, args []any, jobFilter string, summaries map[string]JobSummary, getOrCreate func(string) JobSummary,
 ) error {
@@ -128,7 +128,7 @@ func addJobRecentRuns(
 			       created_at
 			FROM varroa.runs r
 			WHERE r.cluster = $1 AND r.tenant = $2 AND r.job_path = jobs.job_path AND r.result IS NOT NULL
-			  AND `+recordsBuildRunSQL+`
+			  AND `+historyRunRunSQL+`
 			ORDER BY r.created_at DESC, r.run_id DESC
 			LIMIT $%[2]d
 		) recent
@@ -158,15 +158,15 @@ func addJobRecentRuns(
 	return nil
 }
 
-// addJobLastRuns fills LastRun with the newest run of every job_path, in
-// one query keyed by DISTINCT ON (job_path).
+// addJobLastRuns fills LastRun with the newest history run of every
+// job_path, in one query keyed by DISTINCT ON (job_path).
 func addJobLastRuns(
 	ctx context.Context, db rowQuerier, args []any, jobFilter string, summaries map[string]JobSummary, getOrCreate func(string) JobSummary,
 ) error {
 	rows, err := db.Query(ctx, fmt.Sprintf(`
 		SELECT DISTINCT ON (job_path) `+runColumns+`
 		FROM varroa.runs
-		WHERE cluster = $1 AND tenant = $2 AND `+recordsBuildSQL+` %s
+		WHERE cluster = $1 AND tenant = $2 AND `+historyRunSQL+` %s
 		ORDER BY job_path, created_at DESC, run_id DESC
 	`, jobFilter), args...)
 	if err != nil {
@@ -197,9 +197,9 @@ func addJobLastRuns(
 // still occupies its rank and the trend never reaches past
 // jobSummaryTrendSize runs into older history to fill in a duration.
 //
-// The no-build-recorded exclusion belongs to the inner ranking subquery.
-// A failed trigger or an accepted-only row must consume no rank before
-// the outer clause drops it.
+// The history exclusion belongs to the inner ranking subquery. A failed
+// trigger, an accepted-only row, or a DUPLICATE row must consume no rank
+// before the outer clause drops it.
 func addJobDurationTrends(
 	ctx context.Context, db rowQuerier, args []any, jobFilter string, summaries map[string]JobSummary, getOrCreate func(string) JobSummary,
 ) error {
@@ -210,7 +210,7 @@ func addJobDurationTrends(
 			SELECT job_path, duration_ms,
 			       row_number() OVER (PARTITION BY job_path ORDER BY created_at DESC, run_id DESC) AS rn
 			FROM varroa.runs
-			WHERE cluster = $1 AND tenant = $2 AND `+recordsBuildSQL+` %s
+			WHERE cluster = $1 AND tenant = $2 AND `+historyRunSQL+` %s
 		) ranked
 		WHERE rn <= $%d AND duration_ms IS NOT NULL
 		ORDER BY job_path, rn
@@ -248,7 +248,7 @@ func addJobQueueWaitMedians(ctx context.Context, db rowQuerier, cluster, tenant 
 		           ORDER BY EXTRACT(EPOCH FROM (started_at - queued_at)) * 1000
 		       )::numeric)::bigint AS median_queue_wait_ms
 		FROM varroa.runs
-		WHERE cluster = $1 AND tenant = $2 AND created_at >= $3 AND `+recordsBuildSQL+`
+		WHERE cluster = $1 AND tenant = $2 AND created_at >= $3 AND `+historyRunSQL+`
 		  AND queued_at IS NOT NULL AND started_at IS NOT NULL
 		GROUP BY job_path
 	`, cluster, tenant, since)

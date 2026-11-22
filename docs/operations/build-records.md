@@ -136,6 +136,18 @@ Counters: `varroa.gateway.trigger_accepted`, `recorder_ingest_trigger_accepted_t
 `running`). `recorder_ingest_superseded_start_total` counts a dropped late `run.started`; see
 [Build claims](build-claims.md).
 
+## A duplicate run
+
+The record store marks a newer run `DUPLICATE` when an older run of the same revision is still
+live. The recorder then cancels the newer run. Its completion still arrives, usually with the
+result `ABORTED`, and the run page shows that result.
+
+The older run gives the outcome of the revision. A `DUPLICATE` run therefore counts in no job
+statistic, job health value, failing-job count, or overview count. It is never the last run of
+its job. Its completion sends no webhook, starts no upstream trigger, and writes no
+`build.failed` event. The completion still releases the run's fleet locks and deletes its run
+state. The run appears in the run list until `runs` expires it.
+
 ## Live updates
 
 The recorder publishes one notification per run change onto the NATS subject

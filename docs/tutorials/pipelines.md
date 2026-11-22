@@ -19,7 +19,7 @@ The tenant rail selects one tenant. Select a column header to sort the feed. The
 
 Each row menu offers **Open**. **Re-run** and **Cancel** appear only when you can write the tenant.
 
-A row names its job below its tenant. A run with no commit subject shows its job and build number as its title. A cron, SCM, or upstream run shows its trigger and no actor. The pass rate does not count interrupted or not-built runs.
+A row names its job below its tenant. A run with no commit subject shows its job and build number as its title. A cron, SCM, or upstream run shows its trigger and no actor. The pass rate does not count interrupted, not-built, or duplicate runs.
 
 Consecutive finished runs of one job fold into one row, such as **cron-probe × 40**. The runs must share a branch, a trigger, an actor, and a result. Select the row to show its runs. Folding applies under the default sort with no job filter. A run with a commit subject does not fold.
 
@@ -127,7 +127,8 @@ administrator writes those globs.
 
 A job page opens with a **Health** card. Health counts the job's last ten finished build runs.
 A run that succeeded passes. A run that failed, was unstable, or was aborted fails. A run that
-was interrupted or was not built does not count, so it does not change the score.
+was interrupted or was not built does not count, so it does not change the score. A
+[duplicate run](../operations/build-records.md#a-duplicate-run) is not one of the ten runs.
 
 The summary counts counted builds, for example **2 of 3 counted builds passed**. The score is the share of counted runs that passed, rounded down. The **Last 30 days** card uses the same rule. The glyph names the bucket:
 

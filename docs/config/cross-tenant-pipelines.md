@@ -155,7 +155,9 @@ two producers calls `varroa.build` from each producer's pipeline instead.
 The trigger reaches the subscriber job's home slot.
 
 A new trigger goes live only after the subscriber's cell exports its schedules, within ten
-minutes. A producer run that completes before that export starts no subscriber build.
+minutes. A producer run that completes before that export starts no subscriber build. A
+[duplicate run](../operations/build-records.md#a-duplicate-run) of the producer starts no
+subscriber build.
 
 ## The export grant
 

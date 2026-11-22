@@ -27,12 +27,12 @@ type JobWindowStats struct {
 	SlowestStage      *StageStat
 }
 
-// JobWindowStats summarizes jobPath's runs created at or after since.
-// Builds counts every run in the window, whatever its status.
-// MedianDurationMs draws from finished runs only, a run whose "result"
-// column is set. A run reaches "result" exactly when Jenkins has
-// resolved its outcome, which excludes a queued, running, or
-// duplicate-superseded run. PassRate divides the SUCCESS runs by the
+// JobWindowStats summarizes jobPath's history runs created at or after
+// since. Builds counts every history run in the window, whatever its
+// status. MedianDurationMs draws from finished runs only, a run whose
+// "result" column is set. A run reaches "result" when Jenkins has
+// resolved its outcome, which excludes a queued or running run.
+// PassRate divides the SUCCESS runs by the
 // counted runs. A run counts when countedResultSQL holds, which is the
 // SQL form of CountsTowardPassRate. INTERRUPTED and NOT_BUILT do not
 // count, because those results say the build did not finish. UNSTABLE
@@ -42,9 +42,11 @@ type JobWindowStats struct {
 // window's runs, not its single slowest run: a median resists one
 // outlier run inflating a stage that usually runs fast.
 //
-// A run that records no build counts in no value here: a run whose
-// result is TRIGGER_FAILED, or a run whose payload still holds
-// accepted_at. Neither started a build, so neither is a build outcome.
+// A row outside the job's history counts in no value here
+// (historyRunSQL). A run whose result is TRIGGER_FAILED, or a run whose
+// payload still holds accepted_at, started no build. A DUPLICATE run
+// keeps the result of its owner completion, but the older run of its
+// revision gives that revision's outcome.
 func (r *pgReader) JobWindowStats(ctx context.Context, cluster, tenant, jobPath string, since time.Time) (JobWindowStats, error) {
 	if err := r.checkSchema(ctx); err != nil {
 		return JobWindowStats{}, err
@@ -61,7 +63,7 @@ func (r *pgReader) JobWindowStats(ctx context.Context, cluster, tenant, jobPath 
 			SELECT run_id, result, duration_ms, queued_at, started_at
 			FROM varroa.runs
 			WHERE cluster = $1 AND tenant = $2 AND job_path = $3 AND created_at >= $4
-			  AND `+recordsBuildSQL+`
+			  AND `+historyRunSQL+`
 		),
 		stage_medians AS (
 			SELECT rs.name AS stage_name,
