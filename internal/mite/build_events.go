@@ -979,6 +979,49 @@ func (h *BusHandler) logSummaryPayload(evt *mitev1.BuildEvent) map[string]interf
 	return p
 }
 
+// gatewayLogFacts answers the facts this gateway itself holds about
+// runID's log, and only the facts that raise the stored summary:
+// finalized true, and incomplete true with the gateway's reason. ok is
+// false when the gateway holds neither fact. A fact here describes the
+// stored log, whatever cell sent the event. It never carries incomplete
+// false, because the recorder's merge removes a stored rank-1 reason for
+// that value. It also never carries incomplete true with no reason: each
+// gateway site that sets the flag sets a reason too, and a flag with no
+// reason is not a fact that the merge can rank.
+func (h *BusHandler) gatewayLogFacts(runID string) (map[string]interface{}, bool) {
+	p := map[string]interface{}{}
+	if incomplete, reason := h.runIncompleteness(runID); incomplete && reason != "" {
+		p["incomplete"] = true
+		p["incomplete_reason"] = reason
+	}
+	if h.runFinalized(runID) {
+		p["finalized"] = true
+	}
+	return p, len(p) > 0
+}
+
+// withholdSenderLogSummary replaces the run.log payload of a COMPLETED
+// group with gatewayLogFacts, for a sender that a ledger answer names as
+// not the run's owner. The recorder merges every run.log into the run's
+// log summary with no owner check. The sender's chunk count, dropped
+// bytes, and incomplete flag and reason therefore must not reach it: they
+// describe a log that the owner does not write. The group keeps no
+// run.log envelope when the gateway holds no fact.
+func (h *BusHandler) withholdSenderLogSummary(runID string, kps []kindPayload) []kindPayload {
+	facts, ok := h.gatewayLogFacts(runID)
+	out := kps[:0]
+	for _, kp := range kps {
+		if kp.kind != kindRunLog {
+			out = append(out, kp)
+			continue
+		}
+		if ok {
+			out = append(out, kindPayload{kindRunLog, facts})
+		}
+	}
+	return out
+}
+
 // buildPayloadGroup maps one non-heartbeat BuildEvent onto the ordered
 // list of kinds and payloads design.md D9 states. The caller handles
 // HEARTBEAT separately, because a heartbeat is droppable and every other
@@ -1556,11 +1599,12 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 		return nil
 	}
 
+	withholdSummary := false
 	if evt.Phase == phaseCompleted && evt.RunId != "" {
 		// The log writer's finalize deadline anchors on this moment, so
 		// it must be recorded before the ordered envelope group below
 		// reads the gateway's own incompleteness and finalized knowledge.
-		h.markCompletedRunTerminal(ns, name, evt)
+		withholdSummary = h.markCompletedRunTerminal(ns, name, evt)
 	}
 
 	kps, err := h.buildPayloadGroup(evt)
@@ -1568,6 +1612,9 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.sendEventAck(w.send, evt.RunId, evt.Seq, eventAckRejected, err.Error())
 		return nil
+	}
+	if withholdSummary {
+		kps = h.withholdSenderLogSummary(evt.RunId, kps)
 	}
 
 	envs := make([]ingestEnvelope, 0, len(kps))
@@ -1589,32 +1636,57 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 }
 
 // markCompletedRunTerminal sets the log finalize deadline of a COMPLETED
-// event's run, but only when checkOwner matches the sender to the run's
-// owner. The sender instance is the registered one, which the event's
-// envelope also carries. The record store keeps a completion from any
-// other instance out of the run's terminal state, so such a completion
-// must not start the deadline of the owner's log or create its state.
-// A failed lookup marks nothing: the owner's next chunk reads the
-// ledger again, and that answer carries the run's status and anchor.
+// event's run, but only when the sender owns the run. The sender instance
+// is the registered one, which the event's envelope also carries. The
+// record store keeps a completion from any other instance out of the
+// run's terminal state, so such a completion must not start the deadline
+// of the owner's log or create its state.
 //
-// On an owner-cache miss the lookup blocks the read loop for at most
-// ownerLookupTimeout, the same bound OnLogChunk has. It holds no lock
-// while it calls checkOwner. markRunTerminal then takes h.logMu and
-// st.mu in its own order.
-func (h *BusHandler) markCompletedRunTerminal(ns, name string, evt *mitev1.BuildEvent) {
+// checkOwnerForCompletion makes the decision from a ledger request sent
+// for this event, never from a cached entry. A stale cell after a
+// takeover is the sender most likely to hold a cached match, because it
+// streamed the run's chunks through this gateway until the takeover.
+//
+// It answers true when OnBuildEvent must withhold the sender's log
+// summary. That is the case only when the answer names another cell
+// instance as the owner, the same instance test the record store applies
+// to run.completed. A run with no ledger row and an owner with no
+// instance keep the summary and set no deadline. A failed request keeps
+// the summary too: the owner's summary is the only record of its
+// plugin-side losses, and an answer that names no other owner must not
+// drop it. After a failed request, a cached match still sets the
+// deadline, as the chunk path does in the same state, so a recorder
+// outage does not cost each finishing build its deadline. With no cached
+// match, the owner's next chunk reads the ledger again, and that answer
+// carries the run's status and anchor. A gateway with no log writer
+// sends no request and keeps the summary.
+//
+// The request blocks the read loop for at most ownerLookupTimeout, the
+// same bound OnLogChunk has. It holds no lock while it reads the owner.
+// markRunTerminal then takes h.logMu and st.mu in its own order.
+func (h *BusHandler) markCompletedRunTerminal(ns, name string, evt *mitev1.BuildEvent) bool {
 	if h.logStore == nil {
-		return
+		return false
 	}
 	instance := h.lookupCellInstance(ns, name)
-	decision, _ := h.checkOwner(context.Background(), h.cluster, ns, name, instance, evt.RunId)
-	switch decision {
-	case ownerMatched:
+	decision, tuple, fresh := h.checkOwnerForCompletion(context.Background(), h.cluster, ns, name, instance, evt.RunId)
+	withhold := fresh && decision == ownerForeign && tuple.instance != "" && tuple.instance != instance
+	switch {
+	case decision == ownerMatched:
+		if !fresh {
+			h.log().Warn("owner lookup failed for a completed event, the cached match sets its log deadline",
+				"controller", ns+"/"+name, "cell_instance", instance, "run_id", evt.RunId)
+		}
 		h.markRunTerminal(ns, name, evt.RunId, evt.JobPath, millisToTime(evt.CompletedAtMillis))
-	case ownerForeign:
-		h.log().Info("completed event from a cell that does not own the run, its log deadline is not set",
+	case withhold:
+		h.log().Info("completed event from a cell instance that does not own the run, its log deadline and log summary are withheld",
+			"controller", ns+"/"+name, "cell_instance", instance, "owner_instance", tuple.instance, "run_id", evt.RunId)
+	case decision == ownerForeign:
+		h.log().Info("the ledger names no other owner instance for a completed event, its log deadline is not set and its log summary is kept",
 			"controller", ns+"/"+name, "cell_instance", instance, "run_id", evt.RunId)
 	default:
 		h.log().Warn("owner lookup failed for a completed event, its log deadline waits for the next chunk",
 			"controller", ns+"/"+name, "cell_instance", instance, "run_id", evt.RunId)
 	}
+	return withhold
 }

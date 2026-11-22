@@ -95,11 +95,13 @@ func TestOnBuildEventCompletedFromANonOwnerCreatesNoRunState(t *testing.T) {
 
 // TestOnBuildEventCompletedFromTheOwnerMarksTheRunTerminal proves that
 // the owner's COMPLETED event still sets the finalize deadline from its
-// own completion time. A cached match from the relayed claim grant
-// answers the owner check, so the event costs no ledger request.
+// own completion time. A cached match from the relayed claim grant does
+// not decide the owner check: the event reads the ledger once, because a
+// move with no claim leaves an old owner's match in place.
 func TestOnBuildEventCompletedFromTheOwnerMarksTheRunTerminal(t *testing.T) {
 	owner := newFakeOwnerRequester()
 	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
 	h, _ := newCompletedOwnerTestHandler(t, owner, &recordingSender{})
 	h.ownerCache.observeGrant(runID, "core", "ns1", "cell1", "inst1")
 	h.logFinalizeWait = time.Hour
@@ -126,8 +128,8 @@ func TestOnBuildEventCompletedFromTheOwnerMarksTheRunTerminal(t *testing.T) {
 	if ns != "ns1" || name != "cell1" || jobPath != "tenant-a/build" {
 		t.Fatalf("run state writer=%s/%s job_path=%q, want ns1/cell1 and tenant-a/build", ns, name, jobPath)
 	}
-	if calls := owner.callCount(); calls != 0 {
-		t.Fatalf("owner lookups = %d, want 0: the relayed grant answers the check", calls)
+	if calls := owner.callCount(); calls != 1 {
+		t.Fatalf("owner lookups = %d, want 1: a COMPLETED event reads the ledger", calls)
 	}
 }
 
