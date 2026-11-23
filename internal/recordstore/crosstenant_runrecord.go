@@ -150,10 +150,15 @@ func readCrossTenantLastSuccessfulRun(ctx context.Context, pool *pgxpool.Pool, c
 	return run, true, nil
 }
 
-// crossTenantRunState maps rec onto one of the five cross-tenant run
+// crossTenantRunState maps rec onto one of the six cross-tenant run
 // states (design.md D1, D8). It never answers "pending": a caller only
 // reaches this function once a run_intents row or a TRIGGER_FAILED runs
 // row names the run, and "pending" names the absence of both.
+//
+// A DUPLICATE row answers "duplicate" whatever its result holds. The
+// status is terminal. The owner completion of such a run stores its
+// result, but the run never becomes an outcome. A caller that reads such
+// a row as queued waits for a change that never comes.
 func crossTenantRunState(rec crossTenantRunRecord) string {
 	if !rec.hasRuns {
 		return CrossTenantStateQueued
@@ -166,6 +171,8 @@ func crossTenantRunState(rec crossTenantRunRecord) string {
 			return CrossTenantStateInterrupted
 		}
 		return CrossTenantStateCompleted
+	case StatusDuplicate:
+		return CrossTenantStateDuplicate
 	default:
 		return CrossTenantStateQueued
 	}

@@ -17,6 +17,9 @@ final class VarroaCrossTenantOps {
     /** Handle state before a {@code run_intents} row exists (D8). */
     static final String STATE_PENDING = "pending";
 
+    /** Terminal handle state of a run the record store marked {@code DUPLICATE}. */
+    static final String STATE_DUPLICATE = "duplicate";
+
     /** Overrides {@link #client()} in a test; {@code null} in production. */
     private static volatile MiteLoopbackClient testClient;
 

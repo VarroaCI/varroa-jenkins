@@ -33,8 +33,9 @@ def run = varroa.build(
 echo "Started ${run.tenant}/${run.job}, result: ${run.result}"
 ```
 
-`wait` defaults to `true`. A waiting call polls the target run for up to 24 hours, and logs a
-warning at 10 minutes. Wrap the call in the core `timeout` step for a shorter bound:
+`wait` defaults to `true`. A waiting call fails when no target run appears within 24 hours, and
+logs a warning at 10 minutes. A queued or running target run has no bound. Wrap the call in the
+core `timeout` step for a shorter bound:
 
 ```groovy
 timeout(time: 15, unit: 'MINUTES') {
@@ -127,6 +128,9 @@ See [The fleet lock](#the-fleet-lock) for the full contract.
 | `running` | the target build is running |
 | `completed` | the target build finished |
 | `interrupted` | the target build was marked interrupted |
+| `duplicate` | the target build is a [duplicate run](../operations/build-records.md#a-duplicate-run); another run of the same job gives the outcome |
+
+A waiting `varroa.build` call fails on `interrupted` and on `duplicate`, whatever `propagate` is.
 
 ## Declare an upstream trigger
 
