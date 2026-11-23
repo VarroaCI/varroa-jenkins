@@ -94,8 +94,12 @@ func waitNotification(req ClaimRequest, runID, state string) RunNotification {
 
 // notificationFor builds the notification one ingest envelope publishes.
 // It reads the envelope alone, so no route re-reads the row it wrote.
-// ok is false for a kind that publishes nothing.
+// ok is false for a kind that publishes nothing, and for a running-build
+// fact from a sender that does not own the run, which wrote nothing.
 func notificationFor(env IngestEnvelope, res ApplyResult) (RunNotification, bool) {
+	if res.ForeignSender {
+		return RunNotification{}, false
+	}
 	n := RunNotification{
 		Cluster: env.Cluster,
 		Tenant:  env.Tenant,

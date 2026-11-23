@@ -15,9 +15,10 @@ import (
 // complete ingest envelope, not only its inner payload object, so no
 // captured field is unrecoverable.
 //
-// The write has no owner check. The gateway drops the stage envelopes of
-// a COMPLETED event from a cell instance that does not own the run. It
-// checks no owner for the stage event of a running build.
+// dispatch calls senderOwnsRun first, so a stage envelope from a cell
+// instance that does not own a cell run never reaches this write. The
+// gateway also drops the stage envelopes of a COMPLETED event that a
+// ledger answer names foreign.
 func applyRunStage(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	var payload RunStagePayload
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {

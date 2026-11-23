@@ -25,6 +25,9 @@ const runSourceNewerSQL = `COALESCE((EXCLUDED.payload->>'source_seq')::bigint, 0
 // It answers refused true when the event's seq sits below the stored
 // source_seq. The write then applies the accepted-key strip alone, and
 // no other stored value changes.
+//
+// dispatch calls senderOwnsRun first, so a run.source envelope from a
+// cell instance that does not own a cell run never reaches this write.
 func applyRunSource(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) (refused bool, err error) {
 	var payload RunSourcePayload
 	if unmarshalErr := json.Unmarshal(env.Payload, &payload); unmarshalErr != nil {

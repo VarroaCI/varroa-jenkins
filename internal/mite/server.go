@@ -259,6 +259,10 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 			rec.RecordCellInstance(controllerName, namespace, cellInstance)
 		}
 	}
+	// A build event takes this stream's own instance, never the map entry
+	// above. Another pod of the same controller can overwrite that entry
+	// while this stream is still the current one.
+	streamEvents, _ := handler.(streamBuildEventHandler)
 
 	// Create a sender function bound to this stream, protected by a mutex
 	// so background goroutines can send safely.
@@ -361,7 +365,13 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 
 		case *mitev1.MiteMessage_BuildEvent:
 			if be := m.BuildEvent; be != nil {
-				if err := handler.OnBuildEvent(controllerName, namespace, connToken, be); err != nil {
+				var err error
+				if streamEvents != nil {
+					err = streamEvents.OnStreamBuildEvent(controllerName, namespace, cellInstance, connToken, be)
+				} else {
+					err = handler.OnBuildEvent(controllerName, namespace, connToken, be)
+				}
+				if err != nil {
 					if s.Logger != nil {
 						s.Logger.Warn("build event handling failed, closing stream",
 							"controller", controllerName, "namespace", namespace, "error", err)

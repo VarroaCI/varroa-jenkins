@@ -110,3 +110,12 @@ type StreamHandler interface {
 type cellInstanceRecorder interface {
 	RecordCellInstance(name, ns, cellInstance string)
 }
+
+// streamBuildEventHandler is an optional capability of a StreamHandler.
+// The server calls OnStreamBuildEvent in place of OnBuildEvent, with the
+// cell instance of the stream's own verified certificate, so each event
+// carries the instance of the stream that sent it. BusHandler implements
+// it.
+type streamBuildEventHandler interface {
+	OnStreamBuildEvent(name, ns, cellInstance string, connToken int64, evt *mitev1.BuildEvent) error
+}

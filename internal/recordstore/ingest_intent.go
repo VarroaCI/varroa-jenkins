@@ -34,6 +34,10 @@ type intentRow struct {
 	cell         *string
 	cellInstance *string
 	buildNumber  *int64
+	// placementGeneration is the placement generation the claim fence
+	// granted the run under. A cell tenant's generation starts at one. A
+	// controller with no cell role always claims under zero.
+	placementGeneration int64
 	// incarnation is the tenant incarnation that owned the placement when
 	// the claim granted the run. A webhook delivery is stamped from it.
 	incarnation string
@@ -51,12 +55,13 @@ func loadIntent(ctx context.Context, tx pgx.Tx, runID uuid.UUID) (*intentRow, er
 	row := &intentRow{runID: runID}
 	err := tx.QueryRow(ctx, `
 		SELECT created_at, intent_key, cluster, namespace, tenant, job_path, cell, cell_instance, build_number,
-		       incarnation
+		       placement_generation, incarnation
 		FROM varroa.run_intents
 		WHERE run_id = $1
 		FOR UPDATE
 	`, runID).Scan(&row.createdAt, &row.intentKey, &row.cluster, &row.namespace,
-		&row.tenant, &row.jobPath, &row.cell, &row.cellInstance, &row.buildNumber, &row.incarnation)
+		&row.tenant, &row.jobPath, &row.cell, &row.cellInstance, &row.buildNumber,
+		&row.placementGeneration, &row.incarnation)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return nil, ErrIntentMissing
