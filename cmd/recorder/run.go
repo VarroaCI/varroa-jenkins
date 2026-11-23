@@ -177,6 +177,7 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("register concurrency metrics: %w", err)
 	}
 	ledger.SetConcurrencyCancel(busConn, concurrencyMetrics, actionMetrics, logger)
+	ledger.SetOwnerMoves(busConn, logger)
 	wireGrantHold(ledger, busConn, cfg)
 
 	sweepMetrics, err := recordstore.NewInterruptedMetrics(mp)

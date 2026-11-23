@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -150,16 +151,33 @@ type ownerLookupResult struct {
 	err   error
 }
 
+// errOwnerMovedDuringRead is the error of a ledger read that an
+// invalidation of its run overtook. The answer can name the owner from
+// before a move, so it decides nothing and the cache does not keep it.
+var errOwnerMovedDuringRead = errors.New("owner of the run moved during the ledger read")
+
+// ownerReads counts the ledger reads in flight for one run and the
+// invalidations of the run since the first of them began. The cache holds
+// it only while a read is in flight.
+type ownerReads struct {
+	inFlight    int
+	invalidated uint64
+}
+
 // ownerCache is the gateway's bounded, least-recently-used cache of run
 // ownership decisions. A match expires after 30 minutes; a refusal
 // expires after 60 seconds, so a legitimate ownership transfer converges
-// within one minute. Concurrent lookups for the same run_id coalesce
+// within one minute. The recorder's owner move signal drops a moved run's
+// entry at once (WatchOwnerMoves); these lifetimes bound a replica that
+// misses the signal. Concurrent lookups for the same run_id coalesce
 // into one request-reply call.
 type ownerCache struct {
 	mu      sync.Mutex
 	maxSize int
 	entries map[string]*list.Element
 	order   *list.List // front = most recently used
+	// reads holds the ledger reads in flight for each run. mu guards it.
+	reads map[string]*ownerReads
 
 	inflightMu sync.Mutex
 	inflight   map[string][]chan ownerLookupResult
@@ -175,6 +193,7 @@ func newOwnerCache(maxSize int) *ownerCache {
 		maxSize:  maxSize,
 		entries:  make(map[string]*list.Element),
 		order:    list.New(),
+		reads:    make(map[string]*ownerReads),
 		inflight: make(map[string][]chan ownerLookupResult),
 	}
 }
@@ -221,6 +240,55 @@ func (c *ownerCache) peek(runID string) (ownerCacheEntry, bool) {
 func (c *ownerCache) set(runID string, entry ownerCacheEntry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.setLocked(runID, entry)
+}
+
+// setUnlessInvalidated stores entry like set, unless invalidate ran for
+// runID after the ledger read that produced entry began. began is the
+// count that beginRead returned for that read. It answers whether it
+// stored entry.
+func (c *ownerCache) setUnlessInvalidated(runID string, began uint64, entry ownerCacheEntry) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if r := c.reads[runID]; r != nil && r.invalidated != began {
+		return false
+	}
+	c.setLocked(runID, entry)
+	return true
+}
+
+// beginRead records one ledger read in flight for runID. It returns the
+// invalidation count that setUnlessInvalidated compares. Every call needs
+// one endRead.
+func (c *ownerCache) beginRead(runID string) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r := c.reads[runID]
+	if r == nil {
+		r = &ownerReads{}
+		c.reads[runID] = r
+	}
+	r.inFlight++
+	return r.invalidated
+}
+
+// endRead ends one ledger read that beginRead recorded. The record of the
+// run goes with its last read, so the map holds only runs with a read in
+// flight.
+func (c *ownerCache) endRead(runID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r := c.reads[runID]
+	if r == nil {
+		return
+	}
+	if r.inFlight--; r.inFlight <= 0 {
+		delete(c.reads, runID)
+	}
+}
+
+// setLocked is set for a caller that holds c.mu.
+func (c *ownerCache) setLocked(runID string, entry ownerCacheEntry) {
 	if el, ok := c.entries[runID]; ok {
 		el.Value.(*ownerCacheItem).entry = entry
 		c.order.MoveToFront(el)
@@ -237,12 +305,20 @@ func (c *ownerCache) set(runID string, entry ownerCacheEntry) {
 	}
 }
 
-// invalidate drops runID's cached decision, so the next check reads the
-// ledger again. A resume moves a run's owner with no claim behind it,
-// so observeGrant never replaces the entry for such a run.
+// invalidate drops runID's cached decision, its refusal marks, and
+// refusedUntil, so the next check reads the ledger again. A resume or a
+// takeover moves a run's owner with no claim that this replica relays,
+// so observeGrant never replaces the entry for such a run. A ledger read
+// for runID that is in flight can answer the owner from before the move.
+// invalidate therefore also makes each such read fail with
+// errOwnerMovedDuringRead, so its answer is neither cached nor used. A run
+// with no entry and no read in flight is left as it is.
 func (c *ownerCache) invalidate(runID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if r := c.reads[runID]; r != nil {
+		r.invalidated++
+	}
 	el, ok := c.entries[runID]
 	if !ok {
 		return
@@ -294,12 +370,16 @@ func (c *ownerCache) lookup(ctx context.Context, requester ledgerRequester, runI
 // doLookup makes one request-reply call and caches the answer. It never
 // caches a lookup failure: a timeout, an unreachable recorder, an
 // unparsable reply, or a recorder-reported database error must be
-// retried, not remembered as a refusal.
+// retried, not remembered as a refusal. An invalidation of the run while
+// the call is in flight is a failure too (errOwnerMovedDuringRead): the
+// answer can predate the move that the invalidation reports.
 func (c *ownerCache) doLookup(ctx context.Context, requester ledgerRequester, runID, cluster, namespace, cell, instance string) (ownerCacheEntry, error) {
 	body, err := json.Marshal(ownerLookupRequest{RunID: runID})
 	if err != nil {
 		return ownerCacheEntry{}, err
 	}
+	began := c.beginRead(runID)
+	defer c.endRead(runID)
 	msg, err := requester.RequestWithContext(ctx, bus.LedgerOwnerSubject, body, ownerLookupTimeout)
 	if err != nil {
 		return ownerCacheEntry{}, err
@@ -315,22 +395,23 @@ func (c *ownerCache) doLookup(ctx context.Context, requester ledgerRequester, ru
 	caller := ownerCallerKey(cluster, namespace, cell)
 	prev, hadPrev := c.peek(runID)
 	now := time.Now()
+	var entry ownerCacheEntry
 	if !resp.Found {
-		entry := refusalEntry(prev, hadPrev, false, ownerTuple{}, caller, now)
-		c.set(runID, entry)
-		return entry, nil
+		entry = refusalEntry(prev, hadPrev, false, ownerTuple{}, caller, now)
+	} else {
+		tuple := ownerTuple{
+			cluster: resp.Cluster, namespace: resp.Namespace, cell: resp.Cell, instance: resp.Instance,
+			status: resp.Status, anchorUnixMs: resp.AnchorUnixMs,
+		}
+		matched := tuple.cluster == cluster && tuple.namespace == namespace && tuple.cell == cell && tuple.instance == instance
+		entry = ownerCacheEntry{found: true, tuple: tuple, expires: now.Add(ownerMatchTTL)}
+		if !matched {
+			entry = refusalEntry(prev, hadPrev, true, tuple, caller, now)
+		}
 	}
-
-	tuple := ownerTuple{
-		cluster: resp.Cluster, namespace: resp.Namespace, cell: resp.Cell, instance: resp.Instance,
-		status: resp.Status, anchorUnixMs: resp.AnchorUnixMs,
+	if !c.setUnlessInvalidated(runID, began, entry) {
+		return ownerCacheEntry{}, errOwnerMovedDuringRead
 	}
-	matched := tuple.cluster == cluster && tuple.namespace == namespace && tuple.cell == cell && tuple.instance == instance
-	entry := ownerCacheEntry{found: true, tuple: tuple, expires: now.Add(ownerMatchTTL)}
-	if !matched {
-		entry = refusalEntry(prev, hadPrev, true, tuple, caller, now)
-	}
-	c.set(runID, entry)
 	return entry, nil
 }
 
@@ -367,8 +448,9 @@ func decideOwner(entry ownerCacheEntry, cluster, namespace, cell, instance strin
 // coalesced lookup first when ownerCacheEntry.needsRead says so: a resume
 // or a takeover moves the owner with no claim, so a match of the old owner
 // or a refusal read for another caller can name an owner that the ledger
-// no longer holds. The lookup marks its own caller and never shortens a
-// match. One set of marks therefore costs at most ownerRefusedMax lookups
+// no longer holds. The recorder's owner move signal drops such an entry
+// (onOwnerMove); the re-read covers a replica that missed the signal.
+// The lookup marks its own caller and never shortens a match. One set of marks therefore costs at most ownerRefusedMax lookups
 // for new marks and ownerRefusedRereads lookups for aged marks, and a
 // lookup in flight is shared. The lookup runs on the caller's goroutine,
 // the stream read loop for a chunk, and lasts at most ownerLookupTimeout.
@@ -416,6 +498,13 @@ func (h *BusHandler) checkOwnerForCompletion(ctx context.Context, cluster, names
 	cached, hasCached := h.ownerCache.get(runID)
 	entry, err := h.ownerCache.doLookup(ctx, h.ledger, runID, cluster, namespace, cell, instance)
 	if err != nil {
+		// A read that an owner move overtook holds a pre-move answer. Its
+		// cached match is the stale owner, so it must not admit the event.
+		// A read that an owner move overtook holds a pre-move answer. Its
+		// cached match is the stale owner, so it must not admit the event.
+		if errors.Is(err, errOwnerMovedDuringRead) {
+			return ownerUnknown, ownerTuple{}, false
+		}
 		if hasCached && decideOwner(cached, cluster, namespace, cell, instance) == ownerMatched {
 			return ownerMatched, cached.tuple, false
 		}

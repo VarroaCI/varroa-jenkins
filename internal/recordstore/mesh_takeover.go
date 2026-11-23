@@ -288,6 +288,12 @@ func dispatchMeshResumes(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn
 		if !ok {
 			continue
 		}
+		// The move committed, and no claim that a gateway relays carries
+		// it. The signal goes out before the action, so a gateway replica
+		// drops the old owner's cached match before the target can send.
+		if err := PublishOwnerMove(conn, c.cluster, c.runID); err != nil {
+			logger.Warn("publish owner move failed", "run_id", c.runID, "error", err)
+		}
 		action.LogNextSeq = resumeLogNextSeq(ctx, logs, c.runID, logger)
 		// The publish is outside the transaction. A lost action
 		// produces no resume, and the recorder never republishes: the

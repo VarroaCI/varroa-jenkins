@@ -171,6 +171,12 @@ stringData:
               // Live tail: accept the BFF's start/stop requests for a
               // connected cell's console log.
               "varroa.tail.>"
+              // Build-log externalization: the recorder's owner move
+              // signal. Each replica subscribes its own cluster's subject
+              // and drops the moved run's cached owner. Every cluster's
+              // gateway shares this identity, so the grant names no
+              // cluster.
+              "varroa.ledger.moves.*"
 {{- end }}
             ]
           }
@@ -301,6 +307,9 @@ stringData:
               // One recorder serves every cluster, and a member cluster runs
               // no recorder. It publishes each action on the target's cluster.
               "varroa.ledger.actions.>"
+              // The owner move signal, on the cluster of the moved run, for
+              // every gateway replica of that cluster.
+              "varroa.ledger.moves.*"
               // The claim reply: the gateway owns the request inbox.
               "_INBOX_gateway.>"
               // The tenant purge reply and the tenant sync reply: the
