@@ -27,6 +27,7 @@ jobs:
       charts: ${{ steps.paths.outputs.charts }}
       docker: ${{ steps.paths.outputs.docker }}
       frontend: ${{ steps.paths.outputs.frontend }}
+      frontendtest: ${{ steps.paths.outputs.frontend == 'true' || steps.paths.outputs.frontendextra == 'true' }}
       outbound: ${{ steps.base.outputs.outbound }}
     steps:
       # A changed file sets "go" only when it matches every rule. The negated
@@ -60,6 +61,9 @@ jobs:
       # A changed file sets an output here when it matches one rule.
       # goextra lists the files under excluded paths that Go code reads.
       # Every docker path must also set "go": the image build needs Lint and Test.
+      # frontend lists the inputs of the frontend image. The image build reads only that output.
+      # frontendextra lists the files outside frontend/ that a frontend test reads.
+      # frontend/src/ciPathFilter.test.ts fails when a frontend rule does not name such a file.
       - id: paths
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
@@ -68,6 +72,7 @@ jobs:
               - 'charts/varroa/values.yaml'
               - 'charts/varroa/crds/**'
               - 'docs/security/outbound-connections.md'
+              - 'docs/agents/guide.md'
               - 'docs/install/examples/**'
               - 'internal/jenkins/items/testdata/challenge/**'
             charts:
@@ -87,8 +92,12 @@ jobs:
               - '.github/workflows/pr.yaml'
             frontend:
               - 'frontend/**'
-              - 'api/openapi/**'
               - '.github/workflows/pr.yaml'
+            frontendextra:
+              - 'api/openapi/varroa.json'
+              - 'docs/agents/connecting.md'
+              - 'internal/bundle/pipelinetemplate/testdata/schema-corpus/**'
+              - 'internal/recordstore/ingest_common.go'
 
   lint:
     name: Lint
@@ -357,7 +366,7 @@ jobs:
   frontend-test:
     name: Frontend test
     needs: changes
-    if: needs.changes.outputs.frontend == 'true'
+    if: needs.changes.outputs.frontendtest == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
