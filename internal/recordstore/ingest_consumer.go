@@ -134,6 +134,12 @@ func handleIngestMessage(ctx context.Context, ingester *Ingester, metrics *Inges
 				"runID", env.RunID, "reported", result.SupersededReported, "stored", result.SupersededStored,
 				"instance", env.CellInstance, "owner", result.SupersededOwner)
 		}
+		if result.ForeignSender {
+			// A stale cell can replay thousands of buffered events, so
+			// this line stays at debug level, like a dropped heartbeat.
+			logger.Debug("running-build event from a cell instance that does not own the run acknowledged without a write",
+				"runID", env.RunID, "kind", env.Kind, "instance", env.CellInstance)
+		}
 		if result.Truncated {
 			metrics.addScheduleTruncated(ctx)
 			logger.Warn("job schedule envelope truncated; stored every carried row and deleted none",

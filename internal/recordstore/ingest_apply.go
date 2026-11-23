@@ -146,6 +146,12 @@ type ApplyResult struct {
 	// caller acknowledges the message and publishes nothing.
 	RefusedInput bool
 
+	// ForeignSender is true when a run.stage, run.changes, run.source, or
+	// run.input envelope came from a cell instance that does not own the
+	// run (senderOwnsRun). The recorder wrote nothing. The caller
+	// acknowledges the message, logs it, and publishes nothing.
+	ForeignSender bool
+
 	// ReleasedFleetLocks names every fleet lock a terminal run.completed
 	// write released, one entry per deleted row, so notify publishes one
 	// lock notification per row. Every other kind releases none.
@@ -388,6 +394,7 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 	if dispatched.refusedInput {
 		result.RefusedInput = true
 	}
+	result.ForeignSender = dispatched.foreignSender
 	result.ReleasedFleetLocks = dispatched.releasedFleetLocks
 	result.CompletedOwner = dispatched.completedOwner
 	result.RunDuplicate = dispatched.runDuplicate
@@ -515,6 +522,10 @@ type dispatchResult struct {
 	// status, so the write changed no stored set.
 	refusedInput bool
 
+	// foreignSender is true when senderOwnsRun refused a running-build
+	// fact, so dispatch wrote nothing.
+	foreignSender bool
+
 	// releasedFleetLocks names every fleet lock a terminal run.completed
 	// write released, one entry per deleted row. Apply copies it onto
 	// its ApplyResult, the same two-hop path supersededStart and
@@ -559,8 +570,20 @@ func (g *Ingester) applyOnce(ctx context.Context, runID uuid.UUID, env IngestEnv
 	return result, nil
 }
 
-// dispatch runs the write for env.Kind against tx.
+// dispatch runs the write for env.Kind against tx. A running-build fact
+// from a sender that does not own the run writes nothing. dispatch then
+// answers foreignSender and no error, so the consumer acknowledges the
+// message and never retries it.
 func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope, nullBuildNumber bool) (dispatchResult, error) {
+	if runningFactKind(env.Kind) {
+		owns, err := senderOwnsRun(ctx, tx, intent, env)
+		if err != nil {
+			return dispatchResult{}, err
+		}
+		if !owns {
+			return dispatchResult{foreignSender: true}, nil
+		}
+	}
 	switch env.Kind {
 	case KindRunStarted:
 		return applyRunStarted(ctx, tx, intent, env, nullBuildNumber)

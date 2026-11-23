@@ -11,7 +11,8 @@ import (
 
 // senderKinds lists each kind of a COMPLETED group that carries only the
 // sender's facts, with the event content that makes the group carry it.
-// The recorder merges each of these kinds with no owner check.
+// The recorder merges each of these kinds with no owner check, except
+// run.stage and run.changes on a cell run.
 var senderKinds = []struct {
 	kind string
 	add  func(evt *mitev1.BuildEvent)
@@ -63,9 +64,9 @@ func queuedKinds(t *testing.T, h *BusHandler) []string {
 
 // TestOnBuildEventCompletedFromANonOwnerWithholdsEachSenderKind proves
 // that a COMPLETED event publishes no envelope of a sender kind when its
-// ledger answer names another cell instance as the owner. Each kind
-// replaces or merges the owner's record with no owner check in the
-// recorder. The run.completed envelope still goes out, so the recorder
+// ledger answer names another cell instance as the owner. The recorder
+// checks no owner for most of these kinds, so each would replace or merge
+// the owner's record. The run.completed envelope still goes out, so the recorder
 // records the foreign completion. The owner's event of the same content
 // publishes the kind, so the event really carries it.
 func TestOnBuildEventCompletedFromANonOwnerWithholdsEachSenderKind(t *testing.T) {

@@ -1007,12 +1007,12 @@ func (h *BusHandler) gatewayLogFacts(runID string) (map[string]interface{}, bool
 // keeps no run.log envelope when the gateway holds no fact. The function
 // drops every other kind, also a kind that the group adds later.
 //
-// The recorder merges run.stage, run.changes, run.tests, run.quality,
-// run.artifacts, and run.log with no owner check. A payload of such a
-// kind from this sender describes a build that the owner does not run.
-// That payload replaces the owner's stages, tests, quality reports, and
-// artifact rows. The sender's chunk count and loss flags also change the
-// owner's log summary.
+// The recorder merges run.tests, run.quality, run.artifacts, and run.log
+// with no owner check. It checks the owner of run.stage and run.changes
+// only on a cell run. A payload of such a kind from this sender describes
+// a build that the owner does not run. That payload replaces the owner's
+// stages, tests, quality reports, and artifact rows. The sender's chunk
+// count and loss flags also change the owner's log summary.
 func (h *BusHandler) withholdSenderFacts(runID string, kps []kindPayload) []kindPayload {
 	facts, ok := h.gatewayLogFacts(runID)
 	out := kps[:0]
@@ -1513,9 +1513,10 @@ func (h *BusHandler) sendEventAck(send Sender, runID string, eventSeq int64, sta
 // buildEnvelope stamps the identity fields of one ingest envelope. cell
 // and cell_instance never come from the event payload: cell/namespace
 // come from the mTLS stream identity (the name/ns parameters), and
-// cell_instance from the mite's registered pod unique identifier. tenant
-// is resolved once per event by the caller, through CellTenantResolver.
-func (h *BusHandler) buildEnvelope(ns, name string, evt *mitev1.BuildEvent, kind string, payload map[string]interface{}, tenant string) ingestEnvelope {
+// instance is the sending stream's own instance, which the caller
+// resolves once per event (OnStreamBuildEvent). tenant is resolved once
+// per event by the caller, through CellTenantResolver.
+func (h *BusHandler) buildEnvelope(ns, name, instance string, evt *mitev1.BuildEvent, kind string, payload map[string]interface{}, tenant string) ingestEnvelope {
 	return ingestEnvelope{
 		SchemaVersion: 1,
 		Kind:          kind,
@@ -1524,7 +1525,7 @@ func (h *BusHandler) buildEnvelope(ns, name string, evt *mitev1.BuildEvent, kind
 		Cluster:       h.cluster,
 		Namespace:     ns,
 		Cell:          name,
-		CellInstance:  h.lookupCellInstance(ns, name),
+		CellInstance:  instance,
 		Tenant:        tenant,
 		JobPath:       evt.JobPath,
 		OccurredAt:    millisToTime(evt.EmittedAtMillis),
@@ -1569,17 +1570,36 @@ func eventPublishWait() time.Duration {
 	return d
 }
 
-// OnBuildEvent maps evt onto one or more ingest envelopes and enqueues
-// them on this connection's publish worker. It never publishes to
-// JetStream itself: a synchronous publish of a large COMPLETED event
+// OnBuildEvent is OnStreamBuildEvent for a caller that knows no stream
+// instance. Every envelope carries the instance the controller last
+// registered on this replica. The server calls OnStreamBuildEvent.
+func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.BuildEvent) error {
+	return h.OnStreamBuildEvent(name, ns, "", connToken, evt)
+}
+
+// OnStreamBuildEvent maps evt onto one or more ingest envelopes and
+// enqueues them on this connection's publish worker. It never publishes
+// to JetStream itself: a synchronous publish of a large COMPLETED event
 // would stall this controller's heartbeats on the CommandStream read
 // loop, which is where the caller runs this method from.
-func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.BuildEvent) error {
+//
+// cellInstance is the instance of the sending stream's own verified
+// certificate. Every envelope of evt carries it, and the owner decision
+// of a COMPLETED event compares the ledger answer with it. The value
+// must not come from the per-controller map: two pods of one controller
+// can be connected to one replica at once, and each Register or stream
+// open overwrites the entry. The record store drops a running-build fact
+// whose instance does not own the run. An empty value takes the map
+// entry, which is what a certificate with no instance gives.
+func (h *BusHandler) OnStreamBuildEvent(name, ns, cellInstance string, connToken int64, evt *mitev1.BuildEvent) error {
 	w := h.getBuildWorker(ns, name, connToken)
 	if w == nil {
 		// The connection already ended. The read loop's IsCurrentConnection
 		// gate should already have stopped this call from reaching here.
 		return nil
+	}
+	if cellInstance == "" {
+		cellInstance = h.lookupCellInstance(ns, name)
 	}
 
 	// Resolved once per event, from this event's own job path: one cell
@@ -1598,7 +1618,7 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 	}
 
 	if evt.Phase == phaseHeartbeat {
-		env := h.buildEnvelope(ns, name, evt, kindRunHeartbeat, heartbeatPayload(evt), tenant)
+		env := h.buildEnvelope(ns, name, cellInstance, evt, kindRunHeartbeat, heartbeatPayload(evt), tenant)
 		item := buildEventItem{heartbeat: true, envelopes: []ingestEnvelope{env}}
 		if !w.tryEnqueueHeartbeat(item) {
 			h.metrics.buildEventsDropped.Add(context.Background(), 1)
@@ -1611,7 +1631,7 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 		// The log writer's finalize deadline anchors on this moment, so
 		// it must be recorded before the ordered envelope group below
 		// reads the gateway's own incompleteness and finalized knowledge.
-		withhold = h.markCompletedRunTerminal(ns, name, evt)
+		withhold = h.markCompletedRunTerminal(ns, name, cellInstance, evt)
 	}
 
 	kps, err := h.buildPayloadGroup(evt)
@@ -1626,7 +1646,7 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 
 	envs := make([]ingestEnvelope, 0, len(kps))
 	for _, kp := range kps {
-		env := h.buildEnvelope(ns, name, evt, kp.kind, kp.payload, tenant)
+		env := h.buildEnvelope(ns, name, cellInstance, evt, kp.kind, kp.payload, tenant)
 		if !shrinkToBudget(&env) {
 			h.metrics.buildEventsDropped.Add(context.Background(), 1)
 			h.sendEventAck(w.send, evt.RunId, evt.Seq, eventAckRejected, "OVERSIZED")
@@ -1643,9 +1663,9 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 }
 
 // markCompletedRunTerminal sets the log finalize deadline of a COMPLETED
-// event's run, but only when the sender owns the run. The sender instance
-// is the registered one, which the event's envelope also carries. The
-// record store keeps a completion from any other instance out of the
+// event's run, but only when the sender owns the run. instance is the
+// sending stream's own instance, which the event's envelope also carries.
+// The record store keeps a completion from any other instance out of the
 // run's terminal state, so such a completion must not start the deadline
 // of the owner's log or create its state.
 //
@@ -1654,7 +1674,7 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 // takeover is the sender most likely to hold a cached match, because it
 // streamed the run's chunks through this gateway until the takeover.
 //
-// It answers true when OnBuildEvent must withhold the sender's facts
+// It answers true when OnStreamBuildEvent must withhold the sender's facts
 // (withholdSenderFacts). That is the case only when the answer names
 // another cell instance as the owner, the same instance test the record
 // store applies to run.completed. A run with no ledger row and an owner
@@ -1672,11 +1692,10 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 // The request blocks the read loop for at most ownerLookupTimeout, the
 // same bound OnLogChunk has. It holds no lock while it reads the owner.
 // markRunTerminal then takes h.logMu and st.mu in its own order.
-func (h *BusHandler) markCompletedRunTerminal(ns, name string, evt *mitev1.BuildEvent) bool {
+func (h *BusHandler) markCompletedRunTerminal(ns, name, instance string, evt *mitev1.BuildEvent) bool {
 	if h.logStore == nil {
 		return false
 	}
-	instance := h.lookupCellInstance(ns, name)
 	decision, tuple, fresh := h.checkOwnerForCompletion(context.Background(), h.cluster, ns, name, instance, evt.RunId)
 	withhold := fresh && decision == ownerForeign && tuple.instance != "" && tuple.instance != instance
 	switch {

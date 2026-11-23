@@ -31,6 +31,9 @@ const runInputWritableSQL = `(runs.status <> 'COMPLETED' OR ` + heartbeatLostRun
 // It answers refused true when the event's seq sits below the stored
 // inputs_seq, and when the row holds a terminal status. The write then
 // changes no stored set.
+//
+// dispatch calls senderOwnsRun first, so a run.input envelope from a
+// cell instance that does not own a cell run never reaches this write.
 func applyRunInput(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) (refused bool, err error) {
 	var payload RunInputPayload
 	if unmarshalErr := json.Unmarshal(env.Payload, &payload); unmarshalErr != nil {

@@ -12,22 +12,10 @@ import (
 
 // heartbeatOwnerSQL is the owner test both halves of the heartbeat
 // write apply. $9 is the envelope's sender and $10 the intent's own
-// owning instance. The stored row supplies the other two sources, so
-// the test reads the same ownership expression the sweep reads:
-// the intent's instance, else the accepted trigger's instance.
-//
-// The first two rows hold the earlier behaviour where the test has no
-// two names to compare: an envelope that names no sender, and a run
-// that no source names an owner for. A live install meets neither.
-//
-// The last row admits the dispatched resume's target. That target's
-// first heartbeat is the only proof a resumed build gives, and it
-// arrives before any other write moves ownership on.
-const heartbeatOwnerSQL = `
-	$9::text = ''
-	OR COALESCE(NULLIF($10::text, ''), runs.payload->>'accepted_instance') IS NULL
-	OR $9::text = COALESCE(NULLIF($10::text, ''), runs.payload->>'accepted_instance')
-	OR $9::text = runs.payload->'mesh'->'resume'->>'instance'`
+// owning instance. runOwnerSQL states the rule. A dispatched resume's
+// target is admitted because its first heartbeat is the only proof a
+// resumed build gives.
+var heartbeatOwnerSQL = runOwnerSQL("$9", "$10")
 
 // summaryHeartbeatGuardSQL is the guard the heartbeat summary raise
 // reads. $13 is the payload's summary value and $14 is its seq. The
