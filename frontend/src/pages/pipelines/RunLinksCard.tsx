@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { listRunDownstream } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { runLabel } from "../../components/runs/runGlyph";
 import type { RunLink, RunLinkPage } from "../../types";
 import { stripTenantFolder } from "./jobPath";
 import styles from "./RunLinksCard.module.css";
@@ -28,8 +29,9 @@ function RunRef({ link }: { link: RunLink }) {
   return <span>{text}</span>;
 }
 
+/** DownstreamItem names one downstream run and its state word. A run the reader may not read shows no state. */
 function DownstreamItem({ link }: { link: RunLink }) {
-  const state = [link.status, link.result].filter(Boolean).join(" · ");
+  const state = link.status || link.result ? runLabel({ status: link.status ?? "", result: link.result }) : "";
   return (
     <li>
       <RunRef link={link} />

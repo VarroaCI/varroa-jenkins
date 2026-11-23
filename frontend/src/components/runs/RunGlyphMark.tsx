@@ -6,6 +6,7 @@ const GLYPH_MARK: Record<RunGlyph, string> = {
   failure: "✕",
   unstable: "!",
   aborted: "–",
+  notBuilt: "·",
   interrupted: "‖",
   running: "●",
   queued: "○",

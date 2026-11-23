@@ -128,7 +128,7 @@ function jobWithLastBuild(actor: string, changeSummary?: string) {
 describe("JobTree last build cell", () => {
   it("shows the last build status glyph and actor", () => {
     renderRows([jobWithLastBuild("alice")]);
-    expect(screen.getByRole("img", { name: "Failure" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Failed" })).toBeInTheDocument();
     expect(screen.getByText("by alice")).toBeInTheDocument();
   });
 

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Card } from "../../components/Card";
+import { runResultLabel } from "../../components/runs/runGlyph";
 import { plural } from "../../lib/plural";
 import type { JobHealth, JobTrendPoint } from "../../types";
 import { HealthGlyph } from "./HealthGlyph";
@@ -33,7 +34,7 @@ function pointName(point: JobTrendPoint): string {
 
 function pointLabel(point: JobTrendPoint): string {
   const note = UNCOUNTED.has(point.result) ? ", not counted" : "";
-  return `${pointName(point)} ${point.result}${note}`;
+  return `${pointName(point)} ${runResultLabel(point.result)}${note}`;
 }
 
 /** ResultStrip draws one square per run, oldest on the left. Each square
@@ -100,7 +101,7 @@ function DurationChart({ points }: { points: JobTrendPoint[] }) {
       {points.map((point, i) => {
         if (point.durationMs === undefined) return null;
         const h = (point.durationMs / max) * height;
-        const label = `${pointName(point)} · ${formatDuration(point.durationMs)} · ${point.result}`;
+        const label = `${pointName(point)} · ${formatDuration(point.durationMs)} · ${runResultLabel(point.result)}`;
         return (
           <rect
             key={point.runId}

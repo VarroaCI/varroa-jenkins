@@ -14,12 +14,19 @@ export type RunGlyph =
   | "failure"
   | "unstable"
   | "aborted"
+  | "notBuilt"
   | "interrupted"
   | "running"
   | "queued"
   | "waiting"
   | "duplicate"
   | "other";
+
+/**
+ * RunTone is the colour family of a run state on a surface that colours a
+ * word or a fill. RunGlyphMark colours each glyph with a class of its own.
+ */
+export type RunTone = "ok" | "bad" | "warn" | "idle" | "info";
 
 /** RunState is the part of a run that sets its status mark. */
 export interface RunState {
@@ -80,6 +87,8 @@ export function runGlyph(r: RunState): RunGlyph {
       return "unstable";
     case "ABORTED":
       return "aborted";
+    case "NOT_BUILT":
+      return "notBuilt";
     case "INTERRUPTED":
       return "interrupted";
     default:
@@ -87,17 +96,22 @@ export function runGlyph(r: RunState): RunGlyph {
   }
 }
 
-/** runGlyphLabel names a glyph for assistive technology and for the reader. */
+/**
+ * runGlyphLabel names a glyph for assistive technology and for the reader.
+ * Every run surface takes its state word from this function.
+ */
 export function runGlyphLabel(g: RunGlyph): string {
   switch (g) {
     case "success":
-      return "Success";
+      return "Passed";
     case "failure":
-      return "Failure";
+      return "Failed";
     case "unstable":
       return "Unstable";
     case "aborted":
       return "Aborted";
+    case "notBuilt":
+      return "Not built";
     case "interrupted":
       return "Interrupted";
     case "running":
@@ -111,4 +125,37 @@ export function runGlyphLabel(g: RunGlyph): string {
     default:
       return "Other";
   }
+}
+
+/**
+ * runLabel names the state of a run in words. A state with no glyph of its
+ * own keeps its raw result, or else its raw status, so no value is hidden.
+ */
+export function runLabel(r: RunState): string {
+  const glyph = runGlyph(r);
+  return glyph === "other" ? r.result || r.status : runGlyphLabel(glyph);
+}
+
+/** runResultLabel names one finished result, such as a Result filter option. */
+export function runResultLabel(result: string): string {
+  return runLabel({ status: "COMPLETED", result });
+}
+
+const GLYPH_TONE: Record<RunGlyph, RunTone> = {
+  success: "ok",
+  failure: "bad",
+  unstable: "warn",
+  aborted: "idle",
+  notBuilt: "idle",
+  interrupted: "bad",
+  running: "info",
+  queued: "info",
+  waiting: "warn",
+  duplicate: "idle",
+  other: "idle",
+};
+
+/** runTone answers the colour family of a glyph. */
+export function runTone(g: RunGlyph): RunTone {
+  return GLYPH_TONE[g];
 }

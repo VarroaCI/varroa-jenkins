@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
 import type { PipelinesOverviewTenant, RecentRunResult } from "../../types";
 import { plural } from "../../lib/plural";
-import { runGlyphLabel } from "../../components/runs/runGlyph";
+import { runGlyph, runGlyphLabel, runTone, type RunTone } from "../../components/runs/runGlyph";
 import styles from "./TenantRail.module.css";
 
 /** STRIP_CELLS is the number of result cells each rail row draws. */
@@ -18,36 +18,28 @@ const CELL_CLASS: Record<CellKind, string> = {
   idle: styles.cellIdle,
 };
 
+/** TONE_KIND maps a run tone to a strip cell. The strip draws no warn fill, so a warn tone takes the idle fill. */
+const TONE_KIND: Record<RunTone, CellKind> = {
+  ok: "ok",
+  bad: "failed",
+  info: "running",
+  warn: "idle",
+  idle: "idle",
+};
+
 interface StripCell {
   kind: CellKind;
   label: string;
 }
 
 /**
- * stripCell classifies one recent run for the rail strip. A success is ok.
- * A failure, a trigger failure, or an interrupted run is failed. A run in
- * progress is running. A DUPLICATE run is idle whatever its result. Any
- * other result is idle.
+ * stripCell classifies one recent run for the rail strip. The label and the
+ * tone come from the status mark of the run. A state with no mark is an idle
+ * cell named No result.
  */
 export function stripCell(run: RecentRunResult): StripCell {
-  if (run.status === "RUNNING") return { kind: "running", label: "Running" };
-  if (run.status === "QUEUED") return { kind: "running", label: "Queued" };
-  if (run.status === "DUPLICATE") return { kind: "idle", label: runGlyphLabel("duplicate") };
-  switch (run.result) {
-    case "SUCCESS":
-      return { kind: "ok", label: "Success" };
-    case "FAILURE":
-    case "TRIGGER_FAILED":
-      return { kind: "failed", label: "Failed" };
-    case "INTERRUPTED":
-      return { kind: "failed", label: "Interrupted" };
-    case "ABORTED":
-      return { kind: "idle", label: "Aborted" };
-    case "UNSTABLE":
-      return { kind: "idle", label: "Unstable" };
-    default:
-      return { kind: "idle", label: "No result" };
-  }
+  const glyph = runGlyph(run);
+  return { kind: TONE_KIND[runTone(glyph)], label: glyph === "other" ? "No result" : runGlyphLabel(glyph) };
 }
 
 /** stripCells answers the ten cells of one row, oldest on the left and padded with idle cells. */

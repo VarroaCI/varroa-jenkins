@@ -58,7 +58,8 @@ describe("RunLinksCard", () => {
     });
     const link = screen.getByRole("link", { name: "beta/rebuild #2" });
     expect(link.getAttribute("href")).toBe("/pipelines/beta/beta%2Frebuild/run-c1");
-    expect(screen.getByText(/COMPLETED · SUCCESS/)).toBeInTheDocument();
+    expect(screen.getByText("· Passed")).toBeInTheDocument();
+    expect(screen.queryByText(/SUCCESS/)).not.toBeInTheDocument();
     expect(screen.getByText("gamma")).toBeInTheDocument();
   });
 
@@ -90,12 +91,12 @@ describe("RunLinksCard", () => {
     const { rerender } = render(
       tree({ items: [{ tenant: "beta", jobPath: "beta/rebuild", runId: "run-c1", buildNumber: 2, status: "RUNNING" }] }),
     );
-    expect(screen.getByText(/RUNNING/)).toBeInTheDocument();
+    expect(screen.getByText("· Running")).toBeInTheDocument();
     rerender(
       tree({ items: [{ tenant: "beta", jobPath: "beta/rebuild", runId: "run-c1", buildNumber: 2, status: "COMPLETED", result: "SUCCESS" }] }),
     );
-    expect(screen.getByText(/COMPLETED · SUCCESS/)).toBeInTheDocument();
-    expect(screen.queryByText(/RUNNING/)).not.toBeInTheDocument();
+    expect(screen.getByText("· Passed")).toBeInTheDocument();
+    expect(screen.queryByText("· Running")).not.toBeInTheDocument();
   });
 
   it("renders nothing when neither link exists", () => {

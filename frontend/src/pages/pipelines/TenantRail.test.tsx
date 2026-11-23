@@ -3,7 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { PipelinesOverviewTenant } from "../../types";
-import { TenantRail } from "./TenantRail";
+import { TenantRail, stripCell } from "./TenantRail";
 
 function tenant(over: Partial<PipelinesOverviewTenant> = {}): PipelinesOverviewTenant {
   return {
@@ -64,6 +64,7 @@ describe("TenantRail", () => {
     ]);
     const row = screen.getByRole("button", { name: /^pay/ }).closest("li") as HTMLElement;
     expect(within(row).getAllByRole("img")).toHaveLength(10);
+    expect(within(row).getByLabelText("Passed")).toBeInTheDocument();
     expect(within(row).getByLabelText("Failed")).toBeInTheDocument();
     expect(within(row).getByLabelText("Running")).toBeInTheDocument();
   });
@@ -81,6 +82,22 @@ describe("TenantRail", () => {
     expect(within(row).getAllByLabelText("Duplicate")).toHaveLength(2);
     expect(within(row).queryByLabelText("Aborted")).not.toBeInTheDocument();
     expect(within(row).queryByLabelText("No result")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [{ status: "COMPLETED", result: "SUCCESS" }, "ok", "Passed"],
+    [{ status: "COMPLETED", result: "FAILURE" }, "failed", "Failed"],
+    [{ status: "COMPLETED", result: "TRIGGER_FAILED" }, "failed", "Failed"],
+    [{ status: "COMPLETED", result: "INTERRUPTED" }, "failed", "Interrupted"],
+    [{ status: "COMPLETED", result: "UNSTABLE" }, "idle", "Unstable"],
+    [{ status: "COMPLETED", result: "ABORTED" }, "idle", "Aborted"],
+    [{ status: "COMPLETED", result: "NOT_BUILT" }, "idle", "Not built"],
+    [{ status: "COMPLETED" }, "idle", "No result"],
+    [{ status: "RUNNING" }, "running", "Running"],
+    [{ status: "QUEUED" }, "running", "Queued"],
+    [{ status: "DUPLICATE", result: "SUCCESS" }, "idle", "Duplicate"],
+  ])("strip cell for %o is %s and reads %s", (run, kind, label) => {
+    expect(stripCell({ runId: "r", ...run })).toEqual({ kind, label });
   });
 
   it("meta line names a member cluster", () => {

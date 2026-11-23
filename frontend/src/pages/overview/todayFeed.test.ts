@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { FleetRunGroup, FleetRunRow } from "../../types";
 import { createActivityEvent } from "../../test/factories";
 import { fleetRun } from "../../test/overviewFactories";
-import { buildDayFeed, groupDetail, groupTitle, tenantCounts, type OtherRow } from "./todayFeed";
+import { buildDayFeed, groupDetail, groupTitle, runWord, tenantCounts, type OtherRow } from "./todayFeed";
 
 /** run builds one finished, passed run of payments / release. */
 function run(over: Partial<FleetRunRow> = {}): FleetRunRow {
@@ -58,6 +58,17 @@ describe("todayFeed", () => {
       newest: run({ runId: "run-41", buildNumber: 41, status: "DUPLICATE", result: "ABORTED" }),
     });
     expect(groupTitle(g)).toBe("payments / release #41 duplicate");
+  });
+
+  it.each([
+    [{ status: "COMPLETED", result: "FAILURE" }, "failed"],
+    [{ status: "COMPLETED", result: "TRIGGER_FAILED" }, "failed"],
+    [{ status: "COMPLETED", result: "NOT_BUILT" }, "not built"],
+    [{ status: "COMPLETED", result: "SOMETHING_NEW" }, "something new"],
+    [{ status: "RUNNING" }, "running"],
+    [{ status: "DUPLICATE" }, "duplicate"],
+  ])("names the run %o %s", (r, word) => {
+    expect(runWord(r)).toBe(word);
   });
 
   it("folds single machine passes into the other runs row with tenant counts", () => {
