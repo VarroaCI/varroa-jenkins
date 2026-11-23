@@ -39,8 +39,9 @@ A re-run keeps the fork trust decision of the branch source. **Re-run all checks
 request from a fork starts no build. The tenant rules are in
 [Re-run from GitHub](webhooks.md#re-run-from-github).
 
-If an earlier run of the same revision is still live, the record store marks the new run
-`DUPLICATE`. The new run does not build. Re-run after the earlier run completes.
+A re-run builds even when an earlier run of the same revision is still live. The record store
+does not mark a requested run as a
+[duplicate run](build-records.md#a-duplicate-run).
 
 ## Plain jobs
 

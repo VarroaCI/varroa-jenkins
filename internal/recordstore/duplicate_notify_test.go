@@ -121,14 +121,14 @@ func TestDuplicateBackstopPublishesDuplicateForTheArrivingRun(t *testing.T) {
 	ctx := context.Background()
 
 	revision := "rev-dup-notify-arriving"
-	runA := seedGrantedIntent(t, pool, "manual:dup-notify-arriving-a")
-	runB := seedGrantedIntent(t, pool, "manual:dup-notify-arriving-b")
+	runA := seedGrantedIntent(t, pool, "api:dup-notify-arriving-a")
+	runB := seedGrantedIntent(t, pool, "api:dup-notify-arriving-b")
 	buildA, buildB := int64(1), int64(2)
-	if _, err := g.Apply(ctx, newTestEnvelope(t, runA, "manual:dup-notify-arriving-a", KindRunStarted,
+	if _, err := g.Apply(ctx, newTestEnvelope(t, runA, "api:dup-notify-arriving-a", KindRunStarted,
 		RunStartedPayload{BuildNumber: &buildA, SCMRevision: &revision})); err != nil {
 		t.Fatalf("apply run.started A: %v", err)
 	}
-	if _, err := g.Apply(ctx, newTestEnvelope(t, runB, "manual:dup-notify-arriving-b", KindRunStarted,
+	if _, err := g.Apply(ctx, newTestEnvelope(t, runB, "api:dup-notify-arriving-b", KindRunStarted,
 		RunStartedPayload{BuildNumber: &buildB, SCMRevision: &revision})); err != nil {
 		t.Fatalf("apply run.started B: %v", err)
 	}
@@ -159,14 +159,14 @@ func TestDuplicateBackstopPublishesDuplicateForTheOtherRun(t *testing.T) {
 	ctx := context.Background()
 
 	revision := "rev-dup-notify-other"
-	runOlder := seedGrantedIntent(t, pool, "manual:dup-notify-other-a")
-	runNewer := seedGrantedIntent(t, pool, "manual:dup-notify-other-b")
+	runOlder := seedGrantedIntent(t, pool, "api:dup-notify-other-a")
+	runNewer := seedGrantedIntent(t, pool, "api:dup-notify-other-b")
 	buildOlder, buildNewer := int64(1), int64(2)
-	if _, err := g.Apply(ctx, newTestEnvelope(t, runNewer, "manual:dup-notify-other-b", KindRunStarted,
+	if _, err := g.Apply(ctx, newTestEnvelope(t, runNewer, "api:dup-notify-other-b", KindRunStarted,
 		RunStartedPayload{BuildNumber: &buildNewer, SCMRevision: &revision})); err != nil {
 		t.Fatalf("apply run.started of the newer run: %v", err)
 	}
-	if _, err := g.Apply(ctx, newTestEnvelope(t, runOlder, "manual:dup-notify-other-a", KindRunStarted,
+	if _, err := g.Apply(ctx, newTestEnvelope(t, runOlder, "api:dup-notify-other-a", KindRunStarted,
 		RunStartedPayload{BuildNumber: &buildOlder, SCMRevision: &revision})); err != nil {
 		t.Fatalf("apply run.started of the older run: %v", err)
 	}
@@ -228,13 +228,13 @@ func TestApplyOwnerCompletionOfADuplicateRunPublishesDuplicate(t *testing.T) {
 	ctx := context.Background()
 
 	revision := "rev-dup-notify-completed"
-	runA := seedGrantedIntent(t, pool, "manual:dup-notify-completed-a")
-	runB := seedGrantedIntent(t, pool, "manual:dup-notify-completed-b")
+	runA := seedGrantedIntent(t, pool, "api:dup-notify-completed-a")
+	runB := seedGrantedIntent(t, pool, "api:dup-notify-completed-b")
 	buildA, buildB := int64(1), int64(2)
 	for _, started := range []IngestEnvelope{
-		newTestEnvelope(t, runA, "manual:dup-notify-completed-a", KindRunStarted,
+		newTestEnvelope(t, runA, "api:dup-notify-completed-a", KindRunStarted,
 			RunStartedPayload{BuildNumber: &buildA, SCMRevision: &revision}),
-		newTestEnvelope(t, runB, "manual:dup-notify-completed-b", KindRunStarted,
+		newTestEnvelope(t, runB, "api:dup-notify-completed-b", KindRunStarted,
 			RunStartedPayload{BuildNumber: &buildB, SCMRevision: &revision}),
 	} {
 		if _, err := g.Apply(ctx, started); err != nil {
@@ -245,7 +245,7 @@ func TestApplyOwnerCompletionOfADuplicateRunPublishesDuplicate(t *testing.T) {
 	notifier, sent, _ := newCaptureNotifier(t)
 	defer notifier.Close()
 	g.SetRunNotifier(notifier)
-	res, err := g.Apply(ctx, newTestEnvelope(t, runB, "manual:dup-notify-completed-b", KindRunCompleted,
+	res, err := g.Apply(ctx, newTestEnvelope(t, runB, "api:dup-notify-completed-b", KindRunCompleted,
 		RunCompletedPayload{Result: strPtr("ABORTED")}))
 	if err != nil {
 		t.Fatalf("apply run.completed B: %v", err)

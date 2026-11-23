@@ -21,12 +21,13 @@ type duplicatePair struct {
 }
 
 // seedDuplicatePair grants and starts two runs of one revision through g.
-// The second run.started runs the duplicate backstop, which marks the newer
-// run DUPLICATE. Each run.started names a repository, so a source-gone
+// Both runs hold an api: key, which the duplicate backstop compares. The
+// second run.started runs the backstop, which marks the newer run
+// DUPLICATE. Each run.started names a repository, so a source-gone
 // completion has the facts of an end_commit_status action.
 func seedDuplicatePair(t *testing.T, pool *pgxpool.Pool, g *Ingester, name string) duplicatePair {
 	t.Helper()
-	p := duplicatePair{olderKey: "manual:" + name + "-older", duplicateKey: "manual:" + name + "-duplicate"}
+	p := duplicatePair{olderKey: "api:" + name + "-older", duplicateKey: "api:" + name + "-duplicate"}
 	p.older = seedGrantedIntent(t, pool, p.olderKey)
 	p.duplicate = seedGrantedIntent(t, pool, p.duplicateKey)
 	runs := []struct {

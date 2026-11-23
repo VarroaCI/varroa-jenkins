@@ -142,6 +142,12 @@ The record store marks a newer run `DUPLICATE` when an older run of the same rev
 live. The recorder then cancels the newer run. Its completion still arrives, usually with the
 result `ABORTED`, and the run page shows that result.
 
+This rule compares only runs that Jenkins schedules on its own, with an `scm:`, `cron:`, or `api:`
+intent key. A run that a person or a pipeline requests through Varroa is never marked. It also
+never makes another run a duplicate. Such runs come from the **Run** button, the MCP `run_pipeline`
+tool, a forge re-run, a retry, a replay, or a restart. A `varroa.build` call and a `varroaUpstream`
+trigger also request a run. Two requested runs of one revision both build.
+
 The older run gives the outcome of the revision. A `DUPLICATE` run therefore counts in no job
 statistic, job health value, failing-job count, or overview count. It is never the last run of
 its job. Its completion sends no webhook, starts no upstream trigger, and writes no
@@ -163,7 +169,7 @@ A page treats a notification as a hint and refetches the record.
 
 The recorder coalesces each kind of a run on its own. A change waits at most 500 milliseconds, and a newer change of the same kind replaces it. A change of another kind never replaces it. A terminal state publishes at once.
 
-A terminal state is `COMPLETED` or `DUPLICATE`. The record store marks a run `DUPLICATE` when another run holds its intent key, or when an earlier run of the same revision is still live. The recorder then publishes one notification with the status `DUPLICATE` for that run.
+A terminal state is `COMPLETED` or `DUPLICATE`. The record store marks a run `DUPLICATE` when another run holds its intent key, or by the rule in [A duplicate run](#a-duplicate-run). The recorder then publishes one notification with the status `DUPLICATE` for that run.
 
 With a closed stream, the build page reads a live run's record every 3 seconds.
 

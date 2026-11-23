@@ -131,6 +131,8 @@ See [The fleet lock](#the-fleet-lock) for the full contract.
 | `duplicate` | the target build is a [duplicate run](../operations/build-records.md#a-duplicate-run); another run of the same job gives the outcome |
 
 A waiting `varroa.build` call fails on `interrupted` and on `duplicate`, whatever `propagate` is.
+The record store never marks a `varroa.build` run as a duplicate of another run of the same
+revision. Two calls on one job and one revision both build, whatever their parameters.
 
 ## Declare an upstream trigger
 

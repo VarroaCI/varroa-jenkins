@@ -39,18 +39,18 @@ func TestDuplicateBackstopMarksSecondLiveRun(t *testing.T) {
 	g := NewIngester(pool, conn, nil)
 
 	revision := "abc123"
-	runA := seedGrantedIntent(t, pool, "manual:dup-a")
+	runA := seedGrantedIntent(t, pool, "api:dup-a")
 	buildA := int64(1)
-	startedA := newTestEnvelope(t, runA, "manual:dup-a", KindRunStarted, RunStartedPayload{
+	startedA := newTestEnvelope(t, runA, "api:dup-a", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildA, SCMRevision: &revision,
 	})
 	if _, err := g.Apply(context.Background(), startedA); err != nil {
 		t.Fatalf("apply run.started A: %v", err)
 	}
 
-	runB := seedGrantedIntent(t, pool, "manual:dup-b")
+	runB := seedGrantedIntent(t, pool, "api:dup-b")
 	buildB := int64(2)
-	startedB := newTestEnvelope(t, runB, "manual:dup-b", KindRunStarted, RunStartedPayload{
+	startedB := newTestEnvelope(t, runB, "api:dup-b", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildB, SCMRevision: &revision,
 	})
 	if _, err := g.Apply(context.Background(), startedB); err != nil {
@@ -103,24 +103,24 @@ func TestDuplicateBackstopFinishedArrivingRunIsLeftAlone(t *testing.T) {
 	g := NewIngester(pool, nil, nil)
 
 	revision := "rev-finished"
-	runLive := seedGrantedIntent(t, pool, "manual:dup-live")
+	runLive := seedGrantedIntent(t, pool, "api:dup-live")
 	buildLive := int64(1)
-	startedLive := newTestEnvelope(t, runLive, "manual:dup-live", KindRunStarted, RunStartedPayload{
+	startedLive := newTestEnvelope(t, runLive, "api:dup-live", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildLive, SCMRevision: &revision,
 	})
 	if _, err := g.Apply(context.Background(), startedLive); err != nil {
 		t.Fatalf("apply run.started live: %v", err)
 	}
 
-	runFinished := seedGrantedIntent(t, pool, "manual:dup-finished")
+	runFinished := seedGrantedIntent(t, pool, "api:dup-finished")
 	result := "SUCCESS"
-	completedFirst := newTestEnvelope(t, runFinished, "manual:dup-finished", KindRunCompleted, RunCompletedPayload{Result: &result})
+	completedFirst := newTestEnvelope(t, runFinished, "api:dup-finished", KindRunCompleted, RunCompletedPayload{Result: &result})
 	if _, err := g.Apply(context.Background(), completedFirst); err != nil {
 		t.Fatalf("apply run.completed: %v", err)
 	}
 
 	buildFinished := int64(2)
-	startedFinished := newTestEnvelope(t, runFinished, "manual:dup-finished", KindRunStarted, RunStartedPayload{
+	startedFinished := newTestEnvelope(t, runFinished, "api:dup-finished", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildFinished, SCMRevision: &revision,
 	})
 	if _, err := g.Apply(context.Background(), startedFinished); err != nil {
@@ -152,23 +152,23 @@ func TestDuplicateBackstopFinishedRevisionIsNotADuplicate(t *testing.T) {
 	g := NewIngester(pool, nil, nil)
 
 	revision := "rev-old"
-	runOld := seedGrantedIntent(t, pool, "manual:dup-old")
+	runOld := seedGrantedIntent(t, pool, "api:dup-old")
 	buildOld := int64(1)
-	startedOld := newTestEnvelope(t, runOld, "manual:dup-old", KindRunStarted, RunStartedPayload{
+	startedOld := newTestEnvelope(t, runOld, "api:dup-old", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildOld, SCMRevision: &revision,
 	})
 	if _, err := g.Apply(context.Background(), startedOld); err != nil {
 		t.Fatalf("apply run.started old: %v", err)
 	}
 	result := "SUCCESS"
-	completedOld := newTestEnvelope(t, runOld, "manual:dup-old", KindRunCompleted, RunCompletedPayload{Result: &result})
+	completedOld := newTestEnvelope(t, runOld, "api:dup-old", KindRunCompleted, RunCompletedPayload{Result: &result})
 	if _, err := g.Apply(context.Background(), completedOld); err != nil {
 		t.Fatalf("apply run.completed old: %v", err)
 	}
 
-	runNew := seedGrantedIntent(t, pool, "manual:dup-new")
+	runNew := seedGrantedIntent(t, pool, "api:dup-new")
 	buildNew := int64(2)
-	startedNew := newTestEnvelope(t, runNew, "manual:dup-new", KindRunStarted, RunStartedPayload{
+	startedNew := newTestEnvelope(t, runNew, "api:dup-new", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildNew, SCMRevision: &revision,
 	})
 	if _, err := g.Apply(context.Background(), startedNew); err != nil {
@@ -192,16 +192,16 @@ func TestDuplicateBackstopSkipsEmptyRevision(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
-	runA := seedGrantedIntent(t, pool, "manual:dup-empty-a")
+	runA := seedGrantedIntent(t, pool, "api:dup-empty-a")
 	buildA := int64(1)
-	startedA := newTestEnvelope(t, runA, "manual:dup-empty-a", KindRunStarted, RunStartedPayload{BuildNumber: &buildA})
+	startedA := newTestEnvelope(t, runA, "api:dup-empty-a", KindRunStarted, RunStartedPayload{BuildNumber: &buildA})
 	if _, err := g.Apply(context.Background(), startedA); err != nil {
 		t.Fatalf("apply run.started A: %v", err)
 	}
 
-	runB := seedGrantedIntent(t, pool, "manual:dup-empty-b")
+	runB := seedGrantedIntent(t, pool, "api:dup-empty-b")
 	buildB := int64(2)
-	startedB := newTestEnvelope(t, runB, "manual:dup-empty-b", KindRunStarted, RunStartedPayload{BuildNumber: &buildB})
+	startedB := newTestEnvelope(t, runB, "api:dup-empty-b", KindRunStarted, RunStartedPayload{BuildNumber: &buildB})
 	if _, err := g.Apply(context.Background(), startedB); err != nil {
 		t.Fatalf("apply run.started B: %v", err)
 	}
@@ -227,17 +227,17 @@ func TestDuplicateStaysTerminalAfterLaterCompletion(t *testing.T) {
 	g := NewIngester(pool, nil, nil)
 
 	revision := "rev-terminal"
-	runA := seedGrantedIntent(t, pool, "manual:dup-term-a")
+	runA := seedGrantedIntent(t, pool, "api:dup-term-a")
 	buildA := int64(1)
-	startedA := newTestEnvelope(t, runA, "manual:dup-term-a", KindRunStarted, RunStartedPayload{
+	startedA := newTestEnvelope(t, runA, "api:dup-term-a", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildA, SCMRevision: &revision,
 	})
 	if _, err := g.Apply(context.Background(), startedA); err != nil {
 		t.Fatalf("apply run.started A: %v", err)
 	}
-	runB := seedGrantedIntent(t, pool, "manual:dup-term-b")
+	runB := seedGrantedIntent(t, pool, "api:dup-term-b")
 	buildB := int64(2)
-	startedB := newTestEnvelope(t, runB, "manual:dup-term-b", KindRunStarted, RunStartedPayload{
+	startedB := newTestEnvelope(t, runB, "api:dup-term-b", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildB, SCMRevision: &revision,
 	})
 	if _, err := g.Apply(context.Background(), startedB); err != nil {
@@ -253,7 +253,7 @@ func TestDuplicateStaysTerminalAfterLaterCompletion(t *testing.T) {
 	}
 
 	result := "ABORTED"
-	completedB := newTestEnvelope(t, runB, "manual:dup-term-b", KindRunCompleted, RunCompletedPayload{Result: &result})
+	completedB := newTestEnvelope(t, runB, "api:dup-term-b", KindRunCompleted, RunCompletedPayload{Result: &result})
 	if _, err := g.Apply(context.Background(), completedB); err != nil {
 		t.Fatalf("apply run.completed B: %v", err)
 	}
@@ -299,14 +299,14 @@ func TestDuplicateBackstopConcurrentStarts(t *testing.T) {
 	gatewayB := NewIngester(pool, conn, nil)
 
 	revision := "rev-concurrent"
-	runA := seedGrantedIntent(t, pool, "manual:dup-conc-a")
-	runB := seedGrantedIntent(t, pool, "manual:dup-conc-b")
+	runA := seedGrantedIntent(t, pool, "api:dup-conc-a")
+	runB := seedGrantedIntent(t, pool, "api:dup-conc-b")
 	buildA := int64(1)
 	buildB := int64(2)
-	startedA := newTestEnvelope(t, runA, "manual:dup-conc-a", KindRunStarted, RunStartedPayload{
+	startedA := newTestEnvelope(t, runA, "api:dup-conc-a", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildA, SCMRevision: &revision,
 	})
-	startedB := newTestEnvelope(t, runB, "manual:dup-conc-b", KindRunStarted, RunStartedPayload{
+	startedB := newTestEnvelope(t, runB, "api:dup-conc-b", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildB, SCMRevision: &revision,
 	})
 
@@ -386,13 +386,13 @@ func TestDuplicateBackstopMatchesRevisionRunSourceWrote(t *testing.T) {
 	g := NewIngester(pool, nil, nil)
 
 	revision := "rev-from-source"
-	runA := seedGrantedIntent(t, pool, "manual:dup-source-a")
+	runA := seedGrantedIntent(t, pool, "api:dup-source-a")
 	buildA := int64(1)
-	startedA := newTestEnvelope(t, runA, "manual:dup-source-a", KindRunStarted, RunStartedPayload{BuildNumber: &buildA})
+	startedA := newTestEnvelope(t, runA, "api:dup-source-a", KindRunStarted, RunStartedPayload{BuildNumber: &buildA})
 	if _, err := g.Apply(context.Background(), startedA); err != nil {
 		t.Fatalf("apply run.started A: %v", err)
 	}
-	sourceA := newTestEnvelope(t, runA, "manual:dup-source-a", KindRunSource, RunSourcePayload{
+	sourceA := newTestEnvelope(t, runA, "api:dup-source-a", KindRunSource, RunSourcePayload{
 		Seq:         1,
 		SCMRevision: &revision,
 	})
@@ -400,9 +400,9 @@ func TestDuplicateBackstopMatchesRevisionRunSourceWrote(t *testing.T) {
 		t.Fatalf("apply run.source A: %v", err)
 	}
 
-	runB := seedGrantedIntent(t, pool, "manual:dup-source-b")
+	runB := seedGrantedIntent(t, pool, "api:dup-source-b")
 	buildB := int64(2)
-	startedB := newTestEnvelope(t, runB, "manual:dup-source-b", KindRunStarted, RunStartedPayload{
+	startedB := newTestEnvelope(t, runB, "api:dup-source-b", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildB,
 		SCMRevision: &revision,
 	})
@@ -453,9 +453,9 @@ func TestApplyRunSourceRaisesNoDuplicateBackstop(t *testing.T) {
 	g := NewIngester(pool, conn, nil)
 
 	revision := "rev-live-source"
-	runA := seedGrantedIntent(t, pool, "manual:dup-source-live")
+	runA := seedGrantedIntent(t, pool, "api:dup-source-live")
 	buildA := int64(1)
-	startedA := newTestEnvelope(t, runA, "manual:dup-source-live", KindRunStarted, RunStartedPayload{
+	startedA := newTestEnvelope(t, runA, "api:dup-source-live", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildA,
 		SCMRevision: &revision,
 	})
@@ -463,8 +463,8 @@ func TestApplyRunSourceRaisesNoDuplicateBackstop(t *testing.T) {
 		t.Fatalf("apply run.started A: %v", err)
 	}
 
-	runB := seedGrantedIntent(t, pool, "manual:dup-source-arriving")
-	sourceB := newTestEnvelope(t, runB, "manual:dup-source-arriving", KindRunSource, RunSourcePayload{
+	runB := seedGrantedIntent(t, pool, "api:dup-source-arriving")
+	sourceB := newTestEnvelope(t, runB, "api:dup-source-arriving", KindRunSource, RunSourcePayload{
 		Seq:         0,
 		SCMRevision: &revision,
 	})
@@ -564,10 +564,10 @@ func TestDuplicateBackstopSkipsTwoSCMKeysOfOneHeadCommit(t *testing.T) {
 	}
 }
 
-// TestDuplicateBackstopMarksSCMRunAgainstLiveManualRun asserts an arriving
-// scm: run is still marked DUPLICATE when a live manual: run holds the same
+// TestDuplicateBackstopMarksSCMRunAgainstLiveAPIRun asserts an arriving
+// scm: run is still marked DUPLICATE when a live api: run holds the same
 // revision. The scm: skip applies only when both runs hold an scm: key.
-func TestDuplicateBackstopMarksSCMRunAgainstLiveManualRun(t *testing.T) {
+func TestDuplicateBackstopMarksSCMRunAgainstLiveAPIRun(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
@@ -591,9 +591,9 @@ func TestDuplicateBackstopMarksSCMRunAgainstLiveManualRun(t *testing.T) {
 	g := NewIngester(pool, conn, nil)
 
 	revision := "rev-mixed"
-	runA := seedGrantedIntent(t, pool, "manual:dup-scm-live")
+	runA := seedGrantedIntent(t, pool, "api:dup-scm-live")
 	buildA := int64(1)
-	startedA := newTestEnvelope(t, runA, "manual:dup-scm-live", KindRunStarted, RunStartedPayload{
+	startedA := newTestEnvelope(t, runA, "api:dup-scm-live", KindRunStarted, RunStartedPayload{
 		BuildNumber: &buildA, SCMRevision: &revision,
 	})
 	if _, err := g.Apply(context.Background(), startedA); err != nil {
