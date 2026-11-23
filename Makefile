@@ -1,4 +1,4 @@
-.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-generated-test check-plugin-advisories-test check-comments check-outbound check-terminology check-varroactl-platforms check-image-binaries outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
+.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-generated-test check-plugin-advisories-test check-comments check-outbound check-terminology check-varroactl-platforms check-image-binaries outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller ci-tools install-kubeconform
 
 GIT_SHA=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -11,6 +11,11 @@ FRONTEND_IMAGE_NAME=varroa-frontend
 GOLANGCI_LINT_VERSION=v2.12.2
 # The client generator runs from its own module graph. The module kin-openapi version moves on its own.
 OAPI_CODEGEN_VERSION ?= v2.4.1
+# The CRD generator runs from its own module graph. Generate CRDs only, never DeepCopy.
+CONTROLLER_GEN_VERSION ?= v0.17.0
+# The localdev manifest check of both pr.yaml workflows installs this version.
+# A new kubeconform release can fail that check on code that did not change. Bump it on purpose.
+KUBECONFORM_VERSION ?= v0.8.0
 
 lint:
 	docker run --rm -v "$(CURDIR):/workspace" -w /workspace \
@@ -57,14 +62,11 @@ frontend-docker-build:
 frontend-test:
 	cd frontend && npm run coverage
 
+# controller-gen runs on the host Go, so it reads the host module cache and pulls no image.
 generate-crds:
 	go generate ./api/v1alpha1/...
 	rm -f charts/varroa/crds/*.yaml
-	docker run --rm --user "$(shell id -u):$(shell id -g)" \
-		-e GOCACHE=/workspace/.cache/go-build \
-		-e GOMODCACHE=/workspace/.cache/go-mod \
-		-v "$(CURDIR):/workspace" -w /workspace \
-		golang:1.26 go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.17.0 \
+	go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION) \
 		crd paths="./api/..." output:crd:dir=./charts/varroa/crds
 
 check-crds:
@@ -87,6 +89,17 @@ check-terminology:
 # The varroactl release job reads the same list with --list.
 check-varroactl-platforms:
 	bash hack/check-varroactl-platforms.sh
+
+# Installs kubeconform into $(go env GOPATH)/bin.
+install-kubeconform:
+	go install github.com/yannh/kubeconform/cmd/kubeconform@$(KUBECONFORM_VERSION)
+
+# Installs each pinned tool that the pr.yaml Checks job runs from its own module graph.
+# The Release backend job runs this target before it saves the go-main cache entry.
+# A pull request then reads the module of each tool from the restored module cache.
+ci-tools: install-kubeconform
+	go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
+	go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION)
 
 # Builds each backend image binary for linux/arm64 and writes no binary.
 # The release images publish linux/arm64. The Lint and Test jobs compile only the host arch.
