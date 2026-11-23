@@ -50,7 +50,7 @@ func applyEnvelopes(t *testing.T, g *Ingester, envs ...IngestEnvelope) {
 // summary of a cell instance that does not own the run as it merges the
 // owner's. The rank and finalized rules do not bound that summary, so
 // the gateway withholds a non-owner's summary and sends only its own
-// log facts (BusHandler.withholdSenderLogSummary).
+// log facts (BusHandler.withholdSenderFacts).
 func TestApplyRunLogHoldsNoOwnerCheck(t *testing.T) {
 	t.Parallel()
 	result := "SUCCESS"

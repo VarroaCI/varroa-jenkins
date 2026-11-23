@@ -10,6 +10,10 @@ import (
 
 // applyRunArtifacts upserts run_artifacts on the natural key
 // (run_id, path), copying created_at from the intent.
+//
+// The write has no owner check. Only a COMPLETED event carries this kind,
+// and the gateway drops it from the event of a cell instance that does
+// not own the run.
 func applyRunArtifacts(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	var payload RunArtifactsPayload
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {

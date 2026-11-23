@@ -13,6 +13,10 @@ import (
 // table. An absent key keeps them. An empty list clears them. The rows
 // copy their scope and created_at from the intent, and the write never
 // touches the runs row.
+//
+// The write has no owner check. Only a COMPLETED event carries this kind,
+// and the gateway drops it from the event of a cell instance that does
+// not own the run.
 func applyRunQuality(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	var payload RunQualityPayload
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {

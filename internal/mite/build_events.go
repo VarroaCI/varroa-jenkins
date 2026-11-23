@@ -1000,23 +1000,30 @@ func (h *BusHandler) gatewayLogFacts(runID string) (map[string]interface{}, bool
 	return p, len(p) > 0
 }
 
-// withholdSenderLogSummary replaces the run.log payload of a COMPLETED
-// group with gatewayLogFacts, for a sender that a ledger answer names as
-// not the run's owner. The recorder merges every run.log into the run's
-// log summary with no owner check. The sender's chunk count, dropped
-// bytes, and incomplete flag and reason therefore must not reach it: they
-// describe a log that the owner does not write. The group keeps no
-// run.log envelope when the gateway holds no fact.
-func (h *BusHandler) withholdSenderLogSummary(runID string, kps []kindPayload) []kindPayload {
+// withholdSenderFacts reduces a COMPLETED group to what the recorder may
+// take from a sender that a ledger answer names as not the run's owner.
+// The group keeps run.completed, which the recorder stores as a foreign
+// completion. Its run.log payload becomes gatewayLogFacts, and the group
+// keeps no run.log envelope when the gateway holds no fact. The function
+// drops every other kind, also a kind that the group adds later.
+//
+// The recorder merges run.stage, run.changes, run.tests, run.quality,
+// run.artifacts, and run.log with no owner check. A payload of such a
+// kind from this sender describes a build that the owner does not run.
+// That payload replaces the owner's stages, tests, quality reports, and
+// artifact rows. The sender's chunk count and loss flags also change the
+// owner's log summary.
+func (h *BusHandler) withholdSenderFacts(runID string, kps []kindPayload) []kindPayload {
 	facts, ok := h.gatewayLogFacts(runID)
 	out := kps[:0]
 	for _, kp := range kps {
-		if kp.kind != kindRunLog {
+		switch kp.kind {
+		case kindRunCompleted:
 			out = append(out, kp)
-			continue
-		}
-		if ok {
-			out = append(out, kindPayload{kindRunLog, facts})
+		case kindRunLog:
+			if ok {
+				out = append(out, kindPayload{kindRunLog, facts})
+			}
 		}
 	}
 	return out
@@ -1599,12 +1606,12 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 		return nil
 	}
 
-	withholdSummary := false
+	withhold := false
 	if evt.Phase == phaseCompleted && evt.RunId != "" {
 		// The log writer's finalize deadline anchors on this moment, so
 		// it must be recorded before the ordered envelope group below
 		// reads the gateway's own incompleteness and finalized knowledge.
-		withholdSummary = h.markCompletedRunTerminal(ns, name, evt)
+		withhold = h.markCompletedRunTerminal(ns, name, evt)
 	}
 
 	kps, err := h.buildPayloadGroup(evt)
@@ -1613,8 +1620,8 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 		h.sendEventAck(w.send, evt.RunId, evt.Seq, eventAckRejected, err.Error())
 		return nil
 	}
-	if withholdSummary {
-		kps = h.withholdSenderLogSummary(evt.RunId, kps)
+	if withhold {
+		kps = h.withholdSenderFacts(evt.RunId, kps)
 	}
 
 	envs := make([]ingestEnvelope, 0, len(kps))
@@ -1647,19 +1654,20 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 // takeover is the sender most likely to hold a cached match, because it
 // streamed the run's chunks through this gateway until the takeover.
 //
-// It answers true when OnBuildEvent must withhold the sender's log
-// summary. That is the case only when the answer names another cell
-// instance as the owner, the same instance test the record store applies
-// to run.completed. A run with no ledger row and an owner with no
-// instance keep the summary and set no deadline. A failed request keeps
-// the summary too: the owner's summary is the only record of its
-// plugin-side losses, and an answer that names no other owner must not
-// drop it. After a failed request, a cached match still sets the
+// It answers true when OnBuildEvent must withhold the sender's facts
+// (withholdSenderFacts). That is the case only when the answer names
+// another cell instance as the owner, the same instance test the record
+// store applies to run.completed. A run with no ledger row and an owner
+// with no instance keep the whole group and set no deadline. A failed
+// request keeps the whole group too: its stages, tests, quality reports,
+// artifacts, and log summary can be the owner's only record of the
+// build, and an answer that names no other owner must not drop them.
+// After a failed request, a cached match still sets the
 // deadline, as the chunk path does in the same state, so a recorder
 // outage does not cost each finishing build its deadline. With no cached
 // match, the owner's next chunk reads the ledger again, and that answer
 // carries the run's status and anchor. A gateway with no log writer
-// sends no request and keeps the summary.
+// sends no request and keeps the whole group.
 //
 // The request blocks the read loop for at most ownerLookupTimeout, the
 // same bound OnLogChunk has. It holds no lock while it reads the owner.
@@ -1679,10 +1687,10 @@ func (h *BusHandler) markCompletedRunTerminal(ns, name string, evt *mitev1.Build
 		}
 		h.markRunTerminal(ns, name, evt.RunId, evt.JobPath, millisToTime(evt.CompletedAtMillis))
 	case withhold:
-		h.log().Info("completed event from a cell instance that does not own the run, its log deadline and log summary are withheld",
+		h.log().Info("completed event from a cell instance that does not own the run, its log deadline and sender facts are withheld",
 			"controller", ns+"/"+name, "cell_instance", instance, "owner_instance", tuple.instance, "run_id", evt.RunId)
 	case decision == ownerForeign:
-		h.log().Info("the ledger names no other owner instance for a completed event, its log deadline is not set and its log summary is kept",
+		h.log().Info("the ledger names no other owner instance for a completed event, its log deadline is not set and its sender facts are kept",
 			"controller", ns+"/"+name, "cell_instance", instance, "run_id", evt.RunId)
 	default:
 		h.log().Warn("owner lookup failed for a completed event, its log deadline waits for the next chunk",

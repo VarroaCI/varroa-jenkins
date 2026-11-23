@@ -18,6 +18,10 @@ import (
 // payload carries a cases key, and stores the test report on the runs
 // row. The runs upsert also removes the accepted keys from a stored row
 // that still holds them.
+//
+// The write has no owner check. Only a COMPLETED event carries this kind,
+// and the gateway drops it from the event of a cell instance that does
+// not own the run.
 func applyRunTests(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	var payload RunTestsPayload
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {

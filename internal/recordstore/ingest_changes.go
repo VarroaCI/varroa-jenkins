@@ -14,6 +14,11 @@ import (
 // envelope in payload under the key "run.changes", so a later kind's
 // write never replaces it. It removes the accepted keys from a stored
 // row that still holds them, before its own merge.
+//
+// The write has no owner check. The gateway drops the run.changes
+// envelope of a COMPLETED event from a cell instance that does not own
+// the run. It checks no owner for the run.changes envelope of a
+// run.source event.
 func applyRunChanges(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	var payload RunChangesPayload
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
