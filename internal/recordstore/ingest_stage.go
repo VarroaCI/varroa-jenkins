@@ -14,6 +14,10 @@ import (
 // the conflict update leaves such a row untouched. payload stores the
 // complete ingest envelope, not only its inner payload object, so no
 // captured field is unrecoverable.
+//
+// The write has no owner check. The gateway drops the stage envelopes of
+// a COMPLETED event from a cell instance that does not own the run. It
+// checks no owner for the stage event of a running build.
 func applyRunStage(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	var payload RunStagePayload
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
