@@ -301,6 +301,42 @@ operator_rs_block=$(awk 'index($0, "user: \"operator\""){capture=1} capture{prin
 grep -q 'varroa.ledger.actions.>' <<<"$operator_rs_block"
 check "operator (recordStore enabled) subscribes varroa.ledger.actions.>" $?
 
+# 12b. Owner move signal: the recorder publishes and the gateway subscribes
+# varroa.ledger.moves.*, both only with the record store. The gateways of
+# every cluster share one identity on the core NATS, so the grant names no
+# cluster. No other identity holds the subject, in either direction.
+publish_of() { awk '/publish: \[/{p=1;next} p && /\]/{exit} p{print}' <<<"$1"; }
+subscribe_of() { awk '/subscribe: \[/{p=1;next} p && /\]/{exit} p{print}' <<<"$1"; }
+grep -q '"varroa\.ledger\.moves\.\*"' <<<"$(subscribe_of "$gateway_rs_block")"
+check "gateway (recordStore enabled) subscribes varroa.ledger.moves.*" $?
+grep -q '"varroa\.ledger\.moves\.\*"' <<<"$(publish_of "$recorder_block")"
+check "recorder publishes varroa.ledger.moves.*" $?
+if grep -q 'varroa\.ledger\.moves' <<<"$(publish_of "$gateway_rs_block")"; then
+  check "gateway does NOT publish varroa.ledger.moves" 1
+else
+  check "gateway does NOT publish varroa.ledger.moves" 0
+fi
+if grep -q 'varroa\.ledger\.moves' <<<"$(subscribe_of "$recorder_block")"; then
+  check "recorder does NOT subscribe varroa.ledger.moves" 1
+else
+  check "recorder does NOT subscribe varroa.ledger.moves" 0
+fi
+bff_moves_block=$(awk 'index($0, "user: \"bff\""){capture=1} capture{print} capture && $0 == "        }"{exit}' <<<"$RS_RENDER")
+for identity_block in "operator:$operator_rs_block" "bff:$bff_moves_block"; do
+  name="${identity_block%%:*}"
+  block="${identity_block#*:}"
+  if grep -q 'varroa\.ledger\.moves' <<<"$block"; then
+    check "$name holds no varroa.ledger.moves grant" 1
+  else
+    check "$name holds no varroa.ledger.moves grant" 0
+  fi
+done
+if grep -q 'varroa\.ledger\.moves' <<<"$gateway_block"; then
+  check "gateway (recordStore disabled) holds no varroa.ledger.moves grant" 1
+else
+  check "gateway (recordStore disabled) holds no varroa.ledger.moves grant" 0
+fi
+
 if grep -q 'mite_desired' <<<"$RS_RENDER"; then
   check "recordStore enabled: no identity holds a mite_desired KV grant" 1
 else

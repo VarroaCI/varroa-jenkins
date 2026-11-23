@@ -235,6 +235,10 @@ type BusHandler struct {
 	// ownerCache is the bounded run-ownership cache OnLogChunk consults
 	// before it writes one byte.
 	ownerCache *ownerCache
+	// ownerMoves is the listener of the recorder's owner move signal of
+	// this cluster. WatchOwnerMoves sets it after SetLogStore and before
+	// the gateway serves; Close stops it.
+	ownerMoves *bus.Listener
 
 	// stateMu guards stateRuns, restartRuns, tenantGrace, and the
 	// gateway-wide run-state pending counter. It is separate from logMu,
@@ -443,8 +447,14 @@ func NewBusHandler(mp metric.MeterProvider, cluster string, conn *bus.Conn, snap
 }
 
 // Close shuts down the content sweeper goroutine and the log idle sweep,
-// and ends each wait for a finalized publish. Must be called before the
-// BusHandler is discarded to avoid goroutine leaks.
+// ends each wait for a finalized publish, and stops the owner move
+// listener. Must be called before the BusHandler is discarded to avoid
+// goroutine leaks.
+//
+// The listener stops last. A drain that logStop releases and the last
+// sweep round can still read the owner cache, and the listener only drops
+// entries, so it keeps those reads current until they end. Its stop waits
+// for the resubscribe goroutine, so it must not delay the logStop close.
 func (h *BusHandler) Close() {
 	close(h.contentDone)
 	if h.logStop != nil {
@@ -453,6 +463,7 @@ func (h *BusHandler) Close() {
 	if h.logSweepStop != nil {
 		h.logSweepStop()
 	}
+	h.stopOwnerMoves()
 }
 
 // putPresence writes a fresh presence record with a blind Put (no read-modify-

@@ -74,6 +74,24 @@ type Ledger struct {
 	// hold wires the grant hold. A nil hold (NewLedger's default, until
 	// SetGrantHold is called) holds no repeat claim.
 	hold *grantHold
+
+	// moveConn publishes the owner move signal after each claim that
+	// moves the owner of an existing intent. A nil moveConn (NewLedger's
+	// default, until SetOwnerMoves is called) publishes none.
+	moveConn   *bus.Conn
+	moveLogger *slog.Logger
+}
+
+// claimEffects is what one claim transaction leaves for its caller to
+// publish after the commit.
+type claimEffects struct {
+	// marked is the run notification of a runs row that the claim marked
+	// DUPLICATE, or nil.
+	marked *RunNotification
+	// moved names the run whose stored owner the claim replaced, and
+	// movedCluster the cluster that the run's ledger row names. Both are
+	// empty when the claim moved no owner.
+	moved, movedCluster string
 }
 
 // NewLedger returns a Ledger over pool. It uses fence to gate a claim, or
@@ -125,6 +143,34 @@ func (l *Ledger) notifyWait(req ClaimRequest, runID uuid.UUID, change waitChange
 func (l *Ledger) notifyDuplicate(marked *RunNotification) {
 	if marked != nil {
 		l.notifier.Notify(*marked)
+	}
+}
+
+// SetOwnerMoves wires the owner move signal on conn. After a claim
+// commits a move of an existing intent's owner, the ledger publishes one
+// signal for that run. Only the gateway replica that relays the claim sees
+// its grant, so every other replica learns the move from the signal.
+// cmd/recorder calls this once, after NewLedger. A Ledger this method
+// never touches publishes no signal.
+func (l *Ledger) SetOwnerMoves(conn *bus.Conn, logger *slog.Logger) {
+	l.moveConn = conn
+	l.moveLogger = logger
+}
+
+// publishOwnerMove publishes the owner move signal of one committed
+// claim. A claim that moved no owner publishes nothing, and a failed
+// publish is logged only: the gateway owner cache lifetimes still bound a
+// replica that misses the signal.
+func (l *Ledger) publishOwnerMove(effects claimEffects) {
+	if effects.moved == "" || l.moveConn == nil {
+		return
+	}
+	if err := PublishOwnerMove(l.moveConn, effects.movedCluster, effects.moved); err != nil {
+		logger := l.moveLogger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("publish owner move failed", "run_id", effects.moved, "error", err)
 	}
 }
 
@@ -219,7 +265,7 @@ func (l *Ledger) claimAttempt(ctx context.Context, req ClaimRequest, runID uuid.
 			RunID: runID.String()}, false
 	}
 
-	resp, marked, err := claimTx(ctx, tx, l.hold, reading, req, runID, createdAt, result.Incarnation)
+	resp, effects, err := claimTx(ctx, tx, l.hold, reading, req, runID, createdAt, result.Incarnation)
 	if errors.Is(err, errConsumerReadNeeded) {
 		return ClaimResponse{}, true
 	}
@@ -231,7 +277,8 @@ func (l *Ledger) claimAttempt(ctx context.Context, req ClaimRequest, runID uuid.
 		return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}, false
 	}
 	l.notifyWait(req, runID, verdict.Change)
-	l.notifyDuplicate(marked)
+	l.notifyDuplicate(effects.marked)
+	l.publishOwnerMove(effects)
 	return resp, false
 }
 
@@ -250,11 +297,11 @@ func (l *Ledger) checkFence(ctx context.Context, tx pgx.Tx, req ClaimRequest) (F
 // claimTx runs the fast-path insert, then falls back to the existing-key
 // decision table when the key already exists. A nil hold holds no repeat
 // claim. reading is the hold's consumer reading, or nil when Claim has not
-// read it yet. The second answer is the run notification of a runs row
-// that the claim marked DUPLICATE, or nil. The caller publishes it after
-// the commit.
+// read it yet. The second answer holds what the caller publishes after
+// the commit: the run notification of a runs row that the claim marked
+// DUPLICATE, and the run whose stored owner the claim moved.
 func claimTx(ctx context.Context, tx pgx.Tx, hold *grantHold, reading *consumerReading, req ClaimRequest,
-	runID uuid.UUID, createdAt time.Time, incarnation string) (ClaimResponse, *RunNotification, error) {
+	runID uuid.UUID, createdAt time.Time, incarnation string) (ClaimResponse, claimEffects, error) {
 	var insertedRunID uuid.UUID
 	err := tx.QueryRow(ctx, `
 		INSERT INTO varroa.run_intents
@@ -273,11 +320,11 @@ func claimTx(ctx context.Context, tx pgx.Tx, hold *grantHold, reading *consumerR
 	switch {
 	case err == nil:
 		resp, err := grantNewIntent(ctx, tx, req, runID)
-		return resp, nil, err
+		return resp, claimEffects{}, err
 	case errors.Is(err, pgx.ErrNoRows):
 		return existingKeyDecision(ctx, tx, hold, reading, req, runID, createdAt, incarnation)
 	default:
-		return ClaimResponse{}, nil, fmt.Errorf("insert intent: %w", err)
+		return ClaimResponse{}, claimEffects{}, fmt.Errorf("insert intent: %w", err)
 	}
 }
 
@@ -316,11 +363,11 @@ type storedIntent struct {
 }
 
 // existingKeyDecision applies D2's decision table, in order, to the row
-// a repeated intent_key already holds. The second answer is the run
+// a repeated intent_key already holds. The second answer holds the run
 // notification of the requesting run's row when Row 4 marked it
-// DUPLICATE, or nil.
+// DUPLICATE, and the stored run when Row 2 or Row 3 moved its owner.
 func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, reading *consumerReading, req ClaimRequest,
-	reqRunID uuid.UUID, reqCreatedAt time.Time, incarnation string) (ClaimResponse, *RunNotification, error) {
+	reqRunID uuid.UUID, reqCreatedAt time.Time, incarnation string) (ClaimResponse, claimEffects, error) {
 	var row storedIntent
 	err := tx.QueryRow(ctx, `
 		SELECT run_id, created_at, cell_instance, placement_generation, state, build_number, granted_at,
@@ -331,13 +378,13 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 	`, req.IntentKey).Scan(&row.runID, &row.createdAt, &row.cellInstance, &row.placementGeneration, &row.state,
 		&row.buildNumber, &row.grantedAt, &row.startMarkedAt, &row.dbNow)
 	if err != nil {
-		return ClaimResponse{}, nil, fmt.Errorf("read existing intent: %w", err)
+		return ClaimResponse{}, claimEffects{}, fmt.Errorf("read existing intent: %w", err)
 	}
 
 	// Row 1: a lower generation is fenced, no matter which run_id the
 	// request carries.
 	if req.PlacementGeneration < row.placementGeneration {
-		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonFenced, RunID: row.runID.String()}, nil, nil
+		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonFenced, RunID: row.runID.String()}, claimEffects{}, nil
 	}
 
 	// Row 2: the stored run_id equals the request's run_id. A started run
@@ -352,21 +399,20 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 	if row.runID == reqRunID {
 		started, err := intentStarted(ctx, tx, row)
 		if err != nil {
-			return ClaimResponse{}, nil, err
+			return ClaimResponse{}, claimEffects{}, err
 		}
 		if started || (row.startMarkedAt != nil && storedOwner(row) != req.CellInstance) {
-			return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, nil, nil
+			return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, claimEffects{}, nil
 		}
 		held, message, err := hold.holds(ctx, tx, req, row, reading)
 		if err != nil {
-			return ClaimResponse{}, nil, err
+			return ClaimResponse{}, claimEffects{}, err
 		}
 		if held {
 			return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonNotReady, Message: message,
-				RunID: row.runID.String()}, nil, nil
+				RunID: row.runID.String()}, claimEffects{}, nil
 		}
-		resp, err := reanswerSameRun(ctx, tx, req, row, incarnation)
-		return resp, nil, err
+		return reanswerSameRun(ctx, tx, req, row, incarnation)
 	}
 
 	// Row 3: a higher generation on an unstarted GRANTED intent transfers
@@ -375,20 +421,22 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 	if req.PlacementGeneration > row.placementGeneration && row.state == stateGranted && row.startMarkedAt == nil {
 		exists, err := runsRowExists(ctx, tx, row.runID)
 		if err != nil {
-			return ClaimResponse{}, nil, err
+			return ClaimResponse{}, claimEffects{}, err
 		}
 		if !exists {
-			resp, err := transferIntent(ctx, tx, req, reqRunID, reqCreatedAt, incarnation)
-			return resp, nil, err
+			resp, cluster, err := transferIntent(ctx, tx, req, reqRunID, reqCreatedAt, incarnation)
+			// The stored run loses its intent row, so its old owner no
+			// longer holds it.
+			return resp, claimEffects{moved: row.runID.String(), movedCluster: cluster}, err
 		}
 	}
 
 	// Row 4: every other case is a duplicate.
 	marked, err := markDuplicateClaim(ctx, tx, reqRunID, reqCreatedAt)
 	if err != nil {
-		return ClaimResponse{}, nil, err
+		return ClaimResponse{}, claimEffects{}, err
 	}
-	return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, marked, nil
+	return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, claimEffects{marked: marked}, nil
 }
 
 // markDuplicateClaim marks the requesting run's accepted-trigger row
@@ -457,44 +505,53 @@ func intentStarted(ctx context.Context, tx pgx.Tx, row storedIntent) (bool, erro
 // usable number. A number_conflict that names the stored number means
 // the cell refused to apply it; the cell holds no build under it, and
 // the number is below the watermark, so the fresh number is above it.
-func reanswerSameRun(ctx context.Context, tx pgx.Tx, req ClaimRequest, row storedIntent, incarnation string) (ClaimResponse, error) {
+//
+// A move names the run in the second answer. Only the gateway replica that
+// relays this claim sees the grant, so the caller signals the move to the
+// other replicas after the commit.
+func reanswerSameRun(ctx context.Context, tx pgx.Tx, req ClaimRequest, row storedIntent, incarnation string) (ClaimResponse, claimEffects, error) {
 	buildNumber := derefInt64(row.buildNumber)
 	if row.state != stateGranted {
-		return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, nil
+		return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, claimEffects{}, nil
 	}
+	var effects claimEffects
 	sameInstance := row.cellInstance != nil && *row.cellInstance == req.CellInstance
 	refresh := false
 	if !sameInstance {
 		// The move stamps the claiming incarnation, because the claiming
 		// instance runs the build. The run then belongs to that incarnation.
-		if _, err := tx.Exec(ctx, `
+		var cluster string
+		if err := tx.QueryRow(ctx, `
 			UPDATE varroa.run_intents
 			SET cell = $1, cell_instance = $2, placement_generation = $3, granted_at = now(), incarnation = $5
 			WHERE run_id = $4
-		`, nullableString(req.Cell), nullableString(req.CellInstance), req.PlacementGeneration, row.runID, incarnation); err != nil {
-			return ClaimResponse{}, fmt.Errorf("move ownership: %w", err)
+			RETURNING cluster
+		`, nullableString(req.Cell), nullableString(req.CellInstance), req.PlacementGeneration, row.runID, incarnation).
+			Scan(&cluster); err != nil {
+			return ClaimResponse{}, claimEffects{}, fmt.Errorf("move ownership: %w", err)
 		}
+		effects = claimEffects{moved: row.runID.String(), movedCluster: cluster}
 		refresh = req.CellInstance != "" && req.JenkinsNextBuildNumber > 0 && buildNumber < req.JenkinsNextBuildNumber
 	}
 	if !refresh {
 		var err error
 		if refresh, err = namedOrNullRefresh(ctx, tx, req, row); err != nil {
-			return ClaimResponse{}, err
+			return ClaimResponse{}, claimEffects{}, err
 		}
 	}
 	if refresh {
 		fresh, err := reserveBuildNumber(ctx, tx, req.Cluster, req.Tenant, req.JobPath, req.JenkinsNextBuildNumber)
 		if err != nil {
-			return ClaimResponse{}, err
+			return ClaimResponse{}, claimEffects{}, err
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE varroa.run_intents SET build_number = $1 WHERE run_id = $2
 		`, fresh, row.runID); err != nil {
-			return ClaimResponse{}, fmt.Errorf("refresh stale build number: %w", err)
+			return ClaimResponse{}, claimEffects{}, fmt.Errorf("refresh stale build number: %w", err)
 		}
 		buildNumber = fresh
 	}
-	return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, nil
+	return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, effects, nil
 }
 
 // namedOrNullRefresh reports whether a GRANTED intent needs a fresh
@@ -516,23 +573,26 @@ func namedOrNullRefresh(ctx context.Context, tx pgx.Tx, req ClaimRequest, row st
 }
 
 // transferIntent moves an intent to a new run_id, reserving a new build
-// number for it.
-func transferIntent(ctx context.Context, tx pgx.Tx, req ClaimRequest, newRunID uuid.UUID, newCreatedAt time.Time, incarnation string) (ClaimResponse, error) {
+// number for it. It also answers the cluster that the intent row names,
+// which the caller signals the old run's move on.
+func transferIntent(ctx context.Context, tx pgx.Tx, req ClaimRequest, newRunID uuid.UUID, newCreatedAt time.Time, incarnation string) (ClaimResponse, string, error) {
 	buildNumber, err := reserveBuildNumber(ctx, tx, req.Cluster, req.Tenant, req.JobPath, req.JenkinsNextBuildNumber)
 	if err != nil {
-		return ClaimResponse{}, err
+		return ClaimResponse{}, "", err
 	}
-	if _, err := tx.Exec(ctx, `
+	var cluster string
+	if err := tx.QueryRow(ctx, `
 		UPDATE varroa.run_intents
 		SET run_id = $1, created_at = $2, cell = $3, cell_instance = $4,
 		    placement_generation = $5, build_number = $6, granted_at = now(), start_marked_at = NULL,
 		    incarnation = $8
 		WHERE intent_key = $7
+		RETURNING cluster
 	`, newRunID, newCreatedAt, nullableString(req.Cell), nullableString(req.CellInstance),
-		req.PlacementGeneration, buildNumber, req.IntentKey, incarnation); err != nil {
-		return ClaimResponse{}, fmt.Errorf("transfer intent: %w", err)
+		req.PlacementGeneration, buildNumber, req.IntentKey, incarnation).Scan(&cluster); err != nil {
+		return ClaimResponse{}, "", fmt.Errorf("transfer intent: %w", err)
 	}
-	return ClaimResponse{Decision: DecisionGranted, RunID: newRunID.String(), BuildNumber: buildNumber}, nil
+	return ClaimResponse{Decision: DecisionGranted, RunID: newRunID.String(), BuildNumber: buildNumber}, cluster, nil
 }
 
 // storedOwner answers the cell instance the stored intent names, or an

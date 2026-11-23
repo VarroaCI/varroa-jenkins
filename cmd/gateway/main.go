@@ -229,6 +229,12 @@ func main() {
 	handler.SetRecordStoreEnabled(logStore != nil)
 	if logStore != nil {
 		handler.SetLogStore(logStore, logPendingBytesFromEnv(), logFinalizeWaitFromEnv(), runOwnerCacheSizeFromEnv())
+		// The listener reads the owner cache that SetLogStore installs, so
+		// it starts after that call and before the gateway serves.
+		if err := handler.WatchOwnerMoves(); err != nil {
+			logger.Error("failed to subscribe to the owner move signal", "error", err)
+			os.Exit(1)
+		}
 		logger.Info("gateway log writer enabled")
 	}
 

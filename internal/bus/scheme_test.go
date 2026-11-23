@@ -47,6 +47,7 @@ func TestBusScheme(t *testing.T) {
 		{"webhook result", WebhookResultSubject("core", "team-a", "foo"), "whreply.core.team-a.foo"},
 		{"webhook result wildcard", WebhookResultWildcard("core"), "whreply.core.>"},
 		{"ledger action", LedgerActionSubject("core"), "varroa.ledger.actions.core"},
+		{"ledger move", LedgerMoveSubject("member-b"), "varroa.ledger.moves.member-b"},
 		{"build", BuildSubject("core", "team-a", "cell-1"), "builds.core.team-a.cell-1"},
 		{"builds wildcard", BuildsWildcard, "builds.>"},
 		{"builds stream name", BuildsStreamName, "varroa_builds"},

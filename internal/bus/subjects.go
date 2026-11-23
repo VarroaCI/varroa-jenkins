@@ -14,7 +14,8 @@
 // Ledger owner subject:       varroa.ledger.owner (core NATS, request-reply)
 // Ledger cross-tenant subject: varroa.ledger.crosstenant (core NATS, request-reply)
 // Ledger action subjects:     varroa.ledger.actions.<cluster> (core NATS, at-most-once)
-// Build subjects:             builds.<cluster>.<ns>.<cell> (JetStream)
+// Ledger move subjects:       varroa.ledger.moves.<cluster> (core NATS, at-most-once)
+// Build subjects:            builds.<cluster>.<ns>.<cell> (JetStream)
 // Run subjects:                runs.<cluster>.<tenant> (core NATS, at-most-once)
 // Log subjects:                logs.<cluster>.<ns>.<cell>.<runid> (core NATS, gateway to BFF SSE)
 // Tail subjects:               varroa.tail.<cluster>.<ns>.<cell> (core NATS, request-reply)
@@ -260,6 +261,17 @@ func WakeSubjectWildcard(cluster string) string {
 // Format: varroa.ledger.actions.<cluster>
 func LedgerActionSubject(cluster string) string {
 	return fmt.Sprintf("varroa.ledger.actions.%s", cluster)
+}
+
+// LedgerMoveSubject returns the core-NATS subject the recorder publishes an
+// owner move signal on for one cluster. <cluster> is the cluster that the
+// run's ledger row names, because only a gateway of that cluster can hold a
+// cached match for the run. Every gateway replica of that cluster
+// subscribes with no queue group, so each replica gets each signal. No
+// stream may capture this subject: a signal is useful only at once.
+// Format: varroa.ledger.moves.<cluster>
+func LedgerMoveSubject(cluster string) string {
+	return fmt.Sprintf("varroa.ledger.moves.%s", cluster)
 }
 
 // BuildSubject returns the JetStream subject a gateway publishes one
