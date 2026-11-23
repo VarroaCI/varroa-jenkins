@@ -321,6 +321,20 @@ type BusHandler struct {
 	// zero. Only a test sets it.
 	logIdleSweepLookupsMax int
 
+	// logStop closes when Close runs. It ends each wait for a finalized
+	// publish. NewBusHandler creates it.
+	logStop chan struct{}
+	// logMarkerWait overrides logFinalizedPublishWait when above zero.
+	// Only a test sets it.
+	logMarkerWait time.Duration
+	// logMarkerMu guards logMarkersOwed. It is a leaf lock: no other lock
+	// is taken while it is held.
+	logMarkerMu sync.Mutex
+	// logMarkersOwed holds, keyed by run_id, each finalized marker that
+	// did not reach the bus before the final STORED ack. The idle sweep
+	// goroutine sends each one again (resendOwedMarkers).
+	logMarkersOwed map[string]*owedFinalizedMarker
+
 	// logCompareMu guards the compare queue of moved-writer repeats and
 	// its worker count. It is a leaf lock: no other lock is taken while
 	// it is held.
@@ -395,6 +409,7 @@ func NewBusHandler(mp metric.MeterProvider, cluster string, conn *bus.Conn, snap
 		pendingContentTime:         make(map[string]time.Time),
 		contentTTL:                 15 * time.Second,
 		contentDone:                make(chan struct{}),
+		logStop:                    make(chan struct{}),
 		presenceLocks:              make(map[string]*sync.Mutex),
 		lastHeartbeat:              make(map[string]time.Time),
 		watchDegraded:              make(map[string]map[string]string),
@@ -427,11 +442,14 @@ func NewBusHandler(mp metric.MeterProvider, cluster string, conn *bus.Conn, snap
 	return h, nil
 }
 
-// Close shuts down the content sweeper goroutine and the log idle sweep.
-// Must be called before the BusHandler is discarded to avoid goroutine
-// leaks.
+// Close shuts down the content sweeper goroutine and the log idle sweep,
+// and ends each wait for a finalized publish. Must be called before the
+// BusHandler is discarded to avoid goroutine leaks.
 func (h *BusHandler) Close() {
 	close(h.contentDone)
+	if h.logStop != nil {
+		close(h.logStop)
+	}
 	if h.logSweepStop != nil {
 		h.logSweepStop()
 	}

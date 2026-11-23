@@ -80,7 +80,10 @@ func (h *BusHandler) startLogIdleSweep(every time.Duration) {
 	}
 }
 
-// runLogIdleSweep runs one round every interval until ctx ends.
+// runLogIdleSweep runs one round every interval until ctx ends. Each
+// round first sends the owed finalized markers again. The marker pass
+// comes first because a bus outage also fails the owner reads, and the
+// first failed owner read ends the round.
 func (h *BusHandler) runLogIdleSweep(ctx context.Context, every time.Duration) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
@@ -90,6 +93,7 @@ func (h *BusHandler) runLogIdleSweep(ctx context.Context, every time.Duration) {
 			return
 		case <-ticker.C:
 		}
+		h.resendOwedMarkers(ctx)
 		h.sweepIdleLogRuns(ctx)
 	}
 }

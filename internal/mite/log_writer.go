@@ -52,6 +52,15 @@ const (
 
 	defaultLogFinalizeWait = 60 * time.Second // VARROA_RECORDSTORE_LOG_FINALIZE_WAIT
 
+	// logFinalizedPublishWait bounds the retry of a failed finalized
+	// publish before the final STORED ack. The bus connection waits up to
+	// 5 s for a JetStream ack, so the bound holds two such waits, or a
+	// few fast failures with the append backoff. The final chunk holds
+	// its bytes in the pending budget until its ack, so a longer wait lets
+	// the runs that end in an outage fill the budget. A marker that is
+	// still not out after this wait is owed (oweFinalizedMarker).
+	logFinalizedPublishWait = 10 * time.Second
+
 	// logOwnerRecheckAfter is how long a chunk may wait after its
 	// admission before a write of it needs a fresh owner read. It stays
 	// below the record store's default confirmed-gone grace (30s), so a
@@ -173,7 +182,10 @@ type runLogState struct {
 	// from a ledger answer, and no COMPLETED event or chunk of this
 	// gateway set it first. Another gateway replica can then hold the
 	// writer's stream and finish the log. abandonRun therefore records no
-	// incompleteness and publishes no run.log envelope for such a run.
+	// incompleteness and publishes no run.log envelope for such a run. A
+	// later COMPLETED event of the owner, or a later chunk of the terminal
+	// run, clears it, because this replica then holds the writer's stream
+	// (markRunTerminalFrom).
 	ownerReadTerminal bool
 
 	// evicted is true once evictRunState dropped this state from
@@ -594,17 +606,40 @@ func isTerminalRunStatus(status string) bool {
 // A run with a tombstone is finished, so the call changes nothing. The
 // state can also be evicted after the lookup: the call then sets no
 // deadline on it. It answers true only when this call set the mark.
+//
+// A COMPLETED event of the owner and a chunk of a terminal run call it.
+// Both reach this replica on the writer's stream, so a mark that an
+// owner read set earlier stops being quiet.
 func (h *BusHandler) markRunTerminal(ns, name, runID, jobPath string, anchor time.Time) bool {
+	return h.markRunTerminalFrom(ns, name, runID, jobPath, anchor, false)
+}
+
+// markRunTerminalFrom is markRunTerminal with the source of the mark.
+// ownerRead is true only for ownerRecheck. A mark that it sets is quiet
+// (runLogState.ownerReadTerminal), and it never makes an existing mark
+// quiet. A call with ownerRead false clears the quiet flag of an
+// existing mark. The flag changes in the same critical section as the
+// mark, so a COMPLETED event that races the owner read never leaves a
+// stale flag.
+func (h *BusHandler) markRunTerminalFrom(ns, name, runID, jobPath string, anchor time.Time, ownerRead bool) bool {
 	st := h.getOrCreateRunState(runID, ns, name, jobPath)
 	if st == nil {
 		return false
 	}
 	st.mu.Lock()
-	if st.terminal || st.evicted {
+	if st.evicted {
+		st.mu.Unlock()
+		return false
+	}
+	if st.terminal {
+		if !ownerRead {
+			st.ownerReadTerminal = false
+		}
 		st.mu.Unlock()
 		return false
 	}
 	st.terminal = true
+	st.ownerReadTerminal = ownerRead
 	st.deadlineAt = anchor.Add(h.runFinalizeWait())
 	if st.rejectedForever {
 		// abandonRun ended the run before this mark, and the state kept
@@ -784,25 +819,59 @@ func (h *BusHandler) publishRunLogBestEffort(ns, name, runID, jobPath string, pa
 
 // publishFinalized publishes the run.log envelope that sets finalized
 // true. A failed publish is sent again with the append backoff until it
-// succeeds, ctx ends, or one finalize wait passes. After that wait the
-// recorder's finalizeStaleLogs sweep can mark the run itself, and a late
-// marker changes nothing. The recorder's merge never lowers a stored
-// finalized true, so a repeat of the marker changes nothing either.
-func (h *BusHandler) publishFinalized(ctx context.Context, ns, name, runID, jobPath string) {
-	ctx, cancel := context.WithTimeout(ctx, h.runFinalizeWait())
+// succeeds, ctx ends, Close runs, or finalizedPublishWait passes. It
+// answers whether the marker went out. The recorder's merge never lowers
+// a stored finalized true, so a repeat of the marker changes nothing.
+func (h *BusHandler) publishFinalized(ctx context.Context, ns, name, runID, jobPath string) bool {
+	ctx, cancel := context.WithTimeout(ctx, h.finalizedPublishWait())
 	defer cancel()
 	delay := logAppendBackoffFloor
 	for !h.publishRunLogBestEffort(ns, name, runID, jobPath, map[string]interface{}{"finalized": true}) {
 		select {
 		case <-ctx.Done():
 			h.log().Warn("run.log publish of the finalized marker failed, the retry ended", "run_id", runID, "error", ctx.Err())
-			return
+			return false
+		case <-h.logStop:
+			h.log().Warn("run.log publish of the finalized marker failed, the gateway stops", "run_id", runID)
+			return false
 		case <-time.After(jitteredDelay(delay)):
 		}
 		if delay *= 2; delay > logAppendBackoffCap {
 			delay = logAppendBackoffCap
 		}
 	}
+	return true
+}
+
+// finalizedPublishWait returns how long publishFinalized retries: the
+// test override, else logFinalizedPublishWait, but never longer than the
+// finalize wait.
+func (h *BusHandler) finalizedPublishWait() time.Duration {
+	if h.logMarkerWait > 0 {
+		return h.logMarkerWait
+	}
+	if w := h.runFinalizeWait(); w < logFinalizedPublishWait {
+		return w
+	}
+	return logFinalizedPublishWait
+}
+
+// finalizedBeforeAck publishes the finalized marker before the drain
+// acknowledges its chunk. A marker that does not go out is owed
+// (oweFinalizedMarker), and the ack still goes out, so a bus outage never
+// holds the chunk in the pending budget past finalizedPublishWait. It
+// answers false only when Close ran first. The caller then sends no ack:
+// the mite keeps the chunk and sends it again to the next gateway, whose
+// restart recovery publishes the marker.
+func (h *BusHandler) finalizedBeforeAck(ctx context.Context, ns, name, runID, jobPath string) bool {
+	if h.publishFinalized(ctx, ns, name, runID, jobPath) {
+		return true
+	}
+	if h.logStopping() {
+		return false
+	}
+	h.oweFinalizedMarker(ns, name, runID, jobPath)
+	return true
 }
 
 // runIncompleteness returns the gateway's own incompleteness knowledge
@@ -986,15 +1055,15 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 		st.established = true
 		recoveredFinal := !wasFinal && st.finalDurable
 		st.mu.Unlock()
-		if recoveredFinal {
-			// The gateway that wrote the final entry can stop before its
-			// marker reaches the bus. The marker states only what the store
-			// holds, so it goes out before this chunk's ack.
-			h.publishFinalized(ctx, ns, name, runID, st.jobPath)
+		// The gateway that wrote the final entry can stop before its
+		// marker reaches the bus. The marker states only what the store
+		// holds, so it goes out before this chunk's ack.
+		if recoveredFinal && !h.finalizedBeforeAck(ctx, ns, name, runID, st.jobPath) {
+			return appendDone
 		}
 	}
 
-	if proceed, outcome := h.adoptWriter(ctx, runID, ns, name, st, chunk); !proceed {
+	if proceed, outcome := h.adoptWriter(ctx, runID, ns, name, st, chunk, recheck); !proceed {
 		return outcome
 	}
 
@@ -1062,7 +1131,7 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 
 	var finalWritten bool
 	if fillsHole {
-		fw, outcome := h.flushContiguousLogIndex(ctx, ns, name, chunk.CellInstance, runID, st, createdAt)
+		fw, outcome := h.flushContiguousLogIndex(ctx, ns, name, chunk.CellInstance, runID, st, createdAt, recheck)
 		switch outcome {
 		case appendAbandon:
 			return appendAbandon
@@ -1077,10 +1146,13 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 		// The marker goes out before the STORED ack. A gateway that stops
 		// before the marker leaves the final chunk with the mite, and
 		// restart recovery of its next send publishes the marker.
-		h.publishFinalized(ctx, ns, name, runID, st.jobPath)
+		markerOut := h.finalizedBeforeAck(ctx, ns, name, runID, st.jobPath)
 		// The build has ended: clear any live tail lease. No control
 		// message is pushed — there is nothing left to tail.
 		h.clearTailLeaseOnFinal(chunk.RunId)
+		if !markerOut {
+			return appendDone
+		}
 	}
 
 	h.ackStored(ns, name, runID, st)
@@ -1150,7 +1222,12 @@ func (h *BusHandler) checkOldWriterPart(ctx context.Context, runID, ns, name str
 // (log-live-tail, "the relay never leads the blob"). An out-of-order
 // chunk's own entry, and its relay message, both wait here until the
 // hole below it closes.
-func (h *BusHandler) flushContiguousLogIndex(ctx context.Context, ns, name, instance, runID string, st *runLogState, createdAt time.Time) (finalWritten bool, outcome appendOutcome) {
+//
+// recheck is the owner recheck of the chunk that fills the hole. Each
+// retry of an index write takes it, so a store fault that starts after
+// the part write still ends when the ledger names the run terminal or
+// names another owner.
+func (h *BusHandler) flushContiguousLogIndex(ctx context.Context, ns, name, instance, runID string, st *runLogState, createdAt time.Time, recheck func() writeResult) (finalWritten bool, outcome appendOutcome) {
 	for {
 		st.mu.Lock()
 		next := st.ackSeq + 1
@@ -1169,7 +1246,7 @@ func (h *BusHandler) flushContiguousLogIndex(ctx context.Context, ns, name, inst
 			return finalWritten, appendAbandon
 		}
 		line = append(line, '\n')
-		res := h.writeIndexEntry(ctx, runID, ns, name, instance, st, e.Seq, line, indexOptions(createdAt, e.Writer))
+		res := h.writeIndexEntry(ctx, runID, ns, name, instance, st, e.Seq, line, indexOptions(createdAt, e.Writer), recheck)
 		if res == writeConflict {
 			// The slot holds another writer's entry. A sender that no
 			// longer owns the run lost the slot to the writer that does:
@@ -1257,18 +1334,19 @@ func isReservationOf(stamp blob.Stamp, seq int64, writer string) bool {
 // once for the line's own writer, and after an owner read for another
 // writer's reservation, which a writer that lost the run can leave above
 // the owner's entries. writeConflict means the slot holds an index entry,
-// and writeRefused means the sender no longer owns the run.
-func (h *BusHandler) writeIndexEntry(ctx context.Context, runID, ns, name, instance string, st *runLogState, seq int64, line []byte, opts blob.ObjectOptions) writeResult {
+// and writeRefused means the sender no longer owns the run. Every retry
+// takes recheck.
+func (h *BusHandler) writeIndexEntry(ctx context.Context, runID, ns, name, instance string, st *runLogState, seq int64, line []byte, opts blob.ObjectOptions, recheck func() writeResult) writeResult {
 	key := blob.LogIndexKey(runID)
-	r := h.retryWrite(ctx, runID, st, key, seq, nil, func(c context.Context) error {
+	r := h.retryWrite(ctx, runID, st, key, seq, onRetry(recheck), func(c context.Context) error {
 		return h.logStore.Append(c, key, seq, line, opts)
 	})
 	if r != writeConflict {
 		return r
 	}
-	stamp, found, ok := h.readPartStamp(ctx, runID, st, key, seq)
-	if !ok {
-		return writeDeadline
+	stamp, found, res := h.readPartStamp(ctx, runID, st, key, seq, recheck)
+	if res != writeDone {
+		return res
 	}
 	if !found || stamp.Digest != blob.Digest(reservationLine(seq, stamp.Writer)) {
 		return writeConflict
@@ -1278,7 +1356,7 @@ func (h *BusHandler) writeIndexEntry(ctx context.Context, runID, ns, name, insta
 			return r
 		}
 	}
-	return h.retryWrite(ctx, runID, st, key, seq, nil, func(c context.Context) error {
+	return h.retryWrite(ctx, runID, st, key, seq, onRetry(recheck), func(c context.Context) error {
 		err := h.logStore.Overwrite(c, key, seq, line, stamp, opts)
 		if errors.Is(err, blob.ErrChunkConflict) {
 			// A retry after a write that committed with a lost answer
@@ -1308,8 +1386,9 @@ func (h *BusHandler) writeIndexEntry(ctx context.Context, runID, ns, name, insta
 // whose bytes belong to another writer.
 //
 // res is writeRefused when the caller no longer owns the run, and
-// writeDeadline when the finalize deadline passed first.
-func (h *BusHandler) reserveIndexSlot(ctx context.Context, runID, ns, name, instance string, st *runLogState, writer string) writeResult {
+// writeDeadline when the finalize deadline passed first. Every retry
+// takes recheck.
+func (h *BusHandler) reserveIndexSlot(ctx context.Context, runID, ns, name, instance string, st *runLogState, writer string, recheck func() writeResult) writeResult {
 	key := blob.LogIndexKey(runID)
 	opts := indexOptions(runCreatedAtFromUUIDv7(runID), writer)
 	for {
@@ -1317,33 +1396,33 @@ func (h *BusHandler) reserveIndexSlot(ctx context.Context, runID, ns, name, inst
 		slot := st.ackSeq + 1
 		st.mu.Unlock()
 		line := reservationLine(slot, writer)
-		switch h.retryWrite(ctx, runID, st, key, slot, nil, func(c context.Context) error {
+		switch r := h.retryWrite(ctx, runID, st, key, slot, onRetry(recheck), func(c context.Context) error {
 			return h.logStore.Append(c, key, slot, line, opts)
-		}) {
+		}); r {
 		case writeDone:
 			return writeDone
 		case writeConflict:
 		default:
-			return writeDeadline
+			return r
 		}
 
-		stamp, found, ok := h.readPartStamp(ctx, runID, st, key, slot)
-		if !ok {
-			return writeDeadline
+		stamp, found, res := h.readPartStamp(ctx, runID, st, key, slot, recheck)
+		if res != writeDone {
+			return res
 		}
 		if found && stamp.Digest == blob.Digest(reservationLine(slot, stamp.Writer)) {
 			if r := h.ownerStillMatches(ctx, runID, ns, name, instance, st); r != writeDone {
 				return r
 			}
-			switch h.retryWrite(ctx, runID, st, key, slot, nil, func(c context.Context) error {
+			switch r := h.retryWrite(ctx, runID, st, key, slot, onRetry(recheck), func(c context.Context) error {
 				return h.logStore.Overwrite(c, key, slot, line, stamp, opts)
-			}) {
+			}); r {
 			case writeDone:
 				return writeDone
 			case writeConflict:
 				continue
 			default:
-				return writeDeadline
+				return r
 			}
 		}
 		// Another writer's entry holds the slot. That writer can own the
@@ -1363,6 +1442,11 @@ func (h *BusHandler) reserveIndexSlot(ctx context.Context, runID, ns, name, inst
 			h.log().Warn("log run recovery failed, retrying", "run_id", runID, "error", err)
 			if deadlinePassed(st) {
 				return writeDeadline
+			}
+			if recheck != nil {
+				if r := recheck(); r != writeDone {
+					return r
+				}
 			}
 			select {
 			case <-ctx.Done():
@@ -1452,6 +1536,24 @@ func (h *BusHandler) retryWrite(ctx context.Context, runID string, st *runLogSta
 	}
 }
 
+// onRetry wraps recheck so that it runs before each retry of a write, but
+// not before the first attempt. The store fences the first attempt of an
+// index write, a reservation, or a blank pass, so that attempt needs no
+// owner read. The read only ends a retry that a store fault keeps going.
+func onRetry(recheck func() writeResult) func() writeResult {
+	if recheck == nil {
+		return nil
+	}
+	first := true
+	return func() writeResult {
+		if first {
+			first = false
+			return writeDone
+		}
+		return recheck()
+	}
+}
+
 // adoptWriter records the chunk's sender as the run's writer. It reports
 // false, with the outcome to return, when the chunk must not be
 // appended.
@@ -1463,7 +1565,8 @@ func (h *BusHandler) retryWrite(ctx context.Context, runID string, st *runLogSta
 // they sit above a hole that the old writer can no longer fill, and the
 // new writer continues the log at that hole. The new writer's own chunks
 // at those sequences replace the dropped parts through replaceStalePart.
-func (h *BusHandler) adoptWriter(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk) (bool, appendOutcome) {
+// Each store retry of the reservation and the blank pass takes recheck.
+func (h *BusHandler) adoptWriter(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, recheck func() writeResult) (bool, appendOutcome) {
 	writer := logWriterKey(ns, name, chunk)
 	st.mu.Lock()
 	if st.writer == "" || st.writer == writer {
@@ -1483,7 +1586,7 @@ func (h *BusHandler) adoptWriter(ctx context.Context, runID, ns, name string, st
 		return false, appendDone
 	}
 
-	switch h.reserveIndexSlot(ctx, runID, ns, name, chunk.CellInstance, st, writer) {
+	switch h.reserveIndexSlot(ctx, runID, ns, name, chunk.CellInstance, st, writer, recheck) {
 	case writeDone:
 	case writeRefused:
 		h.refuseStaleWriterChunk(ns, name, runID, chunk)
@@ -1491,7 +1594,7 @@ func (h *BusHandler) adoptWriter(ctx context.Context, runID, ns, name string, st
 	default:
 		return false, appendAbandon
 	}
-	blanked, res := h.blankPartsAboveAckSeq(ctx, runID, ns, name, st, chunk, writer)
+	blanked, res := h.blankPartsAboveAckSeq(ctx, runID, ns, name, st, chunk, writer, recheck)
 	switch res {
 	case writeDone:
 	case writeRefused:
@@ -1557,15 +1660,16 @@ func logWriterKey(ns, name string, chunk *mitev1.LogChunk) string {
 // blanked counts the parts that held old bytes, not the reservation. res
 // is writeRefused when the run moved again and chunk's sender no longer
 // owns it, and writeDeadline when the finalize deadline passed first.
-func (h *BusHandler) blankPartsAboveAckSeq(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, writer string) (blanked int, res writeResult) {
+// Every retry takes recheck.
+func (h *BusHandler) blankPartsAboveAckSeq(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, writer string, recheck func() writeResult) (blanked int, res writeResult) {
 	st.mu.Lock()
 	from := st.ackSeq + 1
 	st.mu.Unlock()
 
 	key := blob.LogKey(runID)
-	parts, ok := h.listLogParts(ctx, runID, st, key, from)
-	if !ok {
-		return 0, writeDeadline
+	parts, res := h.listLogParts(ctx, runID, st, key, from, recheck)
+	if res != writeDone {
+		return 0, res
 	}
 
 	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID), Writer: writer}
@@ -1573,7 +1677,7 @@ func (h *BusHandler) blankPartsAboveAckSeq(ctx context.Context, runID, ns, name 
 		if part.Size == 0 {
 			continue
 		}
-		n, res := h.blankPart(ctx, runID, ns, name, st, chunk, key, part.Seq, opts)
+		n, res := h.blankPart(ctx, runID, ns, name, st, chunk, key, part.Seq, opts, recheck)
 		if res != writeDone {
 			return blanked, res
 		}
@@ -1583,9 +1687,9 @@ func (h *BusHandler) blankPartsAboveAckSeq(ctx context.Context, runID, ns, name 
 		return blanked, writeDone
 	}
 
-	switch h.retryWrite(ctx, runID, st, key, from, nil, func(c context.Context) error {
+	switch r := h.retryWrite(ctx, runID, st, key, from, onRetry(recheck), func(c context.Context) error {
 		return h.logStore.Append(c, key, from, []byte{}, opts)
-	}) {
+	}); r {
 	case writeDone:
 		return blanked, writeDone
 	case writeConflict:
@@ -1593,10 +1697,10 @@ func (h *BusHandler) blankPartsAboveAckSeq(ctx context.Context, runID, ns, name 
 		// that serves the same writer can store that writer's own chunk
 		// there, and that part is not old. Only another writer's part
 		// holds old bytes, and it is emptied like a listed part.
-		n, res := h.blankPart(ctx, runID, ns, name, st, chunk, key, from, opts)
+		n, res := h.blankPart(ctx, runID, ns, name, st, chunk, key, from, opts, recheck)
 		return blanked + n, res
 	default:
-		return blanked, writeDeadline
+		return blanked, r
 	}
 }
 
@@ -1607,13 +1711,14 @@ func (h *BusHandler) blankPartsAboveAckSeq(ctx context.Context, runID, ns, name 
 // (ownerStillMatches), and the Overwrite carries that stamp. A writer that
 // took the run after this call's adoption wrote its parts only after the
 // ledger named it, so either the owner read refuses this call or the
-// Overwrite conflicts. blanked is 1 when this call emptied bytes.
-func (h *BusHandler) blankPart(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, key string, seq int64, opts blob.ObjectOptions) (blanked int, res writeResult) {
+// Overwrite conflicts. blanked is 1 when this call emptied bytes. Every
+// retry takes recheck.
+func (h *BusHandler) blankPart(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, key string, seq int64, opts blob.ObjectOptions, recheck func() writeResult) (blanked int, res writeResult) {
 	empty := blob.Digest(nil)
 	for {
-		stamp, found, ok := h.readPartStamp(ctx, runID, st, key, seq)
-		if !ok {
-			return 0, writeDeadline
+		stamp, found, res := h.readPartStamp(ctx, runID, st, key, seq, recheck)
+		if res != writeDone {
+			return 0, res
 		}
 		if !found || stamp.Digest == empty || stamp.Writer == opts.Writer {
 			return 0, writeDone
@@ -1621,58 +1726,72 @@ func (h *BusHandler) blankPart(ctx context.Context, runID, ns, name string, st *
 		if r := h.ownerStillMatches(ctx, runID, ns, name, chunk.CellInstance, st); r != writeDone {
 			return 0, r
 		}
-		switch h.retryWrite(ctx, runID, st, key, seq, nil, func(c context.Context) error {
+		switch r := h.retryWrite(ctx, runID, st, key, seq, onRetry(recheck), func(c context.Context) error {
 			return h.logStore.Overwrite(c, key, seq, []byte{}, stamp, opts)
-		}) {
+		}); r {
 		case writeDone:
 			return 1, writeDone
 		case writeConflict:
 		default:
-			return 0, writeDeadline
+			return 0, r
 		}
 	}
 }
 
 // readPartStamp reads the stamp of the part of key at seq, and retries a
 // failed read until the run's finalize deadline. found is false when the
-// part is absent. ok is false when the deadline passed first.
-func (h *BusHandler) readPartStamp(ctx context.Context, runID string, st *runLogState, key string, seq int64) (stamp blob.Stamp, found, ok bool) {
+// part is absent. res is writeDeadline when the deadline passed first.
+// recheck, when not nil, runs before each retry, and any answer other
+// than writeDone ends the retry with that answer.
+func (h *BusHandler) readPartStamp(ctx context.Context, runID string, st *runLogState, key string, seq int64, recheck func() writeResult) (stamp blob.Stamp, found bool, res writeResult) {
 	for {
 		stamp, err := h.logStore.PartStamp(ctx, key, seq)
 		if err == nil {
-			return stamp, true, true
+			return stamp, true, writeDone
 		}
 		if errors.Is(err, blob.ErrObjectNotFound) {
-			return blob.Stamp{}, false, true
+			return blob.Stamp{}, false, writeDone
 		}
 		h.log().Warn("read part stamp failed, retrying", "run_id", runID, "key", key, "seq", seq, "error", err)
 		if deadlinePassed(st) {
-			return blob.Stamp{}, false, false
+			return blob.Stamp{}, false, writeDeadline
+		}
+		if recheck != nil {
+			if r := recheck(); r != writeDone {
+				return blob.Stamp{}, false, r
+			}
 		}
 		select {
 		case <-ctx.Done():
-			return blob.Stamp{}, false, false
+			return blob.Stamp{}, false, writeDeadline
 		case <-time.After(logAppendBackoffFloor):
 		}
 	}
 }
 
 // listLogParts lists the log parts of key at or above from, and retries
-// a failed listing until the run's finalize deadline. ok is false when
-// the deadline passed first.
-func (h *BusHandler) listLogParts(ctx context.Context, runID string, st *runLogState, key string, from int64) (parts []blob.Part, ok bool) {
+// a failed listing until the run's finalize deadline. res is
+// writeDeadline when the deadline passed first. recheck, when not nil,
+// runs before each retry, and any answer other than writeDone ends the
+// retry with that answer.
+func (h *BusHandler) listLogParts(ctx context.Context, runID string, st *runLogState, key string, from int64, recheck func() writeResult) (parts []blob.Part, res writeResult) {
 	for {
 		parts, err := h.logStore.Parts(ctx, key, from)
 		if err == nil {
-			return parts, true
+			return parts, writeDone
 		}
 		h.log().Warn("list log parts failed, retrying", "run_id", runID, "error", err)
 		if deadlinePassed(st) {
-			return nil, false
+			return nil, writeDeadline
+		}
+		if recheck != nil {
+			if r := recheck(); r != writeDone {
+				return nil, r
+			}
 		}
 		select {
 		case <-ctx.Done():
-			return nil, false
+			return nil, writeDeadline
 		case <-time.After(logAppendBackoffFloor):
 		}
 	}
@@ -1703,7 +1822,7 @@ func (h *BusHandler) replaceStalePart(ctx context.Context, runID, ns, name strin
 		h.refuseStaleWriterChunk(ns, name, runID, chunk)
 		return false, appendDone
 	}
-	switch h.reserveIndexSlot(ctx, runID, ns, name, chunk.CellInstance, st, opts.Writer) {
+	switch h.reserveIndexSlot(ctx, runID, ns, name, chunk.CellInstance, st, opts.Writer, recheck) {
 	case writeDone:
 	case writeRefused:
 		h.refuseStaleWriterChunk(ns, name, runID, chunk)
@@ -1728,8 +1847,13 @@ func (h *BusHandler) replaceStalePart(ctx context.Context, runID, ns, name strin
 	empty := blob.Digest(nil)
 	replacedBytes := false
 	for done := false; !done; {
-		stamp, found, ok := h.readPartStamp(ctx, runID, st, key, chunk.Seq)
-		if !ok {
+		stamp, found, read := h.readPartStamp(ctx, runID, st, key, chunk.Seq, recheck)
+		switch read {
+		case writeDone:
+		case writeRefused:
+			h.refuseStaleWriterChunk(ns, name, runID, chunk)
+			return false, appendDone
+		default:
 			return false, appendAbandon
 		}
 		if found && stamp.Digest == want && stamp.Writer == opts.Writer {
@@ -1819,6 +1943,11 @@ func (h *BusHandler) confirmOwner(ctx context.Context, runID, ns, name, instance
 // another replica, so this gateway can get no other mark, and the retry
 // of a failing store must still end at the finalize deadline. A mark that
 // this call sets makes the end quiet (runLogState.ownerReadTerminal).
+//
+// Every store retry of the chunk with no other bound takes the recheck:
+// the part write, the index write, the index reservation, the blank
+// pass, the part listing, and each part stamp read. A write that the
+// store fences takes it only before a retry (onRetry).
 func (h *BusHandler) ownerRecheck(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, admitted time.Time) func() writeResult {
 	after := logOwnerRecheckAfter
 	if h.logOwnerRecheckAge > 0 {
@@ -1838,11 +1967,7 @@ func (h *BusHandler) ownerRecheck(ctx context.Context, runID, ns, name string, s
 		}
 		last = time.Now()
 		if isTerminalRunStatus(tuple.status) && tuple.anchorUnixMs > 0 {
-			if h.markRunTerminal(ns, name, runID, st.jobPath, time.UnixMilli(tuple.anchorUnixMs)) {
-				st.mu.Lock()
-				st.ownerReadTerminal = true
-				st.mu.Unlock()
-			}
+			h.markRunTerminalFrom(ns, name, runID, st.jobPath, time.UnixMilli(tuple.anchorUnixMs), true)
 			if deadlinePassed(st) {
 				return writeDeadline
 			}
