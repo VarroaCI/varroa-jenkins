@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,12 +15,27 @@ import (
 // scmIntentKeyPrefix is the prefix of every intent key an SCM build holds.
 const scmIntentKeyPrefix = string(IntentSchemeSCM) + ":"
 
+// backstopSchemes are the intent-key schemes that the plugin mints when
+// Jenkins schedules a build on its own: a branch event, a branch scan, a
+// timer, or a trigger with no revision. Varroa supplies every other scheme,
+// for a run that a person or a pipeline requests. Such a run can build a
+// revision again on purpose, with other parameters and its own caller.
+var backstopSchemes = []string{string(IntentSchemeSCM), string(IntentSchemeCron), string(IntentSchemeAPI)}
+
+// isBackstopKey reports whether intentKey holds one of backstopSchemes.
+func isBackstopKey(intentKey string) bool {
+	scheme, _, _ := strings.Cut(intentKey, ":")
+	return slices.Contains(backstopSchemes, scheme)
+}
+
 // runDuplicateBackstop stops a second live run of one revision. It skips
-// an empty revision, because a freestyle SCM job reports none. Two runs
-// that both hold an `scm:` intent key are not duplicates. The ledger gives
-// one claim revision one key, so two such keys name two accepted revisions.
-// A change-request merge build against a new base is one example: it shares
-// the head commit with the older build. It takes
+// an empty revision, because a freestyle SCM job reports none. It compares
+// only runs whose intent key holds one of backstopSchemes. A run with any
+// other key is never marked and never makes another run a duplicate. Two
+// runs that both hold an `scm:` intent key are not duplicates. The ledger
+// gives one claim revision one key, so two such keys name two accepted
+// revisions. A change-request merge build against a new base is one
+// example: it shares the head commit with the older build. It takes
 // pg_advisory_xact_lock on the 64-bit hash Postgres's own
 // hashtextextended computes over the tuple, joined with a unit separator
 // so two different tuples with the same concatenation never collide. The
@@ -29,7 +45,7 @@ const scmIntentKeyPrefix = string(IntentSchemeSCM) + ":"
 // that row's own identity, so the caller publishes it after the commit.
 // Both answers are nil when it marks no row.
 func runDuplicateBackstop(ctx context.Context, tx pgx.Tx, intent *intentRow, revision string) (*LedgerAction, *RunNotification, error) {
-	if revision == "" {
+	if revision == "" || !isBackstopKey(intent.intentKey) {
 		return nil, nil, nil
 	}
 	arrivingSCM := strings.HasPrefix(intent.intentKey, scmIntentKeyPrefix)
@@ -45,10 +61,12 @@ func runDuplicateBackstop(ctx context.Context, tx pgx.Tx, intent *intentRow, rev
 		SELECT run_id, created_at FROM varroa.runs
 		WHERE cluster = $1 AND tenant = $2 AND job_path = $3 AND scm_revision = $4
 		  AND status IN ('QUEUED', 'RUNNING') AND run_id <> $5
+		  AND split_part(intent_key, ':', 1) = ANY($8::text[])
 		  AND NOT ($6::boolean AND starts_with(intent_key, $7))
 		ORDER BY created_at
 		LIMIT 1
-	`, intent.cluster, intent.tenant, intent.jobPath, revision, intent.runID, arrivingSCM, scmIntentKeyPrefix).Scan(&otherRunID, &otherCreatedAt)
+	`, intent.cluster, intent.tenant, intent.jobPath, revision, intent.runID, arrivingSCM, scmIntentKeyPrefix,
+		backstopSchemes).Scan(&otherRunID, &otherCreatedAt)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return nil, nil, nil
