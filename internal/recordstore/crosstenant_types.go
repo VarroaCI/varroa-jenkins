@@ -20,15 +20,18 @@ const (
 	CrossTenantKindLockRelease    = "lock_release"
 )
 
-// The five allocated cross-tenant run states (design.md D1, D8). A
+// The six allocated cross-tenant run states (design.md D1, D8). A
 // status or a build reply never answers "pending" once a run_intents
 // row exists for the key; "pending" names the absence of that row.
+// "duplicate" names a run whose runs row holds the status DUPLICATE. It
+// is terminal: another run of the same job gives the outcome.
 const (
 	CrossTenantStatePending     = "pending"
 	CrossTenantStateQueued      = "queued"
 	CrossTenantStateRunning     = "running"
 	CrossTenantStateCompleted   = "completed"
 	CrossTenantStateInterrupted = "interrupted"
+	CrossTenantStateDuplicate   = "duplicate"
 )
 
 // The fleet-lock reply states (design.md D11). "released" answers a

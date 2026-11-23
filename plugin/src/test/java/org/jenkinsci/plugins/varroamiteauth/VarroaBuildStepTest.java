@@ -226,6 +226,23 @@ public class VarroaBuildStepTest {
     }
 
     @Test
+    public void aDuplicateTargetFailsTheStep() throws Exception {
+        installClient();
+        AtomicInteger statusCalls = new AtomicInteger();
+        server.createContext("/v1/cross-tenant/build", ex -> respond(ex, "{\"run_id\":\"run-1\",\"state\":\"running\"}"));
+        server.createContext("/v1/cross-tenant/status", ex -> {
+            statusCalls.incrementAndGet();
+            respond(ex, "{\"run_id\":\"run-1\",\"state\":\"duplicate\",\"result\":\"ABORTED\"}");
+        });
+
+        WorkflowRun run = scheduleAndWait(
+                "node { varroa.build(tenant: 'beta', job: 'beta/deploy', propagate: false) }", Result.FAILURE);
+        j.assertLogContains("varroaBuild: beta/deploy (run run-1) is a duplicate: "
+                + "another run of the same job gives the outcome", run);
+        assertEquals("a duplicate state is terminal, so the step must stop at the first poll", 1, statusCalls.get());
+    }
+
+    @Test
     public void aFailedBuildCallShowsTheRecorderCodeAndText() throws Exception {
         installClient();
         server.createContext("/v1/cross-tenant/build", ex -> respond(ex,

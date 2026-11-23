@@ -251,6 +251,16 @@ public class VarroaBuildStep extends Step {
                         "varroaBuild: " + jobPath + " (run " + runId + ") was interrupted"));
                 return true;
             }
+            // The record store marked the run DUPLICATE: another run of the
+            // same job gives the outcome. The state is terminal, and the run
+            // has no outcome of its own. The step therefore fails whatever
+            // propagate says, as it does for an interrupted run.
+            if (VarroaCrossTenantOps.STATE_DUPLICATE.equals(state)) {
+                getContext().onFailure(new AbortException(
+                        "varroaBuild: " + jobPath + " (run " + runId + ") is a duplicate: "
+                                + "another run of the same job gives the outcome"));
+                return true;
+            }
             if ("completed".equals(state)) {
                 Map<String, Object> handle = VarroaCrossTenantOps.handleMap(reply, targetTenant, jobPath,
                         callerJobPath, intentKey);

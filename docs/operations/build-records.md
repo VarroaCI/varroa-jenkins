@@ -148,6 +148,9 @@ its job. Its completion sends no webhook, starts no upstream trigger, and writes
 `build.failed` event. The completion still releases the run's fleet locks and deletes its run
 state. The run appears in the run list until `runs` expires it.
 
+A cross-tenant status read answers the state `duplicate` for such a run. A
+[`varroa.build`](../config/cross-tenant-pipelines.md#the-run-handle) call that waits on it fails.
+
 ## Live updates
 
 The recorder publishes one notification per run change onto the NATS subject

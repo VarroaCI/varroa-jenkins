@@ -96,6 +96,7 @@ func handleCrossTenantBuild(ctx context.Context, deps CrossTenantDeps, req Cross
 		resp := CrossTenantResponse{RunID: intent.RunID}
 		if recFound {
 			resp.State = crossTenantRunState(rec)
+			resp.Result = rec.result
 			resp.BuildNumber = rec.buildNumber
 		} else {
 			resp.State = CrossTenantStateQueued
