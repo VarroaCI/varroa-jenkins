@@ -169,6 +169,13 @@ type runLogState struct {
 	terminal   bool
 	deadlineAt time.Time
 
+	// ownerReadTerminal is true when ownerRecheck set the terminal mark
+	// from a ledger answer, and no COMPLETED event or chunk of this
+	// gateway set it first. Another gateway replica can then hold the
+	// writer's stream and finish the log. abandonRun therefore records no
+	// incompleteness and publishes no run.log envelope for such a run.
+	ownerReadTerminal bool
+
 	// evicted is true once evictRunState dropped this state from
 	// h.logRuns. A goroutine that still holds the state starts no
 	// heartbeat and sets no deadline on it.
@@ -586,16 +593,16 @@ func isTerminalRunStatus(status string) bool {
 //
 // A run with a tombstone is finished, so the call changes nothing. The
 // state can also be evicted after the lookup: the call then sets no
-// deadline on it.
-func (h *BusHandler) markRunTerminal(ns, name, runID, jobPath string, anchor time.Time) {
+// deadline on it. It answers true only when this call set the mark.
+func (h *BusHandler) markRunTerminal(ns, name, runID, jobPath string, anchor time.Time) bool {
 	st := h.getOrCreateRunState(runID, ns, name, jobPath)
 	if st == nil {
-		return
+		return false
 	}
 	st.mu.Lock()
 	if st.terminal || st.evicted {
 		st.mu.Unlock()
-		return
+		return false
 	}
 	st.terminal = true
 	st.deadlineAt = anchor.Add(h.runFinalizeWait())
@@ -605,7 +612,7 @@ func (h *BusHandler) markRunTerminal(ns, name, runID, jobPath string, anchor tim
 		// tombstone takes the state's place from now on.
 		st.mu.Unlock()
 		h.evictRunState(runID, st)
-		return
+		return true
 	}
 	deadline := st.deadlineAt
 	cancel := st.appendCancel
@@ -629,6 +636,7 @@ func (h *BusHandler) markRunTerminal(ns, name, runID, jobPath string, anchor tim
 			}
 		}
 	}
+	return true
 }
 
 // runDeadlineFired runs once the run's finalize deadline is due: inline
@@ -932,12 +940,18 @@ func (h *BusHandler) drainRun(ctx context.Context, runID string, st *runLogState
 // the chunk, and flushes whatever prefix of pendingEntries the chunk
 // makes contiguous. It recovers the run's state from the store on first
 // touch.
+//
+// A failed recovery is retried with the append backoff, and the owner
+// recheck runs before each retry, so a recovery that keeps failing also
+// ends at the deadline of a run that the ledger names terminal.
 func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, admitted time.Time) appendOutcome {
 	st.mu.Lock()
 	established := st.established
 	wasFinal := st.finalDurable
 	st.mu.Unlock()
+	recheck := h.ownerRecheck(ctx, runID, ns, name, st, chunk, admitted)
 	if !established {
+		delay := logAppendBackoffFloor
 		for {
 			err := h.recoverRunState(ctx, runID, st)
 			if err == nil {
@@ -951,7 +965,22 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 			if deadlinePassed(st) {
 				return appendAbandon
 			}
-			time.Sleep(logAppendBackoffFloor)
+			switch recheck() {
+			case writeDone:
+			case writeRefused:
+				h.refuseStaleWriterChunk(ns, name, runID, chunk)
+				return appendDone
+			default:
+				return appendAbandon
+			}
+			select {
+			case <-ctx.Done():
+				return appendAbandon
+			case <-time.After(jitteredDelay(delay)):
+			}
+			if delay *= 2; delay > logAppendBackoffCap {
+				delay = logAppendBackoffCap
+			}
 		}
 		st.mu.Lock()
 		st.established = true
@@ -993,7 +1022,6 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 
 	createdAt := runCreatedAtFromUUIDv7(runID)
 	logOpts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: createdAt, Writer: logWriterKey(ns, name, chunk)}
-	recheck := h.ownerRecheck(ctx, runID, ns, name, st, chunk, admitted)
 	logKey := blob.LogKey(runID)
 	switch h.retryWrite(ctx, runID, st, logKey, chunk.Seq, recheck, func(c context.Context) error {
 		return h.logStore.Append(c, logKey, chunk.Seq, chunk.Data, logOpts)
@@ -1353,7 +1381,7 @@ func (h *BusHandler) reserveIndexSlot(ctx context.Context, runID, ns, name, inst
 // part only after the ledger named it, so either this read refuses the
 // caller or the stamp is still current.
 func (h *BusHandler) ownerStillMatches(ctx context.Context, runID, ns, name, instance string, st *runLogState) writeResult {
-	decision, ok := h.confirmOwner(ctx, runID, ns, name, instance, st)
+	decision, _, ok := h.confirmOwner(ctx, runID, ns, name, instance, st)
 	if !ok {
 		return writeDeadline
 	}
@@ -1446,7 +1474,7 @@ func (h *BusHandler) adoptWriter(ctx context.Context, runID, ns, name string, st
 	}
 	st.mu.Unlock()
 
-	decision, ok := h.confirmOwner(ctx, runID, ns, name, chunk.CellInstance, st)
+	decision, _, ok := h.confirmOwner(ctx, runID, ns, name, chunk.CellInstance, st)
 	if !ok {
 		return false, appendAbandon
 	}
@@ -1667,7 +1695,7 @@ func (h *BusHandler) listLogParts(ctx context.Context, runID string, st *runLogS
 // the next attempt reads both again. The same bytes of the same writer
 // mean another replica of this writer stored the chunk.
 func (h *BusHandler) replaceStalePart(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, opts blob.ObjectOptions, recheck func() writeResult) (bool, appendOutcome) {
-	decision, ok := h.confirmOwner(ctx, runID, ns, name, chunk.CellInstance, st)
+	decision, _, ok := h.confirmOwner(ctx, runID, ns, name, chunk.CellInstance, st)
 	if !ok {
 		return false, appendAbandon
 	}
@@ -1754,24 +1782,25 @@ func (h *BusHandler) markGatewayGap(ns, name, runID string, st *runLogState, msg
 }
 
 // confirmOwner reads the run's owner from the ledger again, past the
-// owner cache, and compares it with the caller. It retries an
-// unverifiable answer until the finalize deadline. ok is false when the
-// deadline passed first.
-func (h *BusHandler) confirmOwner(ctx context.Context, runID, ns, name, instance string, st *runLogState) (ownerDecision, bool) {
+// owner cache, and compares it with the caller. It also returns the
+// ledger's tuple, which carries the run's status and anchor. It retries
+// an unverifiable answer until the finalize deadline. ok is false when
+// the deadline passed first.
+func (h *BusHandler) confirmOwner(ctx context.Context, runID, ns, name, instance string, st *runLogState) (ownerDecision, ownerTuple, bool) {
 	for {
 		if h.ownerCache != nil {
 			h.ownerCache.invalidate(runID)
 		}
-		decision, _ := h.checkOwner(ctx, h.cluster, ns, name, instance, runID)
+		decision, tuple := h.checkOwner(ctx, h.cluster, ns, name, instance, runID)
 		if decision != ownerUnknown {
-			return decision, true
+			return decision, tuple, true
 		}
 		if deadlinePassed(st) {
-			return ownerUnknown, false
+			return ownerUnknown, ownerTuple{}, false
 		}
 		select {
 		case <-ctx.Done():
-			return ownerUnknown, false
+			return ownerUnknown, ownerTuple{}, false
 		case <-time.After(logAppendBackoffFloor):
 		}
 	}
@@ -1783,6 +1812,13 @@ func (h *BusHandler) confirmOwner(ctx context.Context, runID, ns, name, instance
 // needs a fresh owner read: a store stall can hold an old cell's chunk
 // in this queue past a mesh takeover, and the chunk must not land on a
 // sequence the new owner already emptied or wrote.
+//
+// An answer that names the sender with a terminal status and an anchor
+// sets the run's terminal mark through markRunTerminal, as a chunk with
+// the same answer does in OnLogChunk. The COMPLETED event can reach
+// another replica, so this gateway can get no other mark, and the retry
+// of a failing store must still end at the finalize deadline. A mark that
+// this call sets makes the end quiet (runLogState.ownerReadTerminal).
 func (h *BusHandler) ownerRecheck(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, admitted time.Time) func() writeResult {
 	after := logOwnerRecheckAfter
 	if h.logOwnerRecheckAge > 0 {
@@ -1793,7 +1829,7 @@ func (h *BusHandler) ownerRecheck(ctx context.Context, runID, ns, name string, s
 		if time.Since(last) < after {
 			return writeDone
 		}
-		decision, ok := h.confirmOwner(ctx, runID, ns, name, chunk.CellInstance, st)
+		decision, tuple, ok := h.confirmOwner(ctx, runID, ns, name, chunk.CellInstance, st)
 		if !ok {
 			return writeDeadline
 		}
@@ -1801,6 +1837,16 @@ func (h *BusHandler) ownerRecheck(ctx context.Context, runID, ns, name string, s
 			return writeRefused
 		}
 		last = time.Now()
+		if isTerminalRunStatus(tuple.status) && tuple.anchorUnixMs > 0 {
+			if h.markRunTerminal(ns, name, runID, st.jobPath, time.UnixMilli(tuple.anchorUnixMs)) {
+				st.mu.Lock()
+				st.ownerReadTerminal = true
+				st.mu.Unlock()
+			}
+			if deadlinePassed(st) {
+				return writeDeadline
+			}
+		}
 		return writeDone
 	}
 }
@@ -2038,14 +2084,20 @@ func (h *BusHandler) abandonRun(runID string, st *runLogState) {
 	if len(stranded) > 0 || st.incompleteReason == logReasonGatewayGap {
 		reason = logReasonGatewayGap
 	}
-	st.incomplete = true
-	st.incompleteReason = reason
+	// A mark from an owner read does not show that this replica wrote the
+	// log. Only the store knows whether another replica finished it, so the
+	// run keeps the incompleteness this gateway already published.
+	quiet := st.ownerReadTerminal
+	if !quiet {
+		st.incomplete = true
+		st.incompleteReason = reason
+	}
 	ackSeq := st.ackSeq
 	st.mu.Unlock()
 
 	h.log().Warn("abandoning a run's log", "run_id", runID, "controller", ns+"/"+name,
 		"reason", reason, "ack_seq", ackSeq, "queued", len(pending), "queued_bytes", freedBytes,
-		"stranded", len(stranded), "draining", wasDraining)
+		"stranded", len(stranded), "draining", wasDraining, "owner_read_terminal", quiet)
 
 	if hbCancel != nil {
 		hbCancel()
@@ -2069,9 +2121,12 @@ func (h *BusHandler) abandonRun(runID string, st *runLogState) {
 		h.sendLogAck(ns, name, runID, seq, logAckStatusRejected, logReasonFinalizeDeadline, 0)
 	}
 
-	h.publishRunLogBestEffort(ns, name, runID, st.jobPath, map[string]interface{}{
-		"incomplete": true, "incomplete_reason": reason,
-	})
+	// The recorder's finalizeStaleLogs marks a short log of a quiet run.
+	if !quiet {
+		h.publishRunLogBestEffort(ns, name, runID, st.jobPath, map[string]interface{}{
+			"incomplete": true, "incomplete_reason": reason,
+		})
+	}
 
 	// Every abandoned and stranded sequence has its REJECTED ack now. The
 	// tombstone gives each later chunk the same answer. A run with no
