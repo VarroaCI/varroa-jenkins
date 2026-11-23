@@ -411,7 +411,9 @@ func TestOnLogChunkOwnershipTransferInvalidatesCache(t *testing.T) {
 	h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 0, Data: []byte("x"), CellInstance: "inst1"})
 	waitForLogAcks(t, sender, 1)
 
-	// A relayed granted claim moves the run to a new instance.
+	// A relayed granted claim moves the run to a new instance. The ledger
+	// granted that claim, so it names the new instance too.
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
 	h.ownerCache.observeGrant(runID, "core", "ns1", "cell1", "inst2")
 
 	h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 1, Data: []byte("y"), CellInstance: "inst1"})
