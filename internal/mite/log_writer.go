@@ -731,7 +731,8 @@ func (h *BusHandler) warnStalledDrainLocked(runID string, st *runLogState, now t
 // attempt: a failure is logged and never retried here. The 30-second
 // heartbeat cadence, and the recorder's own finalize sweep, are the
 // backstops for a lost publish — the sweep marks a stalled run
-// not-finalized rather than leaving it unmarked forever.
+// not-finalized rather than leaving it unmarked forever. It answers false
+// only when the publish failed, so publishFinalized can send it again.
 //
 // The envelope carries the run's job path and the tenant that the
 // ordered event group resolves through CellTenantResolver. The recorder
@@ -739,9 +740,9 @@ func (h *BusHandler) warnStalledDrainLocked(runID string, st *runLogState, now t
 // into the live run notification. The BFF keys its stream on that tenant.
 // It drops a notification with an empty job path. Without the job path,
 // an open build page misses each finalized and incomplete change.
-func (h *BusHandler) publishRunLogBestEffort(ns, name, runID, jobPath string, payload map[string]interface{}) {
+func (h *BusHandler) publishRunLogBestEffort(ns, name, runID, jobPath string, payload map[string]interface{}) bool {
 	if h.publisher == nil {
-		return
+		return true
 	}
 	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, jobPath)
 	if tenant == "" {
@@ -763,11 +764,36 @@ func (h *BusHandler) publishRunLogBestEffort(ns, name, runID, jobPath string, pa
 	data, err := json.Marshal(env)
 	if err != nil {
 		h.log().Error("marshal run.log envelope failed", "run_id", runID, "error", err)
-		return
+		return true
 	}
 	subject := bus.BuildSubject(h.cluster, ns, name)
 	if _, err := h.publisher.PublishJetStream(subject, data); err != nil {
 		h.log().Warn("run.log publish failed", "run_id", runID, "error", err)
+		return false
+	}
+	return true
+}
+
+// publishFinalized publishes the run.log envelope that sets finalized
+// true. A failed publish is sent again with the append backoff until it
+// succeeds, ctx ends, or one finalize wait passes. After that wait the
+// recorder's finalizeStaleLogs sweep can mark the run itself, and a late
+// marker changes nothing. The recorder's merge never lowers a stored
+// finalized true, so a repeat of the marker changes nothing either.
+func (h *BusHandler) publishFinalized(ctx context.Context, ns, name, runID, jobPath string) {
+	ctx, cancel := context.WithTimeout(ctx, h.runFinalizeWait())
+	defer cancel()
+	delay := logAppendBackoffFloor
+	for !h.publishRunLogBestEffort(ns, name, runID, jobPath, map[string]interface{}{"finalized": true}) {
+		select {
+		case <-ctx.Done():
+			h.log().Warn("run.log publish of the finalized marker failed, the retry ended", "run_id", runID, "error", ctx.Err())
+			return
+		case <-time.After(jitteredDelay(delay)):
+		}
+		if delay *= 2; delay > logAppendBackoffCap {
+			delay = logAppendBackoffCap
+		}
 	}
 }
 
@@ -909,6 +935,7 @@ func (h *BusHandler) drainRun(ctx context.Context, runID string, st *runLogState
 func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, admitted time.Time) appendOutcome {
 	st.mu.Lock()
 	established := st.established
+	wasFinal := st.finalDurable
 	st.mu.Unlock()
 	if !established {
 		for {
@@ -928,7 +955,14 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 		}
 		st.mu.Lock()
 		st.established = true
+		recoveredFinal := !wasFinal && st.finalDurable
 		st.mu.Unlock()
+		if recoveredFinal {
+			// The gateway that wrote the final entry can stop before its
+			// marker reaches the bus. The marker states only what the store
+			// holds, so it goes out before this chunk's ack.
+			h.publishFinalized(ctx, ns, name, runID, st.jobPath)
+		}
 	}
 
 	if proceed, outcome := h.adoptWriter(ctx, runID, ns, name, st, chunk); !proceed {
@@ -1011,6 +1045,16 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 		finalWritten = fw
 	}
 
+	if finalWritten {
+		// The marker goes out before the STORED ack. A gateway that stops
+		// before the marker leaves the final chunk with the mite, and
+		// restart recovery of its next send publishes the marker.
+		h.publishFinalized(ctx, ns, name, runID, st.jobPath)
+		// The build has ended: clear any live tail lease. No control
+		// message is pushed — there is nothing left to tail.
+		h.clearTailLeaseOnFinal(chunk.RunId)
+	}
+
 	h.ackStored(ns, name, runID, st)
 
 	if wasFinalDurable {
@@ -1018,12 +1062,6 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 		// C1's merge keeps a stored finalized true, so this only ever
 		// widens incomplete, never narrows finalized.
 		h.publishRunLogBestEffort(ns, name, runID, st.jobPath, map[string]interface{}{"incomplete": true})
-	}
-	if finalWritten {
-		h.publishRunLogBestEffort(ns, name, runID, st.jobPath, map[string]interface{}{"finalized": true})
-		// The build has ended: clear any live tail lease. No control
-		// message is pushed — there is nothing left to tail.
-		h.clearTailLeaseOnFinal(chunk.RunId)
 	}
 	return appendDone
 }
