@@ -17,6 +17,14 @@ const (
 	ownerMatchTTL         = 30 * time.Minute
 	ownerRefuseTTL        = 60 * time.Second
 	ownerLookupTimeout    = 5 * time.Second
+
+	// ownerRefusedMax is the most callers that one entry marks as
+	// refused. ownerRefusedRereads is the most reads of an aged mark that
+	// one entry allows. A mark is aged ownerRefusedRereadAfter after the
+	// read that set it.
+	ownerRefusedMax         = 4
+	ownerRefusedRereads     = 3
+	ownerRefusedRereadAfter = 5 * time.Second
 )
 
 // ownerTuple is the ledger's answer to "who owns this run": the
@@ -32,10 +40,81 @@ type ownerTuple struct {
 // ownerCacheEntry is one decision the cache holds for a run_id. found
 // false means the ledger carries no intent row for the run — a policy
 // failure, cached the same as a foreign owner.
+//
+// refused maps the ownerCallerKey of each caller that a ledger read behind
+// this entry refused to the time of that read. It holds at most
+// ownerRefusedMax callers. rereads counts the reads of an aged mark. Both
+// live until refusedUntil, ownerRefuseTTL after the last read that marked
+// a caller, and they do not change expires. A match entry can therefore
+// hold marks and keep its match lifetime. A fresh answer that names the
+// same owner tuple keeps live marks. A match read, a grant, a miss, a new
+// owner tuple, and the end of refusedUntil start them again. The map is
+// never modified after the entry is stored.
 type ownerCacheEntry struct {
-	found   bool
-	tuple   ownerTuple
-	expires time.Time
+	found        bool
+	tuple        ownerTuple
+	expires      time.Time
+	refused      map[string]time.Time
+	rereads      int
+	refusedUntil time.Time
+}
+
+// needsRead reports whether a cached foreign decision for the caller key
+// must read the ledger before it refuses the caller. A move with no claim
+// can leave the entry stale. A caller with no mark reads while the set has
+// room. A marked caller reads again only when its mark is aged and the
+// entry still allows a re-read, because the ledger can name that caller
+// after the read that refused it. Every other foreign decision is final.
+func (e ownerCacheEntry) needsRead(key string, now time.Time) bool {
+	if !now.Before(e.refusedUntil) {
+		return true
+	}
+	at, marked := e.refused[key]
+	if !marked {
+		return len(e.refused) < ownerRefusedMax
+	}
+	return e.rereads < ownerRefusedRereads && now.Sub(at) >= ownerRefusedRereadAfter
+}
+
+// refusalEntry returns the entry for a fresh answer that names tuple and
+// refuses caller. found is false for a missing intent row. When prev names
+// the same tuple, the entry keeps the later expiry of prev, so a foreign
+// caller's read never shortens the owner's match. It also keeps the live
+// marks and the re-read count of prev. A caller that prev marked counts
+// one re-read. A new caller gets a mark only while the set holds fewer
+// than ownerRefusedMax callers. A caller past that bound gets prev back
+// unchanged, so its read does not extend the marks.
+func refusalEntry(prev ownerCacheEntry, hadPrev, found bool, tuple ownerTuple, caller string, now time.Time) ownerCacheEntry {
+	entry := ownerCacheEntry{
+		found: found, tuple: tuple, expires: now.Add(ownerRefuseTTL),
+		refused: make(map[string]time.Time, ownerRefusedMax), refusedUntil: now.Add(ownerRefuseTTL),
+	}
+	if hadPrev && prev.found == found && prev.tuple == tuple {
+		if prev.expires.After(entry.expires) {
+			entry.expires = prev.expires
+		}
+		if now.Before(prev.refusedUntil) {
+			for k, at := range prev.refused {
+				entry.refused[k] = at
+			}
+			entry.rereads = prev.rereads
+		}
+	}
+	if _, marked := entry.refused[caller]; marked {
+		entry.rereads++
+	} else if len(entry.refused) >= ownerRefusedMax {
+		return prev
+	}
+	entry.refused[caller] = now
+	return entry
+}
+
+// ownerCallerKey names the caller of an owner check by the stream
+// identity that the gateway authenticated. It holds no cell instance: the
+// sender stamps the instance on each chunk, so a sender that changes it
+// must not get a new mark, and a new ledger read, for each value.
+func ownerCallerKey(cluster, namespace, cell string) string {
+	return cluster + "/" + namespace + "/" + cell
 }
 
 // ownerCacheItem is the container list.Element.Value holds, so the LRU
@@ -233,8 +312,11 @@ func (c *ownerCache) doLookup(ctx context.Context, requester ledgerRequester, ru
 		return ownerCacheEntry{}, fmt.Errorf("recorder owner lookup failed: %s", resp.Error)
 	}
 
+	caller := ownerCallerKey(cluster, namespace, cell)
+	prev, hadPrev := c.peek(runID)
+	now := time.Now()
 	if !resp.Found {
-		entry := ownerCacheEntry{found: false, expires: time.Now().Add(ownerRefuseTTL)}
+		entry := refusalEntry(prev, hadPrev, false, ownerTuple{}, caller, now)
 		c.set(runID, entry)
 		return entry, nil
 	}
@@ -244,11 +326,10 @@ func (c *ownerCache) doLookup(ctx context.Context, requester ledgerRequester, ru
 		status: resp.Status, anchorUnixMs: resp.AnchorUnixMs,
 	}
 	matched := tuple.cluster == cluster && tuple.namespace == namespace && tuple.cell == cell && tuple.instance == instance
-	ttl := ownerRefuseTTL
-	if matched {
-		ttl = ownerMatchTTL
+	entry := ownerCacheEntry{found: true, tuple: tuple, expires: now.Add(ownerMatchTTL)}
+	if !matched {
+		entry = refusalEntry(prev, hadPrev, true, tuple, caller, now)
 	}
-	entry := ownerCacheEntry{found: true, tuple: tuple, expires: time.Now().Add(ttl)}
 	c.set(runID, entry)
 	return entry, nil
 }
@@ -281,6 +362,18 @@ func decideOwner(entry ownerCacheEntry, cluster, namespace, cell, instance strin
 // runID, consulting the cache first and issuing one coalesced lookup on a
 // miss. It returns the ledger's tuple alongside the decision so a caller
 // can read the run's status and finalize-wait anchor from a match.
+//
+// A cached match admits the caller. A cached foreign decision takes the
+// coalesced lookup first when ownerCacheEntry.needsRead says so: a resume
+// or a takeover moves the owner with no claim, so a match of the old owner
+// or a refusal read for another caller can name an owner that the ledger
+// no longer holds. The lookup marks its own caller and never shortens a
+// match. One set of marks therefore costs at most ownerRefusedMax lookups
+// for new marks and ownerRefusedRereads lookups for aged marks, and a
+// lookup in flight is shared. The lookup runs on the caller's goroutine,
+// the stream read loop for a chunk, and lasts at most ownerLookupTimeout.
+// A failed lookup writes no entry and answers ownerUnknown, never
+// ownerForeign.
 func (h *BusHandler) checkOwner(ctx context.Context, cluster, namespace, cell, instance, runID string) (ownerDecision, ownerTuple) {
 	if h.ownerCache == nil {
 		// No cache configured (e.g. a hand-built BusHandler in a test
@@ -289,7 +382,10 @@ func (h *BusHandler) checkOwner(ctx context.Context, cluster, namespace, cell, i
 		return ownerUnknown, ownerTuple{}
 	}
 	if entry, ok := h.ownerCache.get(runID); ok {
-		return decideOwner(entry, cluster, namespace, cell, instance), entry.tuple
+		decision := decideOwner(entry, cluster, namespace, cell, instance)
+		if decision == ownerMatched || !entry.needsRead(ownerCallerKey(cluster, namespace, cell), time.Now()) {
+			return decision, entry.tuple
+		}
 	}
 	entry, err := h.ownerCache.lookup(ctx, h.ledger, runID, cluster, namespace, cell, instance)
 	if err != nil {
