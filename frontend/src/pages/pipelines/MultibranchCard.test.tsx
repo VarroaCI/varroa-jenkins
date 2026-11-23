@@ -108,11 +108,11 @@ describe("MultibranchCard", () => {
     mockListJobBranches.mockResolvedValue(inventory);
     renderCard();
 
-    const result = await screen.findByRole("link", { name: "SUCCESS" });
+    const result = await screen.findByRole("link", { name: "Passed" });
     expect(result.getAttribute("href")).toBe("/pipelines/alpha/alpha%2Fapp%2Fmain/run-main");
   });
 
-  it("names a duplicate latest run DUPLICATE, not its stored result", async () => {
+  it("names a duplicate latest run Duplicate, not its stored result", async () => {
     mockListJobBranches.mockResolvedValue({
       ...inventory,
       branches: [
@@ -121,8 +121,8 @@ describe("MultibranchCard", () => {
     });
     renderCard();
 
-    expect(await screen.findByRole("link", { name: "DUPLICATE" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "ABORTED" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Duplicate" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Aborted" })).not.toBeInTheDocument();
   });
 
   it("states when the cell has not exported the job yet", async () => {

@@ -1,4 +1,5 @@
 import type { FleetRunRow } from "../../types";
+import { runLabel } from "./runGlyph";
 import { runJobName, titleIsJob } from "./runRowText";
 
 /** FOLD_MAX is the most runs that one fold holds. A longer run of matching rows starts a new fold. */
@@ -11,15 +12,11 @@ export type FeedItem =
 
 const SEP = "\u001F";
 
-/** RESULT_TEXT names the outcome of a fold in its second line. */
-const RESULT_TEXT: Record<string, string> = {
-  SUCCESS: "all passed",
-  FAILURE: "all failed",
-  UNSTABLE: "all unstable",
-  ABORTED: "all aborted",
-  INTERRUPTED: "all interrupted",
-  NOT_BUILT: "none built",
-};
+/** foldOutcome names the outcome of a fold from the state label of its newest run. */
+function foldOutcome(newest: FleetRunRow): string {
+  if (newest.result === "NOT_BUILT") return "none built";
+  return `all ${runLabel(newest).toLowerCase()}`;
+}
 
 /**
  * foldKey names the runs that may fold together. A run has no key unless it is
@@ -85,7 +82,7 @@ export function foldTitle(runs: readonly FleetRunRow[]): string {
  */
 export function foldSecondLine(runs: readonly FleetRunRow[]): string {
   const newest = runs[0];
-  const outcome = RESULT_TEXT[newest.result ?? ""] ?? `all ${(newest.result ?? "").toLowerCase()}`;
+  const outcome = foldOutcome(newest);
   const numbers = runs.map((r) => r.buildNumber).filter((n): n is number => n !== undefined);
   const range =
     numbers.length === runs.length ? ` · #${Math.min(...numbers)}–#${Math.max(...numbers)}` : "";

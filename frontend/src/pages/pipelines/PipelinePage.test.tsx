@@ -7,6 +7,7 @@ import { ApiError } from "../../hooks/useApi";
 import type { RunNotification } from "../../types";
 import PipelinePage from "./PipelinePage";
 import { DUPLICATE_RUN_NOTE } from "../../components/runs/runGlyph";
+import styles from "./PipelinePage.module.css";
 
 const mockGetPipelineJob = vi.fn();
 const mockListRuns = vi.fn();
@@ -308,25 +309,50 @@ describe("PipelinePage", () => {
     expect(triggers.compareDocumentPosition(off) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("drops the duplicate Interrupted note", async () => {
+  it("names an interrupted run once, in its result badge", async () => {
     mockGetPipelineJob.mockResolvedValue(jobDetail());
     mockListRuns.mockResolvedValue({ items: [runFixture({ result: "INTERRUPTED" })] });
     renderPage();
     const table = await screen.findByRole("table");
-    expect(within(table).getByText("INTERRUPTED")).toBeInTheDocument();
-    expect(within(table).queryByText("Interrupted")).not.toBeInTheDocument();
+    expect(within(table).getAllByText("Interrupted")).toHaveLength(1);
+    expect(within(table).queryByText("INTERRUPTED")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["SUCCESS", "Passed", "resultOk"],
+    ["FAILURE", "Failed", "resultBad"],
+    ["UNSTABLE", "Unstable", "resultWarn"],
+    ["ABORTED", "Aborted", "resultIdle"],
+    ["INTERRUPTED", "Interrupted", "resultBad"],
+    ["NOT_BUILT", "Not built", "resultIdle"],
+  ] as const)("shows the %s result badge as %s with the %s class", async (result, label, cls) => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+    mockListRuns.mockResolvedValue({ items: [runFixture({ result })] });
+    renderPage();
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText(label)).toHaveClass(styles[cls]);
+  });
+
+  it("labels the Result options with the run state words", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+    mockListRuns.mockResolvedValue({ items: [runFixture()] });
+    renderPage();
+    await screen.findByRole("table");
+    const select = screen.getByLabelText("Result") as HTMLSelectElement;
+    const labels = within(select).getAllByRole("option").map((o) => o.textContent);
+    expect(labels.slice(1)).toEqual(["Passed", "Failed", "Unstable", "Aborted", "Interrupted", "Not built"]);
   });
 
   it.each([
     ["with no result", undefined],
     ["with a stored result", "ABORTED"],
-  ])("shows the DUPLICATE badge and its note for a duplicate run %s", async (_name, result) => {
+  ])("shows the Duplicate badge and its note for a duplicate run %s", async (_name, result) => {
     mockGetPipelineJob.mockResolvedValue(jobDetail());
     mockListRuns.mockResolvedValue({ items: [runFixture({ status: "DUPLICATE", result })] });
     renderPage();
     const table = await screen.findByRole("table");
-    expect(within(table).getByText("DUPLICATE")).toHaveAttribute("title", DUPLICATE_RUN_NOTE);
-    expect(within(table).queryByText("ABORTED")).not.toBeInTheDocument();
+    expect(within(table).getByText("Duplicate")).toHaveAttribute("title", DUPLICATE_RUN_NOTE);
+    expect(within(table).queryByText("Aborted")).not.toBeInTheDocument();
   });
 
   it("omits the build health row for a multibranch job", async () => {

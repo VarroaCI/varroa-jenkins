@@ -7,6 +7,7 @@ import { RunRow } from "../../components/runs/RunRow";
 import { RunFoldRow } from "../../components/runs/RunFoldRow";
 import { foldRuns, type FeedItem } from "../../components/runs/runFold";
 import { displayActor } from "../../components/runs/runActor";
+import { runGlyphLabel, runResultLabel } from "../../components/runs/runGlyph";
 import { RecoveryState } from "../../components/RecoveryState";
 import { Button } from "../../components/Button";
 import { useToast } from "../../components/Toast";
@@ -72,14 +73,13 @@ const SINCE_OPTIONS: FilterOption[] = [
 ];
 
 const STATUS_OPTIONS: FilterOption[] = [
-  { value: "QUEUED", label: "Queued" },
-  { value: "RUNNING", label: "Running" },
-  { value: "WAITING_INPUT", label: "Waiting for input" },
-  { value: "SUCCESS", label: "Success" },
-  { value: "FAILURE", label: "Failure" },
-  { value: "UNSTABLE", label: "Unstable" },
-  { value: "ABORTED", label: "Aborted" },
-  { value: "INTERRUPTED", label: "Interrupted" },
+  { value: "QUEUED", label: runGlyphLabel("queued") },
+  { value: "RUNNING", label: runGlyphLabel("running") },
+  { value: "WAITING_INPUT", label: runGlyphLabel("waiting") },
+  ...["SUCCESS", "FAILURE", "UNSTABLE", "ABORTED", "INTERRUPTED"].map((value) => ({
+    value,
+    label: runResultLabel(value),
+  })),
 ];
 
 /** distinctWith answers the distinct non-empty values of a list, with the active value kept. */

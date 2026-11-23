@@ -39,9 +39,9 @@ describe("JobHealthCard", () => {
     const strip = screen.getByRole("list", { name: "Recent results, oldest first" });
     const links = within(strip).getAllByRole("link");
     expect(links.map((l) => l.getAttribute("aria-label"))).toEqual([
-      "#1 FAILURE",
-      "#2 INTERRUPTED, not counted",
-      "#3 SUCCESS",
+      "#1 Failed",
+      "#2 Interrupted, not counted",
+      "#3 Passed",
     ]);
     expect(links[0]).toHaveAttribute("href", "/pipelines/acme/payments%2Fapp/run-1");
   });
@@ -49,7 +49,7 @@ describe("JobHealthCard", () => {
   it("labels each duration bar with its build, duration, and result", () => {
     const { container } = renderCard({ health: counted(2, 3), trend });
     const bars = Array.from(container.querySelectorAll("rect > title")).map((t) => t.textContent);
-    expect(bars).toEqual(["#1 · 2m 0s · FAILURE", "#2 · 1m 0s · INTERRUPTED", "#3 · 3m 0s · SUCCESS"]);
+    expect(bars).toEqual(["#1 · 2m 0s · Failed", "#2 · 1m 0s · Interrupted", "#3 · 3m 0s · Passed"]);
     expect(screen.getByRole("img", { name: /Build durations, oldest first\. Longest 3m 0s\./ })).toBeInTheDocument();
   });
 

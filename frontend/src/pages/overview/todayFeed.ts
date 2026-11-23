@@ -1,6 +1,6 @@
 import type { ActivityEvent, FleetRunGroup, FleetRunRow, FleetTriggerKind } from "../../types";
 import { repeatKey } from "../../components/activityTimeline.util";
-import { runGlyphLabel } from "../../components/runs/runGlyph";
+import { runLabel } from "../../components/runs/runGlyph";
 import { runActorText } from "../../components/runs/runRowText";
 import { stripTenantFolder } from "../pipelines/jobPath";
 import { hhmm } from "./attentionItems";
@@ -55,25 +55,14 @@ export interface DayFeed {
   other?: OtherRow;
 }
 
-const RESULT_WORDS: Record<string, string> = {
-  SUCCESS: "passed",
-  FAILURE: "failed",
-  UNSTABLE: "unstable",
-  ABORTED: "aborted",
-  INTERRUPTED: "interrupted",
-  NOT_BUILT: "not built",
-};
-
-/** resultWord names a finished result in the words of the feed. */
-export function resultWord(result?: string): string {
-  if (!result) return "running";
-  return RESULT_WORDS[result] ?? result.toLowerCase().replace(/_/g, " ");
-}
-
-/** runWord names one run in the words of the feed. A DUPLICATE run reads duplicate, whatever its result. */
+/**
+ * runWord names one run in the words of the feed: the state label of the run
+ * in lower case. A DUPLICATE run reads duplicate, whatever its result. Any
+ * other run with no result reads running.
+ */
 export function runWord(r: { status: string; result?: string }): string {
-  if (r.status === "DUPLICATE") return runGlyphLabel("duplicate").toLowerCase();
-  return resultWord(r.result);
+  if (r.status !== "DUPLICATE" && !r.result) return "running";
+  return runLabel(r).toLowerCase().replace(/_/g, " ");
 }
 
 /** isHumanRun reports whether a person started the run. */

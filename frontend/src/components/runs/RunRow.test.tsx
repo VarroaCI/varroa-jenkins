@@ -65,7 +65,7 @@ describe("RunRow", () => {
 
   it("names the state in the status cell", () => {
     renderRow(row());
-    expect(screen.getByLabelText("Success")).toBeInTheDocument();
+    expect(screen.getByLabelText("Passed")).toBeInTheDocument();
   });
 
   it("shows the cluster chip only for a run on another cluster", () => {

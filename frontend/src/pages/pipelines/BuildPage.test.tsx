@@ -6,6 +6,7 @@ import type { InitialEntry } from "react-router-dom";
 import BuildPage, { testsSummary } from "./BuildPage";
 import { ApiError } from "../../hooks/useApi";
 import { DUPLICATE_RUN_NOTE } from "../../components/runs/runGlyph";
+import styles from "./BuildPage.module.css";
 import type { RunDetail, RunInput, RunScript, RunTestListResponse } from "../../types";
 
 const mockGetRun = vi.fn();
@@ -982,6 +983,22 @@ describe("BuildPage — orientation", () => {
     renderPage();
     await screen.findByText(/Build #42/);
     await waitFor(() => expect(document.title).toMatch(/^Running · #42 /));
+  });
+
+  it.each([
+    ["COMPLETED", "SUCCESS", "Passed", "tone_ok"],
+    ["COMPLETED", "FAILURE", "Failed", "tone_bad"],
+    ["COMPLETED", "UNSTABLE", "Unstable", "tone_warn"],
+    ["COMPLETED", "ABORTED", "Aborted", "tone_idle"],
+    ["COMPLETED", "INTERRUPTED", "Interrupted", "tone_bad"],
+    ["RUNNING", undefined, "Running", "tone_idle"],
+  ] as const)("shows a %s run with result %s as the %s pill with the %s class", async (status, result, label, tone) => {
+    mockGetRun.mockResolvedValue(baseRun({ status, result }));
+    const { container } = renderPage();
+    await screen.findByText(/Build #42/);
+    const pill = container.querySelector(`.${styles.statusPill}`);
+    expect(pill).toHaveTextContent(label);
+    expect(pill).toHaveClass(styles[tone]);
   });
 
   it("opens the tab the URL names", async () => {

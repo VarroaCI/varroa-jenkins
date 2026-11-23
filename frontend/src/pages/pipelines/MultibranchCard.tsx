@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { listJobBranches, scanMultibranch } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { runLabel } from "../../components/runs/runGlyph";
 import type { BranchScan, JobBranchHead, JobBranchList, PipelineItemKind } from "../../types";
 import styles from "./MultibranchCard.module.css";
 
@@ -31,17 +32,17 @@ function shortRevision(revision?: string): string {
   return revision ? revision.slice(0, 7) : "";
 }
 
-/** RunResult shows the latest run of a head, linked to its build page. */
+/**
+ * RunResult shows the state word of the latest run of a head, linked to its
+ * build page. A DUPLICATE run reads Duplicate in place of any stored result.
+ */
 function RunResult({ tenant, head }: { tenant: string; head: JobBranchHead }) {
   if (!head.lastRun) {
     return <span className={styles.dim}>No builds</span>;
   }
-  // A DUPLICATE run shows its status in place of any stored result.
-  const label =
-    head.lastRun.status === "DUPLICATE" ? head.lastRun.status : (head.lastRun.result ?? head.lastRun.status);
   return (
     <Link to={runHref(tenant, head.jobPath, head.lastRun.runId)} className={`${styles.headLink} ${styles.result}`}>
-      {label}
+      {runLabel(head.lastRun)}
     </Link>
   );
 }

@@ -66,6 +66,7 @@ import {
   isTerminalRunStatus,
   runGlyph,
   runGlyphLabel,
+  runTone,
 } from "../../components/runs/runGlyph";
 import styles from "./BuildPage.module.css";
 
@@ -230,36 +231,21 @@ function useRunRecord(runId: string | undefined, requested: boolean, streamOpen:
   return { run, status, refetch };
 }
 
-const RESULT_LABELS: Record<string, string> = {
-  SUCCESS: "Passed",
-  UNSTABLE: "Unstable",
-  FAILURE: "Failed",
-  ABORTED: "Aborted",
-  INTERRUPTED: "Interrupted",
-};
-const RESULT_TONE: Record<string, "ok" | "bad" | "warn" | "idle"> = {
-  SUCCESS: "ok",
-  UNSTABLE: "warn",
-  FAILURE: "bad",
-  ABORTED: "idle",
-  INTERRUPTED: "bad",
-};
+type PillTone = "ok" | "bad" | "warn" | "idle";
 
 /**
- * describeRunState names the header pill. A COMPLETED run shows its result.
- * Any other status shows the label of its own status mark, so a DUPLICATE
- * run with a stored result still reads Duplicate. A status with no mark
- * shows its own name.
+ * describeRunState names the header pill. The label and the tone come from
+ * the status mark of the run, so a DUPLICATE run with a stored result still
+ * reads Duplicate. The pill has no info tone, so a run in progress shows the
+ * idle tone. A state with no mark shows its raw result or status.
  */
-function describeRunState(run: RunDetail): { label: string; tone: "ok" | "bad" | "warn" | "idle" } {
-  if (run.status !== "COMPLETED") {
-    const glyph = runGlyph({ status: run.status });
-    return { label: glyph === "other" ? run.status : runGlyphLabel(glyph), tone: "idle" };
+function describeRunState(run: RunDetail): { label: string; tone: PillTone } {
+  const glyph = runGlyph({ status: run.status, result: run.result });
+  if (glyph === "other") {
+    return { label: run.status === "COMPLETED" ? (run.result ?? "Completed") : run.status, tone: "idle" };
   }
-  if (run.result && RESULT_LABELS[run.result]) {
-    return { label: RESULT_LABELS[run.result], tone: RESULT_TONE[run.result] };
-  }
-  return { label: run.result ?? "Completed", tone: "idle" };
+  const tone = runTone(glyph);
+  return { label: runGlyphLabel(glyph), tone: tone === "info" ? "idle" : tone };
 }
 
 function isTerminal(run: RunDetail): boolean {

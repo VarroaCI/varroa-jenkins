@@ -21,6 +21,7 @@
 .failure { color: var(--bad-text); background: var(--bad-soft); }
 .unstable { color: var(--warn-text); background: var(--warn-soft); }
 .aborted { color: var(--text-2); background: var(--surface-3); }
+.notBuilt { color: var(--text-2); background: var(--surface-3); }
 .interrupted { color: var(--warn-text); background: var(--warn-soft); }
 .running { color: var(--info-text); background: var(--info-soft); }
 .queued { color: var(--idle-text); background: var(--idle-soft); }

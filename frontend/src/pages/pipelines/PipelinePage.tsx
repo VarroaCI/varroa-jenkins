@@ -25,7 +25,15 @@ import { JobBadgeCard } from "./JobBadgeCard";
 import { forgeFileHref, forgeTreeHref } from "./forgeLink";
 import { RevisionLink } from "./RevisionLink";
 import { TRIGGER_LABEL, changeRequestLabel, queueWaitMs, safeWebUrl, waitCountText } from "./runMeta";
-import { DUPLICATE_RUN_NOTE, isTerminalRunStatus } from "../../components/runs/runGlyph";
+import {
+  DUPLICATE_RUN_NOTE,
+  isTerminalRunStatus,
+  runGlyph,
+  runLabel,
+  runResultLabel,
+  runTone,
+  type RunTone,
+} from "../../components/runs/runGlyph";
 import type {
   ChangeRequest,
   RunNotification,
@@ -56,22 +64,17 @@ function formatDuration(ms: number | undefined): string {
 }
 
 /** RESULT_OPTIONS lists the results a build can carry, for the Result filter. */
-const RESULT_OPTIONS: FilterOption[] = [
-  { value: "SUCCESS", label: "Success" },
-  { value: "FAILURE", label: "Failure" },
-  { value: "UNSTABLE", label: "Unstable" },
-  { value: "ABORTED", label: "Aborted" },
-  { value: "INTERRUPTED", label: "Interrupted" },
-  { value: "NOT_BUILT", label: "Not built" },
-];
+const RESULT_OPTIONS: FilterOption[] = ["SUCCESS", "FAILURE", "UNSTABLE", "ABORTED", "INTERRUPTED", "NOT_BUILT"].map(
+  (value) => ({ value, label: runResultLabel(value) }),
+);
 
-const RESULT_CLASS: Record<string, string> = {
-  SUCCESS: styles.resultOk,
-  FAILURE: styles.resultBad,
-  UNSTABLE: styles.resultWarn,
-  ABORTED: styles.resultIdle,
-  INTERRUPTED: styles.resultBad,
-  NOT_BUILT: styles.resultIdle,
+/** TONE_CLASS colours a result badge. A badge names a finished run, so an info tone takes the idle fill. */
+const TONE_CLASS: Record<RunTone, string> = {
+  ok: styles.resultOk,
+  bad: styles.resultBad,
+  warn: styles.resultWarn,
+  idle: styles.resultIdle,
+  info: styles.resultIdle,
 };
 
 /** PrChip marks a run that builds a pull request. Its visible text is also its
@@ -95,20 +98,20 @@ function PrChip({ changeRequest }: { changeRequest: ChangeRequest }) {
 }
 
 /**
- * ResultBadge shows a run's result code. A DUPLICATE run shows its status
- * in place of any stored result, so it never reads as a live run.
+ * ResultBadge shows a run's state word and tone. A DUPLICATE run shows its
+ * status in place of any stored result, so it never reads as a live run.
  */
 function ResultBadge({ status, result }: { status: string; result?: string }) {
-  if (status === "DUPLICATE") {
-    return (
-      <span className={`${styles.resultBadge} ${styles.resultIdle}`} title={DUPLICATE_RUN_NOTE}>
-        DUPLICATE
-      </span>
-    );
-  }
-  if (!result) return <span className={styles.dim}>—</span>;
-  const cls = RESULT_CLASS[result] ?? styles.resultIdle;
-  return <span className={`${styles.resultBadge} ${cls}`}>{result}</span>;
+  if (status !== "DUPLICATE" && !result) return <span className={styles.dim}>—</span>;
+  const glyph = runGlyph({ status, result });
+  return (
+    <span
+      className={`${styles.resultBadge} ${TONE_CLASS[runTone(glyph)]}`}
+      title={glyph === "duplicate" ? DUPLICATE_RUN_NOTE : undefined}
+    >
+      {runLabel({ status, result })}
+    </span>
+  );
 }
 
 /**
