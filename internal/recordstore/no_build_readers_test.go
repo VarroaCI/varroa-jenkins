@@ -317,7 +317,7 @@ func TestLookupOwnerExcludesAcceptedOnly(t *testing.T) {
 		t.Fatalf("apply run.trigger_accepted: %v", err)
 	}
 
-	resp, err := lookupOwner(ctx, pool, runID.String())
+	resp, err := lookupOwner(ctx, pool, ownerLookupRequest{RunID: runID.String()})
 	if err != nil {
 		t.Fatalf("lookupOwner: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestLookupOwnerExcludesAcceptedOnly(t *testing.T) {
 	if _, err := g.Apply(ctx, started); err != nil {
 		t.Fatalf("apply run.started: %v", err)
 	}
-	resp, err = lookupOwner(ctx, pool, runID.String())
+	resp, err = lookupOwner(ctx, pool, ownerLookupRequest{RunID: runID.String()})
 	if err != nil {
 		t.Fatalf("lookupOwner after run.started: %v", err)
 	}

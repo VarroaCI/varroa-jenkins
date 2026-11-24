@@ -134,8 +134,15 @@ type ownerCacheItem struct {
 }
 
 // ownerLookupRequest is the request body of a varroa.ledger.owner call.
+// Field names mirror internal/recordstore's ownerLookupRequest exactly.
+// The caller fields let the recorder name the replacement pod of a
+// controller with no cell role as the owner.
 type ownerLookupRequest struct {
-	RunID string `json:"runId"`
+	RunID     string `json:"runId"`
+	Cluster   string `json:"cluster,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Cell      string `json:"cell,omitempty"`
+	Instance  string `json:"instance,omitempty"`
 }
 
 // ownerLookupResponse is the reply body of a varroa.ledger.owner call.
@@ -454,7 +461,9 @@ func (c *ownerCache) readOwner(ctx context.Context, requester ledgerRequester, r
 // one stall stands for all the checks of the pause. The end of the
 // caller's own context starts no pause. A reply ends the pause.
 func (c *ownerCache) doLookup(ctx context.Context, requester ledgerRequester, runID, cluster, namespace, cell, instance string) (ownerCacheEntry, error) {
-	body, err := json.Marshal(ownerLookupRequest{RunID: runID})
+	body, err := json.Marshal(ownerLookupRequest{
+		RunID: runID, Cluster: cluster, Namespace: namespace, Cell: cell, Instance: instance,
+	})
 	if err != nil {
 		return ownerCacheEntry{}, err
 	}

@@ -95,6 +95,10 @@ type runInterruptCandidate struct {
 	// empty when the run recorded neither. The commit-status end needs them.
 	scmRevision string
 	scmURL      string
+	// generationZero is true when the run's intent was granted under
+	// placement generation zero, so a controller with no cell role owns
+	// the run. A run with no intent answers false.
+	generationZero bool
 }
 
 // livenessBaseline is the moved and silent tests' anchor: the recorder's
@@ -121,7 +125,10 @@ func livenessBaseline(c runInterruptCandidate) time.Time {
 // then the moved test, then the silent test, to one QUEUED or RUNNING
 // run. It answers the reason the first test that holds names. None of
 // these tests fires without a cell-liveness reading naming the run's own
-// owning cell instance.
+// owning cell instance. A RUNNING run that a controller with no cell role
+// owns reads controllerLiveness instead, so only the silent test applies.
+// A QUEUED run keeps every test: its build did not start, and the claim
+// path moves it when the next pod claims it again.
 //
 // The heartbeat-lost test applies last, to a RUNNING run alone, and
 // needs no liveness reading: no placement row, a live member, and an
@@ -134,7 +141,11 @@ func evaluateInterruption(now time.Time, c runInterruptCandidate, row tenantPlac
 		return reason, ok
 	}
 	anchor := livenessBaseline(c)
-	switch cellLivenessGone(now, anchor, c.cellInstance, row, exists, grace) {
+	reading := cellLivenessGone(now, anchor, c.cellInstance, row, exists, grace)
+	if c.generationZero && c.status == StatusRunning {
+		reading = controllerLiveness(now, anchor, row, exists)
+	}
+	switch reading {
 	case livenessConfirmedGone:
 		return ReasonCellLost, true
 	case livenessMoved:
@@ -152,6 +163,20 @@ func evaluateInterruption(now time.Time, c runInterruptCandidate, row tenantPlac
 		return ReasonHeartbeatLost, true
 	}
 	return "", false
+}
+
+// controllerLiveness is the liveness reading of a run that a controller
+// with no cell role owns. The controller holds such a run, not its pod:
+// Jenkins on the next pod resumes the build from the controller's volume,
+// and that pod takes the run over (adoptReplacementPod). A pod read that
+// proves the old pod gone therefore proves no loss, so neither the
+// confirmed test nor the moved test applies. The silent test applies to
+// the controller's current liveness signal.
+func controllerLiveness(now, anchor time.Time, row tenantPlacementLivenessRow, exists bool) livenessReading {
+	if exists && anchor.Before(now.Add(-silentHeartbeatWindow)) && currentInstanceGone(row, now, silentHeartbeatWindow) {
+		return livenessSilent
+	}
+	return livenessAlive
 }
 
 // provisionalMark reports whether reason names a mark the run's owner can
@@ -231,7 +256,7 @@ func scanCandidates(rows pgx.Rows) ([]runInterruptCandidate, error) {
 		)
 		if err := rows.Scan(&c.runID, &c.createdAt, &c.cluster, &c.namespace, &c.cell, &c.tenant, &c.jobPath,
 			&c.status, &c.buildNumber, &actor, &c.params, &c.heartbeatReceivedAt, &c.acceptedAt, &owningInstance,
-			&meshRaw, &c.scmRevision, &c.scmURL); err != nil {
+			&meshRaw, &c.scmRevision, &c.scmURL, &c.generationZero); err != nil {
 			return nil, fmt.Errorf("scan interrupt candidate: %w", err)
 		}
 		c.mesh = decodeMeshRecord(meshRaw)
@@ -257,7 +282,8 @@ const candidatesQuery = `
 	       COALESCE(NULLIF(ri.cell_instance, ''), r.payload->>'accepted_instance'),
 	       r.payload->'mesh',
 	       COALESCE(r.scm_revision, ''),
-	       COALESCE(NULLIF(r.payload->'run.source'->>'scm_url', ''), r.payload->'run.started'->'payload'->>'scm_url', '')
+	       COALESCE(NULLIF(r.payload->'run.source'->>'scm_url', ''), r.payload->'run.started'->'payload'->>'scm_url', ''),
+	       COALESCE(ri.placement_generation = 0, false)
 	FROM varroa.runs r
 	LEFT JOIN varroa.run_intents ri ON ri.run_id = r.run_id
 	WHERE r.status IN ('QUEUED', 'RUNNING')`

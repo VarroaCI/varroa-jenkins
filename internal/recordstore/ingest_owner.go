@@ -52,18 +52,12 @@ func runningFactKind(kind string) bool {
 // dispatch moves the intent under that lock, so the answer cannot go
 // stale before the write commits.
 //
-// A run that the claim granted under placement generation zero always
-// passes. Such a run belongs to a controller with no cell role. That
-// controller keeps its Jenkins home on a volume, so Jenkins on a
-// replacement pod resumes the build from disk with no new claim. The
-// intent then still names the old pod, and the test would drop every
-// stage and input of the resumed build. A cell keeps its Jenkins home on
-// ephemeral storage, so only a resume dispatch continues its build, and
-// the dispatch moves the intent first.
+// The test holds no exception for a controller with no cell role. Its
+// replacement pod resumes the build from its volume with no new claim,
+// and dispatch moves the run to that pod before this test runs
+// (adoptReplacementPod). A late fact from the replaced pod then fails
+// the test like a stale cell's fact.
 func senderOwnsRun(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) (bool, error) {
-	if intent.placementGeneration == 0 {
-		return true, nil
-	}
 	owner := intent.cellInstanceValue()
 	if env.CellInstance == "" || env.CellInstance == owner {
 		return true, nil

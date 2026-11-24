@@ -94,6 +94,21 @@ owner can still resume. Other pods keep the bounds above.
 When the operator confirms the lost pod gone, it also deletes the instance's idle agent pods within a
 few minutes. A pod that a stored build can still adopt stays.
 
+## A controller with no cell role
+
+A controller with no cell role keeps its Jenkins home on a volume. When its pod is replaced, Jenkins
+on the new pod resumes each running Pipeline build from that volume. The build keeps its run identifier and
+sends no new claim.
+
+The recorder gives the run to the new pod when the placement announcement names that pod as the
+controller's current pod. The first heartbeat, stage, or completion from the new pod moves the run.
+The gateway accepts the new pod's log and completion facts at once. An event from the replaced pod
+changes nothing after the move.
+
+A pod read of the replaced pod does not end such a build. Only `no-heartbeat`, after fifteen
+minutes with no live pod, and `heartbeat-lost` end it. A queued build keeps every reason. A cell
+build never moves this way, because a cell keeps its Jenkins home on ephemeral storage.
+
 ## The re-fire
 
 A build can be granted and never start, because its cell dies first. Such a build writes no run

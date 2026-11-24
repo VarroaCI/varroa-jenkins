@@ -48,7 +48,7 @@ type intentRow struct {
 // wait for a claim that refreshes the same intent, so the write compares
 // against the refreshed number and never writes a stale one back. A
 // claim locks the tenant's placement row first and the intent row
-// second; an ingest write locks the intent row first and never touches
+// second; an ingest write locks the intent row first and never locks
 // the placement row, so the two orders cannot form a cycle. It returns
 // ErrIntentMissing when the row is absent.
 func loadIntent(ctx context.Context, tx pgx.Tx, runID uuid.UUID) (*intentRow, error) {
