@@ -1966,14 +1966,19 @@ func (h *BusHandler) markGatewayGap(ns, name, runID string, st *runLogState, msg
 // ledger's tuple, which carries the run's status and anchor. It retries
 // an unverifiable answer until the finalize deadline. ok is false when
 // the deadline passed first.
+//
+// The read must begin after this call, because ownerStillMatches reads a
+// part stamp first. It therefore sends its own request and never joins a
+// lookup in flight. The read never drops the cached entry: only an answer
+// replaces it. A failed read, or a read in the owner lookup pause, leaves
+// the owner's match cached, so the owner's chunks are still admitted.
 func (h *BusHandler) confirmOwner(ctx context.Context, runID, ns, name, instance string, st *runLogState) (ownerDecision, ownerTuple, bool) {
 	for {
 		if h.ownerCache != nil {
-			h.ownerCache.invalidate(runID)
-		}
-		decision, tuple := h.checkOwner(ctx, h.cluster, ns, name, instance, runID)
-		if decision != ownerUnknown {
-			return decision, tuple, true
+			entry, err := h.ownerCache.readOwner(ctx, h.ledger, runID, h.cluster, ns, name, instance)
+			if err == nil {
+				return decideOwner(entry, h.cluster, ns, name, instance), entry.tuple, true
+			}
 		}
 		if deadlinePassed(st) {
 			return ownerUnknown, ownerTuple{}, false
@@ -1981,9 +1986,29 @@ func (h *BusHandler) confirmOwner(ctx context.Context, runID, ns, name, instance
 		select {
 		case <-ctx.Done():
 			return ownerUnknown, ownerTuple{}, false
-		case <-time.After(logAppendBackoffFloor):
+		case <-time.After(h.confirmOwnerRetryWait(time.Now())):
 		}
 	}
+}
+
+// confirmOwnerRetryWait is the wait of confirmOwner before its next read,
+// at now. In the owner lookup pause a read fails at once, so the wait
+// lasts until the end of the pause, at most ownerLookupTimeout. A reply
+// to another read can end the pause early, and the cap bounds the delay
+// of the next read to the time that one request could take. Otherwise
+// the wait is logAppendBackoffFloor.
+func (h *BusHandler) confirmOwnerRetryWait(now time.Time) time.Duration {
+	if h.ownerCache == nil {
+		return logAppendBackoffFloor
+	}
+	left := h.ownerCache.pauseLeft(now)
+	if left > ownerLookupTimeout {
+		return ownerLookupTimeout
+	}
+	if left < logAppendBackoffFloor {
+		return logAppendBackoffFloor
+	}
+	return left
 }
 
 // ownerRecheck answers the recheck that retryWrite runs before each

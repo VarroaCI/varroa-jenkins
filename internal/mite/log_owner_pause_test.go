@@ -33,6 +33,17 @@ func sendCell2Chunk(h *BusHandler, runID string) {
 	})
 }
 
+// runTerminal reports whether runID has a run state with a terminal mark.
+func runTerminal(h *BusHandler, runID string) bool {
+	st, ok := h.lookupRunState(runID)
+	if !ok {
+		return false
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.terminal
+}
+
 // TestOwnerCheckWithAnExpiredMatchAndAFailedReadAdmitsNothing proves that
 // a match past ownerMatchTTL never decides a check whose ledger read
 // fails. The COMPLETED event sets no deadline and keeps its whole group.
@@ -91,10 +102,9 @@ func TestOwnerCheckWithAnExpiredMatchAndAFailedReadAdmitsNothing(t *testing.T) {
 // TestOwnerLookupPauseAfterATimeout proves the pause. A request that
 // times out holds its caller for ownerLookupTimeout, so in an outage the
 // checks that follow send no request for ownerLookupPause. A check in the
-// pause answers as a failed request does: a cached match admits a chunk
-// and sets a COMPLETED event's deadline, and every other check answers
-// BUSY or sets no deadline. After the pause, the next check reads the
-// ledger again.
+// pause answers as a failed request does: a cached match admits a chunk,
+// every other chunk answers BUSY, and no COMPLETED event sets a deadline.
+// After the pause, the next check reads the ledger again.
 func TestOwnerLookupPauseAfterATimeout(t *testing.T) {
 	owner := newFakeOwnerRequester()
 	cachedRun, unknownRun := newTestRunID(), newTestRunID()
@@ -131,7 +141,9 @@ func TestOwnerLookupPauseAfterATimeout(t *testing.T) {
 	if err := h.OnBuildEvent("cell2", "ns1", 0, completedBuildEvent(cachedRun, time.Now())); err != nil {
 		t.Fatalf("OnBuildEvent: %v", err)
 	}
-	assertRunTerminal(t, h, cachedRun)
+	if runTerminal(h, cachedRun) {
+		t.Fatal("pause: expected no deadline from the cached match")
+	}
 	if calls := owner.callCount(); calls != 1 {
 		t.Fatalf("owner lookups = %d, want 1: no check in the pause sends a request", calls)
 	}
@@ -245,5 +257,137 @@ func TestOwnerLookupReplyEndsThePause(t *testing.T) {
 	}
 	if entry, ok := h.ownerCache.peek(runID); !ok || decideOwner(entry, "core", "ns1", "cell1", "inst1") != ownerMatched {
 		t.Fatalf("cached entry = %+v (ok=%v), want the match from the reply", entry, ok)
+	}
+}
+
+// TestStaleCompletionInTheOwnerLookupPauseKeepsTheNewOwnersLog proves that
+// a COMPLETED event of a stale cell in the pause sets no deadline from the
+// cached match of that cell. The recorder moved the run from cell2 to
+// cell1, and this replica missed the move signal. A deadline from the
+// stale match would end the new owner's log on this replica: the end
+// publishes a finalize-deadline mark, and the new owner's next chunk gets
+// REJECTED. The finalize wait is one hour, so the test runs a deadline
+// that the event set, as its timer would.
+func TestStaleCompletionInTheOwnerLookupPauseKeepsTheNewOwnersLog(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		oldChunk bool
+	}{
+		{name: "old owner's chunk on this replica", oldChunk: true},
+		{name: "no log state on this replica"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			newOwnerSender := &recordingSender{}
+			owner := newFakeOwnerRequester()
+			runID := newTestRunID()
+			owner.setAnswer(runID, cell2Owner())
+			h, oldOwnerSender := newCompletedOwnerTestHandler(t, owner, newOwnerSender)
+			pub := &fakePublisher{}
+			h.publisher = pub
+			h.logFinalizeWait = time.Hour
+			next := int64(0)
+			if tc.oldChunk {
+				sendCell2Chunk(h, runID)
+				if got := waitForLogAcks(t, oldOwnerSender, 1)[0]; got.Status != logAckStatusStored {
+					t.Fatalf("expected the old owner's chunk STORED, got %+v", got)
+				}
+				st, _ := h.lookupRunState(runID)
+				waitForIdleRun(t, st)
+				next = 1
+			} else {
+				h.ownerCache.observeGrant(runID, "core", "ns1", "cell2", "inst2")
+			}
+
+			owner.setAnswer(runID, ownerAnswer())
+			setOwnerLookupErr(owner, nats.ErrTimeout)
+			if err := h.OnBuildEvent("cell2", "ns1", 0, completedBuildEvent(runID, time.Now())); err != nil {
+				t.Fatalf("OnBuildEvent: %v", err)
+			}
+			setOwnerLookupErr(owner, nil)
+			endOwnerLookupPause(h)
+
+			sendInst1Chunk(h, runID, next, "b", false)
+			if got := waitForLogAcks(t, newOwnerSender, 1)[0]; got.Status != logAckStatusStored || got.AckSeq != next {
+				t.Fatalf("expected the new owner's chunk STORED at ack_seq %d, got %+v", next, got)
+			}
+			if st, ok := h.lookupRunState(runID); ok && runTerminal(h, runID) {
+				waitForIdleRun(t, st)
+				fireDeadline(h, runID, st)
+			}
+
+			sendInst1Chunk(h, runID, next+1, "c", false)
+			if got := waitForLogAcks(t, newOwnerSender, 2)[1]; got.Status != logAckStatusStored || got.AckSeq != next+1 {
+				t.Fatalf("expected the new owner's next chunk STORED at ack_seq %d, got %+v", next+1, got)
+			}
+			if n := incompletePublishes(pub); n != 0 {
+				t.Fatalf("published %d incomplete markers, want none: the new owner still writes the log", n)
+			}
+		})
+	}
+}
+
+// TestConfirmOwnerInTheOwnerLookupPauseKeepsTheCachedMatch proves that the
+// fresh owner read of the log writer drops no cached entry in the pause.
+// The read sends no request in the pause, so the owner's chunks are still
+// admitted from the cached match. The test holds a read record of the run
+// open, so each lap that drops the entry counts one change.
+func TestConfirmOwnerInTheOwnerLookupPauseKeepsTheCachedMatch(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerAnswer())
+	h := newLogTestHandler(t, owner, sender)
+	h.ownerCache.observeGrant(runID, "core", "ns1", "cell1", "inst1")
+	h.ownerCache.pauseLookups(time.Now())
+	began := h.ownerCache.beginRead(runID)
+	t.Cleanup(func() { h.ownerCache.endRead(runID) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, _, ok := h.confirmOwner(ctx, runID, "ns1", "cell1", "inst1", &runLogState{}); ok {
+		t.Fatal("expected no owner answer in the pause")
+	}
+	h.ownerCache.mu.Lock()
+	drops := h.ownerCache.reads[runID].changes - began
+	h.ownerCache.mu.Unlock()
+	if drops != 0 {
+		t.Fatalf("confirmOwner dropped the cached match on %d laps, want none", drops)
+	}
+	if calls := owner.callCount(); calls != 0 {
+		t.Fatalf("owner lookups = %d, want 0 in the pause", calls)
+	}
+
+	sendInst1Chunk(h, runID, 0, "a", false)
+	if got := waitForLogAcks(t, sender, 1)[0]; got.Status != logAckStatusStored {
+		t.Fatalf("expected the owner's chunk STORED from the cached match, got %+v", got)
+	}
+}
+
+// TestConfirmOwnerLapsInTheOwnerLookupPause counts the laps of
+// confirmOwner over one whole pause on a stepped clock. Each lap waits for
+// the end of the pause, at most ownerLookupTimeout, so one pause costs six
+// laps, not one lap for each logAppendBackoffFloor.
+func TestConfirmOwnerLapsInTheOwnerLookupPause(t *testing.T) {
+	h := newLogTestHandler(t, newFakeOwnerRequester(), &recordingSender{})
+	start := time.Now()
+	h.ownerCache.pauseLookups(start)
+
+	laps := 0
+	for now := start; h.ownerCache.lookupsPaused(now); now = now.Add(h.confirmOwnerRetryWait(now)) {
+		laps++
+	}
+	if want := int(ownerLookupPause / ownerLookupTimeout); laps != want {
+		t.Fatalf("laps in one pause = %d, want %d", laps, want)
+	}
+	for _, tc := range []struct {
+		left, want time.Duration
+	}{
+		{left: time.Second, want: time.Second},
+		{left: 100 * time.Millisecond, want: logAppendBackoffFloor},
+		{left: 0, want: logAppendBackoffFloor},
+	} {
+		if got := h.confirmOwnerRetryWait(start.Add(ownerLookupPause - tc.left)); got != tc.want {
+			t.Fatalf("wait with %v of the pause left = %v, want %v", tc.left, got, tc.want)
+		}
 	}
 }

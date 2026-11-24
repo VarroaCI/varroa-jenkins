@@ -323,9 +323,18 @@ func (c *ownerCache) noteChangeLocked(runID string) {
 // lookupsPaused reports whether a timed-out request paused the ledger
 // requests at now.
 func (c *ownerCache) lookupsPaused(now time.Time) bool {
+	return c.pauseLeft(now) > 0
+}
+
+// pauseLeft answers how long the pause still lasts at now. It answers
+// zero when no pause is active.
+func (c *ownerCache) pauseLeft(now time.Time) time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return now.Before(c.pausedUntil)
+	if !now.Before(c.pausedUntil) {
+		return 0
+	}
+	return c.pausedUntil.Sub(now)
 }
 
 // pauseLookups starts the pause after a request that timed out at now.
@@ -578,38 +587,28 @@ func (h *BusHandler) checkOwner(ctx context.Context, cluster, namespace, cell, i
 }
 
 // checkOwnerForCompletion answers whether the caller owns runID, for a
-// COMPLETED event. The answer comes from a ledger request that this call
-// sends. It never comes from a cached entry, and it never joins a lookup
-// already in flight, which can predate the event. A move with no claim,
-// such as a resume, leaves the old owner's cached match in place for up
-// to ownerMatchTTL, and the old owner is the sender most likely to send a
-// stale completion. The answer replaces the cached entry with the
+// COMPLETED event. The answer comes only from a ledger request that this
+// call sends. It never joins a lookup already in flight, which can
+// predate the event. The answer replaces the cached entry with the
 // lifetime doLookup gives it, so the chunk path keeps a fresh match for
 // the whole ownerMatchTTL with no new request. A change to the entry that
 // overtakes the request costs one more request (readOwner).
 //
-// fresh is false when no request answered: a failed request, or a call
-// in the pause after a timed-out request, which sends none. The decision
-// is then ownerMatched when the entry that the cache holds after the
-// attempt matches the caller, the answer the chunk path gives in the same
-// state. With no entry, or with an entry for another owner, it is
-// ownerUnknown. A failed request never answers ownerForeign. A check whose
-// two reads are both overtaken is the exception. It answers ownerUnknown
-// even when the cache holds a match, because the entry changed during
-// each read and the check does not trust it.
-func (h *BusHandler) checkOwnerForCompletion(ctx context.Context, cluster, namespace, cell, instance, runID string) (decision ownerDecision, tuple ownerTuple, fresh bool) {
+// When no request answers, the check answers ownerUnknown, also when the
+// cache holds a match for the caller. This covers a failed request, a
+// call in the pause after a timed-out request, which sends no request,
+// and a check whose two reads are both overtaken. A move with no claim,
+// such as a resume, leaves the old owner's match cached for up to
+// ownerMatchTTL, and the old owner is the sender most likely to send a
+// stale completion. A deadline from that match would end the new owner's
+// log on this replica.
+func (h *BusHandler) checkOwnerForCompletion(ctx context.Context, cluster, namespace, cell, instance, runID string) (ownerDecision, ownerTuple) {
 	if h.ownerCache == nil {
-		return ownerUnknown, ownerTuple{}, false
+		return ownerUnknown, ownerTuple{}
 	}
 	entry, err := h.ownerCache.readOwner(ctx, h.ledger, runID, cluster, namespace, cell, instance)
-	if err == nil {
-		return decideOwner(entry, cluster, namespace, cell, instance), entry.tuple, true
+	if err != nil {
+		return ownerUnknown, ownerTuple{}
 	}
-	if errors.Is(err, errOwnerReadOvertaken) {
-		return ownerUnknown, ownerTuple{}, false
-	}
-	if cached, ok := h.ownerCache.get(runID); ok && decideOwner(cached, cluster, namespace, cell, instance) == ownerMatched {
-		return ownerMatched, cached.tuple, false
-	}
-	return ownerUnknown, ownerTuple{}, false
+	return decideOwner(entry, cluster, namespace, cell, instance), entry.tuple
 }
