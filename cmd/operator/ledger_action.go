@@ -137,7 +137,7 @@ var endStatusSlots = make(chan struct{}, 4)
 // shows error until the retry build completes and writes its own end state,
 // which supersedes it. The target_url build-number match keeps the write off
 // the retry's own status row.
-func dispatchEndCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatusWriter, action recordstore.LedgerAction) {
+func dispatchEndCommitStatus(ctx context.Context, logger *slog.Logger, rec ledgerActionRunner, forge commitStatusWriter, action recordstore.LedgerAction) {
 	select {
 	case endStatusSlots <- struct{}{}:
 	default:
@@ -147,20 +147,32 @@ func dispatchEndCommitStatus(ctx context.Context, logger *slog.Logger, forge com
 	}
 	go func() {
 		defer func() { <-endStatusSlots }()
-		endCommitStatus(ctx, logger, forge, action)
+		endCommitStatus(ctx, logger, rec, forge, action)
 	}()
 }
 
 // endCommitStatus asks the forge answerer to end the pending commit
 // statuses of a build that the recorder ended, or of a completed build
 // whose branch job lost its branch source. It runs only when the
-// action names the tenant, the repository, the commit, and the build
-// number, and the operator has a forge answerer. A failure is logged and
+// action names the tenant, the repository, the commit, the cell, and the
+// build number, and the operator has a forge answerer. It reads the Jenkins
+// location URL of the action's cell, and the forge answerer writes only over
+// a status whose target URL starts with it. A cell with no location URL
+// writes nothing, and the status then stays pending. A failure is logged and
 // never retried: the status then stays pending.
-func endCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatusWriter, action recordstore.LedgerAction) {
-	if forge == nil || action.Tenant == "" || action.Repo == "" || action.Revision == "" || action.BuildNumber == nil {
+func endCommitStatus(ctx context.Context, logger *slog.Logger, rec ledgerActionRunner, forge commitStatusWriter, action recordstore.LedgerAction) {
+	if forge == nil || action.Tenant == "" || action.Repo == "" || action.Revision == "" ||
+		action.Namespace == "" || action.Controller == "" || action.BuildNumber == nil {
 		logger.Info("end_commit_status skipped, nothing to end",
 			"run_id", action.RunID, "tenant", action.Tenant, "forge", forge != nil)
+		return
+	}
+	root := rec.JenkinsLocationURL(ctx, action.Namespace, action.Controller)
+	if root == "" {
+		logger.Warn("end_commit_status skipped, the cell has no Jenkins location url",
+			"run_id", action.RunID, "tenant", action.Tenant,
+			"controller", action.Namespace+"/"+action.Controller,
+			"job_path", action.JobPath, "revision", action.Revision)
 		return
 	}
 	fctx, cancel := context.WithTimeout(ctx, forgeRequestTimeout)
@@ -173,6 +185,7 @@ func endCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatu
 		BuildNumber: *action.BuildNumber,
 		Reason:      action.Reason,
 		Result:      action.Result,
+		JenkinsURL:  root,
 	})
 	if err != nil {
 		logger.Warn("end_commit_status failed", "run_id", action.RunID, "tenant", action.Tenant, "error", err)
@@ -256,8 +269,9 @@ func restoreCommitStatus(ctx context.Context, logger *slog.Logger, forge commitS
 // WakeHibernatedController call. trigger_run and resume_run both wake
 // the target through the same call before they send the command. An
 // unknown kind takes no action and is counted. end_commit_status asks the
-// forge answerer to end the pending commit statuses of the build, from the
-// recorder's synthetic reason or from a completed run's result.
+// forge answerer to end the pending commit statuses of the build under the
+// Jenkins location URL of its cell, from the recorder's synthetic reason or
+// from a completed run's result.
 // restore_commit_status asks it, after restoreSettleDelay, to put the
 // newest build's result back over the statuses of older builds.
 // release_instance_agents deletes the idle agent pods of a confirmed gone
@@ -413,7 +427,7 @@ func handleLedgerAction(ctx context.Context, logger *slog.Logger, metrics *ledge
 		}
 		rec.ReleaseInstanceAgentPods(ctx, action.Tenant, action.AgentNamespace, action.KeepPods, *action.RefreshedBefore)
 	case recordstore.LedgerActionEndCommitStatus:
-		dispatchEndCommitStatus(ctx, logger, forge, action)
+		dispatchEndCommitStatus(ctx, logger, rec, forge, action)
 	case recordstore.LedgerActionRestoreCommitStatus:
 		dispatchRestoreCommitStatus(ctx, logger, rec, forge, action)
 	default:

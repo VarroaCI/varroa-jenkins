@@ -158,15 +158,26 @@ repository. The operator tries each pushing credential in turn. A forge 403 move
 credential. A forge rate limit stops the attempt. The operator logs it, and the status stays pending. The new status keeps the context and the link of the old status. Its description reads
 `Varroa ended the build: <reason>`.
 
-The operator changes only a status that matches the build by its job path and build number. A
-status that has an end state is never changed. A retry of the build has its own build number, so
-the retry keeps its own pending status.
+The operator changes only a status whose link is the build link of the build:
+
+- The link starts with the Jenkins location URL of the build's cell. Each scheme, host, and path
+  segment before `/job/` must match. A cell's location URL is its dashboard door.
+- One `job/<name>` pair for each segment of the job path follows, then the build number.
+- Nothing, a slash, or `display/redirect` ends the link.
+
+A status of another Jenkins or another cell with the same job path and build number stays
+`pending`. A status that has an end state is never changed. A retry of the build has its own build
+number, so the retry keeps its own pending status.
 
 These builds keep their `pending` status:
 
 - A provisional end: `heartbeat-lost` and `start-lost`. The build can still finish. The build's own
   completion then writes its status.
 - A build with no recorded commit or no recorded repository.
+- A build whose cell has no location URL that the operator can name. A deleted cell has none. The
+  operator logs the build at `Warn`.
+- A build that a resume moved to another cell. Its status link names the first cell.
+- A build that started before a change of the dashboard URL.
 - A tenant whose only credential is a `githubApp` credential. The operator does not end a status
   with a GitHub App credential.
 
@@ -191,18 +202,23 @@ A scan can mark a branch job dead while the branch job builds. The default Gitea
 drops a branch that a pull request also files. The branch-source plugin then finds no source for
 the job. It writes no status, so the context keeps its `pending` status.
 
-At completion, the operator sets that `pending` status from the Jenkins result:
+At completion, the operator sets that `pending` status from the Jenkins result. The state is the
+state that the branch-source plugin of the forge writes:
 
-| Result | Status |
-|---|---|
-| `SUCCESS` | `success` |
-| `UNSTABLE`, `FAILURE` | `failure` |
-| Any other result | `error` |
+| Result | GitHub | Gitea and Forgejo |
+|---|---|---|
+| `SUCCESS` | `success` | `success` |
+| `UNSTABLE` | `failure` | `failure` |
+| `FAILURE` | `error` | `failure` |
+| Any other result | `error` | `error` |
+
+For `NOT_BUILT`, the `gitea` plugin writes `skipped` or `warning`. The operator writes `error`.
 
 The description reads `Varroa reported the build result: <result>`. The operator also ends the
 queued status that links to the job, `Build queued...`, because a dead branch job queues no other build.
+That link must also start with the location URL of the build's cell.
 
-The credential, rate-limit, and four-write rules of [Interrupted builds](#interrupted-builds) apply.
+The credential, link, rate-limit, and four-write rules of [Interrupted builds](#interrupted-builds) apply.
 
 ## Pull-request revision
 
