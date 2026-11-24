@@ -10,9 +10,11 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
 )
 
+// statusBuildURL and statusOtherURL are the build URLs of builds 7 and 8
+// under statusRoot, the Jenkins location URL of the cell.
 const (
-	statusBuildURL = "https://jenkins.example.org/job/payments/job/app/job/main/7/"
-	statusOtherURL = "https://jenkins.example.org/job/payments/job/app/job/main/8/"
+	statusBuildURL = statusRoot + "job/payments/job/app/job/main/7/"
+	statusOtherURL = statusRoot + "job/payments/job/app/job/main/8/"
 )
 
 func endReq() forgeapi.CommitStatusRequest {
@@ -23,6 +25,7 @@ func endReq() forgeapi.CommitStatusRequest {
 		JobPath:     "payments/app/main",
 		BuildNumber: 7,
 		Reason:      "cell-lost",
+		JenkinsURL:  statusRoot,
 	}
 }
 
@@ -84,6 +87,50 @@ func TestEndPendingStatus_SkipsOtherBuildNumber(t *testing.T) {
 	}
 }
 
+// TestEndPendingStatus_LeavesPendingOfAnotherJenkins checks that a pending
+// status of another Jenkins, or of another cell, with the same job path and
+// build number stays pending. Only the status under the location URL of the
+// build's own cell is written.
+func TestEndPendingStatus_LeavesPendingOfAnotherJenkins(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	c := pushable()
+	c.statuses = []forge.CommitStatus{
+		{Context: "other/host", State: forge.StatePending, TargetURL: "https://jenkins.example.org/job/payments/job/app/job/main/7/"},
+		{Context: "other/cell", State: forge.StatePending, TargetURL: "https://varroa.example.org/headless/core/cells/cell-b/job/payments/job/app/job/main/7/"},
+		{Context: "ci/jenkins", State: forge.StatePending, TargetURL: statusBuildURL},
+	}
+	oneWriter(fx, c)
+	n, err := fx.ops.EndPendingStatus(context.Background(), endReq())
+	if err != nil || n != 1 {
+		t.Fatalf("written %d, err %v; want 1, nil", n, err)
+	}
+	if len(c.statusWrites) != 1 || c.statusWrites[0].Context != "ci/jenkins" {
+		t.Fatalf("writes = %+v, want only ci/jenkins", c.statusWrites)
+	}
+}
+
+// TestEndPendingStatus_NoJenkinsURLReadsNothing checks that a request with
+// no location URL is refused before the forge is read, so no status is
+// written.
+func TestEndPendingStatus_NoJenkinsURLReadsNothing(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	c := pushable()
+	c.statuses = []forge.CommitStatus{
+		{Context: "ci/jenkins", State: forge.StatePending, TargetURL: statusBuildURL},
+	}
+	oneWriter(fx, c)
+	req := endReq()
+	req.JenkinsURL = ""
+	_, err := fx.ops.EndPendingStatus(context.Background(), req)
+	var re *replyError
+	if !errors.As(err, &re) || re.Code != forgeapi.CodeInvalidRequest {
+		t.Fatalf("err %v, want code %s", err, forgeapi.CodeInvalidRequest)
+	}
+	if len(c.statusReads) != 0 || len(c.statusWrites) != 0 {
+		t.Fatalf("reads %v, writes %v; want none", c.statusReads, c.statusWrites)
+	}
+}
+
 // TestEndPendingStatus_NoStatusesWritesNothing checks a commit without any
 // status. The call succeeds and writes nothing.
 func TestEndPendingStatus_NoStatusesWritesNothing(t *testing.T) {
@@ -119,6 +166,7 @@ func TestEndPendingStatus_InvalidRequest(t *testing.T) {
 		"negative build":          func(r *forgeapi.CommitStatusRequest) { r.BuildNumber = -1 },
 		"bad repo url":            func(r *forgeapi.CommitStatusRequest) { r.Repo = "git@[bad" },
 		"no repo at all":          func(r *forgeapi.CommitStatusRequest) { r.Repo = "" },
+		"no jenkins url":          func(r *forgeapi.CommitStatusRequest) { r.JenkinsURL = "" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -145,30 +193,41 @@ func TestEndPendingStatus_ForgeWriteFails(t *testing.T) {
 	}
 }
 
-// TestBuildURLMatches covers the URL forms that a branch-source plugin writes.
-func TestBuildURLMatches(t *testing.T) {
+// TestBuildURLUnder covers the build URL forms that a branch-source plugin
+// writes, under the Jenkins location URL of the cell.
+func TestBuildURLUnder(t *testing.T) {
+	const plain = "https://j.example.org/"
 	cases := []struct {
 		name   string
 		target string
+		root   string
 		job    string
 		number int64
 		want   bool
 	}{
-		{"plain build", "https://j.example.org/job/payments/job/app/job/main/7/", "payments/app/main", 7, true},
-		{"headless redirect", "https://j.example.org/job/payments/job/app/job/main/7/display/redirect", "payments/app/main", 7, true},
-		{"encoded branch slash", "https://j.example.org/job/payments/job/app/job/feature%2Fx/7/", "payments/app/feature%2Fx", 7, true},
-		{"doubly encoded branch slash", "https://j.example.org/job/payments/job/app/job/feature%252Fx/7/", "payments/app/feature%2Fx", 7, true},
-		{"prefix of the build number", "https://j.example.org/job/payments/job/app/job/main/42/", "payments/app/main", 4, false},
-		{"another job", "https://j.example.org/job/payments/job/other/job/main/7/", "payments/app/main", 7, false},
-		{"nested job with the same tail", "https://j.example.org/job/other/job/payments/job/app/job/main/7/", "payments/app/main", 7, false},
-		{"context path prefix", "https://j.example.org/jenkins/job/payments/job/app/job/main/7/", "payments/app/main", 7, true},
-		{"url that does not parse", "https://[::1/job/payments/job/app/job/main/7/", "payments/app/main", 7, false},
-		{"empty target", "", "payments/app/main", 7, false},
+		{"plain build", plain + "job/payments/job/app/job/main/7/", plain, "payments/app/main", 7, true},
+		{"build with no trailing slash", plain + "job/payments/job/app/job/main/7", plain, "payments/app/main", 7, true},
+		{"dashboard door with display redirect", statusRoot + "job/payments/job/app/job/main/7/display/redirect", statusRoot, "payments/app/main", 7, true},
+		{"encoded branch slash", plain + "job/payments/job/app/job/feature%2Fx/7/", plain, "payments/app/feature%2Fx", 7, true},
+		{"doubly encoded branch slash", plain + "job/payments/job/app/job/feature%252Fx/7/", plain, "payments/app/feature%2Fx", 7, true},
+		{"context path prefix", "https://j.example.org/jenkins/job/payments/job/app/job/main/7/", "https://j.example.org/jenkins/", "payments/app/main", 7, true},
+		{"prefix of the build number", plain + "job/payments/job/app/job/main/42/", plain, "payments/app/main", 4, false},
+		{"another job", plain + "job/payments/job/other/job/main/7/", plain, "payments/app/main", 7, false},
+		{"nested job with the same tail", plain + "job/other/job/payments/job/app/job/main/7/", plain, "payments/app/main", 7, false},
+		{"a page under the build", plain + "job/payments/job/app/job/main/7/console", plain, "payments/app/main", 7, false},
+		{"job url", plain + "job/payments/job/app/job/main/", plain, "payments/app/main", 7, false},
+		{"another host", "https://other.example.org/job/payments/job/app/job/main/7/", plain, "payments/app/main", 7, false},
+		{"another scheme", "http://j.example.org/job/payments/job/app/job/main/7/", plain, "payments/app/main", 7, false},
+		{"another cell", "https://varroa.example.org/headless/core/cells/cell-b/job/payments/job/app/job/main/7/", statusRoot, "payments/app/main", 7, false},
+		{"no root path", "https://varroa.example.org/job/payments/job/app/job/main/7/", statusRoot, "payments/app/main", 7, false},
+		{"url that does not parse", "https://[::1/job/payments/job/app/job/main/7/", plain, "payments/app/main", 7, false},
+		{"empty target", "", plain, "payments/app/main", 7, false},
+		{"empty root", plain + "job/payments/job/app/job/main/7/", "", "payments/app/main", 7, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := buildURLMatches(tc.target, tc.job, tc.number); got != tc.want {
-				t.Fatalf("buildURLMatches(%q, %q, %d) = %v, want %v", tc.target, tc.job, tc.number, got, tc.want)
+			if got := buildURLUnder(tc.target, tc.root, tc.job, tc.number); got != tc.want {
+				t.Fatalf("buildURLUnder(%q, %q, %q, %d) = %v, want %v", tc.target, tc.root, tc.job, tc.number, got, tc.want)
 			}
 		})
 	}

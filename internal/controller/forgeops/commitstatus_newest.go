@@ -53,7 +53,7 @@ func (o *Ops) restoreStatusesWith(ctx context.Context, w writer, fr forge.Repo, 
 	if err != nil {
 		return 0, err
 	}
-	state := resultState(req.Result)
+	state := resultState(w.Kind, req.Result)
 	description := newestStatusDescription(req.BuildNumber, req.Result)
 	written := 0
 	for _, s := range statuses {
@@ -128,43 +128,13 @@ func branchSourceContext(kind forge.Kind, name, jobPath string) bool {
 }
 
 // replaceBuildNumber returns targetURL with build from of jobPath set to
-// build to. targetURL must be the build URL that the display-url-api plugin
-// gives a branch-source plugin: the Jenkins location URL root, one job/<name>
-// pair for each segment of jobPath, the build number, and then nothing, a
-// slash, or display/redirect. The scheme and the host must equal those of
-// root, and the path must start with the path of root. The query stays as it
-// was. Any other URL answers false, so a status of another Jenkins with the
-// same job path and build number is never written.
+// build to. splitBuildURL must accept targetURL as the build URL of build
+// from under the Jenkins location URL root. The query stays as it was. Any
+// other URL answers false, so a status of another Jenkins with the same job
+// path and build number is never written.
 func replaceBuildNumber(targetURL, root, jobPath string, from, to int64) (string, bool) {
-	u, err := url.Parse(targetURL)
-	if err != nil || u.Opaque != "" || u.User != nil {
-		return "", false
-	}
-	r, err := url.Parse(root)
-	if err != nil || r.Host == "" || r.Opaque != "" {
-		return "", false
-	}
-	if !strings.EqualFold(u.Scheme, r.Scheme) || !strings.EqualFold(u.Host, r.Host) {
-		return "", false
-	}
-	rootSegs := strings.Split(strings.TrimSuffix(r.EscapedPath(), "/"), "/")
-	segs := strings.Split(u.EscapedPath(), "/")
-	if len(segs) < len(rootSegs) {
-		return "", false
-	}
-	for k, s := range rootSegs {
-		if unescapeFully(segs[k]) != unescapeFully(s) {
-			return "", false
-		}
-	}
-	i := len(rootSegs)
-	for _, name := range strings.Split(jobPath, "/") {
-		if i+1 >= len(segs) || segs[i] != "job" || unescapeFully(segs[i+1]) != unescapeFully(name) {
-			return "", false
-		}
-		i += 2
-	}
-	if i >= len(segs) || unescapeFully(segs[i]) != strconv.FormatInt(from, 10) || !buildURLTail(segs[i+1:]) {
+	u, segs, i, ok := splitBuildURL(targetURL, root, jobPath, from)
+	if !ok {
 		return "", false
 	}
 	segs[i] = strconv.FormatInt(to, 10)
@@ -176,22 +146,6 @@ func replaceBuildNumber(targetURL, root, jobPath string, from, to int64) (string
 	u.Path = path
 	u.RawPath = escaped
 	return u.String(), true
-}
-
-// buildURLTail reports whether rest, the path segments after the build
-// number, is one of the tails that a branch-source build URL carries.
-func buildURLTail(rest []string) bool {
-	switch len(rest) {
-	case 0:
-		return true
-	case 1:
-		return rest[0] == ""
-	case 2:
-		return rest[0] == "display" && rest[1] == "redirect"
-	case 3:
-		return rest[0] == "display" && rest[1] == "redirect" && rest[2] == ""
-	}
-	return false
 }
 
 // newestStatusDescription returns the description of a status that the

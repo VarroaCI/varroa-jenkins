@@ -21,7 +21,7 @@ func TestHandleLedgerAction_EndCommitStatusPassesResult(t *testing.T) {
 	})
 	ender := &fakeCommitStatusWriter{}
 	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
-		"varroa.ledger.actions.core", "core", &fakeLedgerActionRunner{}, ender, data)
+		"varroa.ledger.actions.core", "core", endRunner(), ender, data)
 	reqs := waitCalls(t, ender, 1)
 	want := forgeapi.CommitStatusRequest{
 		Tenant:      "payments",
@@ -30,6 +30,7 @@ func TestHandleLedgerAction_EndCommitStatusPassesResult(t *testing.T) {
 		JobPath:     "payments/app/main",
 		BuildNumber: 7,
 		Result:      "FAILURE",
+		JenkinsURL:  endCellURL,
 	}
 	if reqs[0] != want {
 		t.Fatalf("request = %+v, want %+v", reqs[0], want)

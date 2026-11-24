@@ -72,6 +72,15 @@ func marshalLedgerAction(t *testing.T, a recordstore.LedgerAction) []byte {
 	return data
 }
 
+// endCellURL is the Jenkins location URL of the cell in the end tests.
+const endCellURL = "https://varroa.example.org/headless/core/cells-ns/cell-a/"
+
+// endRunner returns a runner that names the location URL of the cell of
+// endCommitStatusAction.
+func endRunner() *fakeLedgerActionRunner {
+	return &fakeLedgerActionRunner{locationURLs: map[string]string{"cells-ns/cell-a": endCellURL}}
+}
+
 func endCommitStatusAction(t *testing.T) []byte {
 	t.Helper()
 	bn := int64(7)
@@ -85,11 +94,12 @@ func endCommitStatusAction(t *testing.T) []byte {
 }
 
 // TestHandleLedgerAction_EndCommitStatusCallsForge checks the field mapping
-// from the action to the forge request.
+// from the action to the forge request, with the location URL of the
+// action's cell.
 func TestHandleLedgerAction_EndCommitStatusCallsForge(t *testing.T) {
 	ender := &fakeCommitStatusWriter{}
 	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
-		"varroa.ledger.actions.core", "core", &fakeLedgerActionRunner{}, ender, endCommitStatusAction(t))
+		"varroa.ledger.actions.core", "core", endRunner(), ender, endCommitStatusAction(t))
 	reqs := waitCalls(t, ender, 1)
 	want := forgeapi.CommitStatusRequest{
 		Tenant:      "payments",
@@ -98,31 +108,54 @@ func TestHandleLedgerAction_EndCommitStatusCallsForge(t *testing.T) {
 		JobPath:     "payments/app/main",
 		BuildNumber: 7,
 		Reason:      "cell-lost",
+		JenkinsURL:  endCellURL,
 	}
 	if reqs[0] != want {
 		t.Fatalf("request = %+v, want %+v", reqs[0], want)
 	}
 }
 
+// TestHandleLedgerAction_EndCommitStatusSkipsACellWithNoLocationURL checks
+// that a cell whose location URL the operator cannot name, because it is
+// gone, cannot be read, or is not headless, writes no status.
+func TestHandleLedgerAction_EndCommitStatusSkipsACellWithNoLocationURL(t *testing.T) {
+	ender := &fakeCommitStatusWriter{}
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
+		"varroa.ledger.actions.core", "core", &fakeLedgerActionRunner{}, ender, endCommitStatusAction(t))
+	time.Sleep(100 * time.Millisecond)
+	if n := len(ender.calls()); n != 0 {
+		t.Fatalf("forge calls = %d, want 0", n)
+	}
+}
+
 // TestHandleLedgerAction_EndCommitStatusMissingFieldsSkips checks that an
-// action without a repository, a commit, or a tenant never reaches the forge.
+// action without a repository, a commit, a tenant, a build number, or a
+// cell never reaches the forge, also when the cell has a location URL.
 func TestHandleLedgerAction_EndCommitStatusMissingFieldsSkips(t *testing.T) {
 	bn := int64(7)
-	cases := map[string]recordstore.LedgerAction{
-		"no repo": {Kind: recordstore.LedgerActionEndCommitStatus, Cluster: "core", Tenant: "payments",
-			Revision: "abc", BuildNumber: &bn},
-		"no revision": {Kind: recordstore.LedgerActionEndCommitStatus, Cluster: "core", Tenant: "payments",
-			Repo: "https://git.example.org/team/app", BuildNumber: &bn},
-		"no tenant": {Kind: recordstore.LedgerActionEndCommitStatus, Cluster: "core",
-			Repo: "https://git.example.org/team/app", Revision: "abc", BuildNumber: &bn},
-		"no build number": {Kind: recordstore.LedgerActionEndCommitStatus, Cluster: "core", Tenant: "payments",
-			Repo: "https://git.example.org/team/app", Revision: "abc"},
+	complete := func() recordstore.LedgerAction {
+		return recordstore.LedgerAction{
+			Kind: recordstore.LedgerActionEndCommitStatus, Cluster: "core",
+			Namespace: "cells-ns", Controller: "cell-a", Tenant: "payments",
+			Repo: "https://git.example.org/team/app", Revision: "abc", BuildNumber: &bn,
+			Reason: "cell-lost",
+		}
 	}
-	for name, action := range cases {
+	cases := map[string]func(*recordstore.LedgerAction){
+		"no repo":         func(a *recordstore.LedgerAction) { a.Repo = "" },
+		"no revision":     func(a *recordstore.LedgerAction) { a.Revision = "" },
+		"no tenant":       func(a *recordstore.LedgerAction) { a.Tenant = "" },
+		"no build number": func(a *recordstore.LedgerAction) { a.BuildNumber = nil },
+		"no namespace":    func(a *recordstore.LedgerAction) { a.Namespace = "" },
+		"no controller":   func(a *recordstore.LedgerAction) { a.Controller = "" },
+	}
+	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
+			action := complete()
+			mutate(&action)
 			ender := &fakeCommitStatusWriter{}
 			handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
-				"varroa.ledger.actions.core", "core", &fakeLedgerActionRunner{}, ender, marshalLedgerAction(t, action))
+				"varroa.ledger.actions.core", "core", endRunner(), ender, marshalLedgerAction(t, action))
 			time.Sleep(50 * time.Millisecond)
 			if n := len(ender.calls()); n != 0 {
 				t.Fatalf("forge calls = %d, want 0", n)
@@ -146,7 +179,7 @@ func TestHandleLedgerAction_EndCommitStatusNilForge(t *testing.T) {
 // forge error does not panic and does not reach the imperative path.
 func TestHandleLedgerAction_EndCommitStatusForgeErrorIsLogged(t *testing.T) {
 	ender := &fakeCommitStatusWriter{err: errors.New("forge_unreachable")}
-	rec := &fakeLedgerActionRunner{}
+	rec := endRunner()
 	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
 		"varroa.ledger.actions.core", "core", rec, ender, endCommitStatusAction(t))
 	waitCalls(t, ender, 1)
