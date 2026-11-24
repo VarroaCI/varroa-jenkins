@@ -269,20 +269,31 @@ func TestRunningFactsAfterAJenkinsRestartInTheSamePodMerge(t *testing.T) {
 }
 
 // TestRunningFactsOfAControllerWithNoCellRoleMergeFromAReplacementPod
-// asserts a run claimed under generation zero takes every sender. A
-// controller with no cell role keeps its Jenkins home on a volume, so a
-// replacement pod resumes the build with no new claim, and the intent
-// still names the old pod.
+// asserts a run claimed under generation zero takes the facts of the
+// controller's replacement pod. A controller with no cell role keeps its
+// Jenkins home on a volume, so a replacement pod resumes the build with
+// no new claim, and the intent still names the old pod. The placement row
+// names the replacement pod, so its first fact moves the run to it, and
+// only the first fact moves it.
 func TestRunningFactsOfAControllerWithNoCellRoleMergeFromAReplacementPod(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
 	runID, intentKey := seedOwnedRun(t, pool, runningOwnerInstance, 0)
+	seedControllerPlacement(t, db, 0, runningStaleInstance)
 
 	results := applyRunningFacts(t, pool, runID, intentKey, runningStaleInstance, "replacement", 1)
 
 	assertForeignSender(t, results, false)
 	assertRunningFacts(t, db, runID, "replacement")
+	for i, res := range results {
+		if res.AdoptedOwner != (i == 0) {
+			t.Errorf("fact %d: AdoptedOwner = %v, want %v", i, res.AdoptedOwner, i == 0)
+		}
+	}
+	if owner := intentOwnerOf(t, db, runID); owner != runningStaleInstance {
+		t.Fatalf("intent owner = %q, want %q", owner, runningStaleInstance)
+	}
 }
 
 // TestRunningFactsOfAnIntentWithNoInstanceMerge asserts a cell run whose

@@ -152,6 +152,12 @@ type ApplyResult struct {
 	// acknowledges the message, logs it, and publishes nothing.
 	ForeignSender bool
 
+	// AdoptedOwner is true when the write moved the run to its sender, the
+	// replacement pod of a controller with no cell role
+	// (adoptReplacementPod). Apply publishes the owner move signal after
+	// the commit.
+	AdoptedOwner bool
+
 	// ReleasedFleetLocks names every fleet lock a terminal run.completed
 	// write released, one entry per deleted row, so notify publishes one
 	// lock notification per row. Every other kind releases none.
@@ -400,11 +406,23 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 		result.RefusedInput = true
 	}
 	result.ForeignSender = dispatched.foreignSender
+	result.AdoptedOwner = dispatched.adoptedOwner
 	result.ReleasedFleetLocks = dispatched.releasedFleetLocks
 	result.CompletedOwner = dispatched.completedOwner
 	result.RunDuplicate = dispatched.runDuplicate
 	result.MarkedDuplicate = dispatched.markedDuplicate
 	publishActivityAfterCommit(g.activityPub, &dispatched.activity)
+
+	// The owner move signal goes out after the commit, so a gateway that
+	// reads the ledger on the signal finds the new owner. The move needs
+	// the envelope's cluster to equal the intent's cluster.
+	if dispatched.adoptedOwner {
+		g.logger.Info("the replacement pod of a controller with no cell role took over the run",
+			"runID", env.RunID, "kind", env.Kind, "cellInstance", env.CellInstance)
+		if perr := PublishOwnerMove(g.conn, env.Cluster, env.RunID); perr != nil {
+			g.logger.Warn("publish owner move failed", "runID", env.RunID, "error", perr)
+		}
+	}
 
 	actions := []*LedgerAction{dispatched.action}
 	if dispatched.restoreCheck != nil {
@@ -545,6 +563,10 @@ type dispatchResult struct {
 	// fact, so dispatch wrote nothing.
 	foreignSender bool
 
+	// adoptedOwner is true when adoptReplacementPod moved the run to the
+	// sender before the write.
+	adoptedOwner bool
+
 	// releasedFleetLocks names every fleet lock a terminal run.completed
 	// write released, one entry per deleted row. Apply copies it onto
 	// its ApplyResult, the same two-hop path supersededStart and
@@ -589,11 +611,27 @@ func (g *Ingester) applyOnce(ctx context.Context, runID uuid.UUID, env IngestEnv
 	return result, nil
 }
 
-// dispatch runs the write for env.Kind against tx. A running-build fact
-// from a sender that does not own the run writes nothing. dispatch then
-// answers foreignSender and no error, so the consumer acknowledges the
-// message and never retries it.
+// dispatch first lets the replacement pod of a controller with no cell
+// role take over the run (adoptReplacementPod), then runs the write for
+// env.Kind. Every owner rule of the write then reads the moved owner.
 func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope, nullBuildNumber bool) (dispatchResult, error) {
+	adopted, err := adoptReplacementPod(ctx, tx, intent, env)
+	if err != nil {
+		return dispatchResult{}, err
+	}
+	result, err := g.dispatchKind(ctx, tx, intent, env, nullBuildNumber)
+	if err != nil {
+		return dispatchResult{}, err
+	}
+	result.adoptedOwner = adopted
+	return result, nil
+}
+
+// dispatchKind runs the write for env.Kind against tx. A running-build
+// fact from a sender that does not own the run writes nothing.
+// dispatchKind then answers foreignSender and no error, so the consumer
+// acknowledges the message and never retries it.
+func (g *Ingester) dispatchKind(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope, nullBuildNumber bool) (dispatchResult, error) {
 	if runningFactKind(env.Kind) {
 		owns, err := senderOwnsRun(ctx, tx, intent, env)
 		if err != nil {

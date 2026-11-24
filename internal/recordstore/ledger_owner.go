@@ -22,8 +22,16 @@ const ownerQueueGroup = "recorder"
 const ownerLookupTimeout = 10 * time.Second
 
 // ownerLookupRequest is the request body of a varroa.ledger.owner call.
+// Cluster, Namespace, Cell, and Instance name the caller whose admission
+// the answer decides. lookupOwner reads them only for the replacement
+// pod rule (replacementPodSQL). A request that names no caller gets the
+// stored owner.
 type ownerLookupRequest struct {
-	RunID string `json:"runId"`
+	RunID     string `json:"runId"`
+	Cluster   string `json:"cluster,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Cell      string `json:"cell,omitempty"`
+	Instance  string `json:"instance,omitempty"`
 }
 
 // ownerLookupResponse is the reply body of a varroa.ledger.owner call.
@@ -74,7 +82,7 @@ func handleOwnerLookup(logger *slog.Logger, pool *pgxpool.Pool, data []byte) []b
 	ctx, cancel := context.WithTimeout(context.Background(), ownerLookupTimeout)
 	defer cancel()
 
-	resp, err := lookupOwner(ctx, pool, req.RunID)
+	resp, err := lookupOwner(ctx, pool, req)
 	if err != nil {
 		logger.Error("owner lookup failed", "run_id", req.RunID, "error", err)
 		out, _ := json.Marshal(ownerLookupResponse{Found: false, Error: "owner lookup failed"})
@@ -99,14 +107,21 @@ func handleOwnerLookup(logger *slog.Logger, pool *pgxpool.Pool, data []byte) []b
 // status and its failure time would otherwise become the real run's
 // finalization anchor: the first log chunk of a same-token retry could
 // then miss a deadline that already passed.
-func lookupOwner(ctx context.Context, pool *pgxpool.Pool, runID string) (ownerLookupResponse, error) {
+//
+// The answer names the caller as the owner when replacementPodSQL holds
+// for it. The ingest write applies the same rule and moves the run, but
+// the gateway decides on a chunk or a completion before any write
+// reaches the recorder. The answer writes nothing.
+func lookupOwner(ctx context.Context, pool *pgxpool.Pool, req ownerLookupRequest) (ownerLookupResponse, error) {
 	row := pool.QueryRow(ctx, `
-		SELECT ri.cluster, ri.namespace, ri.cell, ri.cell_instance, r.status,
+		SELECT ri.cluster, ri.namespace, ri.cell,
+		       CASE WHEN `+replacementPodSQL("ri", "$2", "$3", "$4", "$5")+` THEN $2::text ELSE ri.cell_instance END,
+		       r.status,
 		       `+anchorExpr+`
 		FROM varroa.run_intents ri
 		LEFT JOIN varroa.runs r ON r.run_id = ri.run_id AND `+recordsBuildRunSQL+`
 		WHERE ri.run_id = $1
-	`, runID)
+	`, req.RunID, req.Instance, req.Cluster, req.Namespace, req.Cell)
 
 	var cluster, namespace string
 	var cell, cellInstance, status *string

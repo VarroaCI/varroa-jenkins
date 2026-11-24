@@ -508,7 +508,7 @@ func TestRunBackstopRoundReleasesConfirmedGoneHolderInOneRound(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
-	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
+	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), cellRunGeneration))
 	seedHeldLockOfRun(t, db, runID.String())
 
 	now := time.Now()

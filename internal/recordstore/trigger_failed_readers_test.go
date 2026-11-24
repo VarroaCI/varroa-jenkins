@@ -203,7 +203,7 @@ func TestOwnerLookupIgnoresATriggerFailedRow(t *testing.T) {
 	}
 	seedSyntheticRowForRun(t, db, runID, createdAt)
 
-	resp, err := lookupOwner(ctx, pool, granted.RunID)
+	resp, err := lookupOwner(ctx, pool, ownerLookupRequest{RunID: granted.RunID})
 	if err != nil {
 		t.Fatalf("lookupOwner: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestOwnerLookupIgnoresATriggerFailedRow(t *testing.T) {
 		t.Fatalf("apply run.started: %v", err)
 	}
 
-	resp, err = lookupOwner(ctx, pool, granted.RunID)
+	resp, err = lookupOwner(ctx, pool, ownerLookupRequest{RunID: granted.RunID})
 	if err != nil {
 		t.Fatalf("lookupOwner after run.started: %v", err)
 	}
