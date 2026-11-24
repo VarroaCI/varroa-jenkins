@@ -19,7 +19,7 @@ func TestHandleLedgerAction_EndCommitStatusPassesResult(t *testing.T) {
 		Repo: "https://git.example.org/acme/app", Revision: "0123456789abcdef0123456789abcdef01234567",
 		Result: "FAILURE",
 	})
-	ender := &fakeCommitStatusEnder{}
+	ender := &fakeCommitStatusWriter{}
 	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
 		"varroa.ledger.actions.core", "core", &fakeLedgerActionRunner{}, ender, data)
 	reqs := waitCalls(t, ender, 1)

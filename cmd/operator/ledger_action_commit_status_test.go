@@ -12,30 +12,45 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
-// fakeCommitStatusEnder records the request that the subscriber maps. The
-// subscriber runs the call in its own goroutine, so the record is locked.
-type fakeCommitStatusEnder struct {
-	mu   sync.Mutex
-	reqs []forgeapi.CommitStatusRequest
-	err  error
+// fakeCommitStatusWriter records the requests that the subscriber maps. The
+// subscriber runs each call in its own goroutine, so the record is locked.
+type fakeCommitStatusWriter struct {
+	mu       sync.Mutex
+	reqs     []forgeapi.CommitStatusRequest
+	restores []forgeapi.NewestStatusRequest
+	err      error
 }
 
-func (f *fakeCommitStatusEnder) EndPendingStatus(_ context.Context, req forgeapi.CommitStatusRequest) (int, error) {
+func (f *fakeCommitStatusWriter) EndPendingStatus(_ context.Context, req forgeapi.CommitStatusRequest) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reqs = append(f.reqs, req)
 	return 1, f.err
 }
 
+func (f *fakeCommitStatusWriter) RestoreNewestStatus(_ context.Context, req forgeapi.NewestStatusRequest) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.restores = append(f.restores, req)
+	return 1, f.err
+}
+
+// restoreCalls returns a copy of the recorded restore requests.
+func (f *fakeCommitStatusWriter) restoreCalls() []forgeapi.NewestStatusRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]forgeapi.NewestStatusRequest(nil), f.restores...)
+}
+
 // calls returns a copy of the recorded requests.
-func (f *fakeCommitStatusEnder) calls() []forgeapi.CommitStatusRequest {
+func (f *fakeCommitStatusWriter) calls() []forgeapi.CommitStatusRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]forgeapi.CommitStatusRequest(nil), f.reqs...)
 }
 
 // waitCalls waits until the ender records n requests, or fails the test.
-func waitCalls(t *testing.T, f *fakeCommitStatusEnder, n int) []forgeapi.CommitStatusRequest {
+func waitCalls(t *testing.T, f *fakeCommitStatusWriter, n int) []forgeapi.CommitStatusRequest {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -72,7 +87,7 @@ func endCommitStatusAction(t *testing.T) []byte {
 // TestHandleLedgerAction_EndCommitStatusCallsForge checks the field mapping
 // from the action to the forge request.
 func TestHandleLedgerAction_EndCommitStatusCallsForge(t *testing.T) {
-	ender := &fakeCommitStatusEnder{}
+	ender := &fakeCommitStatusWriter{}
 	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
 		"varroa.ledger.actions.core", "core", &fakeLedgerActionRunner{}, ender, endCommitStatusAction(t))
 	reqs := waitCalls(t, ender, 1)
@@ -105,7 +120,7 @@ func TestHandleLedgerAction_EndCommitStatusMissingFieldsSkips(t *testing.T) {
 	}
 	for name, action := range cases {
 		t.Run(name, func(t *testing.T) {
-			ender := &fakeCommitStatusEnder{}
+			ender := &fakeCommitStatusWriter{}
 			handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
 				"varroa.ledger.actions.core", "core", &fakeLedgerActionRunner{}, ender, marshalLedgerAction(t, action))
 			time.Sleep(50 * time.Millisecond)
@@ -130,7 +145,7 @@ func TestHandleLedgerAction_EndCommitStatusNilForge(t *testing.T) {
 // TestHandleLedgerAction_EndCommitStatusForgeErrorIsLogged checks that a
 // forge error does not panic and does not reach the imperative path.
 func TestHandleLedgerAction_EndCommitStatusForgeErrorIsLogged(t *testing.T) {
-	ender := &fakeCommitStatusEnder{err: errors.New("forge_unreachable")}
+	ender := &fakeCommitStatusWriter{err: errors.New("forge_unreachable")}
 	rec := &fakeLedgerActionRunner{}
 	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
 		"varroa.ledger.actions.core", "core", rec, ender, endCommitStatusAction(t))

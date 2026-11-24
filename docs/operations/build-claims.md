@@ -123,7 +123,7 @@ different run already claimed it.
 For a pull-request build, the key keeps the revision text that the branch source reports. A rebuild
 against a new target commit therefore gets a new key. The build record keeps the pull-request
 revision of the run. The completion event sends the same revision. The rule is in
-[Pull-request revision](commit-status.md#pull-request-revision). Two builds of one pull request against different target commits both run. The record store does not mark the newer build as a duplicate. Both builds report one status context. See [Two builds of one pull request](commit-status.md#two-builds-of-one-pull-request).
+[Pull-request revision](commit-status.md#pull-request-revision). Two builds of one pull request against different target commits both run. The record store does not mark the newer build as a duplicate. Both builds report one status context. See [Two runs of one commit](commit-status.md#two-runs-of-one-commit).
 
 ## Build numbers in a burst
 

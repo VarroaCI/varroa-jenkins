@@ -196,6 +196,11 @@ type Ingester struct {
 	// terminal write enqueues a delivery.
 	webhookDashboardURL string
 	webhookNudge        func()
+
+	// restoreRead reads the restore_commit_status action after an owner
+	// completion commits. A nil value reads with restoreStatusAction. A
+	// test sets a failing read here.
+	restoreRead func(ctx context.Context, q restoreQuerier, intent *intentRow) (*LedgerAction, error)
 }
 
 // NewIngester returns an Ingester over pool. conn publishes a ledger
@@ -401,9 +406,16 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 	result.MarkedDuplicate = dispatched.markedDuplicate
 	publishActivityAfterCommit(g.activityPub, &dispatched.activity)
 
-	if dispatched.action != nil && g.conn != nil {
-		if perr := PublishLedgerAction(g.conn, *dispatched.action); perr != nil {
-			g.logger.Error("publish ledger action failed", "kind", dispatched.action.Kind, "error", perr)
+	actions := []*LedgerAction{dispatched.action}
+	if dispatched.restoreCheck != nil {
+		actions = append(actions, g.readRestoreAction(ctx, env, dispatched.restoreCheck))
+	}
+	for _, action := range actions {
+		if action == nil || g.conn == nil {
+			continue
+		}
+		if perr := PublishLedgerAction(g.conn, *action); perr != nil {
+			g.logger.Error("publish ledger action failed", "kind", action.Kind, "error", perr)
 		}
 	}
 
@@ -464,6 +476,13 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 // which Apply copies onto its ApplyResult too.
 type dispatchResult struct {
 	action *LedgerAction
+
+	// restoreCheck is the intent of an owner run.completed that carries a
+	// result. Apply reads the restore_commit_status action for it after the
+	// commit, and publishes that action after action, because one
+	// completion can need both.
+	restoreCheck *intentRow
+
 	fanout *FanoutProducer
 
 	// activity holds the activity rows of the terminal write. Apply publishes
@@ -629,6 +648,11 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 			}
 			res.action = action
 		}
+		// The check also runs for a DUPLICATE run, because its own aborted
+		// status can land after the result of the run that owns the
+		// revision. Apply runs it after the commit, so its read can never
+		// fail or delay the completion.
+		res.restoreCheck = intent
 		return res, nil
 	case KindRunTests:
 		return dispatchResult{}, applyRunTests(ctx, tx, intent, env)

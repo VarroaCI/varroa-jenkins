@@ -45,6 +45,17 @@ type fakeLedgerActionRunner struct {
 	instanceNamespace    string
 	instanceKeep         []string
 	instanceBefore       time.Time
+
+	// locationURLs maps "<namespace>/<name>" to the Jenkins location URL
+	// that JenkinsLocationURL answers. A test sets it before the handler
+	// runs, and the timer goroutine only reads it.
+	locationURLs map[string]string
+}
+
+// JenkinsLocationURL answers the location URL that the test set for the
+// controller, or "".
+func (f *fakeLedgerActionRunner) JenkinsLocationURL(_ context.Context, namespace, name string) string {
+	return f.locationURLs[namespace+"/"+name]
 }
 
 // ReleaseInstanceAgentPods records the call a release_instance_agents

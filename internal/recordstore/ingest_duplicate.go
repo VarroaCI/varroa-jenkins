@@ -23,9 +23,11 @@ const scmIntentKeyPrefix = string(IntentSchemeSCM) + ":"
 var backstopSchemes = []string{string(IntentSchemeSCM), string(IntentSchemeCron), string(IntentSchemeAPI)}
 
 // isBackstopKey reports whether intentKey holds one of backstopSchemes.
+// A key with no colon names no scheme, so it never matches, also when the
+// whole key equals a scheme name.
 func isBackstopKey(intentKey string) bool {
-	scheme, _, _ := strings.Cut(intentKey, ":")
-	return slices.Contains(backstopSchemes, scheme)
+	scheme, _, found := strings.Cut(intentKey, ":")
+	return found && slices.Contains(backstopSchemes, scheme)
 }
 
 // runDuplicateBackstop stops a second live run of one revision. It skips
@@ -61,7 +63,7 @@ func runDuplicateBackstop(ctx context.Context, tx pgx.Tx, intent *intentRow, rev
 		SELECT run_id, created_at FROM varroa.runs
 		WHERE cluster = $1 AND tenant = $2 AND job_path = $3 AND scm_revision = $4
 		  AND status IN ('QUEUED', 'RUNNING') AND run_id <> $5
-		  AND split_part(intent_key, ':', 1) = ANY($8::text[])
+		  AND strpos(intent_key, ':') > 0 AND split_part(intent_key, ':', 1) = ANY($8::text[])
 		  AND NOT ($6::boolean AND starts_with(intent_key, $7))
 		ORDER BY created_at
 		LIMIT 1

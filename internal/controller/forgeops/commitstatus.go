@@ -41,11 +41,22 @@ func (o *Ops) EndPendingStatus(ctx context.Context, req forgeapi.CommitStatusReq
 	if req.BuildNumber <= 0 {
 		return 0, replyErr(forgeapi.CodeInvalidRequest, "build number must be positive")
 	}
-	repo, err := forgeurl.NormalizeRepoURL(req.Repo)
+	state, description := endState(req)
+	return o.writeStatuses(ctx, req.Tenant, req.Repo, func(w writer, fr forge.Repo) (int, error) {
+		return o.endStatusesWith(ctx, w, fr, req, state, description)
+	})
+}
+
+// writeStatuses runs write with each pushing credential of the tenant for
+// the repository, in id order. A forge 403 moves to the next credential. A
+// rate limit or any other error stops the attempt. It returns the number of
+// statuses that the writes wrote.
+func (o *Ops) writeStatuses(ctx context.Context, tenant, repoURL string, write func(w writer, fr forge.Repo) (int, error)) (int, error) {
+	repo, err := forgeurl.NormalizeRepoURL(repoURL)
 	if err != nil {
 		return 0, replyErr(forgeapi.CodeRepoURLInvalid, "%v", err)
 	}
-	creds, err := o.chooseCredential(ctx, req.Tenant, repo.Host)
+	creds, err := o.chooseCredential(ctx, tenant, repo.Host)
 	if err != nil {
 		return 0, err
 	}
@@ -54,11 +65,10 @@ func (o *Ops) EndPendingStatus(ctx context.Context, req forgeapi.CommitStatusReq
 	if err != nil {
 		return 0, err
 	}
-	state, description := endState(req)
 	written := 0
 	var forbidden []string
 	for _, w := range cands {
-		n, err := o.endStatusesWith(ctx, w, fr, req, state, description)
+		n, err := write(w, fr)
 		written += n
 		if errors.Is(err, forge.ErrForbidden) {
 			o.logger.Info("forge commit status forbidden; trying the next credential", "credential", w.CredentialID, "host", repo.Host)

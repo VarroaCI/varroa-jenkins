@@ -17,7 +17,7 @@ func TestHandleLedgerAction_EndCommitStatusDropsWhenSlotsFull(t *testing.T) {
 			<-endStatusSlots
 		}
 	}()
-	ender := &fakeCommitStatusEnder{}
+	ender := &fakeCommitStatusWriter{}
 	done := make(chan struct{})
 	go func() {
 		handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
