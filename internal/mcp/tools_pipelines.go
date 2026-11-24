@@ -205,7 +205,8 @@ func registerScanMultibranchTool(mcpServer *server.MCPServer, deps *api.Dependen
 	scanTool := mcp.NewTool("scan_multibranch",
 		mcp.WithDescription("Start a scan of a multibranch job's branches and pull requests, or of an organization folder's "+
 			"repositories, as the calling user. A job that is neither answers an error. The scan runs on the job's home "+
-			"member and reports no outcome here. Use list_job_branches to follow its result in lastScan."),
+			"member and reports no outcome here. Use list_job_branches to follow its result in lastScan. A scan creates "+
+			"the jobs of new heads and starts no build. Use run_pipeline to build a head that a scan found."),
 		mcp.WithString("tenant", mcp.Required(), mcp.Description("Tenant name")),
 		mcp.WithString("job", mcp.Required(), mcp.Description("A multibranch job or an organization folder. "+jobArgDescription)),
 		mcp.WithString("cluster", mcp.Description("Cluster to select, when tenant and job resolve to more than one tenant")),

@@ -23,7 +23,8 @@ updates a branch's job without starting a build. The cell starts one scan when i
 or changes a `multibranch` or `organizationFolder` item. Start a later scan from the
 dashboard, or push a commit.
 
-A push that creates a branch job builds that branch once. A scan still builds nothing.
+A push or a pull request event that creates a job builds that job once. A scan still builds
+nothing.
 A push that arrives during a scan can be dropped; push again.
 
 A `JenkinsVersionProfile` that replaces the default plugin set must still pin

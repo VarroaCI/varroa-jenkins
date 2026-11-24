@@ -102,6 +102,13 @@ Add the hook to the organization, not to each repository. One organization hook 
 `gitea-webhook/post` reaches an `organizationFolder` item for every repository of the
 organization. A delivery for a new repository adds its project to the folder.
 
+Select the push event and the pull request events on the organization hook. Include the pull
+request synchronized event, because a push to the branch of a pull request sends it. A pull
+request event builds a new pull request once, and builds it again when its branch changes. A
+push event does not build a pull request. With push events only, a pull request builds only
+when you start a run. Varroa does not read the hook settings, so it does not report a missing
+event.
+
 ### Source setup
 
 A Gitea source also needs these parts. This page does not repeat them:
@@ -232,4 +239,5 @@ curl -i -X POST \
 ```
 
 Expect `202 Accepted`, then a build in the `payments` folder. A push of an already built
-revision starts no build. A push to a new repository or branch starts one build.
+revision starts no build. A push to a new repository or branch starts one build. A scan starts
+no build; see [Scan the branches](../tutorials/multibranch.md#scan-the-branches).

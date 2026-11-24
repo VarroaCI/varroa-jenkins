@@ -30,6 +30,13 @@ Select **Scan now** in the card header on the job page to start a scan. An organ
 has the same button, in the **Repositories** card header. It scans the folder's repositories. The
 button appears only when you may write the job.
 
+A scan creates a job for each new head and starts no build. A cell's Jenkins home does not
+survive a pod roll, so each new pod scans every job again. A build on discovery would build
+every head of every repository after each roll. A webhook delivery builds a new head: a push
+builds a branch, and a pull request event builds a pull request. See
+[Tenant webhooks](../operations/webhooks.md). To build a head that only a scan found, run it
+from its own job page, or push a commit to it.
+
 - The scan runs on the cell that holds the job's home slot.
 - The page checks for the result every five seconds. The checks stop when the result
   arrives, or after ten minutes.
