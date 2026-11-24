@@ -569,6 +569,109 @@ public class VarroaRunRecorderTest {
         assertEquals("UNSTABLE", buildStage.getStatus());
     }
 
+    // --- A stage that did not run reports NOT_EXECUTED ---
+
+    @Test
+    public void aStageSkippedForAnEarlierFailureReportsNotExecuted() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "skip-failure");
+        job.setDefinition(new CpsFlowDefinition("pipeline {\n  agent any\n  stages {\n"
+                + "    stage('one') { steps { echo 'one' } }\n"
+                + "    stage('two') { steps { error('boom') } }\n"
+                + "    stage('three') { steps { echo 'three' } }\n  }\n}\n", true));
+
+        WorkflowRun run = job.scheduleBuild2(0, grantedAction("")).get();
+        j.assertBuildStatus(hudson.model.Result.FAILURE, run);
+        j.assertLogContains("Stage \"three\" skipped due to earlier failure(s)", run);
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(200);
+        assertNotExecutedOnBothPaths(result.events, "three");
+        List<BuildStage> stages = byPhase(result.events, BuildEvent.PHASE_COMPLETED).get(0).getStages();
+        assertEquals("SUCCESS", findStageByName(stages, "one").getStatus());
+        BuildStage two = findStageByName(stages, "two");
+        assertEquals("FAILURE", two.getStatus());
+        assertTrue("the failed stage keeps its own error, got: " + two.getError(), two.getError().contains("boom"));
+    }
+
+    @Test
+    public void aStageSkippedAfterAnUnstableStageReportsNotExecuted() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "skip-unstable");
+        job.setDefinition(new CpsFlowDefinition("pipeline {\n  agent any\n"
+                + "  options { skipStagesAfterUnstable() }\n  stages {\n"
+                + "    stage('one') { steps { unstable('flaky') } }\n"
+                + "    stage('two') { steps { echo 'two' } }\n  }\n}\n", true));
+
+        WorkflowRun run = job.scheduleBuild2(0, grantedAction("")).get();
+        j.assertBuildStatus(hudson.model.Result.UNSTABLE, run);
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(200);
+        assertNotExecutedOnBothPaths(result.events, "two");
+        List<BuildStage> stages = byPhase(result.events, BuildEvent.PHASE_COMPLETED).get(0).getStages();
+        assertEquals("UNSTABLE", findStageByName(stages, "one").getStatus());
+    }
+
+    @Test
+    public void aStageWithAFalseWhenConditionReportsNotExecuted() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "skip-when");
+        job.setDefinition(new CpsFlowDefinition("pipeline {\n  agent any\n  stages {\n"
+                + "    stage('one') { steps { echo 'one' } }\n"
+                + "    stage('two') {\n      when { expression { false } }\n      steps { echo 'two' }\n    }\n"
+                + "    stage('three') { steps { echo 'three' } }\n  }\n}\n", true));
+
+        WorkflowRun run = j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction("")));
+        j.assertLogContains("Stage \"two\" skipped due to when conditional", run);
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(200);
+        assertNotExecutedOnBothPaths(result.events, "two");
+        List<BuildStage> stages = byPhase(result.events, BuildEvent.PHASE_COMPLETED).get(0).getStages();
+        assertEquals("SUCCESS", findStageByName(stages, "one").getStatus());
+        assertEquals("SUCCESS", findStageByName(stages, "three").getStatus());
+    }
+
+    @Test
+    public void aStageBeforeTheRestartStageReportsNotExecuted() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "skip-restart");
+        job.setDefinition(new CpsFlowDefinition("pipeline {\n  agent any\n  stages {\n"
+                + "    stage('one') { steps { echo 'ONE-RUN' } }\n"
+                + "    stage('two') { steps { echo 'TWO-RUN' } }\n  }\n}\n", true));
+        WorkflowRun origin = j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction("")));
+        BuildEventSink.get().resetForTesting();
+
+        WorkflowRun restarted = j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction(""),
+                new CauseAction(VarroaDeclarativeRestart.newRestartCause(origin, "two")),
+                VarroaDeclarativeRestart.newRestartFlowFactoryAction(origin)));
+        j.assertLogNotContains("ONE-RUN", restarted);
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(200);
+        assertNotExecutedOnBothPaths(result.events, "one");
+        List<BuildStage> stages = byPhase(result.events, BuildEvent.PHASE_COMPLETED).get(0).getStages();
+        assertEquals("SUCCESS", findStageByName(stages, "two").getStatus());
+    }
+
+    /**
+     * Asserts that the live {@code STAGE} event and the completion rebuild
+     * both report the stage {@code name} as {@code NOT_EXECUTED} with no
+     * error.
+     */
+    private static void assertNotExecutedOnBothPaths(List<BuildEvent> events, String name) {
+        BuildStage live = null;
+        for (BuildEvent e : byPhase(events, BuildEvent.PHASE_STAGE)) {
+            BuildStage s = findStageByName(e.getStages(), name);
+            if (s != null) {
+                live = s;
+            }
+        }
+        assertNotNull("a live STAGE event carries the stage " + name, live);
+        assertEquals("the live status of " + name, "NOT_EXECUTED", live.getStatus());
+        assertEquals("the live error of " + name, "", live.getError());
+
+        List<BuildEvent> completed = byPhase(events, BuildEvent.PHASE_COMPLETED);
+        assertEquals(1, completed.size());
+        BuildStage rebuilt = findStageByName(completed.get(0).getStages(), name);
+        assertNotNull("the completion rebuild carries the stage " + name, rebuilt);
+        assertEquals("the rebuilt status of " + name, "NOT_EXECUTED", rebuilt.getStatus());
+        assertEquals("the rebuilt error of " + name, "", rebuilt.getError());
+    }
+
     // --- 5.9a: every D3 field, not a subset ---
 
     @Test
