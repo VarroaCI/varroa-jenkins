@@ -257,10 +257,18 @@ message then names the image. The grace
 counts from the init finish. A pod that has not started Jenkins gets a
 30-second delete grace.
 
+A `MiteUnreachable` roll needs a second fact, because a missing presence record can come from
+the message bus. While the pod is `Ready`, or the pod read fails, the roll and the eviction wait.
+The `CellReady` message then starts with `roll held:`. A failed presence read of the cell starts
+the grace count again. These waits end 30 minutes after `unreadySince`, or at the grace when the
+grace is longer. After such a roll, the eviction waits one more grace period, so the new pod can
+connect. The operator logs each pod delete at WARN with the cause, and the `cell.rolled` activity
+event carries it. The cause names the age of the last mite heartbeat that the operator saw.
+
 **Teardown** frees the placement record and the name at once.
 
 **Eviction.** Past twice that grace period, the operator sets `status.cell.evacuate`, and every
-tenant moves off on its next placement tick. The init wait applies here too. Only recovery clears
+tenant moves off on its next placement tick. The init wait and the `MiteUnreachable` wait apply here too. Only recovery clears
 `evacuate`, `unreadySince`, and `rolledAt`.
 
 ## Troubleshoot placement
@@ -296,7 +304,7 @@ Every `CellReady` reason on a cell `Controller`:
 | `BlobTierUnsupported` | False | `recordStore.blobs.mode` is not `s3`. | Set the blob tier to `s3`. |
 | `ArtifactStorageLocal` | False | The `ArtifactStorage` condition is not `External`. | Pin `artifact-manager-s3` and fix the credential that the condition names. |
 | `NotProvisioned` | False | The cell's phase has not reached `Connected` yet. | Wait, or check pod status. |
-| `MiteUnreachable` | False | The mite stream is lost. The roll applies. | Check the gateway. |
+| `MiteUnreachable` | False | The mite stream is lost. The roll applies after the pod stops being `Ready`, or after 30 minutes. | Check the gateway and the mite container log. |
 | `CellRolled` | False | The operator already deleted the pod once to recover. The condition message names the original fault. | Diagnose the reason in the message. If it recurs, that condition is not self-healing. |
 
 ## Rehydration

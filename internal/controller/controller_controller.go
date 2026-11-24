@@ -169,6 +169,8 @@ type Reconciler struct {
 	clusterName         string
 	disconnectedTicks   map[string]int // streamLossMisses counter per "ns/name"; guarded by disconnectedTicksMu
 	disconnectedTicksMu sync.Mutex
+	presenceFaults      map[string]time.Time // newest failed presence read per "ns/name"; guarded by presenceFaultsMu; written only by notePresenceFault
+	presenceFaultsMu    sync.Mutex
 	Logger              *slog.Logger
 	caPEM               string
 	ucBaseURL           string // VARROA_UPDATE_CENTER_URL, read once at boot
@@ -4084,7 +4086,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 
 	// Gather the transport observation; derivation is table-tested in
 	// desiredstate_test.go.
-	info, transportConnected, readErr := r.miteTransport.Info(cr.Namespace, cr.Name)
+	info, transportConnected, readErr := r.readPresence(cr.Namespace, cr.Name)
 	snapshot := r.miteTransport.Snapshot(cr.Namespace, cr.Name)
 	if err := r.recordPendingSignatures(ctx, cr, snapshot); err != nil {
 		logger.Warn("read pool approvals for pending signatures", "error", err)
@@ -4105,9 +4107,16 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		if cr.Status.MiteStatus != nil {
 			lastSeen = cr.Status.MiteStatus.LastSeen
 		}
-		if !presenceMissCounts(health.Miss, lastSeen, time.Now()) {
-			// A fresh read error keeps the phase and the miss count.
-			logger.Warn("mite presence read failed; phase kept", "error", readErr, "lastSeen", lastSeen)
+		faultAt := r.lastPresenceFault(key)
+		if !presenceMissCounts(health.Miss, lastSeen, faultAt, time.Now()) {
+			// A fresh read error, or a miss soon after a failed read of
+			// this mite, keeps the phase and the miss count.
+			if health.Miss == presenceMissUnreadable {
+				logger.Warn("mite presence read failed; phase kept", "error", readErr, "lastSeen", lastSeen)
+			} else {
+				logger.Info("mite presence miss after a failed presence read; not counted", "cause", health.Miss,
+					"faultAt", faultAt, "lastSeen", lastSeen)
+			}
 			return nil
 		}
 		// MiteStreamDegraded means "connected, but the bridge is starving it",
@@ -5307,7 +5316,7 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 	// mite's post-Failed retries presenting a dead token. A connected mite
 	// never reads this token, so the refresh is always safe; a still-valid
 	// token is never rotated. Warn-only on failure — the next tick retries.
-	if _, connectedNow, _ := r.miteTransport.Info(cr.Namespace, cr.Name); !connectedNow {
+	if _, connectedNow, _ := r.readPresence(cr.Namespace, cr.Name); !connectedNow {
 		if err := r.ensureBootstrapToken(ctx, cr, controllerPrefix(cr)); err != nil {
 			r.Logger.Warn("bootstrap token remint failed",
 				"controller", cr.Namespace+"/"+cr.Name, "error", err)
@@ -5357,7 +5366,7 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 	r.reconcileFleetPodLabel(ctx, cr)
 	r.checkPluginRollFailed(ctx, cr, nil, logger)
 
-	info, connected, _ := r.miteTransport.Info(cr.Namespace, cr.Name)
+	info, connected, _ := r.readPresence(cr.Namespace, cr.Name)
 	// handleConnected treats a stale heartbeat as a lost stream. The same rule
 	// applies here, or the two handlers flap the phase on one presence record.
 	connected = connected && !heartbeatStale(info.LastHeartbeat)
@@ -5465,7 +5474,7 @@ func (r *Reconciler) reconcileMiteTransportEnvRoll(ctx context.Context, cr *v1al
 	if cr.Status.Phase != v1alpha1.ControllerPhaseRunning || !isStreamLost(cr) {
 		return false
 	}
-	info, present, readErr := r.miteTransport.Info(cr.Namespace, cr.Name)
+	info, present, readErr := r.readPresence(cr.Namespace, cr.Name)
 	if readErr != nil {
 		// A failed read says nothing about the mite, so it must not drive a roll.
 		r.Logger.Warn("mite transport env roll evaluation skipped: presence read failed",

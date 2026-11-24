@@ -482,22 +482,32 @@ func TestPresenceMissCounts(t *testing.T) {
 	now := time.Now()
 	fresh := &metav1.Time{Time: now.Add(-10 * time.Second)}
 	old := &metav1.Time{Time: now.Add(-3 * time.Minute)}
+	var noFault time.Time
+	recentFault := now.Add(-time.Minute)
+	oldFault := now.Add(-3 * time.Minute)
 	tests := []struct {
 		name     string
 		miss     presenceMiss
 		lastSeen *metav1.Time
+		faultAt  time.Time
 		want     bool
 	}{
-		{"connected does not count", presenceMissNone, nil, false},
-		{"missing record counts", presenceMissMissing, fresh, true},
-		{"stale heartbeat counts", presenceMissStale, fresh, true},
-		{"read error with fresh lastSeen does not count", presenceMissUnreadable, fresh, false},
-		{"read error with old lastSeen counts", presenceMissUnreadable, old, true},
-		{"read error without lastSeen counts", presenceMissUnreadable, nil, true},
+		{"connected does not count", presenceMissNone, nil, noFault, false},
+		{"missing record counts", presenceMissMissing, fresh, noFault, true},
+		{"stale heartbeat counts", presenceMissStale, fresh, noFault, true},
+		{"read error with fresh lastSeen does not count", presenceMissUnreadable, fresh, noFault, false},
+		{"read error with old lastSeen counts", presenceMissUnreadable, old, noFault, true},
+		{"read error without lastSeen counts", presenceMissUnreadable, nil, noFault, true},
+		{"missing record after a recent fault with fresh lastSeen does not count", presenceMissMissing, fresh, recentFault, false},
+		{"stale heartbeat after a recent fault with fresh lastSeen does not count", presenceMissStale, fresh, recentFault, false},
+		{"missing record after a recent fault with old lastSeen counts", presenceMissMissing, old, recentFault, true},
+		{"missing record after a recent fault without lastSeen counts", presenceMissMissing, nil, recentFault, true},
+		{"missing record after an old fault counts", presenceMissMissing, fresh, oldFault, true},
+		{"read error with old lastSeen still counts after a fault", presenceMissUnreadable, old, now, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := presenceMissCounts(tc.miss, tc.lastSeen, now); got != tc.want {
+			if got := presenceMissCounts(tc.miss, tc.lastSeen, tc.faultAt, now); got != tc.want {
 				t.Errorf("presenceMissCounts(%q) = %v, want %v", tc.miss, got, tc.want)
 			}
 		})
