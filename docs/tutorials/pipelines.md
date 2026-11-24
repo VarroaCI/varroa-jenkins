@@ -194,6 +194,9 @@ Each pipelines page sets the browser tab title.
 
 An interrupted build shows a banner naming the reason, and a link to its retry when one exists.
 
+A stage still open when the build completes takes the build's end time and no duration. It
+reads `SUCCESS` for a successful build, else `ABORTED`.
+
 A duplicate build shows the state **Duplicate** wherever one build is named, even when it holds a result.
 Another run of the same trigger or revision was live, so Varroa stopped it. See
 [Build records](../operations/build-records.md#live-updates).

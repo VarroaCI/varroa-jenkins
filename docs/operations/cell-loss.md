@@ -77,7 +77,9 @@ gone ends the five-minute wait.
 
 A mark that ends a running build also sets each stage that is still open to `ABORTED`, at the time
 of the mark. A later stage event from the build replaces that end. A `start-lost` or
-`heartbeat-lost` mark keeps the open stages, because the build can still run them.
+`heartbeat-lost` mark keeps the open stages, because the build can still run them. When the build
+completes, each stage that it did not end takes the build's end time. The stage reads `SUCCESS`
+when the build succeeded, and `ABORTED` for every other result.
 
 A `start-lost` mark sends no cancel and no retry: the build can still start and replace it.
 A `heartbeat-lost` mark sends neither, and the build's own completion replaces it. A Jenkins restart

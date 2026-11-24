@@ -55,6 +55,10 @@ const summaryCompletedGuardSQL = `$15::text IS NOT NULL
 // per row, so the caller publishes one lock notification per released
 // row. A foreign completion releases nothing and answers no entry.
 //
+// The owner arm also ends the stages that the completion left open
+// (endStagesAtCompletion). The plugin sends no terminal stage fact for a
+// block that never closed, or for a build that does not load at boot.
+//
 // status is the row's stored status after the write. An owner write on a
 // DUPLICATE row keeps that status and still stores the result, so the
 // caller reports DUPLICATE, never COMPLETED. The caller then runs the
@@ -164,6 +168,12 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 	if owner {
 		releasedLocks, err = deleteFleetLocksForRun(ctx, tx, intent.runID.String())
 		if err != nil {
+			return false, "", RunCompletedPayload{}, nil, err
+		}
+		// The owner arm ends each stage that the build left open, on a
+		// DUPLICATE row too. A foreign completion ends no stage, because
+		// the owner can still run them.
+		if err := endStagesAtCompletion(ctx, tx, intent, nil); err != nil {
 			return false, "", RunCompletedPayload{}, nil, err
 		}
 	}
