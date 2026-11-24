@@ -15,7 +15,7 @@
 // Ledger cross-tenant subject: varroa.ledger.crosstenant (core NATS, request-reply)
 // Ledger action subjects:     varroa.ledger.actions.<cluster> (core NATS, at-most-once)
 // Ledger move subjects:       varroa.ledger.moves.<cluster> (core NATS, at-most-once)
-// Build subjects:            builds.<cluster>.<ns>.<cell> (JetStream)
+// Build subjects:             builds.<cluster>.<ns>.<cell> (JetStream)
 // Run subjects:                runs.<cluster>.<tenant> (core NATS, at-most-once)
 // Log subjects:                logs.<cluster>.<ns>.<cell>.<runid> (core NATS, gateway to BFF SSE)
 // Tail subjects:               varroa.tail.<cluster>.<ns>.<cell> (core NATS, request-reply)

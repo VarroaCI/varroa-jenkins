@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nats-io/nats.go"
+
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
@@ -18,6 +20,12 @@ const (
 	ownerMatchTTL         = 30 * time.Minute
 	ownerRefuseTTL        = 60 * time.Second
 	ownerLookupTimeout    = 5 * time.Second
+
+	// ownerLookupPause is how long the cache sends no ledger request
+	// after a request timed out. A timed-out request holds the read loop
+	// of its stream for ownerLookupTimeout. Without the pause, each check
+	// in an outage adds one such stall.
+	ownerLookupPause = 30 * time.Second
 
 	// ownerRefusedMax is the most callers that one entry marks as
 	// refused. ownerRefusedRereads is the most reads of an aged mark that
@@ -151,17 +159,23 @@ type ownerLookupResult struct {
 	err   error
 }
 
-// errOwnerMovedDuringRead is the error of a ledger read that an
-// invalidation of its run overtook. The answer can name the owner from
-// before a move, so it decides nothing and the cache does not keep it.
-var errOwnerMovedDuringRead = errors.New("owner of the run moved during the ledger read")
+// errOwnerReadOvertaken is the error of a ledger read that a change to
+// its run's entry overtook: an invalidation, a relayed grant, or the
+// stored answer of another read. The answer can predate that change, so
+// it decides nothing and the cache does not keep it.
+var errOwnerReadOvertaken = errors.New("the cached owner of the run changed during the ledger read")
+
+// errOwnerLookupPaused is the error of a check that sends no ledger
+// request, because a request timed out less than ownerLookupPause ago.
+var errOwnerLookupPaused = errors.New("owner lookups pause after a timed-out ledger request")
 
 // ownerReads counts the ledger reads in flight for one run and the
-// invalidations of the run since the first of them began. The cache holds
-// it only while a read is in flight.
+// changes to the run's entry since the first of them began. A write and
+// an invalidation are changes. The cache holds it only while a read is
+// in flight.
 type ownerReads struct {
-	inFlight    int
-	invalidated uint64
+	inFlight int
+	changes  uint64
 }
 
 // ownerCache is the gateway's bounded, least-recently-used cache of run
@@ -178,6 +192,9 @@ type ownerCache struct {
 	order   *list.List // front = most recently used
 	// reads holds the ledger reads in flight for each run. mu guards it.
 	reads map[string]*ownerReads
+	// pausedUntil ends the pause that a timed-out request starts. No
+	// read begins before it. mu guards it.
+	pausedUntil time.Time
 
 	inflightMu sync.Mutex
 	inflight   map[string][]chan ownerLookupResult
@@ -243,14 +260,15 @@ func (c *ownerCache) set(runID string, entry ownerCacheEntry) {
 	c.setLocked(runID, entry)
 }
 
-// setUnlessInvalidated stores entry like set, unless invalidate ran for
-// runID after the ledger read that produced entry began. began is the
+// setUnlessChanged stores entry like set, unless the entry of runID
+// changed after the ledger read that produced entry began. began is the
 // count that beginRead returned for that read. It answers whether it
-// stored entry.
-func (c *ownerCache) setUnlessInvalidated(runID string, began uint64, entry ownerCacheEntry) bool {
+// stored entry. A stored entry is itself a change, so it overtakes each
+// other read of the run in flight.
+func (c *ownerCache) setUnlessChanged(runID string, began uint64, entry ownerCacheEntry) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if r := c.reads[runID]; r != nil && r.invalidated != began {
+	if r := c.reads[runID]; r != nil && r.changes != began {
 		return false
 	}
 	c.setLocked(runID, entry)
@@ -258,8 +276,8 @@ func (c *ownerCache) setUnlessInvalidated(runID string, began uint64, entry owne
 }
 
 // beginRead records one ledger read in flight for runID. It returns the
-// invalidation count that setUnlessInvalidated compares. Every call needs
-// one endRead.
+// change count that setUnlessChanged compares. Every call needs one
+// endRead.
 func (c *ownerCache) beginRead(runID string) uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -269,7 +287,7 @@ func (c *ownerCache) beginRead(runID string) uint64 {
 		c.reads[runID] = r
 	}
 	r.inFlight++
-	return r.invalidated
+	return r.changes
 }
 
 // endRead ends one ledger read that beginRead recorded. The record of the
@@ -287,8 +305,48 @@ func (c *ownerCache) endRead(runID string) {
 	}
 }
 
-// setLocked is set for a caller that holds c.mu.
+// noteChangeLocked counts one change to runID's entry for each read of the
+// run in flight. The caller holds c.mu.
+func (c *ownerCache) noteChangeLocked(runID string) {
+	if r := c.reads[runID]; r != nil {
+		r.changes++
+	}
+}
+
+// lookupsPaused reports whether a timed-out request paused the ledger
+// requests at now.
+func (c *ownerCache) lookupsPaused(now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return now.Before(c.pausedUntil)
+}
+
+// pauseLookups starts the pause after a request that timed out at now.
+func (c *ownerCache) pauseLookups(now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pausedUntil = now.Add(ownerLookupPause)
+}
+
+// resumeLookups ends a pause. A request that began before the pause and
+// got a reply shows that the ledger answers again.
+func (c *ownerCache) resumeLookups() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pausedUntil = time.Time{}
+}
+
+// ownerRequestTimedOut reports whether err is the end of the request's
+// own wait. Only such a failure holds the caller for ownerLookupTimeout.
+// A request that no responder takes fails at once.
+func ownerRequestTimedOut(err error) bool {
+	return errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// setLocked is set for a caller that holds c.mu. Each write is a change
+// that overtakes the reads of the run in flight.
 func (c *ownerCache) setLocked(runID string, entry ownerCacheEntry) {
+	c.noteChangeLocked(runID)
 	if el, ok := c.entries[runID]; ok {
 		el.Value.(*ownerCacheItem).entry = entry
 		c.order.MoveToFront(el)
@@ -311,14 +369,12 @@ func (c *ownerCache) setLocked(runID string, entry ownerCacheEntry) {
 // so observeGrant never replaces the entry for such a run. A ledger read
 // for runID that is in flight can answer the owner from before the move.
 // invalidate therefore also makes each such read fail with
-// errOwnerMovedDuringRead, so its answer is neither cached nor used. A run
+// errOwnerReadOvertaken, so its answer is neither cached nor used. A run
 // with no entry and no read in flight is left as it is.
 func (c *ownerCache) invalidate(runID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if r := c.reads[runID]; r != nil {
-		r.invalidated++
-	}
+	c.noteChangeLocked(runID)
 	el, ok := c.entries[runID]
 	if !ok {
 		return
@@ -331,6 +387,8 @@ func (c *ownerCache) invalidate(runID string) {
 // ClaimResponse, at no lookup cost. A later grant for the same run_id
 // replaces the entry unconditionally, so an ownership transfer
 // invalidates a stale match immediately rather than waiting on its TTL.
+// A ledger read of the run in flight can answer the owner from before the
+// claim, so the grant overtakes it and the read stores nothing.
 func (c *ownerCache) observeGrant(runID, cluster, namespace, cell, instance string) {
 	c.set(runID, ownerCacheEntry{
 		found:   true,
@@ -343,7 +401,9 @@ func (c *ownerCache) observeGrant(runID, cluster, namespace, cell, instance stri
 // coalescing concurrent callers for the same run_id into one call. cluster,
 // namespace, cell, and instance name the caller whose admission decision
 // this lookup answers: the TTL the entry receives depends on whether the
-// ledger's tuple matches this caller, per design.md D4's table.
+// ledger's tuple matches this caller, per design.md D4's table. The call
+// is readOwner, so a waiter that joins after a change to the run's entry
+// gets the answer of a read that began after that change.
 func (c *ownerCache) lookup(ctx context.Context, requester ledgerRequester, runID, cluster, namespace, cell, instance string) (ownerCacheEntry, error) {
 	ch := make(chan ownerLookupResult, 1)
 	c.inflightMu.Lock()
@@ -355,7 +415,7 @@ func (c *ownerCache) lookup(ctx context.Context, requester ledgerRequester, runI
 		return res.entry, res.err
 	}
 
-	entry, err := c.doLookup(ctx, requester, runID, cluster, namespace, cell, instance)
+	entry, err := c.readOwner(ctx, requester, runID, cluster, namespace, cell, instance)
 
 	c.inflightMu.Lock()
 	waiters = c.inflight[runID]
@@ -367,23 +427,50 @@ func (c *ownerCache) lookup(ctx context.Context, requester ledgerRequester, runI
 	return entry, err
 }
 
+// readOwner reads the run's owner through doLookup. When a change to the
+// run's entry overtakes the read, it reads once more: the second read
+// begins after that change, so its answer is fresh. A second overtaken
+// read fails with errOwnerReadOvertaken. Only a read that got a reply can
+// be overtaken, so the two reads hold the caller for less than twice
+// ownerLookupTimeout.
+func (c *ownerCache) readOwner(ctx context.Context, requester ledgerRequester, runID, cluster, namespace, cell, instance string) (ownerCacheEntry, error) {
+	entry, err := c.doLookup(ctx, requester, runID, cluster, namespace, cell, instance)
+	if errors.Is(err, errOwnerReadOvertaken) {
+		entry, err = c.doLookup(ctx, requester, runID, cluster, namespace, cell, instance)
+	}
+	return entry, err
+}
+
 // doLookup makes one request-reply call and caches the answer. It never
 // caches a lookup failure: a timeout, an unreachable recorder, an
 // unparsable reply, or a recorder-reported database error must be
-// retried, not remembered as a refusal. An invalidation of the run while
-// the call is in flight is a failure too (errOwnerMovedDuringRead): the
-// answer can predate the move that the invalidation reports.
+// retried, not remembered as a refusal. A change to the run's entry while
+// the call is in flight is a failure too (errOwnerReadOvertaken): the
+// answer can predate that change.
+//
+// A request that times out pauses the requests of the whole cache for
+// ownerLookupPause, and a call in the pause fails at once with
+// errOwnerLookupPaused. A recorder or bus outage holds every request, so
+// one stall stands for all the checks of the pause. The end of the
+// caller's own context starts no pause. A reply ends the pause.
 func (c *ownerCache) doLookup(ctx context.Context, requester ledgerRequester, runID, cluster, namespace, cell, instance string) (ownerCacheEntry, error) {
 	body, err := json.Marshal(ownerLookupRequest{RunID: runID})
 	if err != nil {
 		return ownerCacheEntry{}, err
 	}
+	if c.lookupsPaused(time.Now()) {
+		return ownerCacheEntry{}, errOwnerLookupPaused
+	}
 	began := c.beginRead(runID)
 	defer c.endRead(runID)
 	msg, err := requester.RequestWithContext(ctx, bus.LedgerOwnerSubject, body, ownerLookupTimeout)
 	if err != nil {
+		if ctx.Err() == nil && ownerRequestTimedOut(err) {
+			c.pauseLookups(time.Now())
+		}
 		return ownerCacheEntry{}, err
 	}
+	c.resumeLookups()
 	var resp ownerLookupResponse
 	if err := json.Unmarshal(msg.Data, &resp); err != nil {
 		return ownerCacheEntry{}, err
@@ -409,8 +496,8 @@ func (c *ownerCache) doLookup(ctx context.Context, requester ledgerRequester, ru
 			entry = refusalEntry(prev, hadPrev, true, tuple, caller, now)
 		}
 	}
-	if !c.setUnlessInvalidated(runID, began, entry) {
-		return ownerCacheEntry{}, errOwnerMovedDuringRead
+	if !c.setUnlessChanged(runID, began, entry) {
+		return ownerCacheEntry{}, errOwnerReadOvertaken
 	}
 	return entry, nil
 }
@@ -450,12 +537,17 @@ func decideOwner(entry ownerCacheEntry, cluster, namespace, cell, instance strin
 // or a refusal read for another caller can name an owner that the ledger
 // no longer holds. The recorder's owner move signal drops such an entry
 // (onOwnerMove); the re-read covers a replica that missed the signal.
-// The lookup marks its own caller and never shortens a match. One set of marks therefore costs at most ownerRefusedMax lookups
-// for new marks and ownerRefusedRereads lookups for aged marks, and a
-// lookup in flight is shared. The lookup runs on the caller's goroutine,
-// the stream read loop for a chunk, and lasts at most ownerLookupTimeout.
+// The lookup marks its own caller and never shortens a match. One set of
+// marks therefore costs at most ownerRefusedMax lookups for new marks and
+// ownerRefusedRereads lookups for aged marks, and a lookup in flight is
+// shared. The lookup runs on the caller's goroutine, the stream read loop
+// for a chunk. It lasts at most ownerLookupTimeout, and less than twice
+// that when a change to the entry overtakes its first read.
+//
 // A failed lookup writes no entry and answers ownerUnknown, never
-// ownerForeign.
+// ownerForeign. In the pause after a timed-out request, a check that needs
+// a lookup sends no request and answers ownerUnknown at once. A cached
+// match still admits the caller in the pause.
 func (h *BusHandler) checkOwner(ctx context.Context, cluster, namespace, cell, instance, runID string) (ownerDecision, ownerTuple) {
 	if h.ownerCache == nil {
 		// No cache configured (e.g. a hand-built BusHandler in a test
@@ -484,31 +576,31 @@ func (h *BusHandler) checkOwner(ctx context.Context, cluster, namespace, cell, i
 // to ownerMatchTTL, and the old owner is the sender most likely to send a
 // stale completion. The answer replaces the cached entry with the
 // lifetime doLookup gives it, so the chunk path keeps a fresh match for
-// the whole ownerMatchTTL with no new request.
+// the whole ownerMatchTTL with no new request. A change to the entry that
+// overtakes the request costs one more request (readOwner).
 //
-// fresh is false when the request failed. The decision is then
-// ownerMatched when a cached entry matches the caller, the answer the
-// chunk path gives in the same state, and ownerUnknown otherwise. A
-// failed request never answers ownerForeign. A call costs one ledger
-// request, bounded by ownerLookupTimeout.
+// fresh is false when no request answered: a failed request, or a call
+// in the pause after a timed-out request, which sends none. The decision
+// is then ownerMatched when the entry that the cache holds after the
+// attempt matches the caller, the answer the chunk path gives in the same
+// state. With no entry, or with an entry for another owner, it is
+// ownerUnknown. A failed request never answers ownerForeign. A check whose
+// two reads are both overtaken is the exception. It answers ownerUnknown
+// even when the cache holds a match, because the entry changed during
+// each read and the check does not trust it.
 func (h *BusHandler) checkOwnerForCompletion(ctx context.Context, cluster, namespace, cell, instance, runID string) (decision ownerDecision, tuple ownerTuple, fresh bool) {
 	if h.ownerCache == nil {
 		return ownerUnknown, ownerTuple{}, false
 	}
-	cached, hasCached := h.ownerCache.get(runID)
-	entry, err := h.ownerCache.doLookup(ctx, h.ledger, runID, cluster, namespace, cell, instance)
-	if err != nil {
-		// A read that an owner move overtook holds a pre-move answer. Its
-		// cached match is the stale owner, so it must not admit the event.
-		// A read that an owner move overtook holds a pre-move answer. Its
-		// cached match is the stale owner, so it must not admit the event.
-		if errors.Is(err, errOwnerMovedDuringRead) {
-			return ownerUnknown, ownerTuple{}, false
-		}
-		if hasCached && decideOwner(cached, cluster, namespace, cell, instance) == ownerMatched {
-			return ownerMatched, cached.tuple, false
-		}
+	entry, err := h.ownerCache.readOwner(ctx, h.ledger, runID, cluster, namespace, cell, instance)
+	if err == nil {
+		return decideOwner(entry, cluster, namespace, cell, instance), entry.tuple, true
+	}
+	if errors.Is(err, errOwnerReadOvertaken) {
 		return ownerUnknown, ownerTuple{}, false
 	}
-	return decideOwner(entry, cluster, namespace, cell, instance), entry.tuple, true
+	if cached, ok := h.ownerCache.get(runID); ok && decideOwner(cached, cluster, namespace, cell, instance) == ownerMatched {
+		return ownerMatched, cached.tuple, false
+	}
+	return ownerUnknown, ownerTuple{}, false
 }

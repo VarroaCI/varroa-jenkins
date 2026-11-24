@@ -9,7 +9,6 @@ import (
 	"github.com/nats-io/nats-server/v2/server"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
-	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
 // watchOwnerMovesOn connects h to the NATS server srv and starts its owner
@@ -171,17 +170,18 @@ func TestOwnerMoveSignalForAnUnknownRunChangesNothing(t *testing.T) {
 	}
 }
 
-// TestOwnerMoveSignalDuringALookupStoresNothing proves the order rule. A
-// ledger read that began before the signal can answer the old owner. The
-// signal makes that read fail, so its answer is not cached and admits
-// nothing: the chunk gets BUSY, and its re-send reads the ledger again.
-func TestOwnerMoveSignalDuringALookupStoresNothing(t *testing.T) {
+// TestOwnerMoveSignalDuringALookupReadsTheLedgerOnceMore proves the order
+// rule. A ledger read that began before the signal answers the owner from
+// before the move. The signal overtakes that read, so its answer is not
+// cached and decides nothing. The lookup reads the ledger once more, and
+// the fresh answer refuses the old owner's chunk.
+func TestOwnerMoveSignalDuringALookupReadsTheLedgerOnceMore(t *testing.T) {
 	sender := &recordingSender{}
 	owner := newFakeOwnerRequester()
 	runID := newTestRunID()
 	setOwner(owner, runID, "inst1")
 	h := newLogTestHandler(t, owner, sender)
-	gate := &gatedOwnerRequester{inner: owner, entered: make(chan struct{}), release: make(chan struct{})}
+	gate := newStaleGatedOwnerRequester(owner)
 	h.ledger = gate
 
 	done := make(chan struct{})
@@ -189,56 +189,46 @@ func TestOwnerMoveSignalDuringALookupStoresNothing(t *testing.T) {
 		defer close(done)
 		sendChunk(h, runID, 0, "a", "inst1")
 	}()
-	select {
-	case <-gate.entered:
-	case <-time.After(5 * time.Second):
-		close(gate.release)
-		<-done
-		t.Fatal("the chunk sent no ledger request")
-	}
-	// The held read answers after the signal, with the owner from before
-	// the move.
+	gate.waitEntered(t, done)
+	// The recorder moves the run and signals the move. The held read then
+	// answers the owner from before the move.
+	setOwner(owner, runID, "inst2")
 	h.onOwnerMove(mustMarshalOwnerMove(t, runID))
 	close(gate.release)
 	<-done
-	setOwner(owner, runID, "inst2")
 
 	got := waitForLogAcks(t, sender, 1)[0]
-	if got.Status != logAckStatusBusy || got.Reason != logReasonOwnerLookupFail {
-		t.Fatalf("expected BUSY owner-lookup-failed for a read the move overtook, got %+v", got)
-	}
-	if entry, ok := h.ownerCache.peek(runID); ok {
-		t.Fatalf("cached entry = %+v, want none from a read the move overtook", entry)
-	}
-	if _, exists := h.lookupRunState(runID); exists {
-		t.Fatal("expected no run state from a read the move overtook")
-	}
-
-	h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 0, Data: []byte("a0 "), CellInstance: "inst1"})
-	if got := waitForLogAcks(t, sender, 2)[1]; got.Status != logAckStatusRejected || got.Reason != logReasonForeignRun {
-		t.Fatalf("expected the re-send REJECTED foreign-run, got %+v", got)
+	if got.Status != logAckStatusRejected || got.Reason != logReasonForeignRun {
+		t.Fatalf("expected REJECTED foreign-run from the second read, got %+v", got)
 	}
 	if calls := owner.callCount(); calls != 2 {
-		t.Fatalf("owner lookups = %d, want 2", calls)
+		t.Fatalf("owner lookups = %d, want 2: the overtaken read and one more read", calls)
+	}
+	entry, ok := h.ownerCache.peek(runID)
+	if !ok || entry.tuple.instance != "inst2" {
+		t.Fatalf("cached entry = %+v (ok=%v), want the new owner from the second read", entry, ok)
+	}
+	if _, exists := h.lookupRunState(runID); exists {
+		t.Fatal("expected no run state for the old owner")
 	}
 }
 
 // TestCompletionAfterAnOwnerMoveDoesNotAdmitTheCachedOwner proves that a
 // COMPLETED check whose ledger read the move overtakes does not fall back to
-// the pre-move cached match. The old owner's completion must not pass.
+// the pre-move cached match. It reads the ledger once more, and the fresh
+// answer refuses the old owner's completion.
 func TestCompletionAfterAnOwnerMoveDoesNotAdmitTheCachedOwner(t *testing.T) {
-	sender := &recordingSender{}
 	owner := newFakeOwnerRequester()
 	runID := newTestRunID()
-	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
-	h := newLogTestHandler(t, owner, sender)
+	setOwner(owner, runID, "inst1")
+	h := newLogTestHandler(t, owner, &recordingSender{})
 	if _, err := h.ownerCache.doLookup(context.Background(), owner, runID, "core", "ns1", "cell1", "inst1"); err != nil {
 		t.Fatalf("prime the owner cache: %v", err)
 	}
 	if _, ok := h.ownerCache.peek(runID); !ok {
 		t.Fatal("expected the primed match in the owner cache")
 	}
-	gate := &gatedOwnerRequester{inner: owner, entered: make(chan struct{}), release: make(chan struct{})}
+	gate := newStaleGatedOwnerRequester(owner)
 	h.ledger = gate
 
 	type result struct {
@@ -246,25 +236,23 @@ func TestCompletionAfterAnOwnerMoveDoesNotAdmitTheCachedOwner(t *testing.T) {
 		fresh    bool
 	}
 	out := make(chan result, 1)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		decision, _, fresh := h.checkOwnerForCompletion(context.Background(), "core", "ns1", "cell1", "inst1", runID)
 		out <- result{decision: decision, fresh: fresh}
 	}()
-	select {
-	case <-gate.entered:
-	case <-time.After(5 * time.Second):
-		close(gate.release)
-		<-out
-		t.Fatal("the completion check sent no ledger request")
-	}
+	gate.waitEntered(t, done)
+	setOwner(owner, runID, "inst2")
 	h.onOwnerMove(mustMarshalOwnerMove(t, runID))
 	close(gate.release)
+	<-done
 	got := <-out
-	if got.decision == ownerMatched {
-		t.Fatal("a completion whose read the move overtook was admitted on the pre-move cached owner")
+	if got.decision != ownerForeign || !got.fresh {
+		t.Fatalf("completion = %v (fresh=%v), want a fresh ownerForeign from the second read", got.decision, got.fresh)
 	}
-	if got.fresh {
-		t.Fatal("a completion whose read the move overtook must not report a fresh answer")
+	if calls := owner.callCount(); calls != 3 {
+		t.Fatalf("owner lookups = %d, want 3: the priming read, the overtaken read, and one more read", calls)
 	}
 }
 
