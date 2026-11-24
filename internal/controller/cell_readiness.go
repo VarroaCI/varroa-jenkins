@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -68,6 +69,16 @@ func cellConfigGateMessage(reason string) string {
 // unready forever.
 const cellInitRollCap = 30 * time.Minute
 
+// cellMiteRollHoldCap bounds every delay of a MiteUnreachable roll. A
+// missing presence record can come from the bus and not from the cell. A
+// Ready pod, a failed pod read, or a failed presence read therefore delays
+// that roll. Past this age of unreadySince the roll goes, so a mite that
+// stays stuck in a Ready pod still rolls (see miteRollDeadline).
+const cellMiteRollHoldCap = 30 * time.Minute
+
+// cellRollHeldPrefix starts the CellReady message of a held roll.
+const cellRollHeldPrefix = "roll held: "
+
 // cellInitPodDeleteGrace is the delete grace in seconds for a rolled pod
 // whose main containers have not started. That pod has no build and no
 // drain to wait for. It must stay above 0: a force delete can run two pods
@@ -81,6 +92,12 @@ type initObservation struct {
 	Name        string
 	UID         types.UID
 	Terminating bool
+	// Ready is true when the pod's Ready condition is True and the pod has
+	// no deletion timestamp.
+	Ready bool
+	// ReadFailed is true when the pod read failed. Every other field is
+	// then zero.
+	ReadFailed bool
 	// MainStarted is true once a main container has run.
 	MainStarted bool
 	// InitFinishedAt is the latest init container finish time when every
@@ -133,6 +150,12 @@ func observeInit(pod *corev1.Pod, now time.Time, pulls map[string]pullWindow) in
 		Name:        pod.Name,
 		UID:         pod.UID,
 		Terminating: pod.DeletionTimestamp != nil,
+	}
+	for _, c := range pod.Status.Conditions {
+		if c.Type == corev1.PodReady {
+			obs.Ready = c.Status == corev1.ConditionTrue && !obs.Terminating
+			break
+		}
 	}
 	for _, s := range pod.Status.ContainerStatuses {
 		if s.State.Running != nil || s.State.Terminated != nil || s.LastTerminationState.Terminated != nil {
@@ -221,9 +244,14 @@ type cellRollResult struct {
 	// RolledAt is the roll marker to keep or set once DeletePod succeeds.
 	// A tick that neither rolls nor was already rolled leaves this nil.
 	RolledAt *metav1.Time
-	// Evacuate is true once the roll clock has run twice the grace period.
-	// Once true, it stays true until recovery.
+	// Evacuate is true once the roll clock has run twice the grace period
+	// and, for MiteUnreachable after a roll in this unready period, one
+	// grace has passed since rolledAt. Once true, it stays true until
+	// recovery.
 	Evacuate bool
+	// Held is true when the roll would go on this tick and
+	// miteRollHold stopped it.
+	Held bool
 }
 
 // cellRolledInPeriod reports whether rolledAt marks a roll inside the
@@ -241,8 +269,15 @@ func cellRolledInPeriod(rolledAt *metav1.Time, unreadySince time.Time) bool {
 // a fake clock instead of the wall clock. obs is the cell pod's init state.
 // While init progresses, nothing rolls and evacuate does not newly set.
 // After init finishes, the roll clock starts at the later of unreadySince
-// and the init finish time.
-func evaluateCellRoll(cell *v1alpha1.CellStatus, baseReason string, now time.Time, grace time.Duration, obs initObservation) cellRollResult {
+// and the init finish time. For MiteUnreachable, the roll clock also starts
+// no earlier than faultAt, the newest failed presence read of this cell.
+// While miteRollHold holds the roll, evacuate does not newly set either.
+// Neither a fault nor a pod hold delays a MiteUnreachable roll past
+// miteRollDeadline. Evacuate needs the roll clock at twice the grace. For
+// MiteUnreachable, after a roll in this unready period, evacuate also
+// needs one more grace after rolledAt.
+func evaluateCellRoll(cell *v1alpha1.CellStatus, baseReason string, now time.Time, grace time.Duration,
+	obs initObservation, faultAt time.Time) cellRollResult {
 	unreadySince := now
 	var rolledAt *metav1.Time
 	evacuated := false
@@ -275,12 +310,28 @@ func evaluateCellRoll(cell *v1alpha1.CellStatus, baseReason string, now time.Tim
 		return result
 	}
 
+	mite := baseReason == v1alpha1.ReasonMiteUnreachable
 	clockStart := unreadySince
 	if obs.InitFinishedAt.After(clockStart) {
 		clockStart = obs.InitFinishedAt
 	}
+	// A fault moves the clock only before the deadline. Past it the clock
+	// starts at unreadySince or the init finish again.
+	faultShift := mite && now.Before(unreadySince.Add(miteRollDeadline(grace))) && faultAt.After(clockStart)
+	if faultShift {
+		clockStart = faultAt
+	}
 	age := now.Sub(clockStart)
+	if !alreadyRolled && age < grace && faultShift {
+		result.Message = fmt.Sprintf("presence read failed at %s; the roll waits %s after it",
+			faultAt.UTC().Format(time.RFC3339), grace)
+	}
 	if !alreadyRolled && age >= grace {
+		if hold := miteRollHold(baseReason, obs, now.Sub(unreadySince)); hold != "" {
+			result.Message = hold
+			result.Held = true
+			return result
+		}
 		result.DeletePod = true
 		t := metav1.NewTime(now)
 		result.RolledAt = &t
@@ -290,10 +341,56 @@ func evaluateCellRoll(cell *v1alpha1.CellStatus, baseReason string, now time.Tim
 		result.Reason = v1alpha1.ReasonCellRolled
 		result.Message = baseReason
 	}
-	if age >= 2*grace {
+	// A MiteUnreachable roll can come late, after a hold. Evacuate then
+	// waits one grace after the roll, so the new pod can connect first.
+	if age >= 2*grace && (!mite || !alreadyRolled || now.Sub(result.RolledAt.Time) >= grace) {
 		result.Evacuate = true
 	}
 	return result
+}
+
+// miteRollDeadline is the most unready age that a MiteUnreachable roll
+// waits for: the grace, or cellMiteRollHoldCap when that is longer. A
+// presence fault and a pod hold together never delay the roll past it. The
+// init finish of a new pod still starts a full grace for that pod.
+func miteRollDeadline(grace time.Duration) time.Duration {
+	return max(grace, cellMiteRollHoldCap)
+}
+
+// miteRollHold returns the CellReady message that holds a roll, or "" when
+// the roll can go. Only a MiteUnreachable roll holds, and only while
+// unreadyFor is less than cellMiteRollHoldCap. A missing presence record
+// alone does not prove that the cell is broken, so the roll needs a second
+// fact from the pod. A Ready pod holds the roll. A failed pod read holds it
+// too, because the second fact is then unknown.
+func miteRollHold(baseReason string, obs initObservation, unreadyFor time.Duration) string {
+	if baseReason != v1alpha1.ReasonMiteUnreachable || unreadyFor >= cellMiteRollHoldCap {
+		return ""
+	}
+	minutes := int(unreadyFor / time.Minute)
+	switch {
+	case obs.ReadFailed:
+		return fmt.Sprintf("%sthe cell pod read failed; mite unreachable for %dm", cellRollHeldPrefix, minutes)
+	case obs.Ready:
+		return fmt.Sprintf("%spod %s is Ready; mite unreachable for %dm", cellRollHeldPrefix, obs.Name, minutes)
+	}
+	return ""
+}
+
+// cellRollCause is the cause text of a cell roll for the operator log and
+// the cell.rolled event. It names the rule, the unready age, the
+// MiteConnected message, and the age of status.miteStatus.lastSeen, which
+// is the time of the last mite heartbeat that the operator saw.
+func cellRollCause(cr *v1alpha1.Controller, baseReason string, unreadyFor time.Duration, now time.Time) string {
+	cause := fmt.Sprintf("%s for %s", baseReason, unreadyFor.Round(time.Second))
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected); c != nil &&
+		c.Status == metav1.ConditionFalse && c.Message != "" {
+		cause += "; " + c.Message
+	}
+	if ms := cr.Status.MiteStatus; ms != nil && ms.LastSeen != nil {
+		cause += fmt.Sprintf("; last mite heartbeat seen %s ago", now.Sub(ms.LastSeen.Time).Round(time.Second))
+	}
+	return cause
 }
 
 // cellUnreadyGrace returns the unready grace period for one cell: the
@@ -372,7 +469,11 @@ func (r *Reconciler) evaluateCellReadiness(ctx context.Context, cr *v1alpha1.Con
 		}
 		grace := r.cellUnreadyGrace(ctx, cr)
 		obs := r.observeCellPod(ctx, cr, cell, now, grace)
-		roll := evaluateCellRoll(cell, baseReason, now, grace, obs)
+		roll := evaluateCellRoll(cell, baseReason, now, grace, obs, r.lastPresenceFault(cr.Namespace+"/"+cr.Name))
+		if roll.Held && r.Logger != nil && !cellRollHeldBefore(cr) {
+			r.Logger.Warn("cell roll held", "controller", cr.Namespace+"/"+cr.Name,
+				"reason", baseReason, "hold", roll.Message)
+		}
 		if roll.DeletePod && obs.Terminating {
 			// The pod already goes away. Leave rolledAt as it was, so the
 			// next tick decides again against the pod that replaces it.
@@ -395,8 +496,12 @@ func (r *Reconciler) evaluateCellReadiness(ctx context.Context, cr *v1alpha1.Con
 				cell.RolledAt = previousRolledAt
 				cond.Reason, cond.Message = baseReason, ""
 			} else {
-				r.emitOperatorEvent("cell.rolled", cr,
-					fmt.Sprintf("rolled the cell pod to recover from %s", roll.Message), roll.Message)
+				cause := cellRollCause(cr, baseReason, now.Sub(roll.UnreadySince.Time), now)
+				if r.Logger != nil {
+					r.Logger.Warn("cell pod rolled", "controller", cr.Namespace+"/"+cr.Name,
+						"pod", obs.Name, "reason", baseReason, "podReady", obs.Ready, "cause", cause)
+				}
+				r.emitOperatorEvent("cell.rolled", cr, "rolled the cell pod: "+cause, baseReason)
 			}
 		}
 	default:
@@ -419,12 +524,21 @@ func (r *Reconciler) evaluateCellReadiness(ctx context.Context, cr *v1alpha1.Con
 	cr.Status.Conditions = setCondition(cr.Status.Conditions, warmCond)
 }
 
+// cellRollHeldBefore reports whether the CellReady condition of cr already
+// carries a held roll. The caller reads it before the condition is set this
+// tick, so the hold is logged once when it starts.
+func cellRollHeldBefore(cr *v1alpha1.Controller) bool {
+	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
+	return c != nil && strings.HasPrefix(c.Message, cellRollHeldPrefix)
+}
+
 // observeCellPod reads the cell pod's init state only when the roll rule on
 // unreadySince alone would act: the unready age passes the grace, and the
 // cell has not both rolled and evacuated in this unready period. The roll
 // clock never starts before unreadySince, so no other tick can act. A read
-// error answers the zero value, which keeps the rule on unreadySince. The
-// pull events of the pod are listed only for the first-container wait.
+// error answers ReadFailed and no other field, which keeps the rule on
+// unreadySince and holds a MiteUnreachable roll. The pull events of the pod
+// are listed only for the first-container wait.
 func (r *Reconciler) observeCellPod(ctx context.Context, cr *v1alpha1.Controller, cell *v1alpha1.CellStatus, now time.Time, grace time.Duration) initObservation {
 	if cell.UnreadySince == nil || now.Sub(cell.UnreadySince.Time) < grace {
 		return initObservation{}
@@ -437,7 +551,7 @@ func (r *Reconciler) observeCellPod(ctx context.Context, cr *v1alpha1.Controller
 		if r.Logger != nil {
 			r.Logger.Warn("read cell pod failed", "controller", cr.Namespace+"/"+cr.Name, "error", err)
 		}
-		return initObservation{}
+		return initObservation{ReadFailed: true}
 	}
 	obs := observeInit(pod, now, nil)
 	if obs.FirstWait == "" {

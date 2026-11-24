@@ -389,15 +389,23 @@ type miteHealthResult struct {
 
 // presenceMissCounts reports whether a pass without a live mite counts toward
 // streamLossMisses. A failed read is no evidence that the stream is gone, so
-// it counts only after lastSeen is older than staleMiteThreshold.
-func presenceMissCounts(miss presenceMiss, lastSeen *metav1.Time, now time.Time) bool {
+// it counts only after lastSeen is older than staleMiteThreshold. faultAt is
+// the newest failed presence read of this mite. The gateway can fail to
+// write presence during the same fault, so a missing or stale record less
+// than staleMiteThreshold after faultAt is a doubtful pass too. It counts
+// under the same lastSeen rule as a failed read. A steady fault therefore
+// keeps a mite connected for at most staleMiteThreshold after the last
+// heartbeat that the operator saw.
+func presenceMissCounts(miss presenceMiss, lastSeen *metav1.Time, faultAt, now time.Time) bool {
+	lastSeenOld := lastSeen == nil || now.Sub(lastSeen.Time) > staleMiteThreshold
 	switch miss {
 	case presenceMissNone:
 		return false
 	case presenceMissUnreadable:
-		return lastSeen == nil || now.Sub(lastSeen.Time) > staleMiteThreshold
+		return lastSeenOld
 	default:
-		return true
+		doubtful := !faultAt.IsZero() && now.Sub(faultAt) <= staleMiteThreshold
+		return !doubtful || lastSeenOld
 	}
 }
 

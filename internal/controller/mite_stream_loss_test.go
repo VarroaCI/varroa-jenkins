@@ -241,6 +241,9 @@ func TestHandleConnected_PresenceReadErrorKeepsConnected(t *testing.T) {
 
 // TestHandleConnected_PresenceReadErrorKeepsMissCount asserts that a read
 // error neither adds to nor resets the miss count of earlier missing passes.
+// The read error is a presence fault of this mite, so a missing pass soon
+// after it does not count either. A missing pass after the fault ages past
+// staleMiteThreshold counts again.
 func TestHandleConnected_PresenceReadErrorKeepsMissCount(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	rec, _ := newTestReconcilerForGate(client)
@@ -262,14 +265,108 @@ func TestHandleConnected_PresenceReadErrorKeepsMissCount(t *testing.T) {
 	if cr.Status.Phase != v1alpha1.ControllerPhaseConnected {
 		t.Fatalf("phase after read error = %s, want Connected", cr.Status.Phase)
 	}
+	if rec.lastPresenceFault("ns/ctl").IsZero() {
+		t.Fatal("expected the read error to record a presence fault")
+	}
 
 	rec.miteTransport = base
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if n := rec.disconnectedTicks["ns/ctl"]; n != 2 {
+		t.Fatalf("miss count right after the fault = %d, want 2", n)
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseConnected {
+		t.Fatalf("phase right after the fault = %s, want Connected", cr.Status.Phase)
+	}
+
+	rec.presenceFaults["ns/ctl"] = time.Now().Add(-staleMiteThreshold - time.Second)
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if cr.Status.Phase != v1alpha1.ControllerPhaseRunning {
 		t.Fatalf("phase = %s, want Running after the third miss", cr.Status.Phase)
 	}
 	if mc := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected); mc == nil || !strings.Contains(mc.Message, "no presence record") {
 		t.Errorf("MiteConnected = %+v, want the missing cause", mc)
+	}
+}
+
+// keyReadErrTransport decorates a Transport so Info fails for one mite
+// alone, as a corrupt presence record does.
+type keyReadErrTransport struct {
+	transport.Transport
+	ns, name string
+}
+
+func (k *keyReadErrTransport) Info(ns, name string) (transport.MiteInfo, bool, error) {
+	if ns == k.ns && name == k.name {
+		return transport.MiteInfo{}, false, errors.New("decode presence: invalid character")
+	}
+	return k.Transport.Info(ns, name)
+}
+
+// connectedNamedCtrlSeenAgo is connectedCtrlSeenAgo for another name.
+func connectedNamedCtrlSeenAgo(name string, age time.Duration) *v1alpha1.Controller {
+	cr := newGateCtrl(name, 0, "", nil)
+	seen := metav1.NewTime(time.Now().Add(-age))
+	cr.Status.MiteStatus = &v1alpha1.MiteStatus{Connected: true, LastSeen: &seen, JenkinsHealth: "healthy"}
+	cr.Status.Phase = v1alpha1.ControllerPhaseConnected
+	return cr
+}
+
+// TestHandleConnected_PresenceFaultOfOneMiteDoesNotHoldAnother asserts that
+// a failed presence read of one mite never holds the misses of another.
+func TestHandleConnected_PresenceFaultOfOneMiteDoesNotHoldAnother(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	rec, _ := newTestReconcilerForGate(client)
+	broken := connectedNamedCtrlSeenAgo("broken", 10*time.Second)
+	gone := connectedNamedCtrlSeenAgo("gone", 10*time.Second)
+	rec.miteTransport = &keyReadErrTransport{Transport: rec.miteTransport, ns: "ns", name: "broken"}
+
+	for i := 0; i < 3; i++ {
+		_ = rec.handleConnected(context.Background(), broken, runners.RunnerContribution{})
+		_ = rec.handleConnected(context.Background(), gone, runners.RunnerContribution{})
+	}
+	if rec.lastPresenceFault("ns/broken").IsZero() {
+		t.Fatal("expected a presence fault for the mite whose read failed")
+	}
+	if !rec.lastPresenceFault("ns/gone").IsZero() {
+		t.Fatal("expected no presence fault for the mite whose read worked")
+	}
+	if gone.Status.Phase != v1alpha1.ControllerPhaseRunning {
+		t.Fatalf("phase of the missing mite = %s, want Running after three misses", gone.Status.Phase)
+	}
+	if broken.Status.Phase != v1alpha1.ControllerPhaseConnected {
+		t.Fatalf("phase of the unreadable mite = %s, want Connected with a fresh lastSeen", broken.Status.Phase)
+	}
+}
+
+// alternatingPresenceTransport fails every other Info call and answers a
+// missing record on the calls between.
+type alternatingPresenceTransport struct {
+	transport.Transport
+	calls int
+}
+
+func (a *alternatingPresenceTransport) Info(_, _ string) (transport.MiteInfo, bool, error) {
+	a.calls++
+	if a.calls%2 == 1 {
+		return transport.MiteInfo{}, false, errors.New("kv leader get presence: nats: timeout")
+	}
+	return transport.MiteInfo{}, false, nil
+}
+
+// TestHandleConnected_PresenceFaultTrickleStillMarksStreamLost asserts the
+// bound of the doubtful-pass rule: with a steady trickle of failed reads,
+// the misses count once lastSeen is older than staleMiteThreshold.
+func TestHandleConnected_PresenceFaultTrickleStillMarksStreamLost(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	rec, _ := newTestReconcilerForGate(client)
+	cr := connectedCtrlSeenAgo(staleMiteThreshold + time.Second)
+	rec.miteTransport = &alternatingPresenceTransport{Transport: rec.miteTransport}
+
+	for i := 0; i < 3; i++ {
+		_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseRunning {
+		t.Fatalf("phase = %s, want Running: a fault trickle must not keep an old mite connected", cr.Status.Phase)
 	}
 }
 
