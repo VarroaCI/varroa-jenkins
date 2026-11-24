@@ -1690,6 +1690,10 @@ func (h *BusHandler) OnStreamBuildEvent(name, ns, cellInstance string, connToken
 // to the entry overtook sets no deadline, even on a cached match. A
 // gateway with no log writer sends no request and keeps the whole group.
 //
+// A match creates no state for a run that is past its deadline when this
+// gateway holds no state and no tombstone for it (markCompletionTerminal).
+// Another replica can have finished that log, and only the store knows.
+//
 // The request blocks the read loop for at most ownerLookupTimeout, the
 // same bound OnLogChunk has. After a request times out, the checks of
 // the next ownerLookupPause send no request, so the stalls of an outage
@@ -1707,7 +1711,10 @@ func (h *BusHandler) markCompletedRunTerminal(ns, name, instance string, evt *mi
 			h.log().Warn("owner lookup failed for a completed event, the cached match sets its log deadline",
 				"controller", ns+"/"+name, "cell_instance", instance, "run_id", evt.RunId)
 		}
-		h.markRunTerminal(ns, name, evt.RunId, evt.JobPath, millisToTime(evt.CompletedAtMillis))
+		if h.markCompletionTerminal(ns, name, evt.RunId, evt.JobPath, millisToTime(evt.CompletedAtMillis)) {
+			h.log().Info("completed event after its log deadline on a gateway with no log state for the run, no log state is created",
+				"controller", ns+"/"+name, "cell_instance", instance, "run_id", evt.RunId)
+		}
 	case withhold:
 		h.log().Info("completed event from a cell instance that does not own the run, its log deadline and sender facts are withheld",
 			"controller", ns+"/"+name, "cell_instance", instance, "owner_instance", tuple.instance, "run_id", evt.RunId)

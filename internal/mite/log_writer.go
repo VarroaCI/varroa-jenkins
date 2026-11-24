@@ -305,10 +305,10 @@ func (h *BusHandler) lookupRunState(runID string) (*runLogState, bool) {
 }
 
 // getOrCreateRunState returns the run's state, creating it on first
-// touch. The first call records ns, name, and jobPath. Every caller
-// calls it only after checkOwner admits the sender: OnLogChunk for a
-// chunk, and markCompletedRunTerminal for a COMPLETED event. A refused
-// sender therefore never creates the state.
+// touch. The first call records ns, name, and jobPath. markRunTerminalFrom
+// calls it only after an owner read admits the sender: for a chunk of a
+// terminal run, and for ownerRecheck. A refused sender therefore never
+// creates the state. A COMPLETED event uses runStateForCompletion.
 //
 // It returns nil when the run has a tombstone. A new state for a
 // finished run would open its log again, and the tombstone already
@@ -323,6 +323,28 @@ func (h *BusHandler) getOrCreateRunState(runID, ns, name, jobPath string) *runLo
 		return nil
 	}
 	return h.newRunStateLocked(runID, ns, name, jobPath)
+}
+
+// runStateForCompletion is getOrCreateRunState for the owner's COMPLETED
+// event. It creates a state only while deadline is ahead. late is true
+// when the run has no state and no tombstone and the deadline passed, so
+// the call created nothing. The deadline check and the creation share one
+// h.logMu section, so a chunk or an eviction cannot change the run between
+// them.
+func (h *BusHandler) runStateForCompletion(runID, ns, name, jobPath string, deadline time.Time) (st *runLogState, late bool) {
+	h.logMu.Lock()
+	defer h.logMu.Unlock()
+	if st, ok := h.logRuns[runID]; ok {
+		return st, false
+	}
+	now := time.Now()
+	if _, ok := h.tombstonesLocked().get(runID, now); ok {
+		return nil, false
+	}
+	if !now.Before(deadline) {
+		return nil, true
+	}
+	return h.newRunStateLocked(runID, ns, name, jobPath), false
 }
 
 // newRunStateLocked creates and stores the state of a run that has
@@ -607,11 +629,33 @@ func isTerminalRunStatus(status string) bool {
 // state can also be evicted after the lookup: the call then sets no
 // deadline on it. It answers true only when this call set the mark.
 //
-// A COMPLETED event of the owner and a chunk of a terminal run call it.
-// Both reach this replica on the writer's stream, so a mark that an
-// owner read set earlier stops being quiet.
+// A chunk of a terminal run calls it, and the owner's COMPLETED event
+// calls markCompletionTerminal. Both reach this replica on the writer's
+// stream, so a mark that an owner read set earlier stops being quiet.
 func (h *BusHandler) markRunTerminal(ns, name, runID, jobPath string, anchor time.Time) bool {
 	return h.markRunTerminalFrom(ns, name, runID, jobPath, anchor, false)
+}
+
+// markCompletionTerminal is markRunTerminal for the owner's COMPLETED
+// event. It answers true when the run is past its deadline with no state
+// and no tombstone, so the call created nothing and set no mark.
+//
+// Such a run gets the answer that the chunk path gives it. Another replica
+// can hold the writer's stream and finish the log. A new state could only
+// abandon the run at once. Its finalize-deadline marker would then mark a
+// finished log incomplete, and the record store keeps that mark over
+// finalized true. The run.log envelope of the event still carries
+// finalized false, so the recorder's finalizeStaleLogs sweep marks a
+// short log not-finalized.
+//
+// The deadline is anchor plus the finalize wait, the same deadline that a
+// new state gets. An anchor far in the past therefore counts as late. An
+// anchor in the future keeps the deadline ahead, and the state waits for
+// it.
+func (h *BusHandler) markCompletionTerminal(ns, name, runID, jobPath string, anchor time.Time) bool {
+	st, late := h.runStateForCompletion(runID, ns, name, jobPath, anchor.Add(h.runFinalizeWait()))
+	h.markStateTerminal(ns, name, runID, st, anchor, false)
+	return late
 }
 
 // markRunTerminalFrom is markRunTerminal with the source of the mark.
@@ -622,7 +666,12 @@ func (h *BusHandler) markRunTerminal(ns, name, runID, jobPath string, anchor tim
 // mark, so a COMPLETED event that races the owner read never leaves a
 // stale flag.
 func (h *BusHandler) markRunTerminalFrom(ns, name, runID, jobPath string, anchor time.Time, ownerRead bool) bool {
-	st := h.getOrCreateRunState(runID, ns, name, jobPath)
+	return h.markStateTerminal(ns, name, runID, h.getOrCreateRunState(runID, ns, name, jobPath), anchor, ownerRead)
+}
+
+// markStateTerminal sets the terminal mark on st, the state that the
+// caller looked up for runID. A nil st changes nothing.
+func (h *BusHandler) markStateTerminal(ns, name, runID string, st *runLogState, anchor time.Time, ownerRead bool) bool {
 	if st == nil {
 		return false
 	}
