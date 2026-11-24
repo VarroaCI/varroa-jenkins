@@ -220,16 +220,35 @@ func (h *BusHandler) dropCellStateEntries(ns, name string) {
 	}
 }
 
-// OnRunStateChunk implements StreamHandler for one run-state chunk a
+// OnRunStateChunk is OnStreamRunStateChunk for a caller that knows no
+// stream instance. The server calls OnStreamRunStateChunk.
+func (h *BusHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChunk) {
+	h.OnStreamRunStateChunk(name, ns, "", chunk)
+}
+
+// OnStreamRunStateChunk serves one run-state chunk a
 // mite forwards. It applies D6's six ordered steps and answers one
 // RunStateAck. A stored file publishes its run.state envelope before
 // the push is recorded and before the STORED ack. A failed publish
 // answers BUSY. A state-cap refusal publishes its envelope before the
 // REJECTED ack, whatever the publish answers.
-func (h *BusHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChunk) {
+//
+// cellInstance is the instance of the sending stream's own verified
+// certificate. It replaces chunk.CellInstance before any step reads it,
+// so the owner check and the envelope name the sender. The value must
+// not come from the per-controller map: each Register or stream open of
+// another pod of the controller overwrites the entry. A wrong value can
+// refuse the owner's chunk with foreign-run, which the mite treats as
+// permanent. An empty value takes the map entry, which is what a
+// certificate with no instance gives.
+func (h *BusHandler) OnStreamRunStateChunk(name, ns, cellInstance string, chunk *mitev1.RunStateChunk) {
 	if h.logStore == nil {
 		return
 	}
+	if cellInstance == "" {
+		cellInstance = h.lookupCellInstance(ns, name)
+	}
+	chunk.CellInstance = cellInstance
 	// A restart copy follows its own path. It is posted after the run
 	// finalizes, so the terminal drop below never applies to it.
 	if chunk.RestartSource {
@@ -253,11 +272,9 @@ func (h *BusHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChun
 		return
 	}
 
-	// Step 2: the sending cell must own the run. The gateway stamps the
-	// instance from the registered identity, so the message's own value
-	// is never read.
-	instance := h.lookupCellInstance(ns, name)
-	decision, tuple := h.checkOwner(ctx, h.cluster, ns, name, instance, chunk.RunId)
+	// Step 2: the sending cell must own the run. chunk.CellInstance holds
+	// the sending stream's instance, never the value the mite sent.
+	decision, tuple := h.checkOwner(ctx, h.cluster, ns, name, chunk.CellInstance, chunk.RunId)
 	switch decision {
 	case ownerForeign:
 		h.rejectRunState(ctx, ns, name, chunk, stateReasonForeignRun)
@@ -764,7 +781,7 @@ func (h *BusHandler) publishRunStateEnvelope(ns, name string, chunk *mitev1.RunS
 		Cluster:       h.cluster,
 		Namespace:     ns,
 		Cell:          name,
-		CellInstance:  h.lookupCellInstance(ns, name),
+		CellInstance:  chunk.CellInstance,
 		Tenant:        tenant,
 		JobPath:       chunk.JobPath,
 		OccurredAt:    time.Now().UTC(),

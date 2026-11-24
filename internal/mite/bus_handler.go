@@ -150,9 +150,14 @@ type BusHandler struct {
 
 	// cellInstances holds the pod unique identifier each controller's mite
 	// presented at registration ("ns/name" -> cell_instance), set by
-	// RecordCellInstance and read by OnBuildEvent. It is not cleared on
-	// OnDisconnect: the identity belongs to the mite's pod, not to one
-	// stream, and survives a reconnect on the same gateway replica.
+	// RecordCellInstance. It is not cleared on OnDisconnect: the identity
+	// belongs to the mite's pod, not to one stream, and survives a reconnect
+	// on the same gateway replica. Each Register or stream open of any pod
+	// of the controller overwrites the entry, so a path that acts for one
+	// stream reads the instance of that stream instead. The entry serves a
+	// caller or a certificate that names no instance, and the run.log,
+	// job.schedules, and job.branches envelopes, whose instance the recorder
+	// does not decide on.
 	cellInstances map[string]string
 
 	// watchBackoff is the initial retry delay for re-establishing a bus watch.
@@ -855,6 +860,8 @@ func (h *BusHandler) SetRecordStoreEnabled(enabled bool) {
 
 // recordCommandOutcome publishes the record of one command result, and
 // reports whether the pending imperative message may be acknowledged.
+// Every envelope carries instance, the instance of the stream that sent
+// the result.
 //
 // A refused CANCEL_BUILD, input answer, or REPLAY_BUILD logs one Warn line
 // first, with or without a record store, and acknowledges: the caller
@@ -881,7 +888,7 @@ func (h *BusHandler) SetRecordStoreEnabled(enabled bool) {
 // the run on its resume deadline, which is the path it takes today.
 //
 // Every other command type acknowledges, because it writes no record.
-func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg, result *mitev1.CommandResult) bool {
+func (h *BusHandler) recordCommandOutcome(ns, name, instance string, pendingMsg *nats.Msg, result *mitev1.CommandResult) bool {
 	imp := pendingCommand(pendingMsg)
 	if imp == nil {
 		return true
@@ -890,19 +897,19 @@ func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg,
 	case mitev1.CommandTypeCancelBuild:
 		h.logRefusedRunCommand("cancel build command refused", ns, name, result)
 		if p := imp.CancelBuild; p != nil && h.shouldRecordRefusal(result) {
-			h.publishCommandRefused(ns, name, refusedCommandCancel, p.RunId, p.JobPath, p.Actor, result)
+			h.publishCommandRefused(ns, name, instance, refusedCommandCancel, p.RunId, p.JobPath, p.Actor, result)
 		}
 		return true
 	case mitev1.CommandTypeProceedInput:
 		h.logRefusedRunCommand("run input command refused", ns, name, result)
 		if p := imp.ProceedInput; p != nil && h.shouldRecordRefusal(result) {
-			h.publishCommandRefused(ns, name, refusedCommandProceed, p.RunId, p.JobPath, actingUserName(p.ActingUser), result)
+			h.publishCommandRefused(ns, name, instance, refusedCommandProceed, p.RunId, p.JobPath, actingUserName(p.ActingUser), result)
 		}
 		return true
 	case mitev1.CommandTypeAbortInput:
 		h.logRefusedRunCommand("run input command refused", ns, name, result)
 		if p := imp.AbortInput; p != nil && h.shouldRecordRefusal(result) {
-			h.publishCommandRefused(ns, name, refusedCommandAbort, p.RunId, p.JobPath, actingUserName(p.ActingUser), result)
+			h.publishCommandRefused(ns, name, instance, refusedCommandAbort, p.RunId, p.JobPath, actingUserName(p.ActingUser), result)
 		}
 		return true
 	case mitev1.CommandTypeScanMultibranch:
@@ -915,7 +922,7 @@ func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg,
 		// run is the only record the run's reader can find.
 		h.logRefusedRunCommand("replay build command refused", ns, name, result)
 		if p := imp.ReplayBuild; p != nil && h.shouldRecordRefusal(result) {
-			h.publishTriggerFailed(ns, name, &mitev1.TriggerBuildPayload{
+			h.publishTriggerFailed(ns, name, instance, &mitev1.TriggerBuildPayload{
 				RunId:     p.RunId,
 				IntentKey: p.IntentKey,
 				JobPath:   p.JobPath,
@@ -929,7 +936,7 @@ func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg,
 		if p := imp.RestartBuild; p != nil && h.shouldRecordRefusal(result) {
 			// The refusal record decides the acknowledgement: a failed
 			// publish keeps the command pending for a redelivery.
-			return h.publishTriggerFailed(ns, name, &mitev1.TriggerBuildPayload{
+			return h.publishTriggerFailed(ns, name, instance, &mitev1.TriggerBuildPayload{
 				RunId:     p.RunId,
 				IntentKey: p.IntentKey,
 				JobPath:   p.JobPath,
@@ -947,14 +954,14 @@ func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg,
 			return true
 		}
 		if result.Success {
-			return h.publishTriggerAccepted(ns, name, imp.TriggerBuild, result)
+			return h.publishTriggerAccepted(ns, name, instance, imp.TriggerBuild, result)
 		}
-		return h.publishTriggerFailed(ns, name, imp.TriggerBuild, result)
+		return h.publishTriggerFailed(ns, name, instance, imp.TriggerBuild, result)
 	case mitev1.CommandTypeResumeBuild:
 		// A successful resume publishes nothing. The resumed build proves
 		// itself by its own heartbeat, which the recorder already reads.
 		if !result.Success {
-			h.publishResumeFailed(ns, name, imp.ResumeBuild, result)
+			h.publishResumeFailed(ns, name, instance, imp.ResumeBuild, result)
 		}
 		return true
 	default:
@@ -998,7 +1005,7 @@ func actingUserName(user *mitev1.ActingUser) string {
 // names no run publishes nothing. An unresolved tenant publishes nothing and
 // counts a rejection: a cell must not write a record under a tenant it does
 // not host.
-func (h *BusHandler) publishCommandRefused(ns, name, command, runID, jobPath, actor string, result *mitev1.CommandResult) {
+func (h *BusHandler) publishCommandRefused(ns, name, instance, command, runID, jobPath, actor string, result *mitev1.CommandResult) {
 	key := ns + "/" + name
 	if runID == "" {
 		h.metrics.buildEventsDropped.Add(context.Background(), 1)
@@ -1022,7 +1029,7 @@ func (h *BusHandler) publishCommandRefused(ns, name, command, runID, jobPath, ac
 		Cluster:       h.cluster,
 		Namespace:     ns,
 		Cell:          name,
-		CellInstance:  h.lookupCellInstance(ns, name),
+		CellInstance:  instance,
 		Tenant:        tenant,
 		JobPath:       jobPath,
 		// A run command payload carries no timestamp, so the gateway clock
@@ -1058,7 +1065,7 @@ func (h *BusHandler) publishCommandRefused(ns, name, command, runID, jobPath, ac
 // imperative message may be acknowledged. An unresolved tenant publishes
 // nothing and counts a rejection: a cell must not write a record under a tenant
 // it does not host.
-func (h *BusHandler) publishTriggerFailed(ns, name string, payload *mitev1.TriggerBuildPayload, result *mitev1.CommandResult) bool {
+func (h *BusHandler) publishTriggerFailed(ns, name, instance string, payload *mitev1.TriggerBuildPayload, result *mitev1.CommandResult) bool {
 	key := ns + "/" + name
 
 	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, payload.JobPath)
@@ -1078,7 +1085,7 @@ func (h *BusHandler) publishTriggerFailed(ns, name string, payload *mitev1.Trigg
 		Cluster:       h.cluster,
 		Namespace:     ns,
 		Cell:          name,
-		CellInstance:  h.lookupCellInstance(ns, name),
+		CellInstance:  instance,
 		Tenant:        tenant,
 		JobPath:       payload.JobPath,
 		// A TriggerBuildPayload carries no timestamp, so the gateway clock
@@ -1115,7 +1122,7 @@ func (h *BusHandler) publishTriggerFailed(ns, name string, payload *mitev1.Trigg
 // the pending imperative message may be acknowledged. An unresolved tenant
 // publishes nothing and counts a rejection: a cell must not write a record
 // under a tenant it does not host.
-func (h *BusHandler) publishTriggerAccepted(ns, name string, payload *mitev1.TriggerBuildPayload, result *mitev1.CommandResult) bool {
+func (h *BusHandler) publishTriggerAccepted(ns, name, instance string, payload *mitev1.TriggerBuildPayload, result *mitev1.CommandResult) bool {
 	key := ns + "/" + name
 
 	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, payload.JobPath)
@@ -1134,7 +1141,7 @@ func (h *BusHandler) publishTriggerAccepted(ns, name string, payload *mitev1.Tri
 		Cluster:       h.cluster,
 		Namespace:     ns,
 		Cell:          name,
-		CellInstance:  h.lookupCellInstance(ns, name),
+		CellInstance:  instance,
 		Tenant:        tenant,
 		JobPath:       payload.JobPath,
 		// A TriggerBuildPayload carries no timestamp, so the gateway clock
@@ -1174,7 +1181,7 @@ func (h *BusHandler) publishTriggerAccepted(ns, name string, payload *mitev1.Tri
 // An unresolved tenant publishes nothing and counts a rejection, which is the
 // rule both trigger publishers follow: a cell must not write a record under a
 // tenant it does not host.
-func (h *BusHandler) publishResumeFailed(ns, name string, payload *mitev1.ResumeBuildPayload, result *mitev1.CommandResult) {
+func (h *BusHandler) publishResumeFailed(ns, name, instance string, payload *mitev1.ResumeBuildPayload, result *mitev1.CommandResult) {
 	key := ns + "/" + name
 
 	if payload == nil || payload.RunId == "" || payload.Instance == "" {
@@ -1200,7 +1207,7 @@ func (h *BusHandler) publishResumeFailed(ns, name string, payload *mitev1.Resume
 		Cluster:       h.cluster,
 		Namespace:     ns,
 		Cell:          name,
-		CellInstance:  h.lookupCellInstance(ns, name),
+		CellInstance:  instance,
 		Tenant:        tenant,
 		JobPath:       payload.JobPath,
 		// A ResumeBuildPayload carries no timestamp, so the gateway clock
@@ -1245,7 +1252,13 @@ func pendingCommand(msg *nats.Msg) *mitev1.ImperativeCommand {
 	return op.GetImperative()
 }
 
-// OnCommandResult publishes the result to the mite inbound subject — or, for a
+// OnCommandResult is OnStreamCommandResult for a caller that knows no
+// stream instance. The server calls OnStreamCommandResult.
+func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResult) {
+	h.OnStreamCommandResult(name, ns, "", result)
+}
+
+// OnStreamCommandResult publishes the result to the mite inbound subject — or, for a
 // REPLAY_WEBHOOK command, to the dedicated whreply.* subject so it bypasses the
 // reconciler's shared command-result buffer. If the result matches a pending
 // imperative command, the JetStream msg is acked so it is not redelivered after
@@ -1257,8 +1270,19 @@ func pendingCommand(msg *nats.Msg) *mitev1.ImperativeCommand {
 // leaves the stream to redeliver the command. A failed RESUME_BUILD result
 // publishes one run.resume_failed record and acks whatever that publish
 // answers. Every other case acks at once.
-func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResult) {
+//
+// cellInstance is the instance of the sending stream's own verified
+// certificate, and every run record of the result carries it. The value
+// must not come from the per-controller map: each Register or stream open
+// of another pod of the controller overwrites the entry, and the recorder
+// keeps an accepted trigger's instance as the fallback owner of the run.
+// An empty value takes the map entry, which is what a certificate with no
+// instance gives.
+func (h *BusHandler) OnStreamCommandResult(name, ns, cellInstance string, result *mitev1.CommandResult) {
 	key := ns + "/" + name
+	if cellInstance == "" {
+		cellInstance = h.lookupCellInstance(ns, name)
+	}
 
 	// Under lock: ack the pending JetStream imperative message and determine
 	// whether this was a webhook-replay command (routing decision).
@@ -1285,7 +1309,7 @@ func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResu
 	}
 	h.mu.Unlock()
 
-	if pendingMsg != nil && h.recordCommandOutcome(ns, name, pendingMsg, result) {
+	if pendingMsg != nil && h.recordCommandOutcome(ns, name, cellInstance, pendingMsg, result) {
 		_ = pendingMsg.Ack()
 	}
 
