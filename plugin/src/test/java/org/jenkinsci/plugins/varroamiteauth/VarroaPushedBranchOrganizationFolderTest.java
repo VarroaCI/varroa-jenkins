@@ -6,14 +6,25 @@ import static org.junit.Assert.fail;
 import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.Map;
 import java.util.function.BooleanSupplier;
 import jenkins.branch.OrganizationFolder;
 import jenkins.scm.api.SCMEvent;
+import jenkins.scm.api.SCMHead;
 import jenkins.scm.api.SCMHeadEvent;
+import jenkins.scm.api.SCMRevision;
+import jenkins.scm.api.SCMSource;
+import jenkins.scm.api.mixin.ChangeRequestCheckoutStrategy;
+import jenkins.scm.impl.mock.MockChangeRequestSCMHead;
+import jenkins.scm.impl.mock.MockChangeRequestSCMRevision;
 import jenkins.scm.impl.mock.MockSCMController;
 import jenkins.scm.impl.mock.MockSCMDiscoverBranches;
+import jenkins.scm.impl.mock.MockSCMDiscoverChangeRequests;
+import jenkins.scm.impl.mock.MockSCMHead;
 import jenkins.scm.impl.mock.MockSCMHeadEvent;
 import jenkins.scm.impl.mock.MockSCMNavigator;
+import jenkins.scm.impl.mock.MockSCMRevision;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory;
 import org.junit.Before;
@@ -24,7 +35,8 @@ import org.jvnet.hudson.test.JenkinsRule;
 /**
  * Tests the pushed-branch strategy on an organization folder. A push that
  * creates a repository builds its pushed branch once, and the other branches of
- * that repository build nothing.
+ * that repository build nothing. A change request event builds its change
+ * request once. A scan builds nothing that it discovers.
  */
 public class VarroaPushedBranchOrganizationFolderTest {
 
@@ -67,6 +79,83 @@ public class VarroaPushedBranchOrganizationFolderTest {
 
         assertEquals(1, buildCount(folder, "newrepo", "master"));
         assertEquals(0, buildCount(folder, "newrepo", "dev"));
+    }
+
+    @Test
+    public void scanThatDiscoversRepositoryBuildsNothing() throws Exception {
+        OrganizationFolder folder = createFolder("org");
+        folder.scheduleBuild2(0);
+        j.waitUntilNoActivity();
+
+        controller.createRepository("scanned");
+        controller.addFile("scanned", "master", "add Jenkinsfile", "Jenkinsfile",
+                "echo 'hi'".getBytes(StandardCharsets.UTF_8));
+        controller.cloneBranch("scanned", "master", "feature");
+        Integer number = controller.openChangeRequest("scanned", "feature");
+        folder.scheduleBuild2(0);
+        j.waitUntilNoActivity();
+
+        assertEquals(0, buildCount(folder, "scanned", "master"));
+        assertEquals(0, buildCount(folder, "scanned", "feature"));
+        assertEquals(0, buildCount(folder, "scanned", "CR-" + number));
+    }
+
+    @Test
+    public void changeRequestEventThatCreatesRepositoryBuildsChangeRequestOnce() throws Exception {
+        OrganizationFolder folder = createFolder("org");
+        folder.scheduleBuild2(0);
+        j.waitUntilNoActivity();
+
+        controller.createRepository("newrepo");
+        controller.cloneBranch("newrepo", "master", "feature");
+        controller.addFile("newrepo", "feature", "add Jenkinsfile", "Jenkinsfile",
+                "echo 'hi'".getBytes(StandardCharsets.UTF_8));
+        Integer number = controller.openChangeRequest("newrepo", "feature");
+        String changeRequest = "CR-" + number;
+        SCMHeadEvent.fireNow(new ChangeRequestOpenedEvent(controller, "newrepo", number));
+        awaitTrue(() -> buildCount(folder, "newrepo", changeRequest) == 1, "one build of " + changeRequest);
+        j.waitUntilNoActivity();
+
+        assertEquals(1, buildCount(folder, "newrepo", changeRequest));
+        assertEquals(0, buildCount(folder, "newrepo", "feature"));
+    }
+
+    private OrganizationFolder createFolder(String name) throws IOException {
+        OrganizationFolder folder = j.jenkins.createProject(OrganizationFolder.class, name);
+        folder.getNavigators().add(new MockSCMNavigator(controller, new MockSCMDiscoverBranches(),
+                new MockSCMDiscoverChangeRequests(ChangeRequestCheckoutStrategy.HEAD)));
+        folder.getProjectFactories().add(new WorkflowMultiBranchProjectFactory());
+        folder.getBuildStrategies().add(new VarroaPushedBranchBuildStrategy());
+        folder.save();
+        return folder;
+    }
+
+    /**
+     * A create event that names one change request at its current revision, as a
+     * forge sends when a pull request opens.
+     */
+    private static final class ChangeRequestOpenedEvent extends MockSCMHeadEvent {
+
+        private final MockChangeRequestSCMHead head;
+        private final MockChangeRequestSCMRevision revision;
+
+        ChangeRequestOpenedEvent(MockSCMController controller, String repository, Integer number) throws IOException {
+            super(SCMEvent.Type.CREATED, controller, repository, "CR-" + number,
+                    controller.getRevision(repository, "change-request/" + number));
+            String target = controller.getTarget(repository, number);
+            this.head = new MockChangeRequestSCMHead(number, target);
+            this.revision = new MockChangeRequestSCMRevision(head,
+                    new MockSCMRevision(new MockSCMHead(target), controller.getRevision(repository, target)),
+                    controller.getRevision(repository, "change-request/" + number));
+        }
+
+        @Override
+        public Map<SCMHead, SCMRevision> heads(SCMSource source) {
+            if (super.heads(source).isEmpty()) {
+                return Collections.emptyMap();
+            }
+            return Collections.singletonMap(head, revision);
+        }
     }
 
     private static void awaitTrue(BooleanSupplier condition, String what) throws InterruptedException {
