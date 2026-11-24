@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -345,6 +346,62 @@ func TestApplyCellContent_LiftedTemplateRendering(t *testing.T) {
 	}
 	if len(skips) != 1 || skips[0].Tenant != "payments" {
 		t.Errorf("expected one PodTemplateSkipped entry for payments, got %+v", cr.Status.Cell.TenantWarnings)
+	}
+}
+
+// TestApplyCellContent_CacheTemplatesRender asserts that the pod templates
+// of the dependency cache docs reach the cell's jenkins.yaml with every
+// tenant key as written: the claim volume, the workspace volume, the other
+// volume forms, envVars, instanceCap, and idleMinutes.
+func TestApplyCellContent_CacheTemplatesRender(t *testing.T) {
+	client := newTestClient()
+	tenant := pipelinesTenant("payments")
+	templates := cacheDocsPodTemplates + volumeFormsPodTemplate
+	seedTenantBundleContent(client, tenant, "payments-bundle", map[string]string{
+		"jenkins.yaml": minimalCloud(templates),
+	})
+	crdstore.MustSeed(client.store, tenant)
+	rec := newTestReconciler(client)
+
+	cr := cellControllerFixture()
+	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"payments"}}
+	mat := &bundle.MaterializedBundle{}
+	if err := rec.applyCellContent(context.Background(), cr, mat, nil); err != nil {
+		t.Fatalf("applyCellContent: %v", err)
+	}
+	for _, w := range cr.Status.Cell.TenantWarnings {
+		if w.Reason == v1alpha1.TenantReasonPodTemplateSkipped {
+			t.Errorf("unexpected PodTemplateSkipped: %+v", w)
+		}
+	}
+
+	doc := unmarshalYAMLMap(t, mat.JenkinsYAML)
+	clouds, _ := doc["jenkins"].(map[string]any)["clouds"].([]any)
+	if len(clouds) != 1 {
+		t.Fatalf("expected one tenant cloud, got %d", len(clouds))
+	}
+	rendered, _ := clouds[0].(map[string]any)["kubernetes"].(map[string]any)["templates"].([]any)
+
+	var fixture []map[string]any
+	if err := yaml.Unmarshal([]byte(templates), &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if len(rendered) != len(fixture)+1 {
+		t.Fatalf("expected the default and %d lifted templates, got %d", len(fixture), len(rendered))
+	}
+	for i, want := range fixture {
+		name := want["name"].(string)
+		label := "varroa-tenant-payments"
+		if l, ok := want["label"].(string); ok {
+			label += " payments-" + l
+		}
+		want["name"] = "payments-" + name
+		want["namespace"] = "payments-ns"
+		want["serviceAccount"] = "varroa-agent-payments"
+		want["label"] = label
+		if got := rendered[i+1]; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: rendered template differs:\n got %#v\nwant %#v", name, got, want)
+		}
 	}
 }
 
