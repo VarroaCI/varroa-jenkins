@@ -188,6 +188,14 @@ type runLogState struct {
 	// (markRunTerminalFrom).
 	ownerReadTerminal bool
 
+	// chunkQueued is true once a chunk entered the queue. A COMPLETED event
+	// can create the state on a replica that the writer's chunks never
+	// reached, because the stream moved after the last chunk. Such a state
+	// holds no fact about the stored log, so abandonRun ends it quietly, as
+	// it ends a mark from an owner read. A chunk answered BUSY or REJECTED
+	// never entered the queue, so it does not set the flag.
+	chunkQueued bool
+
 	// evicted is true once evictRunState dropped this state from
 	// h.logRuns. A goroutine that still holds the state starts no
 	// heartbeat and sets no deadline on it.
@@ -502,6 +510,7 @@ func (h *BusHandler) enqueueLogChunk(ns, name string, chunk *mitev1.LogChunk) {
 	}
 
 	st.queue = append(st.queue, queuedLogChunk{chunk: chunk, ns: ns, name: name, admitted: time.Now()})
+	st.chunkQueued = true
 	st.queueBytes += size
 	st.lastActivity = h.logClock()
 	st.activitySeq++
@@ -641,12 +650,10 @@ func (h *BusHandler) markRunTerminal(ns, name, runID, jobPath string, anchor tim
 // and no tombstone, so the call created nothing and set no mark.
 //
 // Such a run gets the answer that the chunk path gives it. Another replica
-// can hold the writer's stream and finish the log. A new state could only
-// abandon the run at once. Its finalize-deadline marker would then mark a
-// finished log incomplete, and the record store keeps that mark over
-// finalized true. The run.log envelope of the event still carries
-// finalized false, so the recorder's finalizeStaleLogs sweep marks a
-// short log not-finalized.
+// can hold the writer's stream and finish the log. A new state would hold
+// no chunk and could only end at once. The run.log envelope of the event
+// still carries finalized false, so the recorder's finalizeStaleLogs sweep
+// marks a short log not-finalized.
 //
 // The deadline is anchor plus the finalize wait, the same deadline that a
 // new state gets. An anchor far in the past therefore counts as late. An
@@ -2259,9 +2266,10 @@ func (h *BusHandler) abandonRun(runID string, st *runLogState) {
 		reason = logReasonGatewayGap
 	}
 	// A mark from an owner read does not show that this replica wrote the
-	// log. Only the store knows whether another replica finished it, so the
-	// run keeps the incompleteness this gateway already published.
-	quiet := st.ownerReadTerminal
+	// log, and a state that queued no chunk does not show it either. Only
+	// the store knows whether another replica finished it, so the run keeps
+	// the incompleteness this gateway already published.
+	quiet := st.ownerReadTerminal || !st.chunkQueued
 	if !quiet {
 		st.incomplete = true
 		st.incompleteReason = reason
@@ -2271,7 +2279,7 @@ func (h *BusHandler) abandonRun(runID string, st *runLogState) {
 
 	h.log().Warn("abandoning a run's log", "run_id", runID, "controller", ns+"/"+name,
 		"reason", reason, "ack_seq", ackSeq, "queued", len(pending), "queued_bytes", freedBytes,
-		"stranded", len(stranded), "draining", wasDraining, "owner_read_terminal", quiet)
+		"stranded", len(stranded), "draining", wasDraining, "quiet", quiet)
 
 	if hbCancel != nil {
 		hbCancel()
