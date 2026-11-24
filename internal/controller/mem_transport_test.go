@@ -65,6 +65,27 @@ func (m *memTransport) heartbeat(name, ns string, snap *mitev1.StateSnapshot) {
 	}
 }
 
+// silent writes the record of an open stream of ns/name whose last
+// heartbeat is lastHeartbeat, as the gateway timer writes it for a stream
+// that sends nothing.
+func (m *memTransport) silent(name, ns string, lastHeartbeat time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.nextEpoch++
+	m.mites[ns+"/"+name] = &memMite{
+		info:  transport.MiteInfo{Version: "v1.0", LastHeartbeat: lastHeartbeat, CertExpiry: lastHeartbeat.Add(24 * time.Hour), StreamOpen: true},
+		epoch: m.nextEpoch,
+	}
+}
+
+// drop removes the record of ns/name, as the bucket TTL does after the
+// gateway that held the stream stopped.
+func (m *memTransport) drop(name, ns string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.mites, ns+"/"+name)
+}
+
 func (m *memTransport) record(ns, name string) (memMite, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

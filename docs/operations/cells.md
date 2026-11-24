@@ -259,7 +259,10 @@ counts from the init finish. A pod that has not started Jenkins gets a
 
 A `MiteUnreachable` roll needs a second fact, because a missing presence record can come from
 the message bus. While the pod is `Ready`, or the pod read fails, the roll and the eviction wait.
-The `CellReady` message then starts with `roll held:`. A failed presence read of the cell starts
+They also wait while the gateway holds the mite stream open with no heartbeat, because the stall
+can be in the gateway. The `CellReady` message then starts with `roll held:` and names each fact.
+When that gateway stops, its presence record expires after 90 seconds, and the wait for the open
+stream ends. A failed presence read of the cell starts
 the grace count again. These waits end 30 minutes after `unreadySince`, or at the grace when the
 grace is longer. After such a roll, the eviction waits one more grace period, so the new pod can
 connect. The operator logs each pod delete at WARN with the cause, and the `cell.rolled` activity
@@ -304,7 +307,7 @@ Every `CellReady` reason on a cell `Controller`:
 | `BlobTierUnsupported` | False | `recordStore.blobs.mode` is not `s3`. | Set the blob tier to `s3`. |
 | `ArtifactStorageLocal` | False | The `ArtifactStorage` condition is not `External`. | Pin `artifact-manager-s3` and fix the credential that the condition names. |
 | `NotProvisioned` | False | The cell's phase has not reached `Connected` yet. | Wait, or check pod status. |
-| `MiteUnreachable` | False | The mite stream is lost. The roll applies after the pod stops being `Ready`, or after 30 minutes. | Check the gateway and the mite container log. |
+| `MiteUnreachable` | False | The mite stream is lost or silent. The roll applies after the pod stops being `Ready` and the gateway closes the stream, or after 30 minutes. | Check the gateway and the mite container log. |
 | `CellRolled` | False | The operator already deleted the pod once to recover. The condition message names the original fault. | Diagnose the reason in the message. If it recurs, that condition is not self-healing. |
 
 ## Rehydration

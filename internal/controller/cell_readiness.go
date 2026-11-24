@@ -85,8 +85,9 @@ const cellRollHeldPrefix = "roll held: "
 // for one StatefulSet ordinal.
 const cellInitPodDeleteGrace int64 = 30
 
-// initObservation is what the roll rule reads from the cell pod. The zero
-// value means no pod, and keeps the roll rule on unreadySince alone.
+// initObservation is what the roll rule reads from the cell pod and, for a
+// MiteUnreachable roll, from the presence record. The zero value means no
+// pod, and keeps the roll rule on unreadySince alone.
 type initObservation struct {
 	Present     bool
 	Name        string
@@ -119,6 +120,10 @@ type initObservation struct {
 	Pull *imagePull
 	// InitFor is the age of the pod start.
 	InitFor time.Duration
+	// StreamOpen is true when the presence record shows that a gateway
+	// holds the mite stream open. It is read only for a MiteUnreachable
+	// roll of a pod that exists.
+	StreamOpen bool
 }
 
 // initContainerImage returns the image of the named init container: the spec
@@ -359,22 +364,33 @@ func miteRollDeadline(grace time.Duration) time.Duration {
 
 // miteRollHold returns the CellReady message that holds a roll, or "" when
 // the roll can go. Only a MiteUnreachable roll holds, and only while
-// unreadyFor is less than cellMiteRollHoldCap. A missing presence record
-// alone does not prove that the cell is broken, so the roll needs a second
-// fact from the pod. A Ready pod holds the roll. A failed pod read holds it
-// too, because the second fact is then unknown.
+// unreadyFor is less than cellMiteRollHoldCap. A lost or silent presence
+// record alone does not prove that the cell is broken, so the roll needs a
+// second fact. A Ready pod holds the roll. An open mite stream with no
+// heartbeat holds it too, because the stall can be on the gateway side of
+// the stream. A failed pod read holds it, because the second fact is then
+// unknown. The message names each fact that holds the roll.
 func miteRollHold(baseReason string, obs initObservation, unreadyFor time.Duration) string {
 	if baseReason != v1alpha1.ReasonMiteUnreachable || unreadyFor >= cellMiteRollHoldCap {
 		return ""
 	}
-	minutes := int(unreadyFor / time.Minute)
+	var facts []string
 	switch {
 	case obs.ReadFailed:
-		return fmt.Sprintf("%sthe cell pod read failed; mite unreachable for %dm", cellRollHeldPrefix, minutes)
-	case obs.Ready:
-		return fmt.Sprintf("%spod %s is Ready; mite unreachable for %dm", cellRollHeldPrefix, obs.Name, minutes)
+		facts = append(facts, "the cell pod read failed")
+	default:
+		if obs.StreamOpen {
+			facts = append(facts, "the gateway holds the mite stream open with no heartbeat")
+		}
+		if obs.Ready {
+			facts = append(facts, fmt.Sprintf("pod %s is Ready", obs.Name))
+		}
 	}
-	return ""
+	if len(facts) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s%s; mite unreachable for %dm", cellRollHeldPrefix, strings.Join(facts, "; "),
+		int(unreadyFor/time.Minute))
 }
 
 // cellRollCause is the cause text of a cell roll for the operator log and
@@ -468,7 +484,7 @@ func (r *Reconciler) evaluateCellReadiness(ctx context.Context, cr *v1alpha1.Con
 			baseReason = v1alpha1.ReasonMiteUnreachable
 		}
 		grace := r.cellUnreadyGrace(ctx, cr)
-		obs := r.observeCellPod(ctx, cr, cell, now, grace)
+		obs := r.observeCellPod(ctx, cr, cell, now, grace, baseReason)
 		roll := evaluateCellRoll(cell, baseReason, now, grace, obs, r.lastPresenceFault(cr.Namespace+"/"+cr.Name))
 		if roll.Held && r.Logger != nil && !cellRollHeldBefore(cr) {
 			r.Logger.Warn("cell roll held", "controller", cr.Namespace+"/"+cr.Name,
@@ -538,8 +554,11 @@ func cellRollHeldBefore(cr *v1alpha1.Controller) bool {
 // clock never starts before unreadySince, so no other tick can act. A read
 // error answers ReadFailed and no other field, which keeps the rule on
 // unreadySince and holds a MiteUnreachable roll. The pull events of the pod
-// are listed only for the first-container wait.
-func (r *Reconciler) observeCellPod(ctx context.Context, cr *v1alpha1.Controller, cell *v1alpha1.CellStatus, now time.Time, grace time.Duration) initObservation {
+// are listed only for the first-container wait. For a MiteUnreachable
+// roll of a pod that exists, it also reads the presence record for
+// StreamOpen. A failed presence read answers false, and the fault that
+// readPresence records delays the roll.
+func (r *Reconciler) observeCellPod(ctx context.Context, cr *v1alpha1.Controller, cell *v1alpha1.CellStatus, now time.Time, grace time.Duration, baseReason string) initObservation {
 	if cell.UnreadySince == nil || now.Sub(cell.UnreadySince.Time) < grace {
 		return initObservation{}
 	}
@@ -554,10 +573,14 @@ func (r *Reconciler) observeCellPod(ctx context.Context, cr *v1alpha1.Controller
 		return initObservation{ReadFailed: true}
 	}
 	obs := observeInit(pod, now, nil)
-	if obs.FirstWait == "" {
-		return obs
+	if obs.FirstWait != "" {
+		obs = observeInit(pod, now, r.cellPodPullWindows(ctx, cr, pod))
 	}
-	return observeInit(pod, now, r.cellPodPullWindows(ctx, cr, pod))
+	if baseReason == v1alpha1.ReasonMiteUnreachable && obs.Present && r.miteTransport != nil {
+		info, ok, err := r.readPresence(cr.Namespace, cr.Name)
+		obs.StreamOpen = err == nil && ok && info.StreamOpen
+	}
+	return obs
 }
 
 // cellPodPullWindows reads the pull windows of the cell pod. It answers nil

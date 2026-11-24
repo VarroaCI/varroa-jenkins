@@ -11,6 +11,11 @@ import (
 // ErrKVKeyExists is returned by Create when the key is already present.
 var ErrKVKeyExists = errors.New("bus: kv key exists")
 
+// ErrKVRevisionMismatch is returned by Update and DeleteRevision when another
+// write changed the key after the given revision. An expired or deleted key
+// gives it too.
+var ErrKVRevisionMismatch = errors.New("bus: kv revision mismatch")
+
 // leaderReadWait bounds one GetFromLeader request to the stream leader.
 const leaderReadWait = 2 * time.Second
 
@@ -119,12 +124,70 @@ func (kv *KV) Put(key string, value []byte) error {
 // Create atomically stores a value under the given key only if the key does
 // not already exist. Returns ErrKVKeyExists if it does.
 func (kv *KV) Create(key string, value []byte) error {
-	_, err := kv.bucket.Create(key, value)
+	_, err := kv.CreateRevision(key, value)
+	return err
+}
+
+// CreateRevision stores value under key only when the key is missing or
+// deleted, and returns the revision of the write. It returns ErrKVKeyExists
+// when the key holds a value.
+func (kv *KV) CreateRevision(key string, value []byte) (uint64, error) {
+	rev, err := kv.bucket.Create(key, value)
 	if errors.Is(err, nats.ErrKeyExists) {
-		return ErrKVKeyExists
+		return 0, ErrKVKeyExists
 	}
 	if err != nil {
-		return fmt.Errorf("kv create %s: %w", key, err)
+		return 0, fmt.Errorf("kv create %s: %w", key, err)
+	}
+	return rev, nil
+}
+
+// PutRevision stores value under key and returns the revision of the write.
+func (kv *KV) PutRevision(key string, value []byte) (uint64, error) {
+	rev, err := kv.bucket.Put(key, value)
+	if err != nil {
+		return 0, fmt.Errorf("kv put %s: %w", key, err)
+	}
+	return rev, nil
+}
+
+// Entry returns the latest value of key and its revision. A missing or
+// deleted key gives a nil value, revision zero, and a nil error.
+func (kv *KV) Entry(key string) ([]byte, uint64, error) {
+	e, err := kv.bucket.Get(key)
+	if errors.Is(err, nats.ErrKeyNotFound) {
+		return nil, 0, nil
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("kv get %s: %w", key, err)
+	}
+	return e.Value(), e.Revision(), nil
+}
+
+// Update stores value under key only when last is the revision of the
+// latest write of the key, and returns the revision of the write. It returns
+// ErrKVRevisionMismatch when another write came first.
+func (kv *KV) Update(key string, value []byte, last uint64) (uint64, error) {
+	rev, err := kv.bucket.Update(key, value, last)
+	if errors.Is(err, nats.ErrKeyExists) {
+		return 0, ErrKVRevisionMismatch
+	}
+	if err != nil {
+		return 0, fmt.Errorf("kv update %s: %w", key, err)
+	}
+	return rev, nil
+}
+
+// DeleteRevision deletes key only when last is the revision of the latest
+// write of the key. It returns ErrKVRevisionMismatch when another write came
+// first.
+func (kv *KV) DeleteRevision(key string, last uint64) error {
+	err := kv.bucket.Delete(key, nats.LastRevision(last))
+	if errors.Is(err, nats.ErrKeyExists) {
+		return ErrKVRevisionMismatch
+	}
+	if err != nil {
+		return fmt.Errorf("kv delete %s: %w", key, err)
 	}
 	return nil
 }

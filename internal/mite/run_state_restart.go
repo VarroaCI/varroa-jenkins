@@ -286,7 +286,10 @@ func (h *BusHandler) storeRestartSourceObject(ctx context.Context, ns, name stri
 		CreatedAt:   time.Now().UTC(),
 	}
 	key := blob.RestartSourceKey(chunk.RunId, chunk.Relpath)
-	if err := h.logStore.Replace(ctx, key, bytes.NewReader(body), opts); err != nil {
+	writeCtx, cancel := context.WithTimeout(ctx, h.runStateStoreBound())
+	err := h.logStore.Replace(writeCtx, key, bytes.NewReader(body), opts)
+	cancel()
+	if err != nil {
 		h.log().Warn("restart copy write failed", "run_id", chunk.RunId, "relpath", chunk.Relpath, "error", err)
 		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: stateBudgetPauseMinMS}
 	}

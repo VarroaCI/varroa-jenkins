@@ -38,6 +38,54 @@ func TestKVCreateAtomic(t *testing.T) {
 	}
 }
 
+// TestKVRevisionWrites pins the compare-and-set methods: each answers the
+// revision of its write, a write at an old revision is a conflict, and a
+// deleted key reads as missing and can be created again.
+func TestKVRevisionWrites(t *testing.T) {
+	s := startTestServer(t)
+	c := connectTest(t, s)
+	kv, err := c.EnsureKV("revision_test", time.Minute)
+	if err != nil {
+		t.Fatalf("EnsureKV: %v", err)
+	}
+
+	if v, rev, err := kv.Entry("k"); v != nil || rev != 0 || err != nil {
+		t.Fatalf("Entry of a missing key = %q %d %v, want nil 0 nil", v, rev, err)
+	}
+	r1, err := kv.PutRevision("k", []byte("v1"))
+	if err != nil || r1 == 0 {
+		t.Fatalf("PutRevision = %d %v", r1, err)
+	}
+	r2, err := kv.Update("k", []byte("v2"), r1)
+	if err != nil || r2 <= r1 {
+		t.Fatalf("Update at the latest revision = %d %v", r2, err)
+	}
+	if _, err := kv.Update("k", []byte("v3"), r1); !errors.Is(err, ErrKVRevisionMismatch) {
+		t.Fatalf("Update at an old revision: want ErrKVRevisionMismatch, got %v", err)
+	}
+	if v, rev, err := kv.Entry("k"); string(v) != "v2" || rev != r2 || err != nil {
+		t.Fatalf("Entry = %q %d %v, want v2 at %d", v, rev, err, r2)
+	}
+	if err := kv.DeleteRevision("k", r1); !errors.Is(err, ErrKVRevisionMismatch) {
+		t.Fatalf("DeleteRevision at an old revision: want ErrKVRevisionMismatch, got %v", err)
+	}
+	if err := kv.DeleteRevision("k", r2); err != nil {
+		t.Fatalf("DeleteRevision at the latest revision: %v", err)
+	}
+	if v, _, err := kv.Entry("k"); v != nil || err != nil {
+		t.Fatalf("Entry of a deleted key = %q %v, want nil nil", v, err)
+	}
+	if _, err := kv.Update("k", []byte("v4"), r2); !errors.Is(err, ErrKVRevisionMismatch) {
+		t.Fatalf("Update over a delete marker: want ErrKVRevisionMismatch, got %v", err)
+	}
+	if r3, err := kv.CreateRevision("k", []byte("v5")); err != nil || r3 <= r2 {
+		t.Fatalf("CreateRevision of a deleted key = %d %v", r3, err)
+	}
+	if _, err := kv.CreateRevision("k", []byte("v6")); !errors.Is(err, ErrKVKeyExists) {
+		t.Fatalf("CreateRevision of a present key: want ErrKVKeyExists, got %v", err)
+	}
+}
+
 func TestKVGetFromLeaderReadsCommittedValue(t *testing.T) {
 	s := startTestServer(t)
 	c := connectTest(t, s)

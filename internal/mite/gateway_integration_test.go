@@ -47,6 +47,13 @@ func startNATS(t *testing.T) *server.Server {
 // BusHandler before the server serves.
 func startGatewayWithCA(t *testing.T, natsURL string, opts ...func(*BusHandler)) (*bus.Conn, net.Listener, *ca.CA) {
 	t.Helper()
+	return startGatewayWrapped(t, natsURL, nil, opts...)
+}
+
+// startGatewayWrapped is startGatewayWithCA with a StreamHandler that wrap
+// builds around the BusHandler. A nil wrap serves the BusHandler itself.
+func startGatewayWrapped(t *testing.T, natsURL string, wrap func(*BusHandler) StreamHandler, opts ...func(*BusHandler)) (*bus.Conn, net.Listener, *ca.CA) {
+	t.Helper()
 
 	certAuth, err := ca.NewCA()
 	if err != nil {
@@ -72,7 +79,11 @@ func startGatewayWithCA(t *testing.T, natsURL string, opts ...func(*BusHandler))
 	for _, opt := range opts {
 		opt(handler)
 	}
-	srv := NewServer(certAuth, tokenSigner, handler, "localhost")
+	var served StreamHandler = handler
+	if wrap != nil {
+		served = wrap(handler)
+	}
+	srv := NewServer(certAuth, tokenSigner, served, "localhost")
 	srv.ServerEndpoint = "127.0.0.1:0"
 	srv.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 

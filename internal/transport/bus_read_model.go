@@ -47,10 +47,10 @@ func (m *BusReadModel) Snapshot(ns, name string) *mitev1.StateSnapshot {
 	return &snap
 }
 
-// Connected reports whether the mite has a live presence entry in KV.
+// Connected reports whether the mite has a presence entry in KV with a
+// fresh heartbeat.
 func (m *BusReadModel) Connected(ns, name string) bool {
-	data, err := m.presenceKV.Get(bus.PresenceKey(m.cluster, ns, name))
-	return err == nil && data != nil
+	return presenceConnected(m.presenceKV, bus.PresenceKey(m.cluster, ns, name), time.Now())
 }
 
 // Info returns the presence record of the mite of ns/name. A missing record
@@ -67,7 +67,7 @@ func (m *BusReadModel) Info(ns, name string) (info MiteInfo, ok bool, err error)
 	if err := json.Unmarshal(data, &p); err != nil {
 		return MiteInfo{}, false, fmt.Errorf("decode presence %s/%s: %w", ns, name, err)
 	}
-	return MiteInfo{Version: p.Version, LastHeartbeat: p.LastHeartbeat, CertExpiry: p.CertExpiry}, true, nil
+	return MiteInfo{Version: p.Version, LastHeartbeat: p.LastHeartbeat, CertExpiry: p.CertExpiry, StreamOpen: p.StreamOpen}, true, nil
 }
 
 // StreamDegraded reports whether the gateway's bus→gRPC bridge for this mite

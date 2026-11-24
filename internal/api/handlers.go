@@ -1307,7 +1307,9 @@ func (s *Server) mergeMiteStatus(name, namespace string, cr *controllerResponse)
 	if err != nil || !ok {
 		return
 	}
-	cr.MiteConnected = true
+	// A silent open stream keeps its record, so a stale heartbeat does not
+	// show a connected mite.
+	cr.MiteConnected = !info.HeartbeatStale(time.Now())
 	cr.MiteVersion = info.Version
 	cr.LastSeen = info.LastHeartbeat.UTC().Format("2006-01-02T15:04:05Z")
 
@@ -1331,7 +1333,7 @@ func (s *Server) mergeMiteTelemetry(name, namespace string, cr *controllerDetail
 	if err != nil || !ok {
 		return
 	}
-	cr.MiteConnected = true
+	cr.MiteConnected = !info.HeartbeatStale(time.Now())
 	cr.MiteVersion = info.Version
 	cr.LastSeen = info.LastHeartbeat.UTC().Format("2006-01-02T15:04:05Z")
 	cr.CertExpiry = info.CertExpiry.Format("2006-01-02")

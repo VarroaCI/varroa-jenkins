@@ -160,6 +160,39 @@ func TestBusTransport_PresenceInfo(t *testing.T) {
 	}
 }
 
+// TestPresenceSilentOpenStream asserts that both presence readers report a
+// record of a silent open stream: Info carries StreamOpen, and Connected
+// answers false, because the heartbeat is stale.
+func TestPresenceSilentOpenStream(t *testing.T) {
+	s := startNATS(t)
+	tr := newBusTransport(t, s)
+	m := newBusReadModel(t, s)
+	silent, err := json.Marshal(bus.Presence{Version: "2.4", LastHeartbeat: time.Now().Add(-2 * bus.PresenceStaleAfter), StreamOpen: true})
+	if err != nil {
+		t.Fatalf("marshal presence: %v", err)
+	}
+	if err := tr.presenceKV.Put(bus.PresenceKey(bus.DefaultCluster, "ns", "c1"), silent); err != nil {
+		t.Fatalf("put presence: %v", err)
+	}
+
+	for _, reader := range []struct {
+		name string
+		info func() (MiteInfo, bool, error)
+		conn func() bool
+	}{
+		{"operator", func() (MiteInfo, bool, error) { return tr.Info("ns", "c1") }, func() bool { return tr.Connected("ns", "c1") }},
+		{"read model", func() (MiteInfo, bool, error) { return m.Info("ns", "c1") }, func() bool { return m.Connected("ns", "c1") }},
+	} {
+		info, ok, err := reader.info()
+		if err != nil || !ok || !info.StreamOpen || !info.HeartbeatStale(time.Now()) {
+			t.Errorf("%s: Info = %+v ok=%v err=%v, want a stale record with StreamOpen", reader.name, info, ok, err)
+		}
+		if reader.conn() {
+			t.Errorf("%s: Connected = true for a silent open stream", reader.name)
+		}
+	}
+}
+
 // TestBusTransport_InfoMissingRecord asserts that a key with no record is a
 // clean miss: no error, so the caller can count it as a lost presence.
 func TestBusTransport_InfoMissingRecord(t *testing.T) {

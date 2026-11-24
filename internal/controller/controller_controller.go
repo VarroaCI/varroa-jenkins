@@ -3974,8 +3974,9 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 
 const (
 	// staleMiteThreshold is how long after LastSeen we consider a mite
-	// definitively gone, even if the registry has stale data.
-	staleMiteThreshold = 2 * time.Minute
+	// definitively gone, even if the registry has stale data. The gateway
+	// warning and the dashboard back end use the same value.
+	staleMiteThreshold = bus.PresenceStaleAfter
 
 	// streamLossMisses is the number of counted presence misses in a row that
 	// move a Connected controller to Running.
@@ -4093,6 +4094,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		Version:            info.Version,
 		LastHeartbeat:      info.LastHeartbeat,
 		CertExpiry:         info.CertExpiry,
+		StreamOpen:         info.StreamOpen,
 		Health:             r.miteTransport.Health(cr.Namespace, cr.Name),
 		Snapshot:           snapshot,
 	}, cr.Status.LiveDrift, metav1Now())

@@ -417,10 +417,25 @@ func (b *BusTransport) Health(ns, name string) string {
 	return snap.JenkinsHealth
 }
 
-// Connected reports whether the mite has a live presence entry in KV.
+// Connected reports whether the mite has a presence entry in KV with a
+// fresh heartbeat. The gateway keeps the entry of a silent open stream, so
+// the entry alone does not show a live mite.
 func (b *BusTransport) Connected(ns, name string) bool {
-	data, err := b.presenceKV.Get(bus.PresenceKey(b.cluster, ns, name))
-	return err == nil && data != nil
+	return presenceConnected(b.presenceKV, bus.PresenceKey(b.cluster, ns, name), time.Now())
+}
+
+// presenceConnected reports whether the presence entry under key exists and
+// shows a fresh heartbeat at now. A read or decode failure answers false.
+func presenceConnected(kv *bus.KV, key string, now time.Time) bool {
+	data, err := kv.Get(key)
+	if err != nil || data == nil {
+		return false
+	}
+	var p bus.Presence
+	if err := json.Unmarshal(data, &p); err != nil {
+		return false
+	}
+	return p.HeartbeatFresh(now)
 }
 
 // Info returns the presence record of the mite of ns/name. A missing record
@@ -439,7 +454,7 @@ func (b *BusTransport) Info(ns, name string) (info MiteInfo, ok bool, err error)
 	if err := json.Unmarshal(data, &p); err != nil {
 		return MiteInfo{}, false, fmt.Errorf("decode presence %s/%s: %w", ns, name, err)
 	}
-	return MiteInfo{Version: p.Version, LastHeartbeat: p.LastHeartbeat, CertExpiry: p.CertExpiry}, true, nil
+	return MiteInfo{Version: p.Version, LastHeartbeat: p.LastHeartbeat, CertExpiry: p.CertExpiry, StreamOpen: p.StreamOpen}, true, nil
 }
 
 // IdleGauges returns idle gauges from the presence record, if available.
