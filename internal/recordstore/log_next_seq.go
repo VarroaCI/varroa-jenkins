@@ -11,21 +11,36 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
+// LogRangeReader is the blob method that reads a stored log object. The
+// log-finalization sweep reads a run's log index with it. The recorder
+// passes its blob.Store value.
+type LogRangeReader interface {
+	NewRangeReader(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error)
+}
+
 // LogIndexReader is the blob methods StoredLogNextSeq needs. The
 // recorder passes its blob.Store value.
 type LogIndexReader interface {
-	NewRangeReader(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error)
+	LogRangeReader
 	blob.LogPartReader
 }
 
 // storedLogIndexEntry holds the fields of one gateway log index line
-// that the next sequence depends on. The gateway owns the full shape.
+// that the recorder reads. The gateway owns the full shape.
 type storedLogIndexEntry struct {
 	Seq    int64  `json:"seq"`
 	Writer string `json:"writer,omitempty"`
+	// Final marks the entry of the run's last chunk. The gateway writes
+	// it only after every lower entry.
+	Final bool `json:"final,omitempty"`
 	// Reserved marks a reservation line, which names no bytes.
 	Reserved bool `json:"reserved,omitempty"`
 }
+
+// errLogIndexMalformed marks a stored log index that does not parse: a
+// line that is not JSON, or a line over the scan limit. Each later read
+// of the same index fails in the same way.
+var errLogIndexMalformed = errors.New("malformed log index")
 
 // StoredLogNextSeq answers the next log sequence that the gateway
 // accepts for runID: the highest stored sequence with no hole below it,
@@ -74,17 +89,23 @@ func StoredLogNextSeq(ctx context.Context, store LogIndexReader, runID string) (
 // readStoredLogIndex parses every ndjson line of the index at key, keyed
 // by sequence. It skips a reservation line. A missing index answers an
 // empty map.
-func readStoredLogIndex(ctx context.Context, store LogIndexReader, key string) (map[int64]storedLogIndexEntry, error) {
-	entries := make(map[int64]storedLogIndexEntry)
+func readStoredLogIndex(ctx context.Context, store LogRangeReader, key string) (map[int64]storedLogIndexEntry, error) {
 	r, err := store.NewRangeReader(ctx, key, 0, -1)
 	if err != nil {
 		if errors.Is(err, blob.ErrObjectNotFound) {
-			return entries, nil
+			return make(map[int64]storedLogIndexEntry), nil
 		}
 		return nil, fmt.Errorf("read log index: %w", err)
 	}
 	defer func() { _ = r.Close() }()
+	return parseStoredLogIndex(r)
+}
 
+// parseStoredLogIndex parses every ndjson line that r holds, keyed by
+// sequence. It skips a reservation line. A line that does not parse
+// answers errLogIndexMalformed.
+func parseStoredLogIndex(r io.Reader) (map[int64]storedLogIndexEntry, error) {
+	entries := make(map[int64]storedLogIndexEntry)
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for scanner.Scan() {
@@ -94,7 +115,7 @@ func readStoredLogIndex(ctx context.Context, store LogIndexReader, key string) (
 		}
 		var e storedLogIndexEntry
 		if err := json.Unmarshal(line, &e); err != nil {
-			return nil, fmt.Errorf("parse log index line: %w", err)
+			return nil, fmt.Errorf("%w: parse line: %w", errLogIndexMalformed, err)
 		}
 		if e.Reserved {
 			continue
@@ -102,6 +123,9 @@ func readStoredLogIndex(ctx context.Context, store LogIndexReader, key string) (
 		entries[e.Seq] = e
 	}
 	if err := scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return nil, fmt.Errorf("%w: %w", errLogIndexMalformed, err)
+		}
 		return nil, fmt.Errorf("scan log index: %w", err)
 	}
 	return entries, nil

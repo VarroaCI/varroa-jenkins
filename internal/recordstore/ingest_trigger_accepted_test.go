@@ -322,12 +322,18 @@ func seedAcceptedOnlyMarkedRow(t *testing.T, pool *pgxpool.Pool, db *sql.DB, int
 
 // TestRunStartedSupersedesMarkedAcceptedRow asserts a later run.started
 // over a row the sweep marked interrupted supersedes it to RUNNING with
-// a clean payload, and stamps interrupted_superseded_at.
+// a clean payload, and stamps interrupted_superseded_at. The clean
+// payload holds no failed index read time, so the real run's give-up
+// clock starts at its own first failed read.
 func TestRunStartedSupersedesMarkedAcceptedRow(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
 	runID := seedAcceptedOnlyMarkedRow(t, pool, db, "manual:ta-6")
+	if _, err := db.Exec(`UPDATE varroa.runs SET payload = payload || jsonb_build_object($2::text, 1) WHERE run_id = $1`,
+		runID, indexReadFailedKey); err != nil {
+		t.Fatalf("store a failed-read time: %v", err)
+	}
 
 	g := NewIngester(pool, nil, nil)
 	buildNumber := int64(3)
@@ -352,7 +358,7 @@ func TestRunStartedSupersedesMarkedAcceptedRow(t *testing.T) {
 	}
 
 	payload := readRunPayload(t, db, runID.String())
-	for _, key := range []string{"accepted_at", "accepted_instance", "interrupted_reason", "log_summary"} {
+	for _, key := range []string{"accepted_at", "accepted_instance", "interrupted_reason", "log_summary", indexReadFailedKey} {
 		if _, ok := payload[key]; ok {
 			t.Fatalf("payload still holds %q after a supersede", key)
 		}

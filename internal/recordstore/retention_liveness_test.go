@@ -103,7 +103,7 @@ func TestFinalizeStaleLogsSeesPlacementLivenessAnswer(t *testing.T) {
 	}
 
 	liveness := NewPlacementLiveness(pool, testGrace)
-	finalized, err := finalizeStaleLogs(context.Background(), pool, liveness, time.Minute, time.Now())
+	finalized, err := finalizeStaleLogs(context.Background(), pool, liveness, nil, time.Minute, time.Now())
 	if err != nil {
 		t.Fatalf("finalizeStaleLogs: %v", err)
 	}

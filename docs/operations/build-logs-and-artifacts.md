@@ -96,12 +96,19 @@ A log's manifest can report `incomplete` true with a reason token:
 | `rejected` | The gateway refused a chunk on the run-ownership check. |
 | `gateway-gap` | The gateway observed a sequence it can never fill, or a moved build overlapped a lost cell's parts. |
 | `finalize-deadline` | The finalization deadline passed with chunks unstored. |
-| `not-finalized` | The recorder's sweep finalized a run that produced no final chunk. |
+| `not-finalized` | The run ended, and the recorder's sweep found no final chunk in the stored log index, or a read of that index still failed 24 hours after its first failure. |
 | `no-summary` | The run record carries no log summary. The read path serves every stored chunk. |
 
 The record keeps the most precise reason: a plugin token, then `rejected` or `gateway-gap`, then
 the last three tokens. Inside one rank, the first reason stays. A complete log clears only those
 three.
+
+The recorder's sweep reads the stored log index of each ended run that the gateway did not
+finalize. When the index holds the final chunk, the sweep finalizes the log and adds no reason.
+When the blob store does not answer, the sweep marks no run and tries again in the next round.
+When the store answers but the index of one run cannot be read, the sweep tries that run again in
+each round. It marks the run `not-finalized` only when a read still fails 24 hours after the first
+failure. A store that lists objects but cannot read them gets the same 24 hours.
 
 ## Agent-namespace egress
 

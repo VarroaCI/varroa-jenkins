@@ -248,6 +248,7 @@ func run(ctx context.Context, cfg Config) error {
 		ActivityRetention:      cfg.RetentionActivity,
 		RestartSourceRetention: cfg.RetentionRestartSource,
 		LogStore:               store,
+		LogReader:              store,
 		Liveness:               recordstore.NewPlacementLiveness(pool, confirmedGoneGrace),
 		FinalizeWait:           cfg.FinalizeWait,
 		FleetLockMetrics:       fleetLockMetrics,
