@@ -220,6 +220,132 @@ namespace, so the cluster's own egress rules decide which registries the pod rea
 pod mounts the workspace, so the kaniko container can read the file. Add one `--destination` for
 each tag. To keep layers in the registry between builds, add `--cache=true` and `--cache-repo`.
 
+## Keep a dependency cache
+
+A tool cache on an `emptyDir` volume is empty in each new agent pod, so each build downloads all of
+its dependencies again. Public repositories limit the requests from one address. Maven Central
+answers `429` and blocks the cluster's egress address for a period. Each repeat makes the block
+longer. Until the block expires, each build that downloads a dependency fails.
+
+Use one of these patterns to keep the cache:
+
+| Pattern | Use it for | Limits |
+| --- | --- | --- |
+| A claim at the tool cache directory | Builds of one template that run one at a time | Node binding, one writer for Gradle and Maven, manual clean-up |
+| A caching proxy in the agent namespace | Parallel builds, several active slots, several tools | One more service to operate |
+
+The agent ServiceAccount can manage pods only, so a user with write access to the agent namespace
+creates the claim or the proxy. Give each tenant its own cache. With a shared cache, the builds of
+one tenant can change the dependencies of another.
+
+### Mount a claim at the cache directory
+
+1. Create the claim in the agent namespace:
+
+   ```yaml
+   apiVersion: v1
+   kind: PersistentVolumeClaim
+   metadata:
+     name: gradle-cache
+     namespace: tenant-payments
+   spec:
+     accessModes: ["ReadWriteOnce"]
+     resources:
+       requests:
+         storage: 20Gi
+   ```
+
+2. Mount the claim in a `podtemplate` item, and set the tool's cache directory on it:
+
+   ```yaml
+   # clouds.kubernetes.templates[]
+   - name: gradle
+     label: gradle
+     instanceCap: 1
+     idleMinutes: 0
+     envVars:
+       - envVar:
+           key: GRADLE_USER_HOME
+           value: /cache/gradle
+     containers:
+       - name: gradle
+         image: gradle:8.14-jdk21
+         command: sleep
+         args: 99d
+         ttyEnabled: true
+     volumes:
+       - persistentVolumeClaim:
+           claimName: gradle-cache
+           mountPath: /cache
+           readOnly: false
+   ```
+
+Each `volumes` entry and each `envVars` entry applies to every container of the pod.
+
+| Tool | Cache directory | Pods on one node can write at the same time |
+| --- | --- | --- |
+| Gradle | `GRADLE_USER_HOME`, default `~/.gradle` | No |
+| Maven | `~/.m2/repository` | Not guaranteed. Run one pod at a time, or use a proxy |
+| Go | `GOMODCACHE`, default `$GOPATH/pkg/mod` | Yes |
+| npm | The `cache` setting, default `~/.npm` | Yes |
+
+Mount each cache directory that the build fills. For example, Robolectric downloads its Android
+jars to `~/.m2/repository`, also in a Gradle build.
+
+Gradle shares a cache only between processes that can communicate, and processes in two pods
+usually cannot. A claim has these limits:
+
+- `instanceCap: 1` allows one pod of the template at a time in the tenant cloud. A tenant has one
+  cloud on each cell. A tenant with more than one active slot can run one pod on each slot. Give
+  such a tenant a proxy for Gradle and Maven.
+- `idleMinutes: 0` deletes the pod when its build ends. With a higher value, a cell roll can leave
+  an idle pod behind. That pod holds the volume until a mechanism in
+  [Agent pod lifetime](#agent-pod-lifetime) deletes it.
+- A `ReadWriteOnce` claim mounts on one node at a time. Local storage binds the claim to the node of
+  its first pod, so each later pod runs on that node and stays `Pending` while the node is down or
+  full. On storage that attaches to one node, a pod on another node waits until the volume detaches.
+- A `ReadWriteOncePod` claim mounts in one pod only, and a second pod stays `Pending`. Only CSI
+  storage supports this mode.
+- The operator never deletes a claim, also at tenant teardown. Delete the claim to empty the cache.
+- A `dynamicPVC` or `genericEphemeralVolume` volume ends with its pod, like an `emptyDir`.
+- Do not use a `hostPathVolume`. A pod of any tenant on that node can mount the same path.
+
+### Run a caching proxy
+
+A repository manager in the agent namespace downloads each artifact once and serves it to every
+build of the tenant, on any node and slot. Sonatype recommends a repository manager to stay under
+the Maven Central limits. Examples are Reposilite for Maven, Verdaccio for npm, and Athens for Go.
+Reposilite keeps a proxied artifact only when the mirror has its `store` option on. If the cluster
+limits egress, let the proxy reach the public repositories and the agent pods reach the proxy.
+
+Point each tool at the proxy. Mirror every public repository that the build uses, for example
+Google's Maven repository for an Android build.
+
+| Tool | Setting |
+| --- | --- |
+| Maven | A `<mirror>` entry in `settings.xml` |
+| Gradle | A `maven` repository with the proxy URL, in `settings.gradle` or an init script |
+| Go | The `GOPROXY` environment variable |
+| npm | The `registry` setting, or the `npm_config_registry` environment variable |
+
+Set an environment variable in the pod template:
+
+```yaml
+# clouds.kubernetes.templates[]
+- name: golang
+  label: golang
+  envVars:
+    - envVar:
+        key: GOPROXY
+        value: http://athens.tenant-payments.svc:3000
+  containers:
+    - name: golang
+      image: golang:1.26-bookworm
+      command: sleep
+      args: 99d
+      ttyEnabled: true
+```
+
 ## Security
 
 Varroa does not filter pod specs. A tenant's `yaml` or `volumes` can name a `hostPath`. Pod

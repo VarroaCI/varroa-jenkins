@@ -203,6 +203,110 @@ func TestLiftTenantPodTemplates_InheritFrom(t *testing.T) {
 	}
 }
 
+// cacheDocsPodTemplates holds the two pod templates of the dependency cache
+// section of docs/operations/tenant-pod-templates.md: a claim at the tool
+// cache directory, and a caching proxy set by an environment variable. Keep
+// it the same as the docs.
+const cacheDocsPodTemplates = `- name: gradle
+  label: gradle
+  instanceCap: 1
+  idleMinutes: 0
+  envVars:
+    - envVar:
+        key: GRADLE_USER_HOME
+        value: /cache/gradle
+  containers:
+    - name: gradle
+      image: gradle:8.14-jdk21
+      command: sleep
+      args: 99d
+      ttyEnabled: true
+  volumes:
+    - persistentVolumeClaim:
+        claimName: gradle-cache
+        mountPath: /cache
+        readOnly: false
+- name: golang
+  label: golang
+  envVars:
+    - envVar:
+        key: GOPROXY
+        value: http://athens.tenant-payments.svc:3000
+  containers:
+    - name: golang
+      image: golang:1.26-bookworm
+      command: sleep
+      args: 99d
+      ttyEnabled: true
+`
+
+// volumeFormsPodTemplate holds each other volume form of the kubernetes
+// plugin and a claim as the workspace volume.
+const volumeFormsPodTemplate = `- name: forms
+  volumes:
+    - hostPathVolume:
+        hostPath: /var/cache/payments
+        mountPath: /host-cache
+        readOnly: false
+    - nfsVolume:
+        serverAddress: nfs.example.com
+        serverPath: /exports/payments
+        mountPath: /nfs-cache
+        readOnly: false
+    - dynamicPVC:
+        accessModes: ReadWriteOnce
+        requestsSize: 10Gi
+        storageClassName: standard
+        mountPath: /dynamic
+    - genericEphemeralVolume:
+        accessModes: ReadWriteOnce
+        requestsSize: 10Gi
+        storageClassName: standard
+        mountPath: /ephemeral
+    - configMapVolume:
+        configMapName: maven-settings
+        mountPath: /etc/maven
+        optional: false
+  workspaceVolume:
+    persistentVolumeClaimWorkspaceVolume:
+      claimName: payments-workspace
+      readOnly: false
+`
+
+// TestLiftTenantPodTemplates_VolumeFormsPassThrough pins that the lift
+// keeps every volume form, the workspace volume, envVars, and instanceCap
+// as written. The dependency cache docs rely on each of these keys.
+func TestLiftTenantPodTemplates_VolumeFormsPassThrough(t *testing.T) {
+	templates := cacheDocsPodTemplates + volumeFormsPodTemplate
+	lift := liftTenantPodTemplates("payments", "tenant-payments", minimalCloud(templates), nil)
+	if len(lift.Warnings) != 0 {
+		t.Fatalf("expected no warning, got %+v", lift.Warnings)
+	}
+
+	var fixture []map[string]any
+	if err := yaml.Unmarshal([]byte(templates), &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if len(lift.Templates) != len(fixture) {
+		t.Fatalf("lifted %d templates, want %d", len(lift.Templates), len(fixture))
+	}
+	for _, want := range fixture {
+		name := want["name"].(string)
+		got := liftedByName(lift, "payments-"+name)
+		if got == nil {
+			t.Fatalf("expected payments-%s, got %+v", name, lift.Templates)
+		}
+		if got.Namespace != "tenant-payments" || got.ServiceAccount != "varroa-agent-payments" {
+			t.Errorf("%s: unexpected stamps: %+v", name, got)
+		}
+		delete(want, "name")
+		delete(want, "label")
+		if !reflect.DeepEqual(got.Raw, want) {
+			t.Errorf("%s: pass-through keys differ:\n got %#v\nwant %#v", name, got.Raw, want)
+		}
+	}
+}
+
 func TestLiftTenantPodTemplates_SkipRules(t *testing.T) {
 	cases := []struct {
 		name      string
