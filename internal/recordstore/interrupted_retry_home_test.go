@@ -44,7 +44,7 @@ func TestAfterMarkRetry_AddressesTheHomeSlot(t *testing.T) {
 	defer cleanup()
 	wait := collectBackstopActions(t, conn)
 
-	afterMark(context.Background(), conn, retryHome(t, pool, jobPath), nil, nil,
+	afterMark(context.Background(), conn, nil, retryHome(t, pool, jobPath), nil, nil,
 		interruptedRetryRun(jobPath), ReasonCellLost, interruptedRetryAutomatic, nil)
 
 	actions := wait(1)
@@ -69,7 +69,7 @@ func TestAfterMarkRetry_UnplacedControllerKeepsTheRunCell(t *testing.T) {
 	wait := collectBackstopActions(t, conn)
 
 	jobPath := testTenant + "/retry-unplaced"
-	afterMark(context.Background(), conn, retryHome(t, pool, jobPath), nil, nil,
+	afterMark(context.Background(), conn, nil, retryHome(t, pool, jobPath), nil, nil,
 		interruptedRetryRun(jobPath), ReasonCellLost, interruptedRetryAutomatic, nil)
 
 	a := wait(1)[0]
@@ -99,7 +99,7 @@ func TestAfterMarkRetry_UnboundHomeSlotPublishesNothing(t *testing.T) {
 	defer cleanup()
 	wait := collectBackstopActions(t, conn)
 
-	afterMark(context.Background(), conn, retryHome(t, pool, jobPath), metrics, nil,
+	afterMark(context.Background(), conn, nil, retryHome(t, pool, jobPath), metrics, nil,
 		interruptedRetryRun(jobPath), ReasonCellLost, interruptedRetryAutomatic, nil)
 
 	wait(0)

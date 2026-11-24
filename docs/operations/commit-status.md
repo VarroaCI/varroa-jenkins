@@ -245,7 +245,8 @@ run, an `INTERRUPTED` run, and a failed trigger never own the context.
 
 When the newest run has completed, the operator puts its result back:
 
-1. The recorder sees a completion of a run of the job and the commit.
+1. The recorder sees a completion of a run of the job and the commit, or a synthetic end of an
+   older run.
 2. The operator waits 30 seconds, so the plugin's own write can land.
 3. The operator reads the latest status of each context on the commit.
 4. The operator writes the result of the newest run over each context that names an older run.
@@ -265,6 +266,12 @@ never writes over a status of another Jenkins with the same job path and build n
 only for a headless controller, such as a cell. After a cell move or a change of the dashboard
 URL, the old link does not match, so the operator writes nothing. A status that a person sets by
 hand with a default context name and the build link of an older run is written over too.
+
+An older run can write its `pending` status after the newest run completed, for example at a
+late checkout. When the recorder then ends the older run, the end sets that status to `error`. The
+recorder then runs the same check, so the operator puts the newest result back. After an end, the
+check runs only when a newer run owns the context. The end of the newest run keeps its `error`
+status. A provisional end runs no check.
 
 The new status links to the newest build. Its description reads
 `Varroa kept the result of the newest build #<n>: <result>`. The state follows the table in

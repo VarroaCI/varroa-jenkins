@@ -589,14 +589,16 @@ func decodeInterruptedRetry(policy json.RawMessage) string {
 }
 
 // afterMark publishes the actions a successful mark triggers: one
-// end_commit_status for a run with a recorded commit, one cancel_run for
+// end_commit_status for a run with a recorded commit, then the
+// restore_commit_status of publishRestoreAfterMark, one cancel_run for
 // the silent reason alone, and one automatic retry_run when the tenant's
 // policy calls for it. The retry names a new build number, so its own
 // status never overlaps the ended one. None of
 // these publishes is
 // transactional with markInterrupted's write: a lost action produces no
 // retry and no cancel, per design D14, and the recorder never
-// republishes.
+// republishes. q reads the restore check after the mark commits. A nil q
+// skips the check.
 //
 // The cancel belongs to ReasonNoHeartbeat and ReasonResumeTimeout. A
 // ReasonCellLost mark proves the pod gone, so no process remains to
@@ -621,7 +623,7 @@ func decodeInterruptedRetry(policy json.RawMessage) string {
 // The retry names home, the job's home member (retryAddress). The caller
 // answers home through jobHomeOf over the placement its mark decision
 // read, so the mark and the retry read one placement.
-func afterMark(ctx context.Context, conn *bus.Conn, home JobHome,
+func afterMark(ctx context.Context, conn *bus.Conn, q restoreQuerier, home JobHome,
 	metrics *InterruptedMetrics, actionMetrics *ActionMetrics,
 	run runInterruptCandidate, reason, interruptedRetry string, logger *slog.Logger) {
 	if logger == nil {
@@ -643,6 +645,7 @@ func afterMark(ctx context.Context, conn *bus.Conn, home JobHome,
 	}
 
 	publishEndCommitStatus(ctx, conn, actionMetrics, run, reason, logger)
+	publishRestoreAfterMark(ctx, q, conn, actionMetrics, run, logger)
 
 	if reason == ReasonNoHeartbeat || (reason == ReasonResumeTimeout && run.resumeDispatched()) {
 		action := LedgerAction{
@@ -720,6 +723,46 @@ func publishEndCommitStatus(ctx context.Context, conn *bus.Conn, actionMetrics *
 	}
 	if err := PublishLedgerAction(conn, action); err != nil {
 		logger.Warn("publish end_commit_status action failed", "run_id", run.runID, "error", err)
+		return
+	}
+	actionMetrics.addPublished(ctx, action.Kind)
+}
+
+// publishRestoreAfterMark runs the restore check of an owner completion after
+// a synthetic end, and publishes its restore_commit_status action. An older
+// run can write its pending status after a newer run of the revision
+// completed, for example at a late checkout. The end of the older run then
+// leaves error on the context, and no owner completion of the older run
+// follows. The check applies only when a newer run than the marked run owns
+// the context (restoreStatusActionAfterMark). It needs the facts of the end,
+// so a run that publishes no end_commit_status reads nothing. The read runs
+// on q after the mark commits, under restoreReadTimeout. A failed read logs
+// one Warn line and publishes nothing, and the mark stays stored.
+func publishRestoreAfterMark(ctx context.Context, q restoreQuerier, conn *bus.Conn, actionMetrics *ActionMetrics,
+	run runInterruptCandidate, logger *slog.Logger) {
+	if q == nil || conn == nil || run.scmRevision == "" || run.scmURL == "" || run.buildNumber == nil {
+		return
+	}
+	rctx, cancel := context.WithTimeout(ctx, restoreReadTimeout)
+	defer cancel()
+	intent := &intentRow{
+		runID:     run.runID,
+		createdAt: run.createdAt,
+		cluster:   run.cluster,
+		tenant:    run.tenant,
+		jobPath:   run.jobPath,
+	}
+	action, err := restoreStatusActionAfterMark(rctx, q, intent)
+	if err != nil {
+		logger.Warn("restore_commit_status read after a mark failed; the mark is stored",
+			"run_id", run.runID, "job_path", run.jobPath, "error", err)
+		return
+	}
+	if action == nil {
+		return
+	}
+	if err := PublishLedgerAction(conn, *action); err != nil {
+		logger.Warn("publish restore_commit_status action failed", "run_id", run.runID, "error", err)
 		return
 	}
 	actionMetrics.addPublished(ctx, action.Kind)
@@ -843,7 +886,7 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 			metrics.addCellLoss(ctx, "announce")
 		}
 		deleteRunState(ctx, pool, stateDeleter, c, logger)
-		afterMark(ctx, conn, jobHomeOf(row.members, true, c.jobPath), metrics, actionMetrics, c, reason,
+		afterMark(ctx, conn, pool, jobHomeOf(row.members, true, c.jobPath), metrics, actionMetrics, c, reason,
 			interruptedRetry, logger)
 		releaseRunAgentsAfterMark(ctx, pool, conn, actionMetrics, c, reason, logger)
 		marked++
@@ -948,7 +991,7 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 		if !provisionalMark(reason) {
 			deleteRunState(ctx, pool, stateDeleter, c, logger)
 		}
-		afterMark(ctx, conn, jobHomeOf(row.members, exists, c.jobPath), metrics, actionMetrics, c, reason,
+		afterMark(ctx, conn, pool, jobHomeOf(row.members, exists, c.jobPath), metrics, actionMetrics, c, reason,
 			decodeInterruptedRetry(row.policy), logger)
 		releaseRunAgentsAfterMark(ctx, pool, conn, actionMetrics, c, reason, logger)
 		marked++
