@@ -1686,11 +1686,14 @@ func (h *BusHandler) OnStreamBuildEvent(name, ns, cellInstance string, connToken
 // deadline, as the chunk path does in the same state, so a recorder
 // outage does not cost each finishing build its deadline. With no cached
 // match, the owner's next chunk reads the ledger again, and that answer
-// carries the run's status and anchor. A gateway with no log writer
-// sends no request and keeps the whole group.
+// carries the run's status and anchor. A check whose two reads a change
+// to the entry overtook sets no deadline, even on a cached match. A
+// gateway with no log writer sends no request and keeps the whole group.
 //
 // The request blocks the read loop for at most ownerLookupTimeout, the
-// same bound OnLogChunk has. It holds no lock while it reads the owner.
+// same bound OnLogChunk has. After a request times out, the checks of
+// the next ownerLookupPause send no request, so the stalls of an outage
+// do not add up. It holds no lock while it reads the owner.
 // markRunTerminal then takes h.logMu and st.mu in its own order.
 func (h *BusHandler) markCompletedRunTerminal(ns, name, instance string, evt *mitev1.BuildEvent) bool {
 	if h.logStore == nil {
