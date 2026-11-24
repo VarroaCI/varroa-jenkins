@@ -377,6 +377,22 @@ func TestDeriveMiteHealth(t *testing.T) {
 			t.Errorf("got %+v, want stale-forced disconnect", got)
 		}
 	})
+	t.Run("stale heartbeat on an open stream reports silent", func(t *testing.T) {
+		obs := base()
+		obs.LastHeartbeat = stale
+		obs.StreamOpen = true
+		got := deriveMiteHealth(obs, nil, now)
+		if got.Connected || got.Miss != presenceMissSilent {
+			t.Errorf("got %+v, want a silent open stream", got)
+		}
+	})
+	t.Run("fresh heartbeat on an open stream stays connected", func(t *testing.T) {
+		obs := base()
+		obs.StreamOpen = true
+		if got := deriveMiteHealth(obs, nil, now); !got.Connected || got.Miss != presenceMissNone {
+			t.Errorf("got %+v, want connected", got)
+		}
+	})
 	t.Run("read error reports unreadable and no status", func(t *testing.T) {
 		obs := base()
 		obs.ReadErr = fmt.Errorf("kv get presence: timeout")
@@ -495,6 +511,8 @@ func TestPresenceMissCounts(t *testing.T) {
 		{"connected does not count", presenceMissNone, nil, noFault, false},
 		{"missing record counts", presenceMissMissing, fresh, noFault, true},
 		{"stale heartbeat counts", presenceMissStale, fresh, noFault, true},
+		{"silent open stream counts", presenceMissSilent, fresh, noFault, true},
+		{"silent open stream after a recent fault with fresh lastSeen does not count", presenceMissSilent, fresh, recentFault, false},
 		{"read error with fresh lastSeen does not count", presenceMissUnreadable, fresh, noFault, false},
 		{"read error with old lastSeen counts", presenceMissUnreadable, old, noFault, true},
 		{"read error without lastSeen counts", presenceMissUnreadable, nil, noFault, true},

@@ -64,7 +64,7 @@ type BusHandler struct {
 	conn       *bus.Conn
 	metrics    gatewayMetrics
 	kv         *bus.KV // snapshot KV
-	presenceKV *bus.KV // presence KV (written on connect/heartbeat, deleted on disconnect)
+	presenceKV *bus.KV // presence KV (written on connect, heartbeat, snapshot, and the presence timer; deleted on disconnect)
 	// desired is the desired-state request source. Nil when the handler
 	// runs without a bus connection; serveDesiredState then returns at once.
 	desired desiredSource
@@ -115,6 +115,22 @@ type BusHandler struct {
 	// mite as "connected". Keyed rather than handler-wide so one slow JetStream
 	// write cannot stall every other controller's heartbeat.
 	presenceLocks map[string]*sync.Mutex
+	// presenceWrittenAt records the last presence write that the bus
+	// accepted, per controller ("ns/name"). The presence timer skips a
+	// tick that follows such a write by less than one interval.
+	presenceWrittenAt map[string]time.Time
+	// presenceRev records the KV revision of that write. A guarded write
+	// compares against it, so a write of another gateway replica in between
+	// is never replaced unread. OnConnect clears both entries.
+	presenceRev map[string]uint64
+	// presenceRefreshEvery and presenceSilentAfter override
+	// bus.PresenceRefreshInterval and bus.PresenceStaleAfter when above
+	// zero. Only a test sets them.
+	presenceRefreshEvery time.Duration
+	presenceSilentAfter  time.Duration
+	// runStateStoreWait overrides runStateStoreTimeout when above zero.
+	// Only a test sets it.
+	runStateStoreWait time.Duration
 
 	// watchDegraded records which of a controller's bus→stream watches are
 	// currently broken: "ns/name" -> watch kind -> reason. Tracked per kind
@@ -416,6 +432,8 @@ func NewBusHandler(mp metric.MeterProvider, cluster string, conn *bus.Conn, snap
 		logStop:                    make(chan struct{}),
 		presenceLocks:              make(map[string]*sync.Mutex),
 		lastHeartbeat:              make(map[string]time.Time),
+		presenceWrittenAt:          make(map[string]time.Time),
+		presenceRev:                make(map[string]uint64),
 		watchDegraded:              make(map[string]map[string]string),
 		miteVersion:                make(map[string]string),
 		scheduleRetained:           make(map[string]*mitev1.JobScheduleSet),
@@ -466,21 +484,61 @@ func (h *BusHandler) Close() {
 	h.stopOwnerMoves()
 }
 
-// putPresence writes a fresh presence record with a blind Put (no read-modify-
-// write). CertExpiry comes from the in-memory cache populated at OnConnect.
-// If OnDisconnect has already run (cancels entry gone), the write is skipped to
-// avoid clobbering CertExpiry with a zero value from a stale in-flight call.
+// putPresence writes the presence record of the live connection with a
+// guarded write (presenceGuarded). The heartbeat, snapshot, and watch paths
+// call it. A record of a newer epoch, which another gateway replica wrote
+// for a newer stream of the same mite, stays in place.
 func (h *BusHandler) putPresence(ns, name, version string) {
+	h.writePresence(ns, name, version, 0, presenceGuarded)
+}
+
+// presenceWriteMode names how a presence write treats the record that the
+// key holds.
+type presenceWriteMode int
+
+const (
+	// presenceClaim replaces any record. A new connection claims the key
+	// with it, so the newest stream owns the key at once.
+	presenceClaim presenceWriteMode = iota
+	// presenceGuarded replaces only the record that this connection wrote
+	// last, a missing record, or a record of an epoch that is not newer.
+	presenceGuarded
+)
+
+// presenceOutcome is the result of one presence write.
+type presenceOutcome int
+
+const (
+	presenceWritten presenceOutcome = iota
+	// presenceNotWritten covers no live connection, a marshal fault, and a
+	// bus failure. A later write tries again.
+	presenceNotWritten
+	// presenceNewer means that a newer connection owns the key, on this
+	// gateway or on another replica.
+	presenceNewer
+)
+
+// presenceCASReads bounds the reads of one guarded write after a conflict.
+const presenceCASReads = 2
+
+// writePresence writes the presence record of the live connection.
+// CertExpiry comes from the in-memory cache populated at OnConnect. If
+// OnDisconnect has already run (cancels entry gone), the write is skipped to
+// avoid clobbering CertExpiry with a zero value from a stale in-flight call.
+// Every write comes from a live connection, so every record sets StreamOpen.
+// A non-zero epoch writes only while that epoch is the live connection of
+// this handler, and answers presenceNewer otherwise.
+func (h *BusHandler) writePresence(ns, name, version string, epoch int64, mode presenceWriteMode) presenceOutcome {
 	if h.presenceKV == nil {
-		return
+		return presenceNotWritten
 	}
 	key := ns + "/" + name
-	// Held across the connected-check and the Put so OnDisconnect cannot slip
-	// its delete between them. No entry means the controller has no live
-	// connection, so there is nothing to write.
+	// Held across the connected-check and the write so OnDisconnect cannot
+	// slip its delete between them. No entry means the controller has no
+	// live connection, so there is nothing to write.
 	pl, ok := h.presenceLock(key)
 	if !ok {
-		return
+		return presenceNotWritten
 	}
 	pl.Lock()
 	defer pl.Unlock()
@@ -490,7 +548,7 @@ func (h *BusHandler) putPresence(ns, name, version string) {
 	ce := h.certExpiry[key]
 	h.mu.Unlock()
 	if !connected {
-		return
+		return presenceNotWritten
 	}
 	h.mu.Lock()
 	ep := h.connectEpoch[key]
@@ -499,7 +557,11 @@ func (h *BusHandler) putPresence(ns, name, version string) {
 	installedHash := h.installedPluginsHash[key]
 	degradedReason := degradedReasonLocked(h.watchDegraded[key])
 	seen, ok := h.lastHeartbeat[key]
+	lastRev := h.presenceRev[key]
 	h.mu.Unlock()
+	if epoch != 0 && ep != epoch {
+		return presenceNewer
+	}
 	if !ok {
 		seen = time.Now()
 	}
@@ -508,6 +570,7 @@ func (h *BusHandler) putPresence(ns, name, version string) {
 		LastHeartbeat:        seen,
 		CertExpiry:           ce,
 		Epoch:                ep,
+		StreamOpen:           true,
 		IdleGaugesJSON:       gaugesJSON,
 		IdleGaugesReceivedAt: gaugesAt,
 		InstalledPluginsHash: installedHash,
@@ -516,11 +579,125 @@ func (h *BusHandler) putPresence(ns, name, version string) {
 	})
 	if err != nil {
 		h.log().Error("marshal presence failed", "controller", key, "error", err)
+		return presenceNotWritten
+	}
+	kvKey := bus.PresenceKey(h.cluster, ns, name)
+	var rev uint64
+	if mode == presenceClaim {
+		rev, err = h.presenceKV.PutRevision(kvKey, data)
+	} else {
+		var outcome presenceOutcome
+		rev, outcome, err = casPresence(h.presenceKV, kvKey, data, ep, lastRev)
+		if outcome == presenceNewer {
+			h.log().Debug("presence write skipped: a newer stream holds the record", "controller", key, "epoch", ep)
+			return presenceNewer
+		}
+	}
+	if err != nil {
+		h.log().Error("write presence failed", "controller", key, "error", err)
+		return presenceNotWritten
+	}
+	h.mu.Lock()
+	// OnDisconnect clears the maps before it takes the presence lock, and
+	// OnConnect clears them for a new epoch, so an entry describes only the
+	// live connection.
+	if _, live := h.cancels[key]; live && h.connectEpoch[key] == ep {
+		if h.presenceWrittenAt == nil {
+			h.presenceWrittenAt = make(map[string]time.Time)
+		}
+		if h.presenceRev == nil {
+			h.presenceRev = make(map[string]uint64)
+		}
+		h.presenceWrittenAt[key] = time.Now()
+		h.presenceRev[key] = rev
+	}
+	h.mu.Unlock()
+	return presenceWritten
+}
+
+// presenceCAS is the seam of the guarded presence write. *bus.KV satisfies
+// it; a test substitutes a store that answers a conflict on every write.
+type presenceCAS interface {
+	Entry(key string) ([]byte, uint64, error)
+	Update(key string, value []byte, last uint64) (uint64, error)
+	CreateRevision(key string, value []byte) (uint64, error)
+}
+
+// casPresence writes data under kvKey for the connection epoch ep with
+// compare-and-set writes only. lastRev is the revision of the last write of
+// this connection that the bus accepted, or zero. A record of a newer epoch
+// answers presenceNewer and stays in place. A missing or deleted key is
+// created again. After a conflict, the record is read again at most
+// presenceCASReads times, so one call costs at most five bus operations. On
+// the healthy path the first Update succeeds, at the cost of one Put.
+func casPresence(store presenceCAS, kvKey string, data []byte, ep int64, lastRev uint64) (uint64, presenceOutcome, error) {
+	if lastRev > 0 {
+		rev, err := store.Update(kvKey, data, lastRev)
+		if err == nil {
+			return rev, presenceWritten, nil
+		}
+		if !presenceConflict(err) {
+			return 0, presenceNotWritten, err
+		}
+	}
+	var err error
+	for range presenceCASReads {
+		var cur []byte
+		var curRev, rev uint64
+		cur, curRev, err = store.Entry(kvKey)
+		if err != nil {
+			return 0, presenceNotWritten, err
+		}
+		if cur == nil {
+			rev, err = store.CreateRevision(kvKey, data)
+		} else {
+			if presenceEpochOf(cur) > ep {
+				return 0, presenceNewer, nil
+			}
+			rev, err = store.Update(kvKey, data, curRev)
+		}
+		if err == nil {
+			return rev, presenceWritten, nil
+		}
+		if !presenceConflict(err) {
+			return 0, presenceNotWritten, err
+		}
+	}
+	return 0, presenceNotWritten, fmt.Errorf("presence record changed during %d reads: %w", presenceCASReads, err)
+}
+
+// presenceConflict reports whether err is a compare-and-set conflict: another
+// write changed the key first.
+func presenceConflict(err error) bool {
+	return errors.Is(err, bus.ErrKVRevisionMismatch) || errors.Is(err, bus.ErrKVKeyExists)
+}
+
+// presenceEpochOf returns the connection epoch of a stored presence record.
+// A record that does not decode gives zero, so any writer replaces it.
+func presenceEpochOf(data []byte) int64 {
+	var p struct {
+		Epoch int64 `json:"epoch"`
+	}
+	if json.Unmarshal(data, &p) != nil {
+		return 0
+	}
+	return p.Epoch
+}
+
+// deletePresence removes the presence record of a connection that ends. A
+// record of a newer epoch stays: another gateway replica wrote it for a
+// newer stream of the same mite. A zero epoch removes any record. A read or
+// a conflict leaves the record to expire after bus.PresenceTTL.
+func (h *BusHandler) deletePresence(kvKey string, epoch int64) {
+	if epoch == 0 {
+		_ = h.presenceKV.Delete(kvKey)
 		return
 	}
-	if err := h.presenceKV.Put(bus.PresenceKey(h.cluster, ns, name), data); err != nil {
-		h.log().Error("write presence failed", "controller", key, "error", err)
+	cur, rev, err := h.presenceKV.Entry(kvKey)
+	if err != nil || cur == nil || presenceEpochOf(cur) > epoch {
+		return
 	}
+	_ = h.presenceKV.DeleteRevision(kvKey, rev)
 }
 
 // OnConnect caches cert expiry, writes initial presence, and starts the
@@ -554,6 +731,10 @@ func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{},
 	// connection's first presence write — and if the matching watcher never
 	// runs setup, the stale mark survives for its whole life.
 	delete(h.watchDegraded, key)
+	// The write marks of the superseded connection must not let the presence
+	// timer of this one skip a tick, or guard its first write.
+	delete(h.presenceWrittenAt, key)
+	delete(h.presenceRev, key)
 	if h.presenceLocks == nil {
 		h.presenceLocks = make(map[string]*sync.Mutex)
 	}
@@ -582,7 +763,9 @@ func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{},
 	go h.watchTail(ctx, ns, name, send)
 	h.startBuildEventWorker(ctx, ns, name, epoch, send)
 
-	h.putPresence(ns, name, version)
+	// The connect write replaces any record: the newest stream claims the
+	// key, also when an older stream of another replica wrote last.
+	h.writePresence(ns, name, version, epoch, presenceClaim)
 	h.publishBroodEvent("connected", ns, name, version)
 	return epoch
 }
@@ -1361,6 +1544,8 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 	delete(h.watchDegraded, key)
 	delete(h.miteVersion, key)
 	delete(h.lastHeartbeat, key)
+	delete(h.presenceWrittenAt, key)
+	delete(h.presenceRev, key)
 	// Purge any content requests associated with this mite (no reply coming).
 	for reqID, nsKey := range h.pendingContentNS {
 		if nsKey == key {
@@ -1391,7 +1576,7 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 		_, reconnected := h.cancels[key]
 		h.mu.Unlock()
 		if !reconnected && h.presenceKV != nil {
-			_ = h.presenceKV.Delete(bus.PresenceKey(h.cluster, ns, name))
+			h.deletePresence(bus.PresenceKey(h.cluster, ns, name), token)
 		}
 		pl.Unlock()
 		// Retire the entry once the delete has completed — unconditionally on

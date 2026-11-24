@@ -467,3 +467,84 @@ func TestReconcileCellPresenceFaultFeedsRollClock(t *testing.T) {
 		t.Fatalf("pass 3: CellReady reason = %q, want CellRolled", cond.Reason)
 	}
 }
+
+// TestCellRollHoldsForSilentOpenStream covers the open stream fact: the
+// gateway holds the mite stream open, and no heartbeat reaches it. The roll
+// of a pod that is not Ready waits until cellMiteRollHoldCap, and the
+// message names the open stream.
+func TestCellRollHoldsForSilentOpenStream(t *testing.T) {
+	grace := 5 * time.Minute
+	rec, client, cr := streamLostCell(t, grace)
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	client.controllerPod = runningCellPod(t0.Add(-time.Hour), false)
+	rec.miteTransport.(*memTransport).silent("cell1", "ns", t0.Add(-5*time.Minute))
+
+	rec.evaluateCellReadiness(context.Background(), cr, t0)
+	for _, at := range []time.Duration{grace + time.Minute, cellMiteRollHoldCap - time.Minute} {
+		rec.evaluateCellReadiness(context.Background(), cr, t0.Add(at))
+		if client.deleteControllerPodCalls != 0 {
+			t.Fatalf("at %v: expected no delete while the stream is open, got %d", at, client.deleteControllerPodCalls)
+		}
+		cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
+		if !strings.HasPrefix(cond.Message, cellRollHeldPrefix) ||
+			!strings.Contains(cond.Message, "the gateway holds the mite stream open with no heartbeat") {
+			t.Fatalf("at %v: message %q does not name the open stream", at, cond.Message)
+		}
+		if cr.Status.Cell.Evacuate {
+			t.Fatalf("at %v: expected no evacuate while the roll is held", at)
+		}
+	}
+
+	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(cellMiteRollHoldCap))
+	if client.deleteControllerPodCalls != 1 {
+		t.Fatalf("past the hold cap: expected one delete, got %d", client.deleteControllerPodCalls)
+	}
+}
+
+// TestCellRollHoldNamesEachFact covers a Ready pod with a silent open
+// stream: the held message names both facts.
+func TestCellRollHoldNamesEachFact(t *testing.T) {
+	grace := 5 * time.Minute
+	rec, client, cr := streamLostCell(t, grace)
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	client.controllerPod = runningCellPod(t0.Add(-time.Hour), true)
+	rec.miteTransport.(*memTransport).silent("cell1", "ns", t0.Add(-5*time.Minute))
+
+	rec.evaluateCellReadiness(context.Background(), cr, t0)
+	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+time.Minute))
+	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
+	for _, want := range []string{"the gateway holds the mite stream open with no heartbeat", "pod cell1-abcd1234-0 is Ready"} {
+		if !strings.Contains(cond.Message, want) {
+			t.Errorf("message %q lacks %q", cond.Message, want)
+		}
+	}
+}
+
+// TestCellRollGoesAfterTheGatewayStops covers a gateway replica that stops
+// while it holds a silent stream. Its timer stops, and the bucket TTL
+// removes the record. The open stream fact goes with the record, so the
+// roll of a pod that is not Ready goes on the next tick.
+func TestCellRollGoesAfterTheGatewayStops(t *testing.T) {
+	grace := 5 * time.Minute
+	rec, client, cr := streamLostCell(t, grace)
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	client.controllerPod = runningCellPod(t0.Add(-time.Hour), false)
+	mites := rec.miteTransport.(*memTransport)
+	mites.silent("cell1", "ns", t0.Add(-5*time.Minute))
+
+	rec.evaluateCellReadiness(context.Background(), cr, t0)
+	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+time.Minute))
+	if client.deleteControllerPodCalls != 0 {
+		t.Fatalf("expected no delete while the stream is open, got %d", client.deleteControllerPodCalls)
+	}
+
+	mites.drop("cell1", "ns")
+	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+2*time.Minute))
+	if client.deleteControllerPodCalls != 1 {
+		t.Fatalf("expected one delete after the record aged out, got %d", client.deleteControllerPodCalls)
+	}
+	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
+	if cond.Reason != v1alpha1.ReasonCellRolled {
+		t.Fatalf("Reason = %q, want CellRolled", cond.Reason)
+	}
+}

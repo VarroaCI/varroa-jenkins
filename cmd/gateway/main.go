@@ -166,7 +166,7 @@ func main() {
 		logger.Error("failed to create snapshot KV", "error", err)
 		os.Exit(1)
 	}
-	presenceKV, err := busConn.EnsureKV(bus.KVPresenceBucket, 90*time.Second)
+	presenceKV, err := busConn.EnsureKV(bus.KVPresenceBucket, bus.PresenceTTL)
 	if err != nil {
 		logger.Error("failed to create presence KV", "error", err)
 		os.Exit(1)

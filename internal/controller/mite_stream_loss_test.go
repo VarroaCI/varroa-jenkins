@@ -71,6 +71,18 @@ func (s *staleTransport) Info(_, _ string) (transport.MiteInfo, bool, error) {
 	return transport.MiteInfo{Version: "v1.0", LastHeartbeat: time.Now().Add(-2 * staleMiteThreshold), CertExpiry: time.Now().Add(time.Hour)}, true, nil
 }
 
+// silentTransport decorates a Transport so Info reports an open stream whose
+// last heartbeat is older than staleMiteThreshold: a gateway holds the
+// stream, and no mite message reaches it.
+type silentTransport struct {
+	transport.Transport
+}
+
+func (s *silentTransport) Info(_, _ string) (transport.MiteInfo, bool, error) {
+	return transport.MiteInfo{Version: "v1.0", LastHeartbeat: time.Now().Add(-2 * staleMiteThreshold),
+		CertExpiry: time.Now().Add(time.Hour), StreamOpen: true}, true, nil
+}
+
 // TestHandleRunning_StaleHeartbeatIsNotAReconnect asserts that handleRunning
 // applies the same stale-heartbeat rule as handleConnected. A presence record
 // with an aged heartbeat must not return a stream-lost controller to
@@ -384,6 +396,8 @@ func TestHandleConnected_StreamLossNamesCause(t *testing.T) {
 			func(b transport.Transport) transport.Transport { return b }},
 		{"stale", "stale", "heartbeat older than", 10 * time.Second,
 			func(b transport.Transport) transport.Transport { return &staleTransport{Transport: b} }},
+		{"silent", "silent", "stream open on the gateway, heartbeat older than", 10 * time.Second,
+			func(b transport.Transport) transport.Transport { return &silentTransport{Transport: b} }},
 		{"unreadable", "unreadable", "presence record unreadable", 3 * time.Minute,
 			func(b transport.Transport) transport.Transport { return &presenceReadErrTransport{Transport: b} }},
 	}

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
@@ -26,6 +27,17 @@ type MiteInfo struct {
 	Version       string
 	LastHeartbeat time.Time
 	CertExpiry    time.Time
+	// StreamOpen reports that the gateway that wrote the record holds an
+	// open stream of the mite. With a stale LastHeartbeat, the stream is
+	// open and silent.
+	StreamOpen bool
+}
+
+// HeartbeatStale reports whether LastHeartbeat is older than
+// bus.PresenceStaleAfter at now. A stale record does not show a live mite,
+// also when its stream is open.
+func (i MiteInfo) HeartbeatStale(now time.Time) bool {
+	return now.Sub(i.LastHeartbeat) > bus.PresenceStaleAfter
 }
 
 // Transport is how the operator talks to a mite. The interface uses
@@ -48,7 +60,8 @@ type Transport interface {
 	// "unknown", or "unreachable").
 	Health(ns, name string) string
 
-	// Connected reports whether a mite stream is currently held (anywhere).
+	// Connected reports whether a mite stream is currently held (anywhere)
+	// and its last heartbeat is no older than bus.PresenceStaleAfter.
 	Connected(ns, name string) bool
 
 	// Info returns the presence record of the mite of ns/name. ok is false

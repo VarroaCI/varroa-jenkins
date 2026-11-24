@@ -128,7 +128,7 @@ func runSelfContained(N int, rampRate int, dur time.Duration, cluster, busUser, 
 		slog.Default().Error("kv", "error", err)
 		os.Exit(1)
 	}
-	presenceKV, err := busConn.EnsureKV(bus.KVPresenceBucket, 90*time.Second)
+	presenceKV, err := busConn.EnsureKV(bus.KVPresenceBucket, bus.PresenceTTL)
 	if err != nil {
 		slog.Default().Error("presence kv", "error", err)
 		os.Exit(1)

@@ -358,6 +358,9 @@ type miteObservation struct {
 	Version       string
 	LastHeartbeat time.Time
 	CertExpiry    time.Time
+	// StreamOpen is true when the presence record shows that a gateway
+	// holds the mite stream open.
+	StreamOpen bool
 	// Health is the transport health state ("healthy"/"unhealthy"/"unreachable"/...).
 	Health   string
 	Snapshot *mitev1.StateSnapshot
@@ -371,6 +374,10 @@ const (
 	presenceMissMissing    presenceMiss = "missing"
 	presenceMissStale      presenceMiss = "stale"
 	presenceMissUnreadable presenceMiss = "unreadable"
+	// presenceMissSilent is a record that shows an open stream with a
+	// stale heartbeat: a gateway holds the stream, and no mite message
+	// reaches its handlers.
+	presenceMissSilent presenceMiss = "silent"
 )
 
 // miteHealthResult is what deriveMiteHealth decided: effective connectivity
@@ -416,6 +423,8 @@ func presenceMissDetail(miss presenceMiss, readErr error) string {
 		return "no presence record"
 	case presenceMissStale:
 		return fmt.Sprintf("heartbeat older than %s", staleMiteThreshold)
+	case presenceMissSilent:
+		return fmt.Sprintf("stream open on the gateway, heartbeat older than %s", staleMiteThreshold)
 	case presenceMissUnreadable:
 		return fmt.Sprintf("presence record unreadable: %v", readErr)
 	}
@@ -437,9 +446,13 @@ func deriveMiteHealth(obs miteObservation, prevDrift *v1alpha1.LiveDriftStatus, 
 	case !obs.TransportConnected:
 		res.Connected, res.Miss = false, presenceMissMissing
 		return res
-	// If the last heartbeat is stale, the mite is gone. Use lastHeartbeat from
-	// Info (the transport source of truth), not cr.Status.MiteStatus.LastSeen
-	// (the persisted CR field which may lag behind after an operator restart).
+	// If the last heartbeat is stale, the mite is gone or silent. Use
+	// lastHeartbeat from Info (the transport source of truth), not
+	// cr.Status.MiteStatus.LastSeen (the persisted CR field which may lag
+	// behind after an operator restart).
+	case now.Sub(obs.LastHeartbeat) > staleMiteThreshold && obs.StreamOpen:
+		res.Connected, res.Miss = false, presenceMissSilent
+		return res
 	case now.Sub(obs.LastHeartbeat) > staleMiteThreshold:
 		res.Connected, res.Miss = false, presenceMissStale
 		return res

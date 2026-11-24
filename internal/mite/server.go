@@ -280,8 +280,17 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 	connToken := handler.OnConnect(controllerName, namespace, hello.Version, leaf.NotAfter, send)
 	defer handler.OnDisconnect(controllerName, namespace, connToken)
 
+	// The presence timer stops before OnDisconnect runs, because deferred
+	// calls run in reverse order. Its writes then never follow the
+	// disconnect delete.
+	loop := &readLoopState{}
+	loop.set(readLoopRecv)
+	stopPresence := keepPresence(stream.Context(), handler, controllerName, namespace, connToken, loop)
+	defer stopPresence()
+
 	// Read loop: process incoming messages from the mite.
 	for {
+		loop.set(readLoopRecv)
 		msg, err := stream.Recv()
 		if err != nil {
 			if err == io.EOF {
@@ -324,6 +333,7 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 			return status.Error(codes.Aborted, "stream superseded by a newer connection")
 		}
 
+		loop.set(miteMessageKind(msg))
 		switch m := msg.Message.(type) {
 		case *mitev1.MiteMessage_Heartbeat:
 			handler.OnHeartbeat(controllerName, namespace, m.Heartbeat)
@@ -410,6 +420,94 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 				handler.OnRunStateRequest(controllerName, namespace, rsr, send)
 			}
 		}
+	}
+}
+
+// readLoopState records what the read loop of one stream does: it waits for
+// a mite message, or it runs the handler of one message kind. The presence
+// timer reads it from another goroutine.
+type readLoopState struct {
+	mu    sync.Mutex
+	state string
+	since time.Time
+}
+
+// set records state as the current state of the loop, from now.
+func (l *readLoopState) set(state string) {
+	now := time.Now()
+	l.mu.Lock()
+	l.state, l.since = state, now
+	l.mu.Unlock()
+}
+
+// read returns the current state of the loop and when it started.
+func (l *readLoopState) read() (string, time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.state, l.since
+}
+
+// miteMessageKind returns the oneof field name of msg, for example
+// "log_chunk". A kind with no case here returns its Go type name.
+func miteMessageKind(msg *mitev1.MiteMessage) string {
+	switch msg.Message.(type) {
+	case *mitev1.MiteMessage_Hello:
+		return "hello"
+	case *mitev1.MiteMessage_Heartbeat:
+		return "heartbeat"
+	case *mitev1.MiteMessage_StateSnapshot:
+		return "state_snapshot"
+	case *mitev1.MiteMessage_CommandResult:
+		return "command_result"
+	case *mitev1.MiteMessage_TokenRefreshRequest:
+		return "token_refresh_request"
+	case *mitev1.MiteMessage_ObservabilityReport:
+		return "observability_report"
+	case *mitev1.MiteMessage_ContentResponse:
+		return "content_response"
+	case *mitev1.MiteMessage_JenkinsActivity:
+		return "jenkins_activity"
+	case *mitev1.MiteMessage_PluginInventory:
+		return "plugin_inventory"
+	case *mitev1.MiteMessage_BuildEvent:
+		return "build_event"
+	case *mitev1.MiteMessage_ClaimRequest:
+		return "claim_request"
+	case *mitev1.MiteMessage_LogChunk:
+		return "log_chunk"
+	case *mitev1.MiteMessage_TailAck:
+		return "tail_ack"
+	case *mitev1.MiteMessage_CrossTenantRequest:
+		return "cross_tenant_request"
+	case *mitev1.MiteMessage_RunStateChunk:
+		return "run_state_chunk"
+	case *mitev1.MiteMessage_RunStateRequest:
+		return "run_state_request"
+	case nil:
+		return "empty"
+	default:
+		return fmt.Sprintf("%T", msg.Message)
+	}
+}
+
+// keepPresence starts the presence timer of one stream when handler has
+// one. The returned stop ends the timer and waits for it. The timer also
+// ends with ctx, the stream context, which gRPC ends when the peer goes
+// away, also while a handler blocks the read loop.
+func keepPresence(ctx context.Context, handler StreamHandler, name, ns string, token int64, loop *readLoopState) func() {
+	keeper, ok := handler.(presenceKeeper)
+	if !ok {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		keeper.KeepPresence(ctx, name, ns, token, loop.read)
+	}()
+	return func() {
+		cancel()
+		<-done
 	}
 }
 

@@ -2,15 +2,45 @@ package bus
 
 import "time"
 
+const (
+	// PresenceTTL is the entry lifetime of the presence bucket. A record
+	// that no gateway writes again is gone after it, so the record of a
+	// gateway replica that stopped ages out. It must stay below
+	// PresenceStaleAfter: the last record of a stopped gateway then reads
+	// as missing, never as a silent open stream.
+	PresenceTTL = 90 * time.Second
+
+	// PresenceRefreshInterval is how often a gateway writes the presence
+	// record of each open stream when no mite message wrote it. It must
+	// stay well below PresenceTTL, so the record of an open stream never
+	// ages out.
+	PresenceRefreshInterval = 15 * time.Second
+
+	// PresenceStaleAfter is the heartbeat age past which a mite counts as
+	// silent. The operator, the dashboard back end, and the gateway warning
+	// use this one value.
+	PresenceStaleAfter = 2 * time.Minute
+)
+
 // Presence is the gateway-written liveness record for a connected mite.
 // It carries metadata that the generic StateSnapshot proto cannot hold:
 // the actual heartbeat timestamp (as observed by the gateway) and cert
 // expiry from the mTLS handshake.
 type Presence struct {
-	Version       string    `json:"version"`
+	Version string `json:"version"`
+	// LastHeartbeat is the time of the last mite message that refreshed
+	// liveness, never the time of the write. A record of a silent stream
+	// therefore keeps an old value.
 	LastHeartbeat time.Time `json:"lastHeartbeat"`
 	CertExpiry    time.Time `json:"certExpiry"`
 	Epoch         int64     `json:"epoch"` // connection epoch, stable across heartbeats
+
+	// StreamOpen reports that the gateway that wrote the record holds an
+	// open stream of the mite. The gateway writes the record again every
+	// PresenceRefreshInterval while the stream is open, also when no mite
+	// message arrives. A record with StreamOpen and a stale LastHeartbeat
+	// is a silent open stream, not a lost one.
+	StreamOpen bool `json:"streamOpen"`
 
 	// IdleGaugesJSON is the JSON-serialized idle gauges from the latest
 	// heartbeat, or empty if none have been received.
@@ -30,4 +60,10 @@ type Presence struct {
 	// not reaching it. StreamDegradedReason carries the underlying error.
 	StreamDegraded       bool   `json:"streamDegraded,omitempty"`
 	StreamDegradedReason string `json:"streamDegradedReason,omitempty"`
+}
+
+// HeartbeatFresh reports whether the record shows a live mite at now: its
+// last heartbeat is no older than PresenceStaleAfter.
+func (p Presence) HeartbeatFresh(now time.Time) bool {
+	return now.Sub(p.LastHeartbeat) <= PresenceStaleAfter
 }

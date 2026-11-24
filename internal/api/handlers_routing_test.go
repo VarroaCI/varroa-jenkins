@@ -1066,6 +1066,35 @@ func TestHandleControllersListCarriesLastSeen(t *testing.T) {
 	}
 }
 
+// TestMergeMiteStatusStaleRecordIsNotConnected covers the record of a silent
+// open stream: the gateway keeps it, so the merge keeps its heartbeat time
+// and version but does not mark the mite connected.
+func TestMergeMiteStatusStaleRecordIsNotConnected(t *testing.T) {
+	srv, _ := newRoutingTestServer()
+	for _, tc := range []struct {
+		name string
+		seen time.Time
+		want bool
+	}{
+		{"fresh", time.Now().Add(-10 * time.Second), true},
+		{"stale", time.Now().Add(-2 * bus.PresenceStaleAfter), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv.deps.MiteRegistry = &lastSeenMiteTransport{lastSeen: tc.seen}
+			var list controllerResponse
+			srv.mergeMiteStatus("ctl", "ns", &list)
+			var detail controllerDetailResponse
+			srv.mergeMiteTelemetry("ctl", "ns", &detail)
+			if list.MiteConnected != tc.want || detail.MiteConnected != tc.want {
+				t.Errorf("miteConnected list=%v detail=%v, want %v", list.MiteConnected, detail.MiteConnected, tc.want)
+			}
+			if list.LastSeen == "" || list.MiteVersion != "mite-1.0" {
+				t.Errorf("list = %+v, want the record's heartbeat time and version", list)
+			}
+		})
+	}
+}
+
 // absentMiteTransport reports no mite at all, the registry's view of a mite
 // that has disconnected.
 type absentMiteTransport struct {

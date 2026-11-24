@@ -38,7 +38,22 @@ const (
 	// runStateContentType names the gzip body every run-state object
 	// holds.
 	runStateContentType = "application/gzip"
+
+	// runStateStoreTimeout bounds one blob call of the run-state path.
+	// The call runs on the stream read loop, so a call with no bound
+	// stops every message of the stream, the heartbeats included. A
+	// store that holds a dead connection answers no error by itself.
+	runStateStoreTimeout = 30 * time.Second
 )
+
+// runStateStoreBound returns the bound of one blob call of the run-state
+// path.
+func (h *BusHandler) runStateStoreBound() time.Duration {
+	if h.runStateStoreWait > 0 {
+		return h.runStateStoreWait
+	}
+	return runStateStoreTimeout
+}
 
 // RunStateAck status and reason tokens. The status set mirrors LogAck's,
 // and the reason set is the whole set mite-loopback-api fixes.
@@ -458,7 +473,10 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, ns, name string, e
 		ContentType: runStateContentType,
 		CreatedAt:   time.Now().UTC(),
 	}
-	if err := h.logStore.Replace(ctx, key, bytes.NewReader(body), opts); err != nil {
+	writeCtx, cancel := context.WithTimeout(ctx, h.runStateStoreBound())
+	err := h.logStore.Replace(writeCtx, key, bytes.NewReader(body), opts)
+	cancel()
+	if err != nil {
 		h.log().Warn("run-state object write failed", "run_id", chunk.RunId, "relpath", chunk.Relpath, "error", err)
 		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: stateBudgetPauseMinMS}
 	}
@@ -806,7 +824,8 @@ func (h *BusHandler) OnRunStateRequest(name, ns string, req *mitev1.RunStateRequ
 
 	h.invalidateOwnerOnFirstFetch(req.RunId, ns, name)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), h.runStateStoreBound())
+	defer cancel()
 	// Replace writes through Put, which both drivers store as chunked
 	// part 0, so the chunked read is the matching read.
 	r, err := h.logStore.NewRangeReader(ctx, key, 0, -1)

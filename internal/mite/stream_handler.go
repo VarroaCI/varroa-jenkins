@@ -1,6 +1,9 @@
 package mite
 
 import (
+	"context"
+	"time"
+
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
@@ -118,4 +121,12 @@ type cellInstanceRecorder interface {
 // it.
 type streamBuildEventHandler interface {
 	OnStreamBuildEvent(name, ns, cellInstance string, connToken int64, evt *mitev1.BuildEvent) error
+}
+
+// presenceKeeper is an optional capability of a StreamHandler. The server
+// runs KeepPresence for each open stream on the stream context, and waits
+// for it to return before it calls OnDisconnect. loop reports what the read
+// loop of the stream does, and since when. BusHandler implements it.
+type presenceKeeper interface {
+	KeepPresence(ctx context.Context, name, ns string, token int64, loop func() (string, time.Time))
 }
