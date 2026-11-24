@@ -52,7 +52,7 @@ func TestAfterMarkPublishesEndCommitStatusBeforeRetry(t *testing.T) {
 	received := subscribeLedgerActionsForTest(t, conn)
 	run := sourcedCandidate(uuid.Must(uuid.NewV7()))
 
-	afterMark(context.Background(), conn, JobHome{}, nil, nil, run, ReasonCellLost, interruptedRetryAutomatic, nil)
+	afterMark(context.Background(), conn, nil, JobHome{}, nil, nil, run, ReasonCellLost, interruptedRetryAutomatic, nil)
 
 	var kinds []string
 	for len(kinds) < 2 {
@@ -95,7 +95,7 @@ func TestAfterMarkPublishesNoEndCommitStatusForHeartbeatLost(t *testing.T) {
 	received := subscribeLedgerActionsForTest(t, conn)
 	run := sourcedCandidate(uuid.Must(uuid.NewV7()))
 
-	afterMark(context.Background(), conn, JobHome{}, nil, nil, run, ReasonHeartbeatLost, interruptedRetryAutomatic, nil)
+	afterMark(context.Background(), conn, nil, JobHome{}, nil, nil, run, ReasonHeartbeatLost, interruptedRetryAutomatic, nil)
 	expectNoLedgerAction(t, received)
 }
 
@@ -109,7 +109,7 @@ func TestAfterMarkPublishesNoEndCommitStatusWithoutRevision(t *testing.T) {
 	run := sourcedCandidate(uuid.Must(uuid.NewV7()))
 	run.scmRevision = ""
 
-	afterMark(context.Background(), conn, JobHome{}, nil, nil, run, ReasonCellLost, "", nil)
+	afterMark(context.Background(), conn, nil, JobHome{}, nil, nil, run, ReasonCellLost, "", nil)
 	expectNoLedgerAction(t, received)
 }
 
@@ -123,7 +123,7 @@ func TestAfterMarkPublishesNoEndCommitStatusForQueued(t *testing.T) {
 	run := sourcedCandidate(uuid.Must(uuid.NewV7()))
 	run.status = StatusQueued
 
-	afterMark(context.Background(), conn, JobHome{}, nil, nil, run, ReasonCellLost, "", nil)
+	afterMark(context.Background(), conn, nil, JobHome{}, nil, nil, run, ReasonCellLost, "", nil)
 	expectNoLedgerAction(t, received)
 }
 

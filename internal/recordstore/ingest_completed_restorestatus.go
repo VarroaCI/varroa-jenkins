@@ -93,6 +93,22 @@ func (r restoreRun) ownsStatus() bool {
 // later rebuild of an old revision costs no forge read. The action names
 // the newest run and the build numbers of those other runs.
 func restoreStatusAction(ctx context.Context, q restoreQuerier, intent *intentRow) (*LedgerAction, error) {
+	return buildRestoreAction(ctx, q, intent, false)
+}
+
+// restoreStatusActionAfterMark builds the restore_commit_status action after
+// a synthetic end of the intent's run. It applies the rules of
+// restoreStatusAction, and it also returns nil unless the newest owning run
+// is newer than the marked run. A marked run that is the newest run of the
+// revision keeps its own end on the context, so an older result never
+// replaces it through this check.
+func restoreStatusActionAfterMark(ctx context.Context, q restoreQuerier, intent *intentRow) (*LedgerAction, error) {
+	return buildRestoreAction(ctx, q, intent, true)
+}
+
+// buildRestoreAction is the body of restoreStatusAction and
+// restoreStatusActionAfterMark. newerOnly is true for a synthetic end.
+func buildRestoreAction(ctx context.Context, q restoreQuerier, intent *intentRow, newerOnly bool) (*LedgerAction, error) {
 	var revision string
 	err := q.QueryRow(ctx, `
 		SELECT COALESCE(scm_revision, '') FROM varroa.runs WHERE run_id = $1 AND created_at = $2`,
@@ -115,6 +131,9 @@ func restoreStatusAction(ctx context.Context, q restoreQuerier, intent *intentRo
 		if runs[i].ownsStatus() {
 			newest = &runs[i]
 			break
+		}
+		if newerOnly && runs[i].runID == intent.runID {
+			return nil, nil
 		}
 	}
 	if newest == nil || newest.status != StatusCompleted || newest.buildNumber == nil || newest.repo == "" {

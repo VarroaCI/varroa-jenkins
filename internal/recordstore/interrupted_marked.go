@@ -348,7 +348,7 @@ func EndMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 			metrics.addRetrySkipped(ctx, retrySkipParameterized)
 			interruptedRetry = ""
 		}
-		afterMark(ctx, conn, jobHomeOf(row.members, exists, c.jobPath), metrics, actionMetrics, run,
+		afterMark(ctx, conn, pool, jobHomeOf(row.members, exists, c.jobPath), metrics, actionMetrics, run,
 			ReasonCellRolled, interruptedRetry, logger)
 		ended++
 	}
