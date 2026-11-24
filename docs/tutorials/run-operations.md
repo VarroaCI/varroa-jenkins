@@ -60,6 +60,14 @@ The card shows up to five parts. Each part appears on its own.
 | Failed tests | The failed, skipped, and total counts of the run's tests |
 | Failed cases | At most ten failed cases by class and test name. Each links to that case's history |
 
+A stage that did not run reads `NOT_EXECUTED`, labelled **Not executed**. It carries no error, and
+the card never names it. Jenkins does not run a declarative stage in these cases:
+
+- An earlier stage failed.
+- An earlier stage is unstable, and the pipeline sets the `skipStagesAfterUnstable` option.
+- The `when` condition of the stage is false.
+- A restart begins at a later stage.
+
 The card uses the whole log for the log tail when no stage reports `FAILURE`. It uses the whole
 log too when the stored log index names no stage. An aborted run and a run with no stages take this
 fallback.

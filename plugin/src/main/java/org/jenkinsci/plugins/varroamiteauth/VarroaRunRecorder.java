@@ -54,6 +54,7 @@ import jenkins.scm.api.mixin.ChangeRequestSCMRevision;
 import org.jenkinsci.plugins.workflow.actions.ErrorAction;
 import org.jenkinsci.plugins.workflow.actions.LabelAction;
 import org.jenkinsci.plugins.workflow.actions.NotExecutedNodeAction;
+import org.jenkinsci.plugins.workflow.actions.TagsAction;
 import org.jenkinsci.plugins.workflow.actions.ThreadNameAction;
 import org.jenkinsci.plugins.workflow.actions.TimingAction;
 import org.jenkinsci.plugins.workflow.actions.WarningAction;
@@ -2410,7 +2411,7 @@ public final class VarroaRunRecorder {
         long endedAt = TimingAction.getStartTime(end);
         List<FlowNode> blockNodes = nodesInBlock(start, end);
         String status = deriveActionStatus(start, end, blockNodes);
-        String error = errorMessage(start, end);
+        String error = stageError(status, start, end);
         BuildStage stage = baseStageBuilder(start)
                 .status(status)
                 .startedAtMillis(startedAt)
@@ -2528,14 +2529,31 @@ public final class VarroaRunRecorder {
     }
 
     /**
-     * Derives a stage status from node actions (D2), checked in order: an
-     * interrupted-typed error, any other error, a warning-typed
-     * unstable result anywhere in the block, a not-executed start node,
-     * else success. This runs at a block end, when the run may still be
-     * in progress and a chunk-status call could report an in-progress
-     * value for a stage that already ended.
+     * The tag that declarative writes on the labelled start node of a stage.
+     * The tag name and the skip values equal the constants of {@code
+     * org.jenkinsci.plugins.pipeline.StageStatus}, which is not a compile
+     * dependency of this plugin.
+     */
+    static final String STAGE_STATUS_TAG = "STAGE_STATUS";
+
+    /** The {@link #STAGE_STATUS_TAG} values of a stage that declarative skipped. */
+    static final Set<String> SKIPPED_STAGE_VALUES = Set.of(
+            "SKIPPED_FOR_FAILURE", "SKIPPED_FOR_UNSTABLE", "SKIPPED_FOR_CONDITIONAL", "SKIPPED_FOR_RESTART");
+
+    /**
+     * Derives a stage status from node actions (D2), checked in order: a
+     * stage that did not run, an interrupted-typed error, any other error,
+     * a warning-typed unstable result anywhere in the block, else success.
+     * The not-run test comes first, because declarative throws the earlier
+     * error again inside each stage that it skips for a failure. This runs
+     * at a block end, when the run may still be in progress and a
+     * chunk-status call could report an in-progress value for a stage that
+     * already ended.
      */
     static String deriveActionStatus(FlowNode start, FlowNode end, List<FlowNode> blockNodes) {
+        if (didNotRun(start, end)) {
+            return BuildStage.STATUS_NOT_EXECUTED;
+        }
         if (isInterrupted(start) || isInterrupted(end)) {
             return "ABORTED";
         }
@@ -2548,10 +2566,38 @@ public final class VarroaRunRecorder {
                 return "UNSTABLE";
             }
         }
-        if (start.getAction(NotExecutedNodeAction.class) != null) {
-            return "NOT_BUILT";
-        }
         return "SUCCESS";
+    }
+
+    /**
+     * Reports whether a stage block did not run. Declarative tags the
+     * labelled start node of each stage that it skips, before the block
+     * ends. A restart from a stage also marks the start and end nodes of
+     * each earlier stage with {@link NotExecutedNodeAction}, after the
+     * block ends, so only the completion rebuild sees that action.
+     */
+    static boolean didNotRun(FlowNode start, FlowNode end) {
+        TagsAction tags = (TagsAction) start.getAction(TagsAction.class);
+        if (tags != null) {
+            String value = tags.getTagValue(STAGE_STATUS_TAG);
+            if (value != null && SKIPPED_STAGE_VALUES.contains(value)) {
+                return true;
+            }
+        }
+        return start.getAction(NotExecutedNodeAction.class) != null
+                || end.getAction(NotExecutedNodeAction.class) != null;
+    }
+
+    /**
+     * Answers the error text of a stage. A stage that did not run carries
+     * none: an error on its block is the earlier failure that declarative
+     * throws again.
+     */
+    private static String stageError(String status, FlowNode start, FlowNode end) {
+        if (BuildStage.STATUS_NOT_EXECUTED.equals(status)) {
+            return "";
+        }
+        return errorMessage(start, end);
     }
 
     private static boolean hasError(FlowNode node) {
@@ -2581,7 +2627,8 @@ public final class VarroaRunRecorder {
      * FlowExecution}, so a run that lost a live {@code STAGE} event still
      * produces a complete DAG. Refines each stage's status with {@code
      * computeChunkStatus2} using the real surrounding nodes, keeping the
-     * action-derived status when the refined value is still in progress.
+     * action-derived status when the refined value is still in progress,
+     * and for a stage that did not run.
      * A run that is not a {@code WorkflowRun}, or whose execution is
      * unavailable, carries an empty {@code stages} list.
      */
@@ -2621,8 +2668,13 @@ public final class VarroaRunRecorder {
             String actionStatus = deriveActionStatus(start, end, blockNodes);
             FlowNode before = start.getParents().isEmpty() ? null : start.getParents().get(0);
             FlowNode after = firstChildOf.get(end.getId());
-            String status = refineStatus(wfRun, before, start, end, after, actionStatus);
-            String error = errorMessage(start, end);
+            // The chunk status reads the error that declarative throws again
+            // inside a stage that it skips for a failure, so a stage that did
+            // not run keeps its action-derived status.
+            String status = BuildStage.STATUS_NOT_EXECUTED.equals(actionStatus)
+                    ? actionStatus
+                    : refineStatus(wfRun, before, start, end, after, actionStatus);
+            String error = stageError(status, start, end);
             long startedAt = TimingAction.getStartTime(start);
             long endedAt = TimingAction.getStartTime(end);
             BuildStage stage = baseStageBuilder(start)
@@ -2663,11 +2715,10 @@ public final class VarroaRunRecorder {
             case ABORTED:
                 return "ABORTED";
             case NOT_EXECUTED:
-                return "NOT_BUILT";
+                return BuildStage.STATUS_NOT_EXECUTED;
             default:
                 // IN_PROGRESS, PAUSED_PENDING_INPUT, QUEUED: keep the
-                // action-derived status (D2) — a stage that ended during
-                // a running build never reports NOT_BUILT this way.
+                // action-derived status (D2), because the stage already ended.
                 return fallback;
         }
     }

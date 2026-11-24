@@ -18,6 +18,9 @@ public final class BuildStage {
     /** Status a live stage carries until it ends. */
     public static final String STATUS_IN_PROGRESS = "IN_PROGRESS";
 
+    /** Status of a stage that did not run. Such a stage carries no error. */
+    public static final String STATUS_NOT_EXECUTED = "NOT_EXECUTED";
+
     private final String stageId;
     private final String parentId;
     private final List<String> parentIds;

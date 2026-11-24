@@ -9,6 +9,7 @@ import java.util.List;
 import org.jenkinsci.plugins.workflow.actions.ErrorAction;
 import org.jenkinsci.plugins.workflow.actions.LabelAction;
 import org.jenkinsci.plugins.workflow.actions.NotExecutedNodeAction;
+import org.jenkinsci.plugins.workflow.actions.TagsAction;
 import org.jenkinsci.plugins.workflow.actions.ThreadNameAction;
 import org.jenkinsci.plugins.workflow.actions.WarningAction;
 import org.jenkinsci.plugins.workflow.graph.BlockStartNode;
@@ -146,12 +147,51 @@ public class VarroaRunRecorderStatusTest {
     }
 
     @Test
-    public void aNotExecutedStartNodeReportsNotBuilt() {
+    public void aNotExecutedStartNodeReportsNotExecuted() {
         FlowNode start = mock(FlowNode.class);
         FlowNode end = mock(FlowNode.class);
         when(start.getAction(NotExecutedNodeAction.class)).thenReturn(new NotExecutedNodeAction());
 
-        assertEquals("NOT_BUILT", VarroaRunRecorder.deriveActionStatus(start, end, List.of(start, end)));
+        assertEquals("NOT_EXECUTED", VarroaRunRecorder.deriveActionStatus(start, end, List.of(start, end)));
+    }
+
+    @Test
+    public void aNotExecutedEndNodeReportsNotExecuted() {
+        FlowNode start = mock(FlowNode.class);
+        FlowNode end = mock(FlowNode.class);
+        when(end.getAction(NotExecutedNodeAction.class)).thenReturn(new NotExecutedNodeAction());
+
+        assertEquals("NOT_EXECUTED", VarroaRunRecorder.deriveActionStatus(start, end, List.of(start, end)));
+    }
+
+    @Test
+    public void everyDeclarativeSkipTagReportsNotExecutedOverTheRethrownError() {
+        for (String value : List.of("SKIPPED_FOR_FAILURE", "SKIPPED_FOR_UNSTABLE", "SKIPPED_FOR_CONDITIONAL",
+                "SKIPPED_FOR_RESTART")) {
+            FlowNode start = mock(FlowNode.class);
+            FlowNode end = mock(FlowNode.class);
+            when(start.getAction(TagsAction.class)).thenReturn(stageStatusTag(value));
+            when(end.getAction(ErrorAction.class)).thenReturn(new ErrorAction(new RuntimeException("earlier")));
+
+            assertEquals(value, "NOT_EXECUTED",
+                    VarroaRunRecorder.deriveActionStatus(start, end, List.of(start, end)));
+        }
+    }
+
+    @Test
+    public void aFailedAndContinuedTagKeepsTheFailure() {
+        FlowNode start = mock(FlowNode.class);
+        FlowNode end = mock(FlowNode.class);
+        when(start.getAction(TagsAction.class)).thenReturn(stageStatusTag("FAILED_AND_CONTINUED"));
+        when(end.getAction(ErrorAction.class)).thenReturn(new ErrorAction(new RuntimeException("boom")));
+
+        assertEquals("FAILURE", VarroaRunRecorder.deriveActionStatus(start, end, List.of(start, end)));
+    }
+
+    private static TagsAction stageStatusTag(String value) {
+        TagsAction tags = new TagsAction();
+        tags.addTag("STAGE_STATUS", value);
+        return tags;
     }
 
     @Test
@@ -213,7 +253,7 @@ public class VarroaRunRecorderStatusTest {
         assertEquals("UNSTABLE", VarroaRunRecorder.mapGenericStatus(GenericStatus.UNSTABLE, "SUCCESS"));
         assertEquals("FAILURE", VarroaRunRecorder.mapGenericStatus(GenericStatus.FAILURE, "SUCCESS"));
         assertEquals("ABORTED", VarroaRunRecorder.mapGenericStatus(GenericStatus.ABORTED, "SUCCESS"));
-        assertEquals("NOT_BUILT", VarroaRunRecorder.mapGenericStatus(GenericStatus.NOT_EXECUTED, "SUCCESS"));
+        assertEquals("NOT_EXECUTED", VarroaRunRecorder.mapGenericStatus(GenericStatus.NOT_EXECUTED, "SUCCESS"));
     }
 
     @Test
