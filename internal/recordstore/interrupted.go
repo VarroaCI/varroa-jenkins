@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -391,15 +392,30 @@ func markInterruptedAndPublish(ctx context.Context, pool *pgxpool.Pool, activity
 // interrupted_reason, which names a stage that the recorder ended. A later
 // terminal run.stage fact of the owner replaces the whole row and that key
 // (applyRunStage).
+//
+// A cell-rolled mark also writes the payload key interrupted_detail when
+// readCellRollCause finds the roll. Every mark removes a stored detail
+// first, so the key always belongs to the stored reason. A failed or slow
+// read stores no detail and never stops the mark.
 func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate, reason string, now time.Time,
 	dashboardURL string, out *activityOutbox) (bool, error) {
+	detail := ""
+	if reason == ReasonCellRolled {
+		var err error
+		if detail, err = readCellRollCause(ctx, tx, run, now, cellRollCauseReadTimeout, slog.Default()); err != nil {
+			return false, err
+		}
+	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE varroa.runs
 		SET status = 'COMPLETED',
 		    result = 'INTERRUPTED',
 		    ended_at = $2,
 		    inputs = CASE WHEN $3::text = '`+ReasonHeartbeatLost+`' THEN inputs ELSE NULL END,
-		    payload = (COALESCE(payload, '{}'::jsonb) || jsonb_build_object('interrupted_reason', $3::text))
+		    payload = ((COALESCE(payload, '{}'::jsonb) - 'interrupted_detail')
+		               || jsonb_build_object('interrupted_reason', $3::text)
+		               || CASE WHEN $6::text = '' THEN '{}'::jsonb
+		                       ELSE jsonb_build_object('interrupted_detail', $6::text) END)
 		        || jsonb_build_object('log_summary',
 		             CASE
 		                 WHEN payload -> 'log_summary' IS NOT NULL
@@ -420,7 +436,7 @@ func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate
 		  AND ($3::text <> '`+ReasonHeartbeatLost+`'
 		       OR heartbeat_received_at IS NULL
 		       OR heartbeat_received_at <= $5)
-	`, run.runID, now, reason, run.status, now.Add(-liveOwnerSilentWindow))
+	`, run.runID, now, reason, run.status, now.Add(-liveOwnerSilentWindow), detail)
 	if err != nil {
 		return false, fmt.Errorf("mark run interrupted: %w", err)
 	}
@@ -474,6 +490,83 @@ func interruptedActivityMessage(run runInterruptCandidate, reason string) string
 		return fmt.Sprintf("%s #%d was interrupted (%s)", run.jobPath, *run.buildNumber, reason)
 	}
 	return fmt.Sprintf("%s was interrupted (%s)", run.jobPath, reason)
+}
+
+// cellRolledActivityType is the activity type that the operator writes when
+// its cell readiness rule deletes a cell pod.
+const cellRolledActivityType = "cell.rolled"
+
+// cellRollCauseShape admits one condition reason word, such as
+// MiteUnreachable. A tenant reader reads the stored detail, so the mark
+// never copies the free-text message of the row. That message can hold a
+// raw presence read error, and the operator can change its text.
+var cellRollCauseShape = regexp.MustCompile(`^[A-Z][A-Za-z0-9]{0,63}$`)
+
+// cellRollCauseReadTimeout bounds the cell.rolled read of a cell-rolled
+// mark. The detail is not needed to end the run, so a slow activity table
+// must not hold the mark or the locks that its transaction already holds.
+const cellRollCauseReadTimeout = 2 * time.Second
+
+// readCellRollCause answers the reason word of the oldest cell.rolled
+// activity row of the run's cell, from after the run's liveness baseline to
+// the mark time. The first roll after the run's last sign of life removed
+// the pod of the run. A later roll in the window removed a replacement pod.
+// It answers "" when no row matches or the reason word has another shape.
+//
+// The row comes from the operator through the activity stream, so it can
+// arrive after the mark. A later row fills nothing: the detail is a record
+// of what the recorder knew when it ended the run.
+//
+// The read runs in a savepoint with a local statement timeout. A failed
+// statement aborts the whole Postgres transaction, so the read always rolls
+// back to the savepoint, and that rollback also removes the local timeout.
+// A read that fails or passes the timeout logs one Warn line and answers
+// "", so the mark goes on. The bound is on the server, not on ctx: pgx
+// closes the connection when a context deadline passes, and that ends the
+// mark's transaction. The function answers an error only when the
+// savepoint itself fails, because the transaction is then unusable.
+func readCellRollCause(ctx context.Context, tx pgx.Tx, run runInterruptCandidate, now time.Time,
+	timeout time.Duration, logger *slog.Logger) (string, error) {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("open the cell roll cause savepoint: %w", err)
+	}
+	cause, readErr := queryCellRollCause(ctx, sp, run, now, timeout)
+	if err := sp.Rollback(ctx); err != nil {
+		return "", fmt.Errorf("roll back the cell roll cause savepoint: %w", err)
+	}
+	if readErr != nil {
+		logger.Warn("read cell roll cause failed; the mark stores no detail", "run_id", run.runID, "error", readErr)
+		return "", nil
+	}
+	if !cellRollCauseShape.MatchString(cause) {
+		return "", nil
+	}
+	return cause, nil
+}
+
+// queryCellRollCause sets the local statement timeout and reads the reason
+// word in the caller's savepoint. No row answers "" and no error.
+func queryCellRollCause(ctx context.Context, sp pgx.Tx, run runInterruptCandidate, now time.Time,
+	timeout time.Duration) (string, error) {
+	if _, err := sp.Exec(ctx, fmt.Sprintf("SET LOCAL statement_timeout = %d", timeout.Milliseconds())); err != nil {
+		return "", fmt.Errorf("set the cell roll cause read timeout: %w", err)
+	}
+	var cause string
+	err := sp.QueryRow(ctx, `
+		SELECT reason FROM varroa.activity
+		WHERE type = $1 AND cluster = $2 AND namespace = $3 AND controller = $4
+		  AND ts > $5 AND ts <= $6
+		ORDER BY ts ASC
+		LIMIT 1
+	`, cellRolledActivityType, run.cluster, run.namespace, run.cell, livenessBaseline(run), now).Scan(&cause)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read cell roll cause: %w", err)
+	}
+	return cause, nil
 }
 
 // policyInterruptedRetry decodes the one field of a tenant_placements

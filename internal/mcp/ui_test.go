@@ -484,6 +484,18 @@ func TestGetRunViewRendersQualityLine(t *testing.T) {
 	}
 }
 
+// TestGetRunViewShowsTheInterruptedDetail asserts that the run card names
+// the roll cause of a cell-rolled run beside its reason.
+func TestGetRunViewShowsTheInterruptedDetail(t *testing.T) {
+	src, err := uiFS.ReadFile("ui/get_run.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `sc.interruptedReason + (present(sc.interruptedDetail) ? " · " + sc.interruptedDetail : "")`) {
+		t.Fatal("get_run view does not show interruptedDetail beside interruptedReason")
+	}
+}
+
 // TestGetRunViewShowsDuplicateStatus asserts that the run card shows the
 // DUPLICATE status in place of a stored result.
 func TestGetRunViewShowsDuplicateStatus(t *testing.T) {

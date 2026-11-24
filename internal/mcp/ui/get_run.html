@@ -184,7 +184,11 @@ function renderCard(root, sc, meta) {
   /* A DUPLICATE run shows its status in place of any stored result. */
   var state = sc.status === "DUPLICATE" ? sc.status : (sc.result || sc.status);
   if (present(state)) line.appendChild(pill(state));
-  if (present(sc.interruptedReason)) line.appendChild(pill(sc.interruptedReason, "bad"));
+  /* A cell-rolled run can name the condition reason of the roll. */
+  if (present(sc.interruptedReason)) {
+    var reason = sc.interruptedReason + (present(sc.interruptedDetail) ? " · " + sc.interruptedDetail : "");
+    line.appendChild(pill(reason, "bad"));
+  }
   root.appendChild(line);
   var up = sc.upstream;
   var upText = up ? (up.jobPath ? up.jobPath + (up.buildNumber ? " #" + up.buildNumber : "") : up.tenant) : "";

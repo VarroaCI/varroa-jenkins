@@ -2225,6 +2225,8 @@ export interface RunDetail {
   logComplete?: boolean;
   /** Set only when result is INTERRUPTED. */
   interruptedReason?: string;
+  /** The condition reason of the cell roll that ended a cell-rolled run, such as MiteUnreachable. Set only when result is INTERRUPTED and the record store held the roll at the mark. */
+  interruptedDetail?: string;
   /** The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED. */
   triggerError?: string;
   /** Why no build exists for the trigger: a controller refusal, CLAIM_EXPIRED, CLAIM_ABANDONED, or a refused build claim (FENCED, CROSS_TENANT, INVALID_KEY, THROTTLED, NOT_HOME). Set only when result is TRIGGER_FAILED. */

@@ -114,6 +114,7 @@ type runDetailJSON struct {
 	LogFinalized      bool               `json:"logFinalized,omitempty"`
 	LogComplete       bool               `json:"logComplete,omitempty"`
 	InterruptedReason string             `json:"interruptedReason,omitempty"`
+	InterruptedDetail string             `json:"interruptedDetail,omitempty"`
 	TriggerError      string             `json:"triggerError,omitempty"`
 	TriggerReasonCode string             `json:"triggerReasonCode,omitempty"`
 	RetryRunID        string             `json:"retryRunId,omitempty"`
@@ -380,11 +381,13 @@ type runTriggerFailedPayload struct {
 	TriggerReasonCode string `json:"trigger_reason_code"`
 }
 
-// runInterruptedPayload reads the reason field the interruption sweep
-// writes into Run.Payload (internal/recordstore's markInterrupted) when
-// it marks a run INTERRUPTED.
+// runInterruptedPayload reads the reason and the detail that the
+// interruption sweep writes into Run.Payload (internal/recordstore's
+// markInterrupted) when it marks a run INTERRUPTED. Only a cell-rolled mark
+// writes the detail: the condition reason of the cell roll.
 type runInterruptedPayload struct {
 	InterruptedReason string `json:"interrupted_reason"`
+	InterruptedDetail string `json:"interrupted_detail"`
 }
 
 // runCommandRefusalPayload reads the refusal notice the recorder writes
@@ -552,6 +555,7 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 		var interrupted runInterruptedPayload
 		if d.Result == "INTERRUPTED" && json.Unmarshal(run.Payload, &interrupted) == nil {
 			d.InterruptedReason = interrupted.InterruptedReason
+			d.InterruptedDetail = interrupted.InterruptedDetail
 		}
 		var refusal runCommandRefusalPayload
 		if json.Unmarshal(run.Payload, &refusal) == nil && refusal.CommandRefusal != nil && refusal.CommandRefusal.Command != "" {
