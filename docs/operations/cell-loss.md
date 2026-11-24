@@ -117,12 +117,14 @@ sends no new claim.
 
 The recorder gives the run to the new pod when the placement announcement names that pod as the
 controller's current pod. The first heartbeat, stage, or completion from the new pod moves the run.
-The gateway accepts the new pod's log and completion facts at once. An event from the replaced pod
-changes nothing after the move.
+The move also gives the run's fleet locks to the new pod. The gateway accepts the new pod's log and
+completion facts at once. An event from the replaced pod changes nothing after the move.
 
 A pod read of the replaced pod does not end such a build. Only `no-heartbeat`, after fifteen
-minutes with no live pod, and `heartbeat-lost` end it. A queued build keeps every reason. A cell
-build never moves this way, because a cell keeps its Jenkins home on ephemeral storage.
+minutes with no live pod, and `heartbeat-lost` end it. The same read does not finalize its log. A
+build that marked its start and sent no start event ends `start-lost` after 75 minutes, with no
+automatic retry. A queued build keeps every reason. A cell build never moves this way, because a
+cell keeps its Jenkins home on ephemeral storage.
 
 ## The re-fire
 

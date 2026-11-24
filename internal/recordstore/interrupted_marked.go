@@ -76,6 +76,11 @@ type markedLostIntent struct {
 // place in the batch on every round, and enough of them would hold an
 // older confirmed loss out of the batch for good. The caller still
 // applies confirmedGoneInstance, the one reading of the grace.
+//
+// The query skips an intent that the claim granted under placement
+// generation 0. A controller with no cell role holds such a run, not its
+// pod. Its next pod loads the build from the volume, so a pod read of the
+// replaced pod proves no loss. The start-lost class still ends the run.
 func selectMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, confirmedBy time.Time) ([]markedLostIntent, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT ri.run_id, ri.created_at, ri.intent_key, ri.cluster, ri.namespace, COALESCE(ri.cell, ''),
@@ -86,6 +91,7 @@ func selectMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, confirmedB
 		FROM varroa.run_intents ri
 		LEFT JOIN varroa.runs r ON r.run_id = ri.run_id
 		WHERE `+markedLostIntentGuardSQL+`
+		  AND ri.placement_generation <> 0
 		  AND EXISTS (
 		    SELECT 1 FROM varroa.tenant_placements tp,
 		         jsonb_array_elements(CASE WHEN jsonb_typeof(tp.dead_instances) = 'array'
@@ -268,8 +274,10 @@ func endMarkedLostIntentAndPublish(ctx context.Context, pool *pgxpool.Pool, acti
 //
 // Two classes share one batch of markedLostBatch attempts. The first
 // class ends a run whose owner is confirmed gone, with the reason
-// cell-rolled. The second class ends a run whose start mark is older than
-// ClaimExpiryAge, with the reason start-lost, whatever the owner's state.
+// cell-rolled. It skips a run of a controller with no cell role
+// (selectMarkedLostIntents). The second class ends a run whose start mark
+// is older than ClaimExpiryAge, with the reason start-lost, whatever the
+// owner's state.
 // A Jenkins process can restart inside a live pod, and that pod keeps its
 // cell instance, so no liveness reading ever proves the loss.
 //

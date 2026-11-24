@@ -126,10 +126,11 @@ func livenessBaseline(c runInterruptCandidate) time.Time {
 // then the moved test, then the silent test, to one QUEUED or RUNNING
 // run. It answers the reason the first test that holds names. None of
 // these tests fires without a cell-liveness reading naming the run's own
-// owning cell instance. A RUNNING run that a controller with no cell role
-// owns reads controllerLiveness instead, so only the silent test applies.
-// A QUEUED run keeps every test: its build did not start, and the claim
-// path moves it when the next pod claims it again.
+// owning cell instance. runLivenessReading gives that reading. A RUNNING
+// run that a controller with no cell role owns reads controllerLiveness,
+// so only the silent test applies. A QUEUED run keeps every test: its
+// build did not start, and the claim path moves it when the next pod
+// claims it again.
 //
 // The heartbeat-lost test applies last, to a RUNNING run alone, and
 // needs no liveness reading: no placement row, a live member, and an
@@ -142,11 +143,7 @@ func evaluateInterruption(now time.Time, c runInterruptCandidate, row tenantPlac
 		return reason, ok
 	}
 	anchor := livenessBaseline(c)
-	reading := cellLivenessGone(now, anchor, c.cellInstance, row, exists, grace)
-	if c.generationZero && c.status == StatusRunning {
-		reading = controllerLiveness(now, anchor, row, exists)
-	}
-	switch reading {
+	switch runLivenessReading(now, anchor, c.cellInstance, c.status, c.generationZero, row, exists, grace) {
 	case livenessConfirmedGone:
 		return ReasonCellLost, true
 	case livenessMoved:

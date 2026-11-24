@@ -22,6 +22,11 @@ const heartbeatGoneAfter = 15 * time.Minute
 // pod's occurred_at. Each implementation compares it with the
 // recorder's now, so a pod clock would add the skew between two
 // machines to the answer.
+//
+// Status is the run's stored status. GenerationZero is true when the claim
+// granted the run's intent under placement generation 0, so a controller
+// with no cell role owns the run. The placement-aware implementation reads
+// both, and the heartbeat-only implementation ignores them.
 type RunLiveness struct {
 	RunID               string
 	Cluster             string
@@ -29,6 +34,8 @@ type RunLiveness struct {
 	Cell                string
 	Tenant              string
 	CellInstance        string
+	Status              string
+	GenerationZero      bool
 	HeartbeatReceivedAt *time.Time
 	StartedAt           *time.Time
 }
@@ -72,7 +79,7 @@ func (h HeartbeatLiveness) CellGone(_ context.Context, run RunLiveness) (bool, e
 
 // PlacementLiveness is the placement-aware Liveness the interrupted-runs
 // capability supplies. It reads varroa.tenant_placements and applies
-// cellLivenessGone, the same reading the interrupted-run sweep uses, so
+// runLivenessReading, the same reading the interrupted-run sweep uses, so
 // the log-finalization sweep and the interrupted-run sweep never
 // disagree about whether a cell is gone.
 type PlacementLiveness struct {
@@ -93,7 +100,9 @@ func NewPlacementLiveness(pool *pgxpool.Pool, grace time.Duration) *PlacementLiv
 // CellGone implements Liveness. It answers gone only when a
 // tenant_placements row exists for run's cluster and tenant, and a
 // cell-liveness reading confirms run's owning cell instance is absent
-// for that reading's own window.
+// for that reading's own window. A RUNNING run that a controller with no
+// cell role owns is gone only when that controller is silent, because
+// its next pod resumes the build and the log from the volume.
 func (p *PlacementLiveness) CellGone(ctx context.Context, run RunLiveness) (bool, error) {
 	now := time.Now
 	if p.Now != nil {
@@ -117,5 +126,6 @@ func (p *PlacementLiveness) CellGone(ctx context.Context, run RunLiveness) (bool
 	}
 	// Any reading but livenessAlive answers gone, so this seam keeps the
 	// behavior it had before the reading carried its own name.
-	return cellLivenessGone(t, *anchor, run.CellInstance, row, exists, p.grace) != livenessAlive, nil
+	return runLivenessReading(t, *anchor, run.CellInstance, run.Status, run.GenerationZero, row, exists,
+		p.grace) != livenessAlive, nil
 }

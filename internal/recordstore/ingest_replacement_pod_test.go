@@ -213,16 +213,20 @@ func TestNoTakeOverWithoutTheReplacementPodRule(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name       string
-		generation int64
-		placement  string
-		cell       string
-		sender     string
+		name                string
+		generation          int64
+		placementGeneration int64
+		placement           string
+		cell                string
+		sender              string
 	}{
 		{name: "the placement names another pod", placement: "pod-other", cell: "cell-a", sender: replacementPod},
 		{name: "no placement row", cell: "cell-a", sender: replacementPod},
 		{name: "another controller", placement: replacementPod, cell: "cell-b", sender: replacementPod},
-		{name: "a cell run", generation: cellRunGeneration, placement: replacementPod, cell: "cell-a", sender: replacementPod},
+		{name: "a placement row at another generation", placementGeneration: cellRunGeneration,
+			placement: replacementPod, cell: "cell-a", sender: replacementPod},
+		{name: "a cell run", generation: cellRunGeneration, placementGeneration: cellRunGeneration,
+			placement: replacementPod, cell: "cell-a", sender: replacementPod},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -231,7 +235,7 @@ func TestNoTakeOverWithoutTheReplacementPodRule(t *testing.T) {
 			pool, db := setupLedgerPool(t)
 			runID, intentKey := seedOwnedRun(t, pool, replacedPod, tc.generation)
 			if tc.placement != "" {
-				seedControllerPlacement(t, db, tc.generation, tc.placement)
+				seedControllerPlacement(t, db, tc.placementGeneration, tc.placement)
 			}
 			g := NewIngester(pool, nil, nil)
 
@@ -260,6 +264,76 @@ func TestNoTakeOverWithoutTheReplacementPodRule(t *testing.T) {
 				t.Fatalf("run = %+v, want RUNNING with no heartbeat stamp and no owner completion", s)
 			}
 		})
+	}
+}
+
+// TestNoTakeOverFromAnotherClusterOrNamespace proves the cluster and the
+// namespace conditions of replacementPodSQL. The placement row names the
+// sender, but the sender names another cluster or another namespace than
+// the intent. Its heartbeat and its completion move nothing.
+func TestNoTakeOverFromAnotherClusterOrNamespace(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, cluster, namespace string
+	}{
+		{name: "another cluster", cluster: "member-b", namespace: testNamespace},
+		{name: "another namespace", cluster: testCluster, namespace: "other-ns"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			pool, db := setupLedgerPool(t)
+			runID, intentKey := seedReplacedControllerRun(t, pool, db, 0)
+			g := NewIngester(pool, nil, nil)
+			apply := func(kind string, payload any) ApplyResult {
+				t.Helper()
+				env := newTestEnvelope(t, runID, intentKey, kind, payload)
+				env.Cluster, env.Namespace, env.CellInstance = tc.cluster, tc.namespace, replacementPod
+				res, err := g.Apply(context.Background(), env)
+				if err != nil {
+					t.Fatalf("apply %s: %v", kind, err)
+				}
+				return res
+			}
+
+			beat := apply(KindRunHeartbeat, map[string]any{"seq": 1})
+			done := apply(KindRunCompleted, RunCompletedPayload{Result: strPtr("SUCCESS")})
+
+			if beat.AdoptedOwner || done.AdoptedOwner || done.CompletedOwner {
+				t.Fatalf("heartbeat %+v, completion %+v, want no move and no owner completion", beat, done)
+			}
+			if owner := intentOwnerOf(t, db, runID); owner != replacedPod {
+				t.Fatalf("intent owner = %q, want %q", owner, replacedPod)
+			}
+			if s := readReplacementRunState(t, db, runID); s.heartbeat || s.status != StatusRunning {
+				t.Fatalf("run = %+v, want RUNNING with no heartbeat stamp", s)
+			}
+		})
+	}
+}
+
+// TestNoTakeOverOfARunWithNoOwner proves the owner condition of
+// replacementPodSQL. An intent that names no owner admits every sender, so
+// the rule moves nothing, and the intent keeps its empty owner.
+func TestNoTakeOverOfARunWithNoOwner(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID, intentKey := seedOwnedRun(t, pool, "", 0)
+	seedControllerPlacement(t, db, 0, replacementPod)
+	g := NewIngester(pool, nil, nil)
+
+	beat := applyFromPod(t, g, runID, intentKey, KindRunHeartbeat, "cell-a", replacementPod, map[string]any{"seq": 1})
+	done := applyFromPod(t, g, runID, intentKey, KindRunCompleted, "cell-a", replacementPod,
+		RunCompletedPayload{Result: strPtr("SUCCESS")})
+
+	if beat.AdoptedOwner || done.AdoptedOwner {
+		t.Fatalf("heartbeat %+v, completion %+v, want no move", beat, done)
+	}
+	if owner := intentOwnerOf(t, db, runID); owner != "" {
+		t.Fatalf("intent owner = %q, want no owner", owner)
 	}
 }
 

@@ -51,10 +51,10 @@ func adoptingKind(kind string) bool {
 // adoptReplacementPod moves the run's owner to env's sender when
 // replacementPodSQL holds. It runs in the write's own transaction, under
 // the intent row lock that loadIntent holds. It reads the placement row
-// with no lock, so it adds no lock order. On a move it also sets the
-// owner in intent, so each later rule of this write compares with the
-// new owner. It reports whether it moved the owner. The caller publishes
-// the owner move signal after the commit.
+// with no lock. On a move it also sets the owner in intent, so each later
+// rule of this write compares with the new owner, and it moves the run's
+// fleet locks (moveReplacementPodLocks). It reports whether it moved the
+// owner. The caller publishes the owner move signal after the commit.
 func adoptReplacementPod(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) (bool, error) {
 	if !adoptingKind(env.Kind) || intent.placementGeneration != 0 ||
 		env.CellInstance == "" || intent.cellInstanceValue() == "" || env.CellInstance == intent.cellInstanceValue() {
@@ -73,5 +73,32 @@ func adoptReplacementPod(ctx context.Context, tx pgx.Tx, intent *intentRow, env 
 	}
 	sender := env.CellInstance
 	intent.cellInstance = &sender
+	if env.Kind != KindRunCompleted {
+		if err := moveReplacementPodLocks(ctx, tx, intent.runID.String(), sender); err != nil {
+			return false, err
+		}
+	}
 	return true, nil
+}
+
+// moveReplacementPodLocks sets the cell_instance of each fleet_locks row
+// of the run to sender, the replacement pod. The release confirmation and
+// the force release read that column. A row that still named the replaced
+// pod would read a confirmed-gone holder while the build holds the lock on
+// the next pod.
+//
+// The caller skips a run.completed. Its owner write deletes every lock row
+// of the run in the same transaction. The skip also keeps the lock order
+// of lockFleetLockRun: the terminal delete takes the run's advisory lock,
+// and an acquire takes that lock before it locks a lock row. Every other
+// adopting kind takes no advisory lock, so it locks the intent row and
+// then the lock rows, the order of the mesh owner move.
+func moveReplacementPodLocks(ctx context.Context, tx pgx.Tx, runID, sender string) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE varroa.fleet_locks SET cell_instance = $2
+		 WHERE run_id = $1 AND cell_instance <> $2
+	`, runID, sender); err != nil {
+		return fmt.Errorf("move the fleet locks to the replacement pod: %w", err)
+	}
+	return nil
 }
