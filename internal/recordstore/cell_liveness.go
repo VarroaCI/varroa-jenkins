@@ -198,9 +198,8 @@ func currentInstanceGone(row tenantPlacementLivenessRow, now time.Time, window t
 // cell_instance names slot 0 alone, and a run owned by slot 1 would
 // otherwise read as moved merely because its instance differs.
 //
-// A missing row answers livenessAlive: no reading is possible. This is
-// the "one piece of code" design D9 requires: both the placement-aware
-// Liveness seam and the interrupted-run sweep call it.
+// A missing row answers livenessAlive: no reading is possible. Production
+// code reaches it through runLivenessReading alone.
 func cellLivenessGone(now, anchor time.Time, cellInstance string, row tenantPlacementLivenessRow,
 	exists bool, grace time.Duration) livenessReading {
 	if !exists {
@@ -224,4 +223,19 @@ func cellLivenessGone(now, anchor time.Time, cellInstance string, row tenantPlac
 		return livenessSilent
 	}
 	return livenessAlive
+}
+
+// runLivenessReading is the one liveness reading of a QUEUED or RUNNING
+// run. A RUNNING run that the claim granted under placement generation 0
+// reads controllerLiveness: a controller with no cell role holds the run,
+// not its pod. Every other run reads cellLivenessGone. This is the "one
+// piece of code" design D9 requires: the interrupted-run sweep and the
+// placement-aware Liveness seam both call it, so the two never disagree
+// about a run.
+func runLivenessReading(now, anchor time.Time, cellInstance, status string, generationZero bool,
+	row tenantPlacementLivenessRow, exists bool, grace time.Duration) livenessReading {
+	if generationZero && status == StatusRunning {
+		return controllerLiveness(now, anchor, row, exists)
+	}
+	return cellLivenessGone(now, anchor, cellInstance, row, exists, grace)
 }

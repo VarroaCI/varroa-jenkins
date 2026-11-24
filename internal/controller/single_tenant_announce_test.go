@@ -78,6 +78,12 @@ func TestAnnounceSingleTenantPlacement_RequestFields(t *testing.T) {
 	if got.CellLastSeenAt == nil || !got.CellLastSeenAt.Equal(lastSeen.Time) {
 		t.Errorf("CellLastSeenAt = %v, want %v", got.CellLastSeenAt, lastSeen.Time)
 	}
+	// The recorder deletes the idle agent pods of a gone pod only in an
+	// announced agent namespace. The next pod of this controller can still
+	// use those agents, so the announcement names none.
+	if got.AgentNamespace != "" {
+		t.Errorf("AgentNamespace = %q, want empty", got.AgentNamespace)
+	}
 }
 
 // TestAnnounceSingleTenantPlacement_SkipsCellController asserts that a

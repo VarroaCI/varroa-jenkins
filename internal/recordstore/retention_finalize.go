@@ -49,6 +49,9 @@ type finalizeCandidate struct {
 	// indexReadFailedUnixMs is the run's first failed index read, from
 	// indexReadFailedKey. It is nil when the run holds none.
 	indexReadFailedUnixMs *int64
+	// generationZero is true when the claim granted the run's intent under
+	// placement generation 0. A run with no intent answers false.
+	generationZero bool
 }
 
 // Bounds of the stored log index reads of one log-finalization round.
@@ -309,7 +312,8 @@ func selectFinalizeCandidates(ctx context.Context, db maintDB, cutoff time.Time,
 		       `+heartbeatMsText+`,
 		       `+safeHeartbeatMsExpr+`,
 		       ri.cell_instance,
-		       `+indexReadFailedMsExpr+`
+		       `+indexReadFailedMsExpr+`,
+		       COALESCE(ri.placement_generation = 0, false)
 		FROM varroa.runs r
 		LEFT JOIN varroa.run_intents ri ON ri.run_id = r.run_id
 		WHERE (r.payload->'log_summary'->>'finalized') IS DISTINCT FROM 'true'
@@ -334,7 +338,8 @@ func selectFinalizeCandidates(ctx context.Context, db maintDB, cutoff time.Time,
 		var c finalizeCandidate
 		if err := rows.Scan(&c.runID, &c.createdAt, &c.status, &c.cluster, &c.namespace, &c.cell, &c.tenant,
 			&c.heartbeatReceivedAt, &c.startedAt, &c.queuedAt, &c.endedAt,
-			&c.writerHeartbeatRaw, &c.writerHeartbeatUnixMs, &c.cellInstance, &c.indexReadFailedUnixMs); err != nil {
+			&c.writerHeartbeatRaw, &c.writerHeartbeatUnixMs, &c.cellInstance, &c.indexReadFailedUnixMs,
+			&c.generationZero); err != nil {
 			return nil, fmt.Errorf("scan log-finalization candidate: %w", err)
 		}
 		candidates = append(candidates, c)
@@ -363,6 +368,8 @@ func isTerminalOrCellGone(ctx context.Context, liveness Liveness, c finalizeCand
 		Cell:                c.cell,
 		Tenant:              c.tenant,
 		CellInstance:        derefString(c.cellInstance),
+		Status:              c.status,
+		GenerationZero:      c.generationZero,
 		HeartbeatReceivedAt: c.heartbeatReceivedAt,
 		StartedAt:           c.startedAt,
 	})
