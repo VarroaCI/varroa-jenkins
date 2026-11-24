@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -219,11 +220,32 @@ func TestMCPSyncCatalogSource_ScopedDeveloper(t *testing.T) {
 type syncRecordingConfigBrood struct {
 	api.ConfigBrood
 	calls []string
+	err   error
 }
 
 func (s *syncRecordingConfigBrood) SyncCatalogSource(_ context.Context, cluster, ns, name string) error {
 	s.calls = append(s.calls, cluster+"/"+ns+"/"+name)
-	return nil
+	return s.err
+}
+
+func TestMCPSyncCatalogSource_NoResponderNamesTheOperator(t *testing.T) {
+	cb := &syncRecordingConfigBrood{err: &api.ErrClusterUnreachable{Cluster: "core", Err: nats.ErrNoResponders}}
+	deps := adminDeps()
+	deps.ConfigBrood = cb
+
+	handler := NewHandler(deps)
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name":      "sync_catalog_source",
+		"arguments": map[string]interface{}{"namespace": "tenant-a", "name": "src1"},
+	}, mcpAdminClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError || len(tr.Content) == 0 {
+		t.Fatalf("want a tool error, got %+v", tr)
+	}
+	want := "failed to sync catalog source: no operator of cluster core received the request: the operator restarts or has no leader; try again later"
+	if got := tr.Content[0].Text; got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
 }
 
 func TestMCPSyncCatalogSource_CallsConfigBrood(t *testing.T) {
