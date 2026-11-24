@@ -3747,6 +3747,11 @@ components:
           items:
             $ref: '#/components/schemas/components_schemas_RunInput'
           type: array
+        interruptedDetail:
+          description: The condition reason of the cell roll that ended a cell-rolled
+            run, such as MiteUnreachable or NotProvisioned. Set only when result is
+            INTERRUPTED and the record store held the roll at the mark.
+          type: string
         interruptedReason:
           description: Set only when result is INTERRUPTED.
           type: string
@@ -11865,6 +11870,11 @@ components:
           items:
             $ref: '#/components/schemas/components_schemas_RunInput'
           type: array
+        interruptedDetail:
+          description: The condition reason of the cell roll that ended a cell-rolled
+            run, such as MiteUnreachable or NotProvisioned. Set only when result is
+            INTERRUPTED and the record store held the roll at the mark.
+          type: string
         interruptedReason:
           description: Set only when result is INTERRUPTED.
           type: string

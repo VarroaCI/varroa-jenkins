@@ -486,7 +486,7 @@ func registerGetPipelinesOverviewTool(mcpServer *server.MCPServer, deps *api.Dep
 
 func registerGetRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	getRunTool := mcp.NewTool("get_run",
-		mcp.WithDescription("Get one run's detail: status, timing, params, the repository URL, the trigger source, test counts, stages, the newest refused cancel or input answer, the upstream run that started it (upstream), and the first page of runs it started (downstream). A refused trigger reads result TRIGGER_FAILED with triggerReasonCode and triggerError. A run you may not read appears as its tenant alone. It carries quality, the coverage and warnings summaries of the run, with a delta against the previous run of the same job and report, when the run recorded one. coverageDropped and warningsDropped count the reports Varroa did not keep."),
+		mcp.WithDescription("Get one run's detail: status, timing, params, the repository URL, the trigger source, test counts, stages, the newest refused cancel or input answer, the upstream run that started it (upstream), and the first page of runs it started (downstream). A refused trigger reads result TRIGGER_FAILED with triggerReasonCode and triggerError. An INTERRUPTED run names interruptedReason. A cell-rolled run can also name interruptedDetail, the condition reason of the cell roll, such as MiteUnreachable. A run you may not read appears as its tenant alone. It carries quality, the coverage and warnings summaries of the run, with a delta against the previous run of the same job and report, when the run recorded one. coverageDropped and warningsDropped count the reports Varroa did not keep."),
 		mcp.WithString("run", mcp.Required(), mcp.Description("Run id (UUIDv7)")),
 		withUIView("get_run"),
 	)

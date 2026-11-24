@@ -103,6 +103,15 @@ const COLD_LOAD_TIMEOUT_MS = 30_000;
 // stages it merged from live "stage" events.
 const EMPTY_STAGES: RunStage[] = [];
 
+// interruptedText is the first sentence of the interrupted banner. A
+// cell-rolled run can carry the condition reason of the roll, which follows
+// the reason in parentheses.
+function interruptedText(run: RunDetail): string {
+  if (!run.interruptedReason) return "Interrupted: reason not available.";
+  const detail = run.interruptedDetail ? ` (${run.interruptedDetail})` : "";
+  return `Interrupted: ${run.interruptedReason}${detail}.`;
+}
+
 // One sentence per reason code the record store carries. The set is
 // complete, and the fallback covers a code a newer recorder adds.
 const TRIGGER_REASON_SENTENCES: Record<string, string> = {
@@ -799,7 +808,7 @@ export default function BuildPage() {
           run holds a start time. */}
       {interrupted && (
         <div className={styles.interruptedBanner} role="alert">
-          <span>Interrupted{run.interruptedReason ? `: ${run.interruptedReason}` : ": reason not available"}.</span>
+          <span>{interruptedText(run)}</span>
           {!run.startedAt && <span> The build never started on the cell.</span>}
           {run.retryRunId && tenant && job && (
             <a

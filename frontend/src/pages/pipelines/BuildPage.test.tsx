@@ -635,6 +635,15 @@ describe("BuildPage — pending and not-found states", () => {
     expect(screen.getByRole("button", { name: /Re-run/ })).toBeDisabled();
   });
 
+  it("names the cause of a cell roll beside the interrupted reason", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({ result: "INTERRUPTED", interruptedReason: "cell-rolled", interruptedDetail: "MiteUnreachable" }),
+    );
+    renderPage();
+    await screen.findByText(/Build #42/);
+    expect(screen.getByText("Interrupted: cell-rolled (MiteUnreachable).")).toBeInTheDocument();
+  });
+
   it("shows the interrupted banner's fallback text when the run carries no reason", async () => {
     mockGetRun.mockResolvedValue(baseRun({ result: "INTERRUPTED" }));
     renderPage();

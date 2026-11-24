@@ -57,7 +57,7 @@ const recordsBuildRunSQL = `NOT (r.result IS NOT DISTINCT FROM '` + ResultTrigge
 // never survives into the real run's log. It also removes the stale-log
 // sweep's failed-read time, because the real run's log has no failed
 // read yet.
-const acceptedSupersedeKeysSQL = `- 'accepted_at' - 'accepted_instance' - 'interrupted_reason' - 'log_summary' - '` + indexReadFailedKey + `'`
+const acceptedSupersedeKeysSQL = `- 'accepted_at' - 'accepted_instance' - 'interrupted_reason' - 'interrupted_detail' - 'log_summary' - '` + indexReadFailedKey + `'`
 
 // supersedeSQL is the predicate a real write carries to supersede a
 // stored row that records no build: a TRIGGER_FAILED row, or a row that

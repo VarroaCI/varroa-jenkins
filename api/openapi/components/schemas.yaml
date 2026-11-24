@@ -5950,6 +5950,12 @@ RunDetail:
     interruptedReason:
       type: string
       description: Set only when result is INTERRUPTED.
+    interruptedDetail:
+      type: string
+      description: >-
+        The condition reason of the cell roll that ended a cell-rolled run,
+        such as MiteUnreachable or NotProvisioned. Set only when result is
+        INTERRUPTED and the record store held the roll at the mark.
     triggerError:
       type: string
       description: The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED.

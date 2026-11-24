@@ -4772,6 +4772,9 @@ type ComponentsSchemasRunDetail struct {
 	// Inputs The input steps the run waits on, read from the run's stored inputs column. This field is absent until a run.input event arrives, and absent for a run that holds no pending input.
 	Inputs *[]ComponentsSchemasRunInput `json:"inputs,omitempty"`
 
+	// InterruptedDetail The condition reason of the cell roll that ended a cell-rolled run, such as MiteUnreachable or NotProvisioned. Set only when result is INTERRUPTED and the record store held the roll at the mark.
+	InterruptedDetail *string `json:"interruptedDetail,omitempty"`
+
 	// InterruptedReason Set only when result is INTERRUPTED.
 	InterruptedReason *string `json:"interruptedReason,omitempty"`
 	JobPath           string  `json:"jobPath"`
