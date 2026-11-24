@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -1320,5 +1321,53 @@ func TestBusBrood_GetDeadlineIsUnreachable(t *testing.T) {
 	}
 	if unreachable.Cluster != "dev-cluster" {
 		t.Errorf("cluster = %q, want dev-cluster", unreachable.Cluster)
+	}
+}
+
+func TestErrClusterUnreachable_NoResponderSaysNoOperatorReceivedTheRequest(t *testing.T) {
+	const noOperator = "no operator of cluster core received the request: the operator restarts or has no leader; try again later"
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"no responder", nats.ErrNoResponders, noOperator},
+		{"wrapped no responder", fmt.Errorf("request: %w", nats.ErrNoResponders), noOperator},
+		{"timeout", nats.ErrTimeout, "cluster core unreachable: nats: timeout"},
+		{"connection closed", nats.ErrConnectionClosed, "cluster core unreachable: nats: connection closed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := &ErrClusterUnreachable{Cluster: "core", Err: tc.err}
+			if got := err.Error(); got != tc.want {
+				t.Errorf("Error() = %q, want %q", got, tc.want)
+			}
+			if !errors.Is(err, tc.err) {
+				t.Errorf("errors.Is(err, %v) = false, want true", tc.err)
+			}
+		})
+	}
+}
+
+func TestConfigBrood_SyncWithNoResponderNamesTheOperator(t *testing.T) {
+	var subjects []string
+	f := &busConfigBrood{
+		localCluster: "core",
+		logger:       slog.Default(),
+		request: func(subject string, _ []byte, _ time.Duration) ([]byte, error) {
+			subjects = append(subjects, subject)
+			return nil, nats.ErrNoResponders
+		},
+	}
+	err := f.SyncCatalogSource(context.Background(), "core", "tenant-a", "src")
+	var unreachable *ErrClusterUnreachable
+	if !errors.As(err, &unreachable) || unreachable.Cluster != "core" {
+		t.Fatalf("err = %v, want ErrClusterUnreachable naming core", err)
+	}
+	if !strings.HasPrefix(err.Error(), "no operator of cluster core received the request") {
+		t.Errorf("err = %q, want the no-operator text", err.Error())
+	}
+	if want := bus.OperatorCatalogSubject("core", "sourcesync"); len(subjects) != 1 || subjects[0] != want {
+		t.Errorf("subjects = %v, want one request on %s", subjects, want)
 	}
 }

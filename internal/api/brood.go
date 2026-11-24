@@ -68,13 +68,21 @@ type BroodError struct {
 func (e *BroodError) Error() string { return e.Msg }
 
 // ErrClusterUnreachable is returned when the target cluster's operator leader
-// does not respond within the timeout.
+// does not respond within the timeout, or when no operator subscribes to the
+// subject. Only the operator leader subscribes, so a restart or a lost lease
+// leaves no responder while the cluster itself stays reachable.
 type ErrClusterUnreachable struct {
 	Cluster string
 	Err     error
 }
 
+// Error names a no-responder error as such. NATS delivers no copy of such a
+// request, so the text tells the caller to try again. Every other error,
+// a timeout included, keeps the unreachable text.
 func (e *ErrClusterUnreachable) Error() string {
+	if bus.IsNoResponder(e.Err) {
+		return fmt.Sprintf("no operator of cluster %s received the request: the operator restarts or has no leader; try again later", e.Cluster)
+	}
 	return fmt.Sprintf("cluster %s unreachable: %v", e.Cluster, e.Err)
 }
 
