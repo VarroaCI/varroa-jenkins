@@ -15,6 +15,12 @@ import (
 // complete ingest envelope, not only its inner payload object, so no
 // captured field is unrecoverable.
 //
+// A stage that an interrupted mark ended (markInterruptedTx) follows the
+// same rule. A terminal fact of the owner replaces it, and an IN_PROGRESS
+// fact never opens it again. A Jenkins process that resumes the build sends
+// no second start for a stage that is open, so a start that arrives after
+// the mark is a redelivery.
+//
 // dispatch calls senderOwnsRun first, so a stage envelope from a cell
 // instance that does not own a cell run never reaches this write. The
 // gateway also drops the stage envelopes of a COMPLETED event that a

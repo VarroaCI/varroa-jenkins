@@ -75,6 +75,10 @@ A `cell-lost` mark sends no cancel command: the pod is gone. A
 fleet lock the lost run held is released on the same schedule. A pod read that proved its owner
 gone ends the five-minute wait.
 
+A mark that ends a running build also sets each stage that is still open to `ABORTED`, at the time
+of the mark. A later stage event from the build replaces that end. A `start-lost` or
+`heartbeat-lost` mark keeps the open stages, because the build can still run them.
+
 A `start-lost` mark sends no cancel and no retry: the build can still start and replace it.
 A `heartbeat-lost` mark sends neither, and the build's own completion replaces it. A Jenkins restart
 in the same pod sends it at boot. The mark also

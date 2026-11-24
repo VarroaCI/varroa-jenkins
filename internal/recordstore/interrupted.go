@@ -186,6 +186,15 @@ func provisionalMark(reason string) bool {
 	return reason == ReasonHeartbeatLost
 }
 
+// endsOpenStages reports whether a mark with reason ends the open stages of
+// run. A heartbeat-lost mark and a start-lost mark keep them, because the
+// owner can still run them, and a later run.started supersedes a start-lost
+// mark. A QUEUED run keeps them too: a later run.started supersedes the mark
+// of an accepted row.
+func endsOpenStages(run runInterruptCandidate, reason string) bool {
+	return run.status == StatusRunning && !provisionalMark(reason) && reason != ReasonStartLost
+}
+
 // resumeDispatched reports whether the mesh moved this run's owner to a
 // live target. Every reader tests the named instance, never the
 // presence of the resume: an armed run holds a resume that names none.
@@ -372,8 +381,16 @@ func markInterruptedAndPublish(ctx context.Context, pool *pgxpool.Pool, activity
 }
 
 // markInterruptedTx is markInterrupted's body inside the caller's
-// transaction: the conditional terminal write and the build.interrupted
-// activity row. The caller commits and then publishes out.
+// transaction: the conditional terminal write, the end of the open stages,
+// and the build.interrupted activity row. The caller commits and then
+// publishes out.
+//
+// A mark that endsOpenStages admits sets each IN_PROGRESS stage of the run
+// to ABORTED, with the mark time as its end. The write sets no duration,
+// so no stage median counts the row. The stage payload takes the key
+// interrupted_reason, which names a stage that the recorder ended. A later
+// terminal run.stage fact of the owner replaces the whole row and that key
+// (applyRunStage).
 func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate, reason string, now time.Time,
 	dashboardURL string, out *activityOutbox) (bool, error) {
 	tag, err := tx.Exec(ctx, `
@@ -409,6 +426,19 @@ func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate
 	}
 	if tag.RowsAffected() == 0 {
 		return false, nil
+	}
+
+	if endsOpenStages(run, reason) {
+		if _, err := tx.Exec(ctx, `
+			UPDATE varroa.run_stages
+			SET status = 'ABORTED',
+			    ended_at = $2,
+			    duration_ms = NULL,
+			    payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('interrupted_reason', $3::text)
+			WHERE run_id = $1 AND status = 'IN_PROGRESS'
+		`, run.runID, now, reason); err != nil {
+			return false, fmt.Errorf("end the open stages of the interrupted run: %w", err)
+		}
 	}
 
 	event := activity.Event{
