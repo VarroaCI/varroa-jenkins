@@ -143,10 +143,17 @@ live. The recorder then cancels the newer run. Its completion still arrives, usu
 result `ABORTED`, and the run page shows that result.
 
 This rule compares only runs that Jenkins schedules on its own, with an `scm:`, `cron:`, or `api:`
-intent key. A run that a person or a pipeline requests through Varroa is never marked. It also
+intent key. Jenkins gives the `api:` key to a run that has no revision and no timer at claim
+time. A core `build` step, SCM polling, a remote trigger, and a build that a user starts inside
+Jenkins get it. A branch event whose 30-second revision wait runs out gets it too. Two such runs of
+one job and one revision are compared, and the newer run is marked.
+
+This rule never marks a run that a person or a pipeline requests through Varroa. Such a run also
 never makes another run a duplicate. Such runs come from the **Run** button, the MCP `run_pipeline`
 tool, a forge re-run, a retry, a replay, or a restart. A `varroa.build` call and a `varroaUpstream`
-trigger also request a run. Two requested runs of one revision both build.
+trigger also request a run. Two requested runs of one revision both build. A requested run still
+becomes `DUPLICATE` when another run already holds its intent key. See
+[Build claims](build-claims.md).
 
 The older run gives the outcome of the revision. A `DUPLICATE` run therefore counts in no job
 statistic, job health value, failing-job count, or overview count. It is never the last run of
@@ -320,7 +327,9 @@ another cell.
 | `cron` | `cron:<job-path>:<fire-minute>` | a build triggered by a schedule |
 | `retry` | `retry:<run-id>` | a retry of an earlier build |
 | `upstream` | `upstream:<caller-run-id>:<seq>` | a build triggered by an upstream pipeline |
-| `api` | `api:<uuid>` | a build triggered through the API |
+| `api` | `api:<uuid>` | a build that Jenkins starts with no revision and no timer, such as a core `build` step or SCM polling |
+| `replay` | `replay:<source-run-id>:<run-id>` | a replay of an earlier build |
+| `restart` | `restart:<source-run-id>:<run-id>` | a restart of an earlier build from a stage |
 
 A claim with a key outside this set, or an empty segment, is rejected.
 

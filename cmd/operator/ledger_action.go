@@ -57,12 +57,18 @@ type ledgerActionRunner interface {
 	WakeHibernatedController(ctx context.Context, namespace, name string)
 	ReleaseRunAgentPods(ctx context.Context, tenant, namespace string, names []string)
 	ReleaseInstanceAgentPods(ctx context.Context, tenant, namespace string, keep []string, refreshedBefore time.Time)
+	// JenkinsLocationURL answers the Jenkins location URL that the operator
+	// injects for the headless controller, or "" when it cannot name one.
+	JenkinsLocationURL(ctx context.Context, namespace, name string) string
 }
 
-// commitStatusEnder ends the pending commit statuses of one build. The
-// forgeops answerer implements it.
-type commitStatusEnder interface {
+// commitStatusWriter writes the commit statuses that the recorder asks for:
+// it ends the pending statuses of one build, and it puts the result of the
+// newest build of a job back on a commit. The forgeops answerer implements
+// it.
+type commitStatusWriter interface {
 	EndPendingStatus(ctx context.Context, req forgeapi.CommitStatusRequest) (int, error)
+	RestoreNewestStatus(ctx context.Context, req forgeapi.NewestStatusRequest) (int, error)
 }
 
 // ledgerActionBuildNumber answers *bn, or 0 for a nil bn.
@@ -131,7 +137,7 @@ var endStatusSlots = make(chan struct{}, 4)
 // shows error until the retry build completes and writes its own end state,
 // which supersedes it. The target_url build-number match keeps the write off
 // the retry's own status row.
-func dispatchEndCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatusEnder, action recordstore.LedgerAction) {
+func dispatchEndCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatusWriter, action recordstore.LedgerAction) {
 	select {
 	case endStatusSlots <- struct{}{}:
 	default:
@@ -151,7 +157,7 @@ func dispatchEndCommitStatus(ctx context.Context, logger *slog.Logger, forge com
 // action names the tenant, the repository, the commit, and the build
 // number, and the operator has a forge answerer. A failure is logged and
 // never retried: the status then stays pending.
-func endCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatusEnder, action recordstore.LedgerAction) {
+func endCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatusWriter, action recordstore.LedgerAction) {
 	if forge == nil || action.Tenant == "" || action.Repo == "" || action.Revision == "" || action.BuildNumber == nil {
 		logger.Info("end_commit_status skipped, nothing to end",
 			"run_id", action.RunID, "tenant", action.Tenant, "forge", forge != nil)
@@ -175,6 +181,73 @@ func endCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatu
 	logger.Info("end_commit_status done", "run_id", action.RunID, "tenant", action.Tenant, "written", written)
 }
 
+// restoreSettleDelay is the wait between a restore_commit_status action and
+// its forge read. The plugin writes a build's own status in a completion
+// listener. That listener has no order against the listener that sends the
+// completion event, so the older build's write can still be in flight when
+// the action arrives. A variable so a test can shorten it.
+var restoreSettleDelay = 30 * time.Second
+
+// dispatchRestoreCommitStatus runs restoreCommitStatus after
+// restoreSettleDelay, off the subscriber callback. When the delay ends, it
+// reads the Jenkins location URL of the action's cell, and then takes a slot
+// of endStatusSlots. A cell with no location URL writes nothing. When
+// endStatusSlots is full, the write is dropped and logged at Warn. An action
+// without its facts is logged and never scheduled.
+func dispatchRestoreCommitStatus(ctx context.Context, logger *slog.Logger, rec ledgerActionRunner, forge commitStatusWriter, action recordstore.LedgerAction) {
+	if forge == nil || action.Tenant == "" || action.Repo == "" || action.Revision == "" ||
+		action.Namespace == "" || action.Controller == "" ||
+		action.BuildNumber == nil || action.Result == "" || len(action.SupersededBuilds) == 0 {
+		logger.Info("restore_commit_status skipped, nothing to restore",
+			"run_id", action.RunID, "tenant", action.Tenant, "forge", forge != nil)
+		return
+	}
+	time.AfterFunc(restoreSettleDelay, func() {
+		root := rec.JenkinsLocationURL(ctx, action.Namespace, action.Controller)
+		if root == "" {
+			logger.Info("restore_commit_status skipped, the cell has no Jenkins location url",
+				"run_id", action.RunID, "tenant", action.Tenant,
+				"controller", action.Namespace+"/"+action.Controller)
+			return
+		}
+		select {
+		case endStatusSlots <- struct{}{}:
+		default:
+			logger.Warn("restore_commit_status dropped, forge writes at capacity",
+				"run_id", action.RunID, "tenant", action.Tenant,
+				"job_path", action.JobPath, "revision", action.Revision)
+			return
+		}
+		defer func() { <-endStatusSlots }()
+		restoreCommitStatus(ctx, logger, forge, action, root)
+	})
+}
+
+// restoreCommitStatus asks the forge answerer to put the result of the
+// newest build of a job back on the commit. root is the Jenkins location URL
+// of the cell. The forge answerer writes only over a status whose target URL
+// starts with it. A failure is logged and never retried: the context then
+// keeps the older build's status.
+func restoreCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatusWriter, action recordstore.LedgerAction, root string) {
+	fctx, cancel := context.WithTimeout(ctx, forgeRequestTimeout)
+	defer cancel()
+	written, err := forge.RestoreNewestStatus(fctx, forgeapi.NewestStatusRequest{
+		Tenant:           action.Tenant,
+		Repo:             action.Repo,
+		SHA:              action.Revision,
+		JobPath:          action.JobPath,
+		BuildNumber:      *action.BuildNumber,
+		Result:           action.Result,
+		SupersededBuilds: action.SupersededBuilds,
+		JenkinsURL:       root,
+	})
+	if err != nil {
+		logger.Warn("restore_commit_status failed", "run_id", action.RunID, "tenant", action.Tenant, "error", err)
+		return
+	}
+	logger.Info("restore_commit_status done", "run_id", action.RunID, "tenant", action.Tenant, "written", written)
+}
+
 // handleLedgerAction implements design D8a/D7 / the mite-command-transport
 // spec's operator subscriber (task 9.1a, task 7.1): it decodes one action
 // published on varroa.ledger.actions.<cluster>, ignores, logs, and counts
@@ -185,12 +258,14 @@ func endCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatu
 // unknown kind takes no action and is counted. end_commit_status asks the
 // forge answerer to end the pending commit statuses of the build, from the
 // recorder's synthetic reason or from a completed run's result.
+// restore_commit_status asks it, after restoreSettleDelay, to put the
+// newest build's result back over the statuses of older builds.
 // release_instance_agents deletes the idle agent pods of a confirmed gone
 // cell instance, except the nodes the action names.
 //
 // The imperative command's subject comes from the action's own namespace
 // and controller fields only — no other field ever names the target.
-func handleLedgerAction(ctx context.Context, logger *slog.Logger, metrics *ledgerActionMetrics, subject, ownCluster string, rec ledgerActionRunner, forge commitStatusEnder, data []byte) {
+func handleLedgerAction(ctx context.Context, logger *slog.Logger, metrics *ledgerActionMetrics, subject, ownCluster string, rec ledgerActionRunner, forge commitStatusWriter, data []byte) {
 	var action recordstore.LedgerAction
 	if err := json.Unmarshal(data, &action); err != nil {
 		logger.Warn("ledger action decode failed", "error", err)
@@ -339,6 +414,8 @@ func handleLedgerAction(ctx context.Context, logger *slog.Logger, metrics *ledge
 		rec.ReleaseInstanceAgentPods(ctx, action.Tenant, action.AgentNamespace, action.KeepPods, *action.RefreshedBefore)
 	case recordstore.LedgerActionEndCommitStatus:
 		dispatchEndCommitStatus(ctx, logger, forge, action)
+	case recordstore.LedgerActionRestoreCommitStatus:
+		dispatchRestoreCommitStatus(ctx, logger, rec, forge, action)
 	default:
 		logger.Warn("ledger action unknown kind rejected", "kind", action.Kind)
 		metrics.rejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "unknown_kind")))

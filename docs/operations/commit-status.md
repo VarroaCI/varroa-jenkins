@@ -39,9 +39,9 @@ A re-run keeps the fork trust decision of the branch source. **Re-run all checks
 request from a fork starts no build. The tenant rules are in
 [Re-run from GitHub](webhooks.md#re-run-from-github).
 
-A re-run builds even when an earlier run of the same revision is still live. The record store
-does not mark a requested run as a
-[duplicate run](build-records.md#a-duplicate-run).
+A re-run builds even when an earlier run of the same revision is still live. The rule in
+[A duplicate run](build-records.md#a-duplicate-run) does not mark a re-run.
+[Two runs of one commit](#two-runs-of-one-commit) states which result the forge then shows.
 
 ## Plain jobs
 
@@ -214,17 +214,56 @@ A pull-request build records one revision. The rule has two parts:
 
 The recorder never records the local merge commit of the checkout, on any forge.
 
-## Two builds of one pull request
+## Two runs of one commit
 
-A pull request can build again when its target branch moves. The new build and the older build
-share the head commit. Both builds report the same status context on that commit. The plugin
-writes the context when each build completes. The build that completes last sets the context, so
-an older build can replace the result of the newer build.
+Two runs of one job can build one commit at the same time. A re-run, the **Run** button, a retry,
+a replay, a restart, and a `varroa.build` call each start such a run. A pull request also builds
+again when its target branch moves, and both builds share the head commit.
 
-To keep the newer result, set `Tenant.spec.pipelines.concurrency` to `cancelInProgress`. The newer
-build then cancels the older build when it claims its build number. The recorder publishes the cancel asynchronously. The older build therefore usually completes
-first. The newer build then usually writes the last status. The order of those writes is not
-guaranteed. Until the newer build completes, the context can show the cancelled build's state.
+Both runs report the same status context on the commit. The plugin writes the context when each
+run completes, so an older run that completes last writes its result over the newer one.
+
+The newest run of the job and the commit owns the context. The newest run has the newest run id.
+A run id is a UUIDv7, so the order is the order in which Varroa created the runs. A `DUPLICATE`
+run, an `INTERRUPTED` run, and a failed trigger never own the context.
+
+When the newest run has completed, the operator puts its result back:
+
+1. The recorder sees a completion of a run of the job and the commit.
+2. The operator waits 30 seconds, so the plugin's own write can land.
+3. The operator reads the latest status of each context on the commit.
+4. The operator writes the result of the newest run over each context that names an older run.
+
+The operator writes only over a context that meets all of these rules:
+
+- The context is a default context of the branch-source plugin. On GitHub, it is
+  `continuous-integration/jenkins/branch`, `continuous-integration/jenkins/pr-merge`, or
+  `continuous-integration/jenkins/pr-head`. On Gitea and Forgejo, it is the folder of the job,
+  then `/pipeline/`, then `head`, `tag`, `release`, or `pr-<target branch>`.
+- Its link is the build link of an older run of the same job.
+- Its link starts with the Jenkins location URL of the cell that ran the newest build. Each scheme,
+  host, and path segment before `/job/` must match. A cell's location URL is its dashboard door.
+
+The operator never writes over a context that a pipeline step writes, such as `githubNotify`. It
+never writes over a status of another Jenkins with the same job path and build number. It writes
+only for a headless controller, such as a cell. After a cell move or a change of the dashboard
+URL, the old link does not match, so the operator writes nothing. A status that a person sets by
+hand with a default context name and the build link of an older run is written over too.
+
+The new status links to the newest build. Its description reads
+`Varroa kept the result of the newest build #<n>: <result>`. The state follows the table in
+[Dropped branch jobs](#dropped-branch-jobs). The operator compares only the runs that were live
+while the newest run built. While the newest run builds, the operator writes nothing, because
+that run writes its own status last.
+
+Until the operator writes, the context shows the older result. The credential, rate-limit, and
+four-write rules of [Interrupted builds](#interrupted-builds) apply. A failed or dropped write
+leaves the older result. An operator restart during the 30-second wait loses the write. A tenant
+whose only credential is a `githubApp` credential keeps the older result.
+
+To stop the older build of a pull request, set `Tenant.spec.pipelines.concurrency` to
+`cancelInProgress`. The newer build then cancels the older build when it claims its build number.
+Until the newer build completes, the context can show the cancelled build's state.
 
 Varroa does not set the context name. The plugin sets it. The `github-branch-source` plugin uses
 `continuous-integration/jenkins/pr-merge` by default. Read the context name on the forge before

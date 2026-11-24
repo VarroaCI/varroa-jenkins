@@ -1435,8 +1435,8 @@ type operatorCommandRunner struct {
 	lifecycle      *controller.LifecycleStore
 	activity       *activity.Publisher
 	beatNow        func()
-	// forge ends the pending commit statuses of a build the recorder ended.
-	forge commitStatusEnder
+	// forge writes the commit statuses that the recorder's ledger actions ask for.
+	forge commitStatusWriter
 	// assistant serves the AssistantConfig write route and the key subjects. Set by -assistant.
 	assistant     bool
 	assistantKeys *controller.AssistantKeys

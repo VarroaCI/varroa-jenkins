@@ -29,6 +29,11 @@ const (
 	// recorder publishes it for a run it ended, and for a completed run
 	// whose branch job lost its source.
 	LedgerActionEndCommitStatus = "end_commit_status"
+	// LedgerActionRestoreCommitStatus asks the operator to put the result
+	// of the newest run of a job and a revision back on the commit. Two runs
+	// of one job and one revision share each forge status context, and an
+	// older run can write its result last.
+	LedgerActionRestoreCommitStatus = "restore_commit_status"
 )
 
 // LedgerActionRecorder is the literal actor value the recorder sets when
@@ -100,16 +105,23 @@ type LedgerAction struct {
 	KeepPods        []string   `json:"keep_pods,omitempty"`
 	RefreshedBefore *time.Time `json:"refreshed_before,omitempty"`
 
-	// Repo, Revision, Reason, and Result apply to end_commit_status alone,
+	// Repo, Revision, Reason, and Result apply to end_commit_status,
 	// along with RunID, JobPath, BuildNumber, and Tenant above. Repo is the
 	// repository URL of the run and Revision its commit SHA. Reason is the
 	// synthetic end reason of a run the recorder ended. Result is the
 	// Jenkins result of a completed run whose branch job lost its branch
-	// source. An action sets exactly one of Reason and Result.
-	Repo     string `json:"repo,omitempty"`
-	Revision string `json:"revision,omitempty"`
-	Reason   string `json:"reason,omitempty"`
-	Result   string `json:"result,omitempty"`
+	// source. An end_commit_status action sets exactly one of Reason and
+	// Result.
+	//
+	// restore_commit_status uses RunID, JobPath, BuildNumber, Tenant, Repo,
+	// Revision, and Result of the newest run, plus SupersededBuilds. The
+	// operator writes only a context whose latest status names one of the
+	// SupersededBuilds.
+	Repo             string  `json:"repo,omitempty"`
+	Revision         string  `json:"revision,omitempty"`
+	Reason           string  `json:"reason,omitempty"`
+	Result           string  `json:"result,omitempty"`
+	SupersededBuilds []int64 `json:"superseded_builds,omitempty"`
 }
 
 // ResumeFile is one stored state file of a resume action: the path under

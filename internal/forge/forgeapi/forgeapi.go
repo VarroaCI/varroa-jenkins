@@ -213,3 +213,20 @@ type CommitStatusRequest struct {
 	// branch source. A request sets exactly one of Reason and Result.
 	Result string `json:"result,omitempty"`
 }
+
+// NewestStatusRequest asks the operator to put the result of the newest
+// build of a job back on a commit. BuildNumber and Result name that build.
+// SupersededBuilds names the other builds of the job on the commit. The
+// operator writes only a context whose latest status names one of them under
+// JenkinsURL, the location URL of the Jenkins that ran the newest build. It
+// has no reply: the operator logs the outcome.
+type NewestStatusRequest struct {
+	Tenant           string  `json:"tenant"`
+	Repo             string  `json:"repo"`
+	SHA              string  `json:"sha"`
+	JobPath          string  `json:"jobPath"`
+	BuildNumber      int64   `json:"buildNumber"`
+	Result           string  `json:"result"`
+	SupersededBuilds []int64 `json:"supersededBuilds"`
+	JenkinsURL       string  `json:"jenkinsURL"`
+}

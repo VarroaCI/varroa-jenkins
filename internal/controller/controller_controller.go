@@ -833,11 +833,7 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	locationURL := ""
 	switch {
 	case v1alpha1.IsHeadless(cr):
-		if u := v1alpha1.HeadlessLocationURL(varroaBaseURL(r.varroaRedirectURL), r.clusterName, cr.Namespace, cr.Name); u != "" {
-			locationURL = u
-		} else {
-			locationURL = vars["varroa_controller_endpoint"] + "/"
-		}
+		locationURL = r.headlessLocationURL(cr)
 	case vars["varroa_controller_external_url"] != "":
 		locationURL = vars["varroa_controller_external_url"] + "/"
 	}
