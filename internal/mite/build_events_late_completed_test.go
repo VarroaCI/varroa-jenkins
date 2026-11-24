@@ -87,6 +87,68 @@ func TestOnBuildEventLateCompletedOnTheOtherReplicaKeepsAFinishedLogComplete(t *
 	}
 }
 
+// TestOnBuildEventCompletedInTimeWithNoChunkKeepsAFinishedLogComplete
+// proves that a COMPLETED event inside the finalize deadline, on a replica
+// that queues no chunk of the run, ends the run quietly at the deadline.
+// Replica A stored every chunk and finalized the log before the stream
+// moved. Replica B creates a state for the event, and that state holds no
+// fact about the stored log. A chunk that B answers BUSY never enters the
+// queue, so it does not make the end loud either.
+func TestOnBuildEventCompletedInTimeWithNoChunkKeepsAFinishedLogComplete(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		busyRepeat bool
+	}{
+		{name: "no chunk"},
+		{name: "a repeat answered BUSY", busyRepeat: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			owner := newFakeOwnerRequester()
+			runID := newTestRunID()
+			owner.setAnswer(runID, cell2Owner())
+
+			a, senderA := newCompletedOwnerTestHandler(t, owner, &recordingSender{})
+			a.publisher = &fakePublisher{}
+			sendOwnerChunk(a, runID, 0, "ab", false)
+			sendOwnerChunk(a, runID, 1, "", true)
+			if last := waitForLogAcks(t, senderA, 2)[1]; last.Status != logAckStatusStored || last.AckSeq != 1 {
+				t.Fatalf("expected the final chunk STORED at ack_seq 1 on replica A, got %+v", last)
+			}
+			waitForEviction(t, a, runID)
+
+			b, senderB := newCompletedOwnerTestHandler(t, owner, &recordingSender{})
+			b.logStore = a.logStore
+			pubB := &fakePublisher{}
+			b.publisher = pubB
+			b.logFinalizeWait = 300 * time.Millisecond
+
+			if err := b.OnBuildEvent("cell2", "ns1", 0, completedBuildEvent(runID, time.Now())); err != nil {
+				t.Fatalf("OnBuildEvent: %v", err)
+			}
+			if _, ok := b.lookupRunState(runID); !ok {
+				t.Fatal("expected the COMPLETED event inside the deadline to create the run state")
+			}
+			if tc.busyRepeat {
+				b.logPendingMaxBytes = 1
+				sendOwnerChunk(b, runID, 0, "ab", false)
+				if got := waitForLogAcks(t, senderB, 1)[0]; got.Status != logAckStatusBusy {
+					t.Fatalf("expected the repeat of chunk 0 BUSY on replica B, got %+v", got)
+				}
+			}
+
+			waitFor(t, func() bool { return b.runRejectedForever(runID) }, 5*time.Second,
+				"replica B did not end the run at its finalize deadline")
+			waitForEviction(t, b, runID)
+			if n := incompletePublishes(pubB); n != 0 {
+				t.Fatalf("replica B published %d incomplete markers, want none: replica A finished the log", n)
+			}
+			if incomplete, reason := b.runIncompleteness(runID); incomplete {
+				t.Fatalf("replica B recorded incomplete with reason %q, want no reason of its own", reason)
+			}
+		})
+	}
+}
+
 // TestOnBuildEventLateCompletedWithNoLogStateLeavesAShortLogToTheSweep
 // proves that a late COMPLETED event on a replica with no log state still
 // leaves a short log to the recorder. Here the gateway restarted after
