@@ -1682,13 +1682,16 @@ func (h *BusHandler) OnStreamBuildEvent(name, ns, cellInstance string, connToken
 // request keeps the whole group too: its stages, tests, quality reports,
 // artifacts, and log summary can be the owner's only record of the
 // build, and an answer that names no other owner must not drop them.
-// After a failed request, a cached match still sets the
-// deadline, as the chunk path does in the same state, so a recorder
-// outage does not cost each finishing build its deadline. With no cached
-// match, the owner's next chunk reads the ledger again, and that answer
-// carries the run's status and anchor. A check whose two reads a change
-// to the entry overtook sets no deadline, even on a cached match. A
-// gateway with no log writer sends no request and keeps the whole group.
+//
+// A failed request, a check in the owner lookup pause, and a check whose
+// two reads a change to the entry overtook set no deadline, also on a
+// cached match. Such a match can name a stale cell. Its deadline would
+// end this replica's state of the run while the new owner still writes
+// the log. The end publishes a finalize-deadline mark, and each later
+// chunk of the new owner gets REJECTED{finalize-deadline}. The owner's
+// run then ends on a later ledger answer: a chunk check that reads the
+// ledger, the owner recheck of a held chunk, or the idle sweep. A gateway
+// with no log writer sends no request and keeps the whole group.
 //
 // A match creates no state for a run that is past its deadline when this
 // gateway holds no state and no tombstone for it (markCompletionTerminal).
@@ -1703,14 +1706,10 @@ func (h *BusHandler) markCompletedRunTerminal(ns, name, instance string, evt *mi
 	if h.logStore == nil {
 		return false
 	}
-	decision, tuple, fresh := h.checkOwnerForCompletion(context.Background(), h.cluster, ns, name, instance, evt.RunId)
-	withhold := fresh && decision == ownerForeign && tuple.instance != "" && tuple.instance != instance
+	decision, tuple := h.checkOwnerForCompletion(context.Background(), h.cluster, ns, name, instance, evt.RunId)
+	withhold := decision == ownerForeign && tuple.instance != "" && tuple.instance != instance
 	switch {
 	case decision == ownerMatched:
-		if !fresh {
-			h.log().Warn("owner lookup failed for a completed event, the cached match sets its log deadline",
-				"controller", ns+"/"+name, "cell_instance", instance, "run_id", evt.RunId)
-		}
 		if h.markCompletionTerminal(ns, name, evt.RunId, evt.JobPath, millisToTime(evt.CompletedAtMillis)) {
 			h.log().Info("completed event after its log deadline on a gateway with no log state for the run, no log state is created",
 				"controller", ns+"/"+name, "cell_instance", instance, "run_id", evt.RunId)
@@ -1722,7 +1721,7 @@ func (h *BusHandler) markCompletedRunTerminal(ns, name, instance string, evt *mi
 		h.log().Info("the ledger names no other owner instance for a completed event, its log deadline is not set and its sender facts are kept",
 			"controller", ns+"/"+name, "cell_instance", instance, "run_id", evt.RunId)
 	default:
-		h.log().Warn("owner lookup failed for a completed event, its log deadline waits for the next chunk",
+		h.log().Warn("owner lookup failed for a completed event, its log deadline waits for a later ledger answer",
 			"controller", ns+"/"+name, "cell_instance", instance, "run_id", evt.RunId)
 	}
 	return withhold

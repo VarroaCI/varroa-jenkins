@@ -90,9 +90,8 @@ func TestOwnerReadsOfTwoCallersAtOnceKeepTheNewerOwner(t *testing.T) {
 	gate.waitEntered(t, done)
 
 	owner.setAnswer(runID, ownerAnswer())
-	decision, _, fresh := h.checkOwnerForCompletion(context.Background(), "core", "ns1", "cell1", "inst1", runID)
-	if decision != ownerMatched || !fresh {
-		t.Fatalf("new owner's completion = %v (fresh=%v), want a fresh match", decision, fresh)
+	if decision, _ := h.checkOwnerForCompletion(context.Background(), "core", "ns1", "cell1", "inst1", runID); decision != ownerMatched {
+		t.Fatalf("new owner's completion = %v, want a match", decision)
 	}
 	match, ok := h.ownerCache.peek(runID)
 	if !ok {
@@ -206,10 +205,10 @@ func TestOwnerLookupOvertakenTwiceAnswersBusy(t *testing.T) {
 	}
 }
 
-// TestCompletionOvertakenTwiceSetsNoDeadline proves the exception to the
-// cached-match rule of a COMPLETED check. A grant overtakes both reads,
-// so the cache holds a match for the sender, but the entry changed during
-// each read. The check answers ownerUnknown and is not fresh.
+// TestCompletionOvertakenTwiceSetsNoDeadline proves that a COMPLETED check
+// whose two reads are both overtaken answers ownerUnknown. A grant
+// overtakes both reads, so the cache holds a match for the sender, but
+// the check decides only from a ledger answer.
 func TestCompletionOvertakenTwiceSetsNoDeadline(t *testing.T) {
 	owner := newFakeOwnerRequester()
 	runID := newTestRunID()
@@ -220,9 +219,8 @@ func TestCompletionOvertakenTwiceSetsNoDeadline(t *testing.T) {
 		h.ownerCache.observeGrant(runID, "core", "ns1", "cell1", "inst1")
 	}}
 
-	decision, _, fresh := h.checkOwnerForCompletion(context.Background(), "core", "ns1", "cell1", "inst1", runID)
-	if decision != ownerUnknown || fresh {
-		t.Fatalf("completion = %v (fresh=%v), want ownerUnknown and not fresh", decision, fresh)
+	if decision, _ := h.checkOwnerForCompletion(context.Background(), "core", "ns1", "cell1", "inst1", runID); decision != ownerUnknown {
+		t.Fatalf("completion = %v, want ownerUnknown", decision)
 	}
 	if calls := owner.callCount(); calls != 2 {
 		t.Fatalf("owner lookups = %d, want 2", calls)

@@ -452,22 +452,19 @@ func TestOnBuildEventCompletedFromTheOwnerReadsTheLedgerOnce(t *testing.T) {
 }
 
 // TestOnBuildEventCompletedAfterAFailedOwnerRead proves what a COMPLETED
-// event does when its ledger request fails. The summary always stays. A
-// cached match still sets the deadline, as the chunk path does in the
-// same state, so a recorder outage does not cost each finishing build its
-// deadline. A cached refusal and no cached entry set none.
+// event does when its ledger request fails. The summary always stays.
+// The event sets no deadline and creates no run state, whatever the cache
+// holds: a cached match can name a stale cell after a move.
 func TestOnBuildEventCompletedAfterAFailedOwnerRead(t *testing.T) {
 	cases := []struct {
-		name         string
-		cache        func(h *BusHandler, runID string)
-		wantTerminal bool
+		name  string
+		cache func(h *BusHandler, runID string)
 	}{
 		{
 			name: "cached match",
 			cache: func(h *BusHandler, runID string) {
 				h.ownerCache.observeGrant(runID, "core", "ns1", "cell2", "inst2")
 			},
-			wantTerminal: true,
 		},
 		{
 			name: "cached refusal",
@@ -495,11 +492,8 @@ func TestOnBuildEventCompletedAfterAFailedOwnerRead(t *testing.T) {
 			}
 			assertQueuedSenderSummary(t, h)
 			assertQueuedRunCompleted(t, h)
-			if _, exists := h.lookupRunState(runID); exists != tc.wantTerminal {
-				t.Fatalf("run state exists = %v, want %v", exists, tc.wantTerminal)
-			}
-			if tc.wantTerminal {
-				assertRunTerminal(t, h, runID)
+			if _, exists := h.lookupRunState(runID); exists {
+				t.Fatal("expected no run state after a failed owner read")
 			}
 			if calls := owner.callCount(); calls != 1 {
 				t.Fatalf("owner lookups = %d, want 1 attempt for the COMPLETED event", calls)

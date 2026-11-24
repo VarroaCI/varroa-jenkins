@@ -231,25 +231,20 @@ func TestCompletionAfterAnOwnerMoveDoesNotAdmitTheCachedOwner(t *testing.T) {
 	gate := newStaleGatedOwnerRequester(owner)
 	h.ledger = gate
 
-	type result struct {
-		decision ownerDecision
-		fresh    bool
-	}
-	out := make(chan result, 1)
+	out := make(chan ownerDecision, 1)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		decision, _, fresh := h.checkOwnerForCompletion(context.Background(), "core", "ns1", "cell1", "inst1", runID)
-		out <- result{decision: decision, fresh: fresh}
+		decision, _ := h.checkOwnerForCompletion(context.Background(), "core", "ns1", "cell1", "inst1", runID)
+		out <- decision
 	}()
 	gate.waitEntered(t, done)
 	setOwner(owner, runID, "inst2")
 	h.onOwnerMove(mustMarshalOwnerMove(t, runID))
 	close(gate.release)
 	<-done
-	got := <-out
-	if got.decision != ownerForeign || !got.fresh {
-		t.Fatalf("completion = %v (fresh=%v), want a fresh ownerForeign from the second read", got.decision, got.fresh)
+	if got := <-out; got != ownerForeign {
+		t.Fatalf("completion = %v, want ownerForeign from the second read", got)
 	}
 	if calls := owner.callCount(); calls != 3 {
 		t.Fatalf("owner lookups = %d, want 3: the priming read, the overtaken read, and one more read", calls)
