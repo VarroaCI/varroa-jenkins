@@ -164,7 +164,7 @@ func TestFinalizeStaleLogsSkipsATriggerFailedRun(t *testing.T) {
 		t.Fatalf("backdate ended_at: %v", err)
 	}
 
-	n, err := finalizeStaleLogs(context.Background(), pool, fakeLiveness{gone: true}, time.Minute, time.Now().UTC())
+	n, err := finalizeStaleLogs(context.Background(), pool, fakeLiveness{gone: true}, nil, time.Minute, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("finalizeStaleLogs: %v", err)
 	}

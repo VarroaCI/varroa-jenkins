@@ -207,7 +207,7 @@ func TestApplyRunLogSweepThenLateRunLogNeverReopensFinalized(t *testing.T) {
 		t.Fatalf("backdate ended_at: %v", err)
 	}
 
-	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, time.Minute, time.Now().UTC())
+	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, nil, time.Minute, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("finalizeStaleLogs: %v", err)
 	}

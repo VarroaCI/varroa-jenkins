@@ -2,8 +2,11 @@ package recordstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
 // heartbeatMsText is the JSON text of a run's stored writer heartbeat,
@@ -43,27 +46,102 @@ type finalizeCandidate struct {
 	endedAt               *time.Time
 	writerHeartbeatRaw    *string
 	writerHeartbeatUnixMs *int64
+	// indexReadFailedUnixMs is the run's first failed index read, from
+	// indexReadFailedKey. It is nil when the run holds none.
+	indexReadFailedUnixMs *int64
 }
+
+// Bounds of the stored log index reads of one log-finalization round.
+const (
+	// finalizeIndexReadBudget bounds the stored log indexes that one round
+	// reads for runs that hold no failed-read time. A read that finds no
+	// index does not count: it costs one listing on an object-store tier
+	// and one query on the Postgres tier. A failed read counts once, and
+	// the run then holds a failed-read time. A run past the budget waits
+	// for the next round.
+	finalizeIndexReadBudget = 1000
+
+	// finalizeIndexDeferredReadBudget bounds the reads of one round for
+	// runs that hold a failed-read time. These reads never spend
+	// finalizeIndexReadBudget, so unreadable indexes cannot hold back the
+	// readable runs behind them. A run past this budget gets no read in
+	// the round.
+	finalizeIndexDeferredReadBudget = 50
+
+	// finalizeIndexGiveUpAge is how long the sweep retries a run whose
+	// index read fails while the blob tier answers. The time counts from
+	// the run's own first failed read, which indexReadFailedKey holds. A
+	// read that fails at least this long after that time marks the run
+	// not-finalized. A failed read while the tier does not answer never
+	// marks a run and starts no clock.
+	finalizeIndexGiveUpAge = 24 * time.Hour
+)
+
+// indexReadFailedKey is the runs.payload key that holds a run's first
+// failed index read, in milliseconds since the epoch on the recorder's
+// clock. It sits beside log_summary, not inside it: a log_summary that
+// held only this key would read as a summary to every log reader. The
+// sweep's own final write removes it, and a supersede that drops the
+// log summary drops it too (acceptedSupersedeKeysSQL).
+const indexReadFailedKey = "log_index_read_failed_unix_ms"
+
+// indexReadFailedMsExpr casts indexReadFailedKey to bigint only when its
+// text is one to fifteen ASCII digits, and yields NULL otherwise.
+const indexReadFailedMsExpr = `(CASE WHEN (payload->>'` + indexReadFailedKey + `') ~ '^[0-9]{1,15}$' THEN (payload->>'` + indexReadFailedKey + `')::bigint END)`
+
+// finalizeProbeRunID names a run that no gateway writes, because each
+// run id is a UUIDv7. A read of its index key tells an index that fails
+// for one run from a blob tier that does not answer.
+const finalizeProbeRunID = "00000000-0000-0000-0000-000000000000"
 
 // finalizeStaleLogs is step 10 of the maintenance round. It selects a run
 // whose status is terminal, or whose owning cell liveness reports gone,
 // whose log summary is absent or reports finalized false, and whose wait
-// anchor is older than wait. It creates the summary when absent, then
-// sets finalized true and incomplete true with reason "not-finalized"
-// unless the summary already holds a reason. It never lowers a finalized
-// that is already true, and it skips a run whose Liveness call errors.
-// It returns how many runs the guarded update actually changed, so a
-// concurrent write that makes the update skip a row is never miscounted
-// as finalized.
+// anchor is older than wait. It then reads the run's stored log index
+// through logs. When the index holds the final entry, it sets finalized
+// true with no incomplete mark, as the gateway's own marker does.
+// Otherwise it sets finalized true and incomplete true with reason
+// "not-finalized" unless the summary already holds a reason. It creates
+// the summary when absent. It never lowers a finalized that is already
+// true, and it skips a run whose Liveness call errors. It returns how
+// many runs the guarded update actually changed, so a concurrent write
+// that makes the update skip a row is never miscounted as finalized.
+//
+// A failed index read is no evidence that a log is short. After each
+// failed read the sweep reads the probe key finalizeProbeRunID. When the
+// tier does not answer the probe, the round ends and writes nothing for
+// the run. When the tier answers, the read failed for that run alone.
+// The first such failure stores now under indexReadFailedKey, and the
+// run is then deferred: later rounds read it under
+// finalizeIndexDeferredReadBudget. A deferred read that fails at least
+// finalizeIndexGiveUpAge after the stored time marks the run
+// not-finalized. One transient error therefore never marks a run.
 //
 // It reads candidates in keyset batches of retentionBatchSize, ordered by
 // (created_at, run_id), so one hourly round never holds an unbounded
-// result set for an installation with years of run history.
+// result set for an installation with years of run history. A run it
+// does not read waits for the next round.
 //
 // It skips a TRIGGER_FAILED row. Such a run holds no log at all, and a
 // summary marked incomplete would survive a later supersede and mislabel
 // the real run's log.
-func finalizeStaleLogs(ctx context.Context, db maintDB, liveness Liveness, wait time.Duration, now time.Time) (int, error) {
+func finalizeStaleLogs(ctx context.Context, db maintDB, liveness Liveness, logs LogRangeReader, wait time.Duration, now time.Time) (int, error) {
+	return finalizeStaleLogsWithin(ctx, db, liveness, logs, wait, now,
+		finalizeReadBudget{first: finalizeIndexReadBudget, deferred: finalizeIndexDeferredReadBudget})
+}
+
+// finalizeReadBudget is the stored log index reads left in one round.
+type finalizeReadBudget struct {
+	// first is the reads left for runs that hold no failed-read time.
+	first int
+	// deferred is the reads left for runs that hold a failed-read time.
+	deferred int
+}
+
+// finalizeStaleLogsWithin is finalizeStaleLogs with a read budget of its
+// own, so a test can spend the budget with a few runs.
+func finalizeStaleLogsWithin(ctx context.Context, db maintDB, liveness Liveness, logs LogRangeReader, wait time.Duration,
+	now time.Time, budget finalizeReadBudget) (int, error) {
 	cutoff := now.Add(-wait)
 	finalized := 0
 	var after *finalizeCursor
@@ -84,12 +162,15 @@ func finalizeStaleLogs(ctx context.Context, db maintDB, liveness Liveness, wait 
 			if err != nil || !ok {
 				continue
 			}
-			changed, err := finalizeLogSummary(ctx, db, c.runID, c.writerHeartbeatRaw, cutoff)
+			changed, stop, err := finalizeCandidateLog(ctx, db, logs, c, now, cutoff, &budget)
 			if err != nil {
-				return finalized, fmt.Errorf("finalize log summary for %s: %w", c.runID, err)
+				return finalized, fmt.Errorf("finalize log of %s: %w", c.runID, err)
 			}
 			if changed {
 				finalized++
+			}
+			if stop {
+				return finalized, nil
 			}
 		}
 
@@ -105,6 +186,104 @@ func finalizeStaleLogs(ctx context.Context, db maintDB, liveness Liveness, wait 
 type finalizeCursor struct {
 	createdAt time.Time
 	runID     string
+}
+
+// finalizeCandidateLog reads the stored log index of c within budget
+// and writes the run's log summary. changed reports whether the final
+// write changed the row. stop is true when the round must end: the first
+// budget is spent, or the blob tier does not answer. A deferred run past
+// the deferred budget gets no read and does not stop the round.
+func finalizeCandidateLog(ctx context.Context, db maintDB, logs LogRangeReader, c finalizeCandidate, now, cutoff time.Time,
+	budget *finalizeReadBudget) (changed, stop bool, err error) {
+	deferred := c.indexReadFailedUnixMs != nil
+	switch {
+	case deferred && budget.deferred <= 0:
+		return false, false, nil
+	case deferred:
+		budget.deferred--
+	case budget.first <= 0:
+		return false, true, nil
+	}
+
+	finalChunks, found, readErr := storedLogFinal(ctx, logs, c.runID)
+	switch {
+	case readErr == nil:
+		if found && !deferred {
+			budget.first--
+		}
+	case !blobTierAnswers(ctx, logs):
+		return false, true, nil
+	case !deferred:
+		budget.first--
+		return false, false, markIndexReadFailed(ctx, db, c.runID, now)
+	case now.Sub(time.UnixMilli(*c.indexReadFailedUnixMs)) < finalizeIndexGiveUpAge:
+		return false, false, nil
+	default:
+		finalChunks = 0
+	}
+	changed, err = finalizeLogSummary(ctx, db, c.runID, c.writerHeartbeatRaw, cutoff, finalChunks)
+	return changed, false, err
+}
+
+// markIndexReadFailed stores now under indexReadFailedKey for a run that
+// is not finalized and holds no valid failed-read time, so a later
+// failure never moves the give-up clock.
+func markIndexReadFailed(ctx context.Context, db maintDB, runID string, now time.Time) error {
+	if _, err := db.Exec(ctx, `
+		UPDATE varroa.runs
+		SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('`+indexReadFailedKey+`', $2::bigint)
+		WHERE run_id = $1
+		  AND (payload->'log_summary'->>'finalized') IS DISTINCT FROM 'true'
+		  AND `+indexReadFailedMsExpr+` IS NULL
+	`, runID, now.UnixMilli()); err != nil {
+		return fmt.Errorf("store failed index read: %w", err)
+	}
+	return nil
+}
+
+// blobTierAnswers reports whether the blob tier answers a read of the
+// probe index key. A missing key is an answer.
+func blobTierAnswers(ctx context.Context, logs LogRangeReader) bool {
+	r, err := logs.NewRangeReader(ctx, blob.LogIndexKey(finalizeProbeRunID), 0, -1)
+	if err != nil {
+		return errors.Is(err, blob.ErrObjectNotFound)
+	}
+	_ = r.Close()
+	return true
+}
+
+// storedLogFinal reads the stored log index of runID. finalChunks is one
+// above the sequence of the highest entry with final true, and 0 when no
+// entry carries it. found reports whether an index is stored at all. The
+// gateway writes a final entry only after every lower entry, and its own
+// restart recovery reads that entry as a finished log. An index that
+// does not parse holds no final entry that a reader can use. A nil logs
+// holds no index.
+func storedLogFinal(ctx context.Context, logs LogRangeReader, runID string) (finalChunks int64, found bool, err error) {
+	if logs == nil {
+		return 0, false, nil
+	}
+	r, err := logs.NewRangeReader(ctx, blob.LogIndexKey(runID), 0, -1)
+	if errors.Is(err, blob.ErrObjectNotFound) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("read log index: %w", err)
+	}
+	defer func() { _ = r.Close() }()
+	entries, err := parseStoredLogIndex(r)
+	if errors.Is(err, errLogIndexMalformed) {
+		return 0, true, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	for _, e := range entries {
+		if e.Final && e.Seq+1 > finalChunks {
+			finalChunks = e.Seq + 1
+		}
+	}
+	return finalChunks, true, nil
 }
 
 // selectFinalizeCandidates reads up to retentionBatchSize runs whose log
@@ -129,7 +308,8 @@ func selectFinalizeCandidates(ctx context.Context, db maintDB, cutoff time.Time,
 		       r.heartbeat_received_at, r.started_at, r.queued_at, r.ended_at,
 		       `+heartbeatMsText+`,
 		       `+safeHeartbeatMsExpr+`,
-		       ri.cell_instance
+		       ri.cell_instance,
+		       `+indexReadFailedMsExpr+`
 		FROM varroa.runs r
 		LEFT JOIN varroa.run_intents ri ON ri.run_id = r.run_id
 		WHERE (r.payload->'log_summary'->>'finalized') IS DISTINCT FROM 'true'
@@ -154,7 +334,7 @@ func selectFinalizeCandidates(ctx context.Context, db maintDB, cutoff time.Time,
 		var c finalizeCandidate
 		if err := rows.Scan(&c.runID, &c.createdAt, &c.status, &c.cluster, &c.namespace, &c.cell, &c.tenant,
 			&c.heartbeatReceivedAt, &c.startedAt, &c.queuedAt, &c.endedAt,
-			&c.writerHeartbeatRaw, &c.writerHeartbeatUnixMs, &c.cellInstance); err != nil {
+			&c.writerHeartbeatRaw, &c.writerHeartbeatUnixMs, &c.cellInstance, &c.indexReadFailedUnixMs); err != nil {
 			return nil, fmt.Errorf("scan log-finalization candidate: %w", err)
 		}
 		candidates = append(candidates, c)
@@ -207,10 +387,15 @@ func waitAnchor(c finalizeCandidate) *time.Time {
 }
 
 // finalizeLogSummary creates runs.payload.log_summary when absent, then
-// sets finalized true and incomplete true. It writes the reason
-// "not-finalized" only when the summary holds no reason, because a stored
-// reason names a more precise cause or arrived first in the same rank.
-// It reports whether the guarded update actually changed the row.
+// sets finalized true. When finalChunks is above 0, the stored index
+// holds the final entry, so it adds no incomplete mark, as the gateway's
+// own marker does. It also writes chunk_count as finalChunks when the
+// summary holds no chunk_count, so a log manifest checks each chunk that
+// the index names. Otherwise it also sets incomplete true. It writes the
+// reason "not-finalized" only when the summary holds no reason, because a
+// stored reason names a more precise cause or arrived first in the same
+// rank. It removes indexReadFailedKey in the same write. It reports
+// whether the guarded update actually changed the row.
 //
 // The WHERE guard repeats the monotonic finalized check at write time,
 // so a concurrent writer that finalized the run between the select and
@@ -223,19 +408,28 @@ func waitAnchor(c finalizeCandidate) *time.Time {
 // window between the select and this update also makes the update skip
 // the row, even though the writer heartbeat guard alone would not catch
 // that change.
-func finalizeLogSummary(ctx context.Context, db maintDB, runID string, writerHeartbeatRaw *string, cutoff time.Time) (bool, error) {
+func finalizeLogSummary(ctx context.Context, db maintDB, runID string, writerHeartbeatRaw *string, cutoff time.Time,
+	finalChunks int64) (bool, error) {
+	args := []any{runID, writerHeartbeatRaw, cutoff}
+	mark := `'{"finalized": true, "incomplete": true, "incomplete_reason": "` + logReasonNotFinalized + `"}'::jsonb
+				|| ` + logReasonKeepSQL(`payload->'log_summary'->>'incomplete_reason'`, `'`+logReasonNotFinalized+`'`)
+	if finalChunks > 0 {
+		args = append(args, finalChunks)
+		mark = `'{"finalized": true}'::jsonb
+				|| (CASE WHEN payload->'log_summary'->'chunk_count' IS NULL
+				         THEN jsonb_build_object('chunk_count', $4::bigint) ELSE '{}'::jsonb END)`
+	}
 	tag, err := db.Exec(ctx, `
 		UPDATE varroa.runs
-		SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object(
+		SET payload = (COALESCE(payload, '{}'::jsonb) - '`+indexReadFailedKey+`') || jsonb_build_object(
 			'log_summary',
-			COALESCE(payload->'log_summary', '{}'::jsonb) || '{"finalized": true, "incomplete": true, "incomplete_reason": "`+logReasonNotFinalized+`"}'::jsonb
-				|| `+logReasonKeepSQL(`payload->'log_summary'->>'incomplete_reason'`, `'`+logReasonNotFinalized+`'`)+`
+			COALESCE(payload->'log_summary', '{}'::jsonb) || `+mark+`
 		)
 		WHERE run_id = $1
 		  AND (payload->'log_summary'->>'finalized') IS DISTINCT FROM 'true'
 		  AND (payload->'log_summary'->>'writer_heartbeat_unix_ms') IS NOT DISTINCT FROM $2::text
 		  AND `+anchorExpr+` < $3
-	`, runID, writerHeartbeatRaw, cutoff)
+	`, args...)
 	if err != nil {
 		return false, err
 	}

@@ -47,6 +47,12 @@ type MaintenanceConfig struct {
 	// row-level steps relies on. cmd/recorder passes a blob.Store value,
 	// which satisfies this interface.
 	LogStore ObjectDeleter
+	// LogReader reads a run's stored log index, so the log-finalization
+	// sweep finalizes a run whose index holds the final entry with no
+	// incomplete mark. A nil LogReader reads no index, and the sweep then
+	// marks each run it finalizes not-finalized. cmd/recorder passes a
+	// blob.Store value.
+	LogReader LogRangeReader
 	// Liveness judges whether a run whose status is not yet terminal
 	// still counts as terminal, because its owning cell is gone.
 	Liveness Liveness
@@ -235,7 +241,7 @@ func runMaintenanceSteps(ctx context.Context, db maintTxDB, cfg MaintenanceConfi
 		return fmt.Errorf("delete expired tenant agent spend: %w", err)
 	}
 
-	if _, err := finalizeStaleLogs(ctx, db, cfg.Liveness, cfg.FinalizeWait, now); err != nil {
+	if _, err := finalizeStaleLogs(ctx, db, cfg.Liveness, cfg.LogReader, cfg.FinalizeWait, now); err != nil {
 		return fmt.Errorf("finalize stale logs: %w", err)
 	}
 

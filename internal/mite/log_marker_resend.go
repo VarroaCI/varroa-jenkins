@@ -11,13 +11,14 @@ import (
 const (
 	// logMarkerResendAge bounds how long the gateway keeps an owed marker.
 	// Each idle sweep round (one minute) sends a marker at most once, so a
-	// marker gets at most about 30 resends. The recorder's hourly
-	// finalizeStaleLogs sweep marks a run with no marker not-finalized,
-	// and a later marker changes nothing in that record.
+	// marker gets at most about 30 resends. After that, the recorder's
+	// hourly finalizeStaleLogs sweep reads the final index entry and
+	// finalizes the run.
 	logMarkerResendAge = logTombstoneTTL
 
 	// logMarkersOwedMax bounds the owed markers. The gateway keeps no
-	// marker over the bound, and the recorder's sweep marks its run.
+	// marker over the bound, and the recorder's sweep finalizes its run
+	// from the stored index.
 	logMarkersOwedMax = 10000
 )
 
@@ -46,7 +47,8 @@ func (h *BusHandler) logStopping() bool {
 // oweFinalizedMarker records that the finalized marker of runID did not
 // reach the bus before the final STORED ack. A gateway restart loses the
 // record. The mite already released the final chunk, so the recorder's
-// finalizeStaleLogs sweep then marks the run not-finalized.
+// finalizeStaleLogs sweep then finalizes the run from the stored final
+// index entry.
 func (h *BusHandler) oweFinalizedMarker(ns, name, runID, jobPath string) {
 	now := h.logClock()
 	h.logMarkerMu.Lock()
@@ -95,7 +97,7 @@ func (h *BusHandler) resendOwedMarkers(ctx context.Context) {
 	h.logMarkerMu.Unlock()
 
 	for _, runID := range expired {
-		h.log().Warn("an owed finalized marker reached its age bound, the recorder's sweep marks the run",
+		h.log().Warn("an owed finalized marker reached its age bound, the recorder's sweep finalizes the run",
 			"run_id", runID)
 	}
 	sort.Slice(items, func(i, j int) bool {

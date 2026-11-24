@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
 // fakeLiveness answers CellGone with a fixed value, or an error when err
@@ -77,7 +79,7 @@ func TestFinalizeStaleLogsClosesTerminalRunWithNoSummary(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, time.Minute, now)
+	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, blob.NewPGBlobStore(pool), time.Minute, now)
 	if err != nil {
 		t.Fatalf("finalizeStaleLogs: %v", err)
 	}
@@ -126,7 +128,7 @@ func TestFinalizeStaleLogsKeepsAStoredReason(t *testing.T) {
 		t.Fatalf("backdate ended_at: %v", err)
 	}
 
-	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, time.Minute, time.Now().UTC())
+	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, blob.NewPGBlobStore(pool), time.Minute, time.Now().UTC())
 	if err != nil || n != 1 {
 		t.Fatalf("finalizeStaleLogs: n=%d err=%v, want 1 run finalized", n, err)
 	}
@@ -168,7 +170,7 @@ func TestFinalizeStaleLogsLeavesRunInsideTheWait(t *testing.T) {
 	// "now" by the heartbeat envelope, so a one-hour wait is not yet
 	// past.
 	now := time.Now().UTC()
-	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, time.Hour, now)
+	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, blob.NewPGBlobStore(pool), time.Hour, now)
 	if err != nil {
 		t.Fatalf("finalizeStaleLogs: %v", err)
 	}
@@ -201,7 +203,7 @@ func TestFinalizeStaleLogsNeverLowersFinalizedTrue(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, time.Minute, now)
+	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, blob.NewPGBlobStore(pool), time.Minute, now)
 	if err != nil {
 		t.Fatalf("finalizeStaleLogs: %v", err)
 	}
@@ -235,7 +237,7 @@ func TestFinalizeStaleLogsUsesHeartbeatForARunningRun(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, time.Minute, now)
+	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, blob.NewPGBlobStore(pool), time.Minute, now)
 	if err != nil {
 		t.Fatalf("finalizeStaleLogs: %v", err)
 	}
@@ -253,7 +255,7 @@ func TestFinalizeStaleLogsUsesHeartbeatForARunningRun(t *testing.T) {
 	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2`, freshHeartbeat, runID2); err != nil {
 		t.Fatalf("stamp fresh heartbeat: %v", err)
 	}
-	if _, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, time.Minute, now); err != nil {
+	if _, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, blob.NewPGBlobStore(pool), time.Minute, now); err != nil {
 		t.Fatalf("finalizeStaleLogs (second call): %v", err)
 	}
 	found2, _ := readLogSummaryFinalized(t, db, runID2)
@@ -277,7 +279,7 @@ func TestFinalizeStaleLogsSkipsOnLivenessError(t *testing.T) {
 
 	now := time.Now().UTC()
 	liveness := fakeLiveness{err: errors.New("liveness backend unavailable")}
-	n, err := finalizeStaleLogs(context.Background(), pool, liveness, time.Minute, now)
+	n, err := finalizeStaleLogs(context.Background(), pool, liveness, blob.NewPGBlobStore(pool), time.Minute, now)
 	if err != nil {
 		t.Fatalf("finalizeStaleLogs: %v", err)
 	}
@@ -320,7 +322,7 @@ func TestFinalizeStaleLogsPassesCellIdentityToLiveness(t *testing.T) {
 
 	liveness := &recordingLiveness{gone: true}
 	now := time.Now().UTC()
-	if _, err := finalizeStaleLogs(context.Background(), pool, liveness, time.Minute, now); err != nil {
+	if _, err := finalizeStaleLogs(context.Background(), pool, liveness, blob.NewPGBlobStore(pool), time.Minute, now); err != nil {
 		t.Fatalf("finalizeStaleLogs: %v", err)
 	}
 
@@ -380,7 +382,7 @@ func TestFinalizeStaleLogsSkipsWhenHeartbeatRacesTheUpdate(t *testing.T) {
 		t.Fatalf("apply fresh run.log: %v", err)
 	}
 
-	changed, err := finalizeLogSummary(context.Background(), pool, candidate.runID, candidate.writerHeartbeatRaw, cutoff)
+	changed, err := finalizeLogSummary(context.Background(), pool, candidate.runID, candidate.writerHeartbeatRaw, cutoff, 0)
 	if err != nil {
 		t.Fatalf("finalizeLogSummary: %v", err)
 	}
@@ -441,7 +443,7 @@ func TestFinalizeStaleLogsIsolatesMalformedHeartbeat(t *testing.T) {
 			}
 
 			now := time.Now().UTC()
-			n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, time.Minute, now)
+			n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, blob.NewPGBlobStore(pool), time.Minute, now)
 			if err != nil {
 				t.Fatalf("finalizeStaleLogs: %v", err)
 			}
@@ -502,7 +504,7 @@ func TestFinalizeStaleLogsProtectsFallbackAnchorFromRace(t *testing.T) {
 		t.Fatalf("apply concurrent run.heartbeat: %v", err)
 	}
 
-	changed, err := finalizeLogSummary(context.Background(), pool, candidate.runID, candidate.writerHeartbeatRaw, cutoff)
+	changed, err := finalizeLogSummary(context.Background(), pool, candidate.runID, candidate.writerHeartbeatRaw, cutoff, 0)
 	if err != nil {
 		t.Fatalf("finalizeLogSummary: %v", err)
 	}
