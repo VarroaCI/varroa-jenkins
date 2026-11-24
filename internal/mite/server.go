@@ -259,10 +259,12 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 			rec.RecordCellInstance(controllerName, namespace, cellInstance)
 		}
 	}
-	// A build event takes this stream's own instance, never the map entry
-	// above. Another pod of the same controller can overwrite that entry
-	// while this stream is still the current one.
+	// A build event, a run-state chunk, a command result, and a claim take
+	// this stream's own instance, never the map entry above. Another pod of
+	// the same controller can overwrite that entry while this stream is
+	// still the current one.
 	streamEvents, _ := handler.(streamBuildEventHandler)
+	streamInstance, _ := handler.(streamInstanceHandler)
 
 	// Create a sender function bound to this stream, protected by a mutex
 	// so background goroutines can send safely.
@@ -348,7 +350,11 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 			if ds := m.CommandResult.GetDesiredState(); ds != nil {
 				ds.CellInstance = cellInstance
 			}
-			handler.OnCommandResult(controllerName, namespace, m.CommandResult)
+			if streamInstance != nil {
+				streamInstance.OnStreamCommandResult(controllerName, namespace, cellInstance, m.CommandResult)
+			} else {
+				handler.OnCommandResult(controllerName, namespace, m.CommandResult)
+			}
 
 		case *mitev1.MiteMessage_TokenRefreshRequest:
 			// The operator answers the request with a TokenGrant on the
@@ -392,6 +398,12 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 
 		case *mitev1.MiteMessage_ClaimRequest:
 			if cr := m.ClaimRequest; cr != nil {
+				// The ledger records this value as the owner of the run,
+				// so a non-empty certificate instance replaces the payload
+				// value. An empty certificate keeps the payload value.
+				if cellInstance != "" {
+					cr.CellInstance = cellInstance
+				}
 				handler.OnClaimRequest(controllerName, namespace, connToken, cr, send)
 			}
 
@@ -412,7 +424,11 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 
 		case *mitev1.MiteMessage_RunStateChunk:
 			if rsc := m.RunStateChunk; rsc != nil {
-				handler.OnRunStateChunk(controllerName, namespace, rsc)
+				if streamInstance != nil {
+					streamInstance.OnStreamRunStateChunk(controllerName, namespace, cellInstance, rsc)
+				} else {
+					handler.OnRunStateChunk(controllerName, namespace, rsc)
+				}
 			}
 
 		case *mitev1.MiteMessage_RunStateRequest:

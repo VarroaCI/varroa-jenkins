@@ -109,7 +109,8 @@ func validRestartSourceChunk(chunk *mitev1.RunStateChunk) bool {
 // onRestartSourceChunk serves one chunk of a restart copy. A copy is
 // posted after its run finalizes, so the terminal-status drop of the mesh
 // path does not apply. Copy chunks use their own entry, so a refusal of
-// one kind never blocks the other.
+// one kind never blocks the other. chunk.CellInstance holds the sending
+// stream's instance, which OnStreamRunStateChunk set.
 func (h *BusHandler) onRestartSourceChunk(name, ns string, chunk *mitev1.RunStateChunk) {
 	ctx := context.Background()
 	if !validRestartSourceChunk(chunk) {
@@ -117,8 +118,7 @@ func (h *BusHandler) onRestartSourceChunk(name, ns string, chunk *mitev1.RunStat
 		return
 	}
 
-	instance := h.lookupCellInstance(ns, name)
-	decision, _ := h.checkOwner(ctx, h.cluster, ns, name, instance, chunk.RunId)
+	decision, _ := h.checkOwner(ctx, h.cluster, ns, name, chunk.CellInstance, chunk.RunId)
 	switch decision {
 	case ownerForeign:
 		h.rejectRestartSource(ctx, ns, name, chunk, stateReasonForeignRun)

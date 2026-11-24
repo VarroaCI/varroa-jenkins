@@ -123,6 +123,15 @@ type streamBuildEventHandler interface {
 	OnStreamBuildEvent(name, ns, cellInstance string, connToken int64, evt *mitev1.BuildEvent) error
 }
 
+// streamInstanceHandler is an optional capability of a StreamHandler. The
+// server calls OnStreamRunStateChunk and OnStreamCommandResult in place of
+// OnRunStateChunk and OnCommandResult, with the cell instance of the
+// stream's own verified certificate. BusHandler implements it.
+type streamInstanceHandler interface {
+	OnStreamRunStateChunk(name, ns, cellInstance string, chunk *mitev1.RunStateChunk)
+	OnStreamCommandResult(name, ns, cellInstance string, result *mitev1.CommandResult)
+}
+
 // presenceKeeper is an optional capability of a StreamHandler. The server
 // runs KeepPresence for each open stream on the stream context, and waits
 // for it to return before it calls OnDisconnect. loop reports what the read

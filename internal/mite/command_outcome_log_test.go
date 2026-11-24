@@ -51,7 +51,7 @@ func TestRecordCommandOutcome_RefusedRunCommandsLog(t *testing.T) {
 				CommandId: tc.cmd.CommandId, Success: false, Error: "build not found",
 				HttpStatus: 404, CommandType: tc.cmd.Type, JobPath: "acme/app", RunId: "r1", Actor: "alice",
 			}
-			if !h.recordCommandOutcome("cells", "cell-1", pendingImperativeMsg(t, tc.cmd), result) {
+			if !h.recordCommandOutcome("cells", "cell-1", "inst-1", pendingImperativeMsg(t, tc.cmd), result) {
 				t.Fatalf("%s store=%v: want an ack for a refused command", tc.name, storeEnabled)
 			}
 			out := logs.String()
@@ -64,7 +64,7 @@ func TestRecordCommandOutcome_RefusedRunCommandsLog(t *testing.T) {
 
 			logs.Reset()
 			result.Success, result.Error = true, ""
-			if !h.recordCommandOutcome("cells", "cell-1", pendingImperativeMsg(t, tc.cmd), result) {
+			if !h.recordCommandOutcome("cells", "cell-1", "inst-1", pendingImperativeMsg(t, tc.cmd), result) {
 				t.Fatalf("%s store=%v: want an ack for a success", tc.name, storeEnabled)
 			}
 			if logs.Len() != 0 {
