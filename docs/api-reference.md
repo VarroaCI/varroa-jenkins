@@ -49,6 +49,10 @@ The BFF sends each write, and each read of a member cluster, to the operator of 
 - `503` with the code `operator_unavailable`: no operator of the cluster received the request. The operator restarts or has no leader. Nothing changed, so send the request again later.
 - `502` with the text `cluster <name> unreachable`: the operator did not answer in time. It can have received the request. Read the object before you send a write again.
 
-A brood operation row of a cluster that no operator answered carries the code `operator_unavailable`. A create or preview that succeeds on no cluster answers `503` when such a row exists and no row names an unreachable cluster.
+A brood operation row of a cluster where no operator received the request carries the code `operator_unavailable`. When a create or preview succeeds on no cluster, the row codes set the status. The first rule that matches applies:
+
+1. `502` when a row has no code. The BFF has no operator reply that it can read for that row, so that operator can have acted.
+2. The status of the first operator reply: `404` for `not_found`, `409` for `conflict`, `400` for `invalid`, and `500` for any other code.
+3. `503` with the code `operator_unavailable` when each row has that code. Nothing changed, so send the request again later.
 
 For exhaustive schemas, examples, and media types, defer to the OpenAPI document rather than duplicating it here.

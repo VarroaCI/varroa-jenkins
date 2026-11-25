@@ -32,13 +32,19 @@
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
       "409":
-        description: Conflict (uniform across clusters).
+        description: >-
+          No cluster succeeded, and the first operator reply is conflict.
+          Each other row holds an operator reply or the code
+          operator_unavailable.
         content:
           application/json:
             schema:
               $ref: '../components/schemas.yaml#/BroodCreateFailure'
       "502":
-        description: All clusters failed or unreachable.
+        description: >-
+          No cluster succeeded, and a row holds no operator reply that the BFF
+          can read. That operator did not answer in time, or its reply was
+          unreadable. It can have acted.
         content:
           application/json:
             schema:
@@ -46,10 +52,9 @@
       "503":
         description: >-
           The brood operations store is not configured, or the BFF cannot read
-          the cluster list (an Error body). Or no operator of a failed cluster
-          received the request, and no failed row names an unreachable cluster
-          (a BroodCreateFailure body with the code operator_unavailable).
-          Nothing changed on a failed cluster.
+          the cluster list (an Error body). Or no operator of any target
+          cluster received the request (a BroodCreateFailure body with the
+          code operator_unavailable). Nothing changed.
         content:
           application/json:
             schema:
@@ -128,7 +133,10 @@
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
       "502":
-        description: All clusters unreachable.
+        description: >-
+          No cluster succeeded, and a row holds no operator reply that the BFF
+          can read. That operator did not answer in time, or its reply was
+          unreadable.
         content:
           application/json:
             schema:
@@ -136,10 +144,9 @@
       "503":
         description: >-
           The brood operations store is not configured, or the BFF cannot read
-          the cluster list (an Error body). Or no operator of a failed cluster
-          received the request, and no failed row names an unreachable cluster
-          (a BroodCreateFailure body with the code operator_unavailable).
-          Nothing changed on a failed cluster.
+          the cluster list (an Error body). Or no operator of any target
+          cluster received the request (a BroodCreateFailure body with the
+          code operator_unavailable).
         content:
           application/json:
             schema:

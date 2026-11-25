@@ -327,31 +327,11 @@ func (s *Server) handleBroodCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Zero successes.
-	rows := make([]fanoutRow, 0, len(failed))
+	codes := make([]string, 0, len(failed))
 	for _, f := range failed {
-		rows = append(rows, fanoutRow{code: f.Code, err: f.Error})
+		codes = append(codes, f.Code)
 	}
-
-	msg := "all clusters failed"
-	switch fanoutTransportStatus(rows) {
-	case http.StatusBadGateway:
-		s.writeJSONErrorStatus(w, http.StatusBadGateway, msg, map[string]interface{}{
-			"clusters": results,
-		})
-		return
-	case http.StatusServiceUnavailable:
-		s.writeJSONErrorStatus(w, http.StatusServiceUnavailable, noOperatorFanoutText, map[string]interface{}{
-			"code":     codeOperatorUnavailable,
-			"clusters": results,
-		})
-		return
-	}
-
-	// Use first cluster's code.
-	code := mapCodeToHTTP(failed[0].Code)
-	s.writeJSONErrorStatus(w, code, msg, map[string]interface{}{
-		"clusters": results,
-	})
+	s.writeBroodFailure(w, codes, results)
 }
 
 func buildBroodRunFromCreateResults(ns, name string, results []ClusterCreateResult) *BroodRun {
@@ -474,28 +454,11 @@ func (s *Server) handleBroodPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Zero resolved.
-	rows := make([]fanoutRow, 0, len(results))
+	codes := make([]string, 0, len(results))
 	for _, r := range results {
-		rows = append(rows, fanoutRow{code: r.Code, err: r.Error})
+		codes = append(codes, r.Code)
 	}
-
-	switch fanoutTransportStatus(rows) {
-	case http.StatusBadGateway:
-		s.writeJSONErrorStatus(w, http.StatusBadGateway, "all clusters unreachable", map[string]interface{}{
-			"clusters": results,
-		})
-		return
-	case http.StatusServiceUnavailable:
-		s.writeJSONErrorStatus(w, http.StatusServiceUnavailable, noOperatorFanoutText, map[string]interface{}{
-			"code":     codeOperatorUnavailable,
-			"clusters": results,
-		})
-		return
-	}
-
-	s.writeJSONErrorStatus(w, mapCodeToHTTP(results[0].Code), "all clusters failed", map[string]interface{}{
-		"clusters": results,
-	})
+	s.writeBroodFailure(w, codes, results)
 }
 
 // --- 4.5 List / Get ---
@@ -1039,31 +1002,55 @@ func sendSSEClosed(w http.ResponseWriter, flusher http.Flusher, reason, message 
 
 // --- Helpers ---
 
-// noOperatorFanoutText is the error of a fan-out with no success whose
-// transport failures are all requests that no operator received.
+// noOperatorFanoutText is the error of a fan-out with no success in which no
+// operator of any target cluster received the request.
 const noOperatorFanoutText = "no operator of a target cluster received the request; try again later"
 
-// fanoutRow is the code and the error text of one failed fan-out row.
-type fanoutRow struct {
-	code string
-	err  string
-}
-
-// fanoutTransportStatus returns the status of a fan-out with no success.
-// A row that names an unreachable cluster makes it 502, because that
-// operator can have acted. Otherwise a row that no operator received makes
-// it 503. It returns 0 when no row holds a transport failure.
-func fanoutTransportStatus(rows []fanoutRow) int {
-	status := 0
-	for _, r := range rows {
-		switch {
-		case r.code == codeOperatorUnavailable:
-			status = http.StatusServiceUnavailable
-		case strings.Contains(r.err, "unreachable"):
+// broodFailureStatus returns the status of a create or preview fan-out with
+// no success. codes holds the code of each failed row in request order. The
+// row code decides the status, never the row text, because an operator reply
+// can hold any text.
+//
+// A row with no code holds no operator reply that the BFF can read: the
+// operator did not answer in time, or its reply was unreadable. That operator
+// can have acted, so one such row makes it 502. Otherwise the first operator
+// reply gives its mapped status, because that operator answered. Only when
+// each row has the code operator_unavailable is it 503: no operator received
+// the request, so nothing changed and a retry is safe.
+func broodFailureStatus(codes []string) int {
+	replied := 0
+	for _, code := range codes {
+		switch code {
+		case "":
 			return http.StatusBadGateway
+		case codeOperatorUnavailable:
+		default:
+			if replied == 0 {
+				replied = mapCodeToHTTP(code)
+			}
 		}
 	}
-	return status
+	if replied != 0 {
+		return replied
+	}
+	return http.StatusServiceUnavailable
+}
+
+// writeBroodFailure writes the answer of a create or preview fan-out with no
+// success. codes holds the code of each row, and results is the row list of
+// the body. Only the 503 body carries the code operator_unavailable.
+func (s *Server) writeBroodFailure(w http.ResponseWriter, codes []string, results any) {
+	status := broodFailureStatus(codes)
+	if status == http.StatusServiceUnavailable {
+		s.writeJSONErrorStatus(w, status, noOperatorFanoutText, map[string]interface{}{
+			"code":     codeOperatorUnavailable,
+			"clusters": results,
+		})
+		return
+	}
+	s.writeJSONErrorStatus(w, status, "all clusters failed", map[string]interface{}{
+		"clusters": results,
+	})
 }
 
 func mapCodeToHTTP(code string) int {
