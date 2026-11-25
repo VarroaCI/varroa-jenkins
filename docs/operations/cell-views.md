@@ -115,11 +115,12 @@ The read applies the controller read check first, then cluster-wide `rolebinding
 | `200` | Both gates pass |
 | `403` | The controller check passes and the caller holds no `rolebindings:read` |
 | `404` | No such controller, a controller that is not a cell, or a refused controller check |
-| `502` | The cell runs on a member cluster and that cluster's operator does not answer |
+| `502` | The cell runs on a member cluster and that cluster's operator does not answer in time |
+| `503` | The cell runs on a member cluster and no operator of that cluster receives the read (code `operator_unavailable`) |
 
 One code for the three `404` conditions confirms no cell's existence. A cluster that the brood does not know also gives `404`, with the text `unknown cluster: <name>`.
 
-The read touches no record store, so it answers no `503`. It returns at most 50 grants for each tenant, narrowing grants first, and flags a cut list as `truncated`.
+The read touches no record store. It returns at most 50 grants for each tenant, narrowing grants first, and flags a cut list as `truncated`.
 
 A cell on a member cluster answers from that member's operator. The member operator reads its own Tenant and binding state, the state the member cell renders. Core tenant-scoped bindings appear there as `federatedBinding` rows. Each row names its JenkinsRoleBinding copy in `binding`, its source VarroaRole in `roleRef`, and its core VarroaRoleBindings in `federatedFrom`. A core cluster-wide binding with pipelines write appears through its all-tenants copy, as described in `cells.md`. The member operator sets `allTenants: true` on that row. Every other row omits the field.
 

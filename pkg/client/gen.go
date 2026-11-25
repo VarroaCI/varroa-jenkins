@@ -1454,10 +1454,13 @@ type ComponentsSchemasBreakGlassTarget struct {
 	Service   string `json:"service"`
 }
 
-// ComponentsSchemasBroodCreateFailure Error body when zero clusters succeed on create.
+// ComponentsSchemasBroodCreateFailure Error body when zero clusters succeed on create or preview.
 type ComponentsSchemasBroodCreateFailure struct {
 	Clusters []ComponentsSchemasBroodRunClusterStatus `json:"clusters"`
-	Error    string                                   `json:"error"`
+
+	// Code operator_unavailable on a 503: no operator of a failed cluster received the request, and nothing changed.
+	Code  *string `json:"code,omitempty"`
+	Error string  `json:"error"`
 }
 
 // ComponentsSchemasBroodOperationDetail Full brood operation resource with spec and status.
@@ -1559,7 +1562,10 @@ type ComponentsSchemasBroodPolicy struct {
 // ComponentsSchemasBroodPreviewResponse Per-cluster preview result with targets.
 type ComponentsSchemasBroodPreviewResponse struct {
 	Clusters []struct {
-		Cluster string  `json:"cluster"`
+		Cluster string `json:"cluster"`
+
+		// Code The reply code of the cluster's operator, or operator_unavailable when no operator of the cluster received the request.
+		Code    *string `json:"code,omitempty"`
 		Error   *string `json:"error,omitempty"`
 		Ok      bool    `json:"ok"`
 		Targets *[]struct {
@@ -1607,9 +1613,12 @@ type ComponentsSchemasBroodRunCluster struct {
 
 // ComponentsSchemasBroodRunClusterStatus Per-cluster fan-out outcome row.
 type ComponentsSchemasBroodRunClusterStatus struct {
-	Cluster string  `json:"cluster"`
-	Error   *string `json:"error,omitempty"`
-	Ok      bool    `json:"ok"`
+	Cluster string `json:"cluster"`
+
+	// Code The reply code of the cluster's operator, or operator_unavailable when no operator of the cluster received the request.
+	Code  *string `json:"code,omitempty"`
+	Error *string `json:"error,omitempty"`
+	Ok    bool    `json:"ok"`
 }
 
 // ComponentsSchemasBroodRunSummaryRow Summary row for a logical run in list responses.
@@ -1697,6 +1706,11 @@ type ComponentsSchemasBroodScheduleSpec struct {
 
 // ComponentsSchemasBroodScheduleSpecConcurrencyPolicy How to handle overlapping executions.
 type ComponentsSchemasBroodScheduleSpecConcurrencyPolicy string
+
+// ComponentsSchemasBroodUnavailable The 503 body of a brood operation create or preview. An Error body means that the brood operations store is not configured, or that the BFF cannot read the cluster list. A BroodCreateFailure body with the code operator_unavailable means that no operator of a failed cluster received the request.
+type ComponentsSchemasBroodUnavailable struct {
+	union json.RawMessage
+}
 
 // ComponentsSchemasBroodUpgradePolicy Governs the upgrade verb. Every field absent means enabled, the same rule as the executeGroovy policy.
 type ComponentsSchemasBroodUpgradePolicy struct {
@@ -2964,7 +2978,7 @@ type ComponentsSchemasEffectiveBundle struct {
 
 // ComponentsSchemasError defines model for components_schemas_Error.
 type ComponentsSchemasError struct {
-	// Code Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed. The value federated_copy means that the object is a federated copy. The response is 409, and a retry does not succeed. The value federated_label means that the request body sets the label varroa.dev/federated-from. The response is 400, and a repeat of the same body does not succeed.
+	// Code Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed. The value federated_copy means that the object is a federated copy. The response is 409, and a retry does not succeed. The value federated_label means that the request body sets the label varroa.dev/federated-from. The response is 400, and a repeat of the same body does not succeed. The value operator_unavailable means that no operator of the target cluster received the request. The response is 503, nothing changed, and a retry can succeed.
 	Code *string `json:"code,omitempty"`
 
 	// Error Human-readable error message.
@@ -6445,6 +6459,9 @@ type ComponentsResponsesNotFound = ComponentsSchemasError
 // ComponentsResponsesNotImplemented defines model for components_responses_NotImplemented.
 type ComponentsResponsesNotImplemented = ComponentsSchemasError
 
+// ComponentsResponsesOperatorUnavailable defines model for components_responses_OperatorUnavailable.
+type ComponentsResponsesOperatorUnavailable = ComponentsSchemasError
+
 // ComponentsResponsesPayloadTooLarge defines model for components_responses_PayloadTooLarge.
 type ComponentsResponsesPayloadTooLarge = ComponentsSchemasError
 
@@ -7518,6 +7535,68 @@ func (a ComponentsSchemasProfileCandidate) MarshalJSON() ([]byte, error) {
 		}
 	}
 	return json.Marshal(object)
+}
+
+// AsComponentsSchemasError returns the union data inside the ComponentsSchemasBroodUnavailable as a ComponentsSchemasError
+func (t ComponentsSchemasBroodUnavailable) AsComponentsSchemasError() (ComponentsSchemasError, error) {
+	var body ComponentsSchemasError
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromComponentsSchemasError overwrites any union data inside the ComponentsSchemasBroodUnavailable as the provided ComponentsSchemasError
+func (t *ComponentsSchemasBroodUnavailable) FromComponentsSchemasError(v ComponentsSchemasError) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeComponentsSchemasError performs a merge with any union data inside the ComponentsSchemasBroodUnavailable, using the provided ComponentsSchemasError
+func (t *ComponentsSchemasBroodUnavailable) MergeComponentsSchemasError(v ComponentsSchemasError) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsComponentsSchemasBroodCreateFailure returns the union data inside the ComponentsSchemasBroodUnavailable as a ComponentsSchemasBroodCreateFailure
+func (t ComponentsSchemasBroodUnavailable) AsComponentsSchemasBroodCreateFailure() (ComponentsSchemasBroodCreateFailure, error) {
+	var body ComponentsSchemasBroodCreateFailure
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromComponentsSchemasBroodCreateFailure overwrites any union data inside the ComponentsSchemasBroodUnavailable as the provided ComponentsSchemasBroodCreateFailure
+func (t *ComponentsSchemasBroodUnavailable) FromComponentsSchemasBroodCreateFailure(v ComponentsSchemasBroodCreateFailure) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeComponentsSchemasBroodCreateFailure performs a merge with any union data inside the ComponentsSchemasBroodUnavailable, using the provided ComponentsSchemasBroodCreateFailure
+func (t *ComponentsSchemasBroodUnavailable) MergeComponentsSchemasBroodCreateFailure(v ComponentsSchemasBroodCreateFailure) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ComponentsSchemasBroodUnavailable) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ComponentsSchemasBroodUnavailable) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
 }
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
@@ -22766,7 +22845,7 @@ type CreateBroodOperationResponse struct {
 	JSON403      *ComponentsResponsesForbidden
 	JSON409      *ComponentsSchemasBroodCreateFailure
 	JSON502      *ComponentsSchemasBroodCreateFailure
-	JSON503      *ComponentsResponsesServiceUnavailable
+	JSON503      *ComponentsSchemasBroodUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -22793,7 +22872,7 @@ type PreviewBroodOperationResponse struct {
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
 	JSON502      *ComponentsSchemasBroodCreateFailure
-	JSON503      *ComponentsResponsesServiceUnavailable
+	JSON503      *ComponentsSchemasBroodUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -23136,6 +23215,7 @@ type GetCellPoolResponse struct {
 	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
 	JSON502      *ComponentsResponsesClusterUnreachable
+	JSON503      *ComponentsResponsesOperatorUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -23164,6 +23244,7 @@ type PatchCellPoolResponse struct {
 	JSON404      *ComponentsResponsesNotFound
 	JSON409      *ComponentsResponsesConflict
 	JSON502      *ComponentsResponsesClusterUnreachable
+	JSON503      *ComponentsResponsesOperatorUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -23217,6 +23298,7 @@ type GetCellGrantsResponse struct {
 	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
 	JSON502      *ComponentsResponsesClusterUnreachable
+	JSON503      *ComponentsResponsesOperatorUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -24330,6 +24412,7 @@ type CancelClusterDrainResponse struct {
 	JSON409 *ComponentsResponsesConflict
 	JSON500 *ComponentsResponsesInternal
 	JSON502 *ComponentsResponsesClusterUnreachable
+	JSON503 *ComponentsResponsesOperatorUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -24361,6 +24444,7 @@ type DrainClusterResponse struct {
 	JSON409 *ComponentsResponsesConflict
 	JSON500 *ComponentsResponsesInternal
 	JSON502 *ComponentsResponsesClusterUnreachable
+	JSON503 *ComponentsResponsesOperatorUnavailable
 }
 
 // Status returns HTTPResponse.Status
@@ -31085,7 +31169,7 @@ func ParseCreateBroodOperationResponse(rsp *http.Response) (*CreateBroodOperatio
 		response.JSON502 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
-		var dest ComponentsResponsesServiceUnavailable
+		var dest ComponentsSchemasBroodUnavailable
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -31146,7 +31230,7 @@ func ParsePreviewBroodOperationResponse(rsp *http.Response) (*PreviewBroodOperat
 		response.JSON502 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
-		var dest ComponentsResponsesServiceUnavailable
+		var dest ComponentsSchemasBroodUnavailable
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -31786,6 +31870,13 @@ func ParseGetCellPoolResponse(rsp *http.Response) (*GetCellPoolResponse, error) 
 		}
 		response.JSON502 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesOperatorUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
 	}
 
 	return response, nil
@@ -31853,6 +31944,13 @@ func ParsePatchCellPoolResponse(rsp *http.Response) (*PatchCellPoolResponse, err
 			return nil, err
 		}
 		response.JSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesOperatorUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
@@ -31956,6 +32054,13 @@ func ParseGetCellGrantsResponse(rsp *http.Response) (*GetCellGrantsResponse, err
 			return nil, err
 		}
 		response.JSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesOperatorUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
@@ -34057,6 +34162,13 @@ func ParseCancelClusterDrainResponse(rsp *http.Response) (*CancelClusterDrainRes
 		}
 		response.JSON502 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesOperatorUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
 	}
 
 	return response, nil
@@ -34133,6 +34245,13 @@ func ParseDrainClusterResponse(rsp *http.Response) (*DrainClusterResponse, error
 			return nil, err
 		}
 		response.JSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesOperatorUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 

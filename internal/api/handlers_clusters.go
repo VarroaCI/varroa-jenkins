@@ -424,7 +424,7 @@ const createOnlyPutForbidden = "forbidden: a body without metadata.resourceVersi
 
 // writeConfigBroodError maps config brood errors to HTTP status codes (DP3).
 // not_found → 404, conflict → 409, invalid → 400, internal → 500,
-// ErrClusterUnreachable → 502 with {error: "cluster <name> unreachable"}.
+// ErrClusterUnreachable → clusterRequestFailure.
 func writeConfigBroodError(w http.ResponseWriter, err error, cluster string) {
 	if err == nil {
 		return
@@ -456,7 +456,7 @@ func writeConfigBroodError(w http.ResponseWriter, err error, cluster string) {
 	}
 	var unreachable *ErrClusterUnreachable
 	if errors.As(err, &unreachable) {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "cluster " + cluster + " unreachable"})
+		writeClusterRequestFailure(w, cluster, unreachable.Err)
 		return
 	}
 	writeJSON(w, http.StatusInternalServerError, body(err.Error()))

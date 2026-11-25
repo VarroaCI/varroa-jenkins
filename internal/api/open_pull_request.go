@@ -17,8 +17,8 @@ import (
 // have landed.
 const codeOperatorTimeout = "operator_timeout"
 
-// codeOperatorUnavailable reports that no operator received a forge request.
-// The operator wrote nothing, so the caller can call again.
+// codeOperatorUnavailable reports that no operator received a request. The
+// operator wrote nothing, so the caller can call again.
 const codeOperatorUnavailable = "operator_unavailable"
 
 // isOperatorTimeout reports whether the relay stopped waiting for the operator.

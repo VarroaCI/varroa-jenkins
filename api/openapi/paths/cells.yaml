@@ -122,3 +122,5 @@
         $ref: '../components/responses.yaml#/NotFound'
       "502":
         $ref: '../components/responses.yaml#/ClusterUnreachable'
+      "503":
+        $ref: '../components/responses.yaml#/OperatorUnavailable'

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -854,12 +855,14 @@ func (s *stubBroodOps) Preview(ctx context.Context, clusters []string, ns string
 
 // countingBroodOps counts the create and preview calls that reach the store
 // and keeps the clusters of the last call. A cluster in unreachable answers
-// with the row of a cluster that does not reply.
+// with the row of a cluster that does not reply. A cluster in noOperator
+// answers with the row of a cluster whose operator received nothing.
 type countingBroodOps struct {
 	stubBroodOps
 	creates, previews int
 	clusters          []string
 	unreachable       map[string]bool
+	noOperator        map[string]bool
 }
 
 func (c *countingBroodOps) Create(ctx context.Context, clusters []string, ns, name string, specs map[string]v1alpha1.BroodOperationSpec, startedBy string) []ClusterCreateResult {
@@ -869,6 +872,10 @@ func (c *countingBroodOps) Create(ctx context.Context, clusters []string, ns, na
 	for i, r := range results {
 		if c.unreachable[r.Cluster] {
 			results[i] = ClusterCreateResult{Cluster: r.Cluster, Error: "cluster " + r.Cluster + " unreachable: nats: timeout"}
+		}
+		if c.noOperator[r.Cluster] {
+			code, msg := clusterRowFailure(r.Cluster, nats.ErrNoResponders)
+			results[i] = ClusterCreateResult{Cluster: r.Cluster, Code: code, Error: msg}
 		}
 	}
 	return results
@@ -881,6 +888,10 @@ func (c *countingBroodOps) Preview(ctx context.Context, clusters []string, ns st
 	for i, r := range results {
 		if c.unreachable[r.Cluster] {
 			results[i] = ClusterPreviewResult{Cluster: r.Cluster, Error: "cluster " + r.Cluster + " unreachable: nats: timeout"}
+		}
+		if c.noOperator[r.Cluster] {
+			code, msg := clusterRowFailure(r.Cluster, nats.ErrNoResponders)
+			results[i] = ClusterPreviewResult{Cluster: r.Cluster, Code: code, Error: msg}
 		}
 	}
 	return results

@@ -44,7 +44,16 @@
             schema:
               $ref: '../components/schemas.yaml#/BroodCreateFailure'
       "503":
-        $ref: '../components/responses.yaml#/ServiceUnavailable'
+        description: >-
+          The brood operations store is not configured, or the BFF cannot read
+          the cluster list (an Error body). Or no operator of a failed cluster
+          received the request, and no failed row names an unreachable cluster
+          (a BroodCreateFailure body with the code operator_unavailable).
+          Nothing changed on a failed cluster.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/BroodUnavailable'
   get:
     operationId: listBroodOperations
     tags: [broodops]
@@ -125,7 +134,16 @@
             schema:
               $ref: '../components/schemas.yaml#/BroodCreateFailure'
       "503":
-        $ref: '../components/responses.yaml#/ServiceUnavailable'
+        description: >-
+          The brood operations store is not configured, or the BFF cannot read
+          the cluster list (an Error body). Or no operator of a failed cluster
+          received the request, and no failed row names an unreachable cluster
+          (a BroodCreateFailure body with the code operator_unavailable).
+          Nothing changed on a failed cluster.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/BroodUnavailable'
 
 /api/v1/brood-operations/{ns}/{name}:
   get:

@@ -392,7 +392,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			return mcp.NewToolResultError("reconciler not available"), nil
 		}
 		if err := deps.Reconciler.ApproveRestart(ctx, cluster, ns, name, "restart", ""); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to restart controller: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to restart controller: %v", api.ActionRequestError(cluster, err))), nil
 		}
 		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:       "restart.approved",
@@ -432,7 +432,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			return mcp.NewToolResultError("reconciler not available"), nil
 		}
 		if err := deps.Reconciler.Hibernate(ctx, cluster, ns, name); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to hibernate controller: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to hibernate controller: %v", api.ActionRequestError(cluster, err))), nil
 		}
 		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:       "controller.hibernated",
@@ -471,7 +471,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			return mcp.NewToolResultError("reconciler not available"), nil
 		}
 		if err := deps.Reconciler.Wake(ctx, cluster, ns, name); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to wake controller: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to wake controller: %v", api.ActionRequestError(cluster, err))), nil
 		}
 		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:       "controller.woken",

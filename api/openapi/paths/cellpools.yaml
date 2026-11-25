@@ -67,6 +67,8 @@
         $ref: '../components/responses.yaml#/NotFound'
       "502":
         $ref: '../components/responses.yaml#/ClusterUnreachable'
+      "503":
+        $ref: '../components/responses.yaml#/OperatorUnavailable'
   patch:
     operationId: patchCellPool
     tags: [CellPools]
@@ -104,3 +106,5 @@
         $ref: '../components/responses.yaml#/Conflict'
       "502":
         $ref: '../components/responses.yaml#/ClusterUnreachable'
+      "503":
+        $ref: '../components/responses.yaml#/OperatorUnavailable'

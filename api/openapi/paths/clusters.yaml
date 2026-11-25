@@ -69,6 +69,8 @@
         $ref: '../components/responses.yaml#/Internal'
       "502":
         $ref: '../components/responses.yaml#/ClusterUnreachable'
+      "503":
+        $ref: '../components/responses.yaml#/OperatorUnavailable'
   delete:
     operationId: cancelClusterDrain
     tags: [clusters]
@@ -96,6 +98,8 @@
         $ref: '../components/responses.yaml#/Internal'
       "502":
         $ref: '../components/responses.yaml#/ClusterUnreachable'
+      "503":
+        $ref: '../components/responses.yaml#/OperatorUnavailable'
 
 /api/v1/clusters/{cluster}/namespaces/deployable:
   parameters:

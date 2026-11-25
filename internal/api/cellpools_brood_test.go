@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 
+	"github.com/nats-io/nats.go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -50,21 +50,34 @@ func (b *twoClusterBrood) IsKnown(_ context.Context, cluster string) bool {
 }
 
 // memberPoolBrood serves member pools from memory. A cluster in
-// unreachable answers ErrClusterUnreachable, the way busConfigBrood does
-// when no operator replies.
+// unreachable answers ErrClusterUnreachable with a timeout, the way
+// busConfigBrood does when the operator does not reply in time. A cluster in
+// noOperator answers it with a no-responder error.
 type memberPoolBrood struct {
 	ConfigBrood
 	mu          sync.Mutex
 	pools       map[string]map[string]*v1alpha1.CellPool
 	unreachable map[string]bool
+	noOperator  map[string]bool
 	failList    map[string]bool
 	scales      []bus.CellPoolScaleRequest
 	scaleTarget []string
 }
 
-func (m *memberPoolBrood) ListCellPools(_ context.Context, cluster string) ([]v1alpha1.CellPool, error) {
+// memberFailure answers the request error of cluster, or nil.
+func (m *memberPoolBrood) memberFailure(cluster string) error {
+	if m.noOperator[cluster] {
+		return &ErrClusterUnreachable{Cluster: cluster, Err: nats.ErrNoResponders}
+	}
 	if m.unreachable[cluster] {
-		return nil, &ErrClusterUnreachable{Cluster: cluster, Err: errors.New("no responders")}
+		return &ErrClusterUnreachable{Cluster: cluster, Err: nats.ErrTimeout}
+	}
+	return nil
+}
+
+func (m *memberPoolBrood) ListCellPools(_ context.Context, cluster string) ([]v1alpha1.CellPool, error) {
+	if err := m.memberFailure(cluster); err != nil {
+		return nil, err
 	}
 	if m.failList[cluster] {
 		return nil, &BroodError{Code: bus.CodeInternal, Msg: "list failed"}
@@ -77,8 +90,8 @@ func (m *memberPoolBrood) ListCellPools(_ context.Context, cluster string) ([]v1
 }
 
 func (m *memberPoolBrood) GetCellPool(_ context.Context, cluster, name string) (*v1alpha1.CellPool, error) {
-	if m.unreachable[cluster] {
-		return nil, &ErrClusterUnreachable{Cluster: cluster, Err: errors.New("no responders")}
+	if err := m.memberFailure(cluster); err != nil {
+		return nil, err
 	}
 	p, ok := m.pools[cluster][name]
 	if !ok {
@@ -92,8 +105,8 @@ func (m *memberPoolBrood) ScaleCellPool(_ context.Context, cluster string, req b
 	defer m.mu.Unlock()
 	m.scales = append(m.scales, req)
 	m.scaleTarget = append(m.scaleTarget, cluster)
-	if m.unreachable[cluster] {
-		return nil, &ErrClusterUnreachable{Cluster: cluster, Err: errors.New("no responders")}
+	if err := m.memberFailure(cluster); err != nil {
+		return nil, err
 	}
 	p, ok := m.pools[cluster][req.Name]
 	if !ok {

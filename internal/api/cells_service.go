@@ -251,7 +251,7 @@ func cellGrantsServiceError(err error, cluster string) *ServiceError {
 	var brood *BroodError
 	switch {
 	case errors.As(err, &unreachable):
-		return &ServiceError{Status: http.StatusBadGateway, Message: "cluster " + cluster + " unreachable"}
+		return clusterRequestFailure(cluster, unreachable.Err)
 	case errors.As(err, &brood) && brood.Code == bus.CodeNotFound:
 		return &ServiceError{Status: http.StatusNotFound, Message: "cell not found"}
 	}

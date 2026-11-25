@@ -200,7 +200,7 @@ func (s *Server) lintOnMember(ctx context.Context, cluster string, cr *v1alpha1.
 		var brood *BroodError
 		switch {
 		case errors.As(err, &unreachable):
-			return nil, &ServiceError{Status: http.StatusBadGateway, Message: "cluster " + cluster + " unreachable"}
+			return nil, clusterRequestFailure(cluster, unreachable.Err)
 		case errors.As(err, &brood) && brood.Code == bus.CodeNotFound:
 			return nil, &ServiceError{Status: http.StatusServiceUnavailable, Message: "read tenant cell failed"}
 		}

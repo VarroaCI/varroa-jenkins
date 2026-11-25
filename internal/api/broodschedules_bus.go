@@ -92,7 +92,7 @@ func (f *busBroodSchedules) Create(ctx context.Context, cluster, ns, name string
 	target := f.targetCluster(cluster)
 	respData, err := f.request(bus.OperatorBroodSchedulesSubject(target, "create"), data, broodSchedulesCreateTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("cluster %s unreachable: %w", target, err)
+		return nil, &ErrClusterUnreachable{Cluster: target, Err: err}
 	}
 	var reply bus.BroodScheduleResponse
 	if err := json.Unmarshal(respData, &reply); err != nil {
@@ -115,7 +115,7 @@ func (f *busBroodSchedules) Get(ctx context.Context, cluster, ns, name string) (
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("get brood schedule on %s: %w", target, ctx.Err())
 		}
-		return nil, fmt.Errorf("cluster %s unreachable: %w", target, err)
+		return nil, &ErrClusterUnreachable{Cluster: target, Err: err}
 	}
 	var reply bus.BroodScheduleResponse
 	if err := json.Unmarshal(respData, &reply); err != nil {
@@ -241,7 +241,7 @@ func (f *busBroodSchedules) Delete(ctx context.Context, cluster, ns, name string
 	target := f.targetCluster(cluster)
 	respData, err := f.request(bus.OperatorBroodSchedulesSubject(target, "delete"), data, broodSchedulesDeleteTimeout)
 	if err != nil {
-		return fmt.Errorf("cluster %s unreachable: %w", target, err)
+		return &ErrClusterUnreachable{Cluster: target, Err: err}
 	}
 	var reply bus.BroodScheduleResponse
 	if err := json.Unmarshal(respData, &reply); err != nil {
@@ -260,7 +260,7 @@ func (f *busBroodSchedules) Suspend(ctx context.Context, cluster, ns, name strin
 	target := f.targetCluster(cluster)
 	respData, err := f.request(bus.OperatorBroodSchedulesSubject(target, "suspend"), data, broodSchedulesSuspendTimeout)
 	if err != nil {
-		return fmt.Errorf("cluster %s unreachable: %w", target, err)
+		return &ErrClusterUnreachable{Cluster: target, Err: err}
 	}
 	var reply bus.BroodScheduleResponse
 	if err := json.Unmarshal(respData, &reply); err != nil {

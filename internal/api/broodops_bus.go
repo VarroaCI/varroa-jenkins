@@ -142,7 +142,8 @@ func (f *busBroodOps) Create(ctx context.Context, clusters []string, ns, name st
 			respData, err := f.request(bus.OperatorBroodOpsSubject(c, "create"), data, broodOpsCreateTimeout)
 			if err != nil {
 				mu.Lock()
-				results[idx] = ClusterCreateResult{Cluster: c, OK: false, Error: fmt.Sprintf("cluster %s unreachable: %v", c, err)}
+				code, msg := clusterRowFailure(c, err)
+				results[idx] = ClusterCreateResult{Cluster: c, OK: false, Code: code, Error: msg}
 				mu.Unlock()
 				return
 			}
@@ -441,7 +442,8 @@ func (f *busBroodOps) actionFanOut(verb string, clusters []string, ns, name stri
 			respData, err := f.request(bus.OperatorBroodOpsSubject(c, verb), data, timeout)
 			if err != nil {
 				mu.Lock()
-				results[idx] = ClusterActionResult{Cluster: c, OK: false, Error: fmt.Sprintf("cluster %s unreachable: %v", c, err)}
+				code, msg := clusterRowFailure(c, err)
+				results[idx] = ClusterActionResult{Cluster: c, OK: false, Code: code, Error: msg}
 				mu.Unlock()
 				return
 			}
@@ -511,7 +513,8 @@ func (f *busBroodOps) Preview(ctx context.Context, clusters []string, ns string,
 				if ctx.Err() != nil {
 					results[idx] = ClusterPreviewResult{Cluster: c, OK: false, Error: "preview cancelled"}
 				} else {
-					results[idx] = ClusterPreviewResult{Cluster: c, OK: false, Error: fmt.Sprintf("cluster %s unreachable: %v", c, err)}
+					code, msg := clusterRowFailure(c, err)
+					results[idx] = ClusterPreviewResult{Cluster: c, OK: false, Code: code, Error: msg}
 				}
 				mu.Unlock()
 				return
