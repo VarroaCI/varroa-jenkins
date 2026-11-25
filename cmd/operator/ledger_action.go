@@ -60,6 +60,11 @@ type ledgerActionRunner interface {
 	// JenkinsLocationURL answers the Jenkins location URL that the operator
 	// injects for the headless controller, or "" when it cannot name one.
 	JenkinsLocationURL(ctx context.Context, namespace, name string) string
+	// EndStatusLocation answers the location URL that the end write compares
+	// for a run of the controller, also for a deleted controller, and the
+	// door prefix of the cluster. Either answer is "" when the operator
+	// cannot name it.
+	EndStatusLocation(ctx context.Context, namespace, name string) (cell, doors string)
 }
 
 // commitStatusWriter writes the commit statuses that the recorder asks for:
@@ -156,10 +161,13 @@ func dispatchEndCommitStatus(ctx context.Context, logger *slog.Logger, rec ledge
 // whose branch job lost its branch source. It runs only when the
 // action names the tenant, the repository, the commit, the cell, and the
 // build number, and the operator has a forge answerer. It reads the Jenkins
-// location URL of the action's cell, and the forge answerer writes only over
-// a status whose target URL starts with it. A cell with no location URL
-// writes nothing, and the status then stays pending. A failure is logged and
-// never retried: the status then stays pending.
+// location URL of the action's cell, or the door of a deleted cell, and the
+// door prefix of the cluster (EndStatusLocation). The forge answerer writes
+// only over a status whose target URL is under that location URL. A reason
+// end also writes over the build URL under the door of another cell of the
+// tenant. A cell with no location URL writes nothing, and the status then
+// stays pending. A failure is logged and never retried: the status then
+// stays pending.
 func endCommitStatus(ctx context.Context, logger *slog.Logger, rec ledgerActionRunner, forge commitStatusWriter, action recordstore.LedgerAction) {
 	if forge == nil || action.Tenant == "" || action.Repo == "" || action.Revision == "" ||
 		action.Namespace == "" || action.Controller == "" || action.BuildNumber == nil {
@@ -167,7 +175,7 @@ func endCommitStatus(ctx context.Context, logger *slog.Logger, rec ledgerActionR
 			"run_id", action.RunID, "tenant", action.Tenant, "forge", forge != nil)
 		return
 	}
-	root := rec.JenkinsLocationURL(ctx, action.Namespace, action.Controller)
+	root, doors := rec.EndStatusLocation(ctx, action.Namespace, action.Controller)
 	if root == "" {
 		logger.Warn("end_commit_status skipped, the cell has no Jenkins location url",
 			"run_id", action.RunID, "tenant", action.Tenant,
@@ -186,6 +194,7 @@ func endCommitStatus(ctx context.Context, logger *slog.Logger, rec ledgerActionR
 		Reason:      action.Reason,
 		Result:      action.Result,
 		JenkinsURL:  root,
+		CellDoors:   doors,
 	})
 	if err != nil {
 		logger.Warn("end_commit_status failed", "run_id", action.RunID, "tenant", action.Tenant, "error", err)
@@ -271,7 +280,8 @@ func restoreCommitStatus(ctx context.Context, logger *slog.Logger, forge commitS
 // unknown kind takes no action and is counted. end_commit_status asks the
 // forge answerer to end the pending commit statuses of the build under the
 // Jenkins location URL of its cell, from the recorder's synthetic reason or
-// from a completed run's result.
+// from a completed run's result. A reason end also ends the build's pending
+// status under the door of another cell.
 // restore_commit_status asks it, after restoreSettleDelay, to put the
 // newest build's result back over the statuses of older builds.
 // release_instance_agents deletes the idle agent pods of a confirmed gone

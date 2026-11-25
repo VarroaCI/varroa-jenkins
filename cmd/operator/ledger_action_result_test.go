@@ -9,7 +9,8 @@ import (
 )
 
 // TestHandleLedgerAction_EndCommitStatusPassesResult checks that a Result
-// action reaches the forge with its result and without a reason.
+// action reaches the forge with its result and without a reason. The request
+// carries the door prefix, and the forge answerer ignores it for a result.
 func TestHandleLedgerAction_EndCommitStatusPassesResult(t *testing.T) {
 	bn := int64(7)
 	data := marshalLedgerAction(t, recordstore.LedgerAction{
@@ -22,7 +23,7 @@ func TestHandleLedgerAction_EndCommitStatusPassesResult(t *testing.T) {
 	ender := &fakeCommitStatusWriter{}
 	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
 		"varroa.ledger.actions.core", "core", endRunner(), ender, data)
-	reqs := waitCalls(t, ender, 1)
+	reqs := waitCalls(t, ender)
 	want := forgeapi.CommitStatusRequest{
 		Tenant:      "payments",
 		Repo:        "https://git.example.org/acme/app",
@@ -31,6 +32,7 @@ func TestHandleLedgerAction_EndCommitStatusPassesResult(t *testing.T) {
 		BuildNumber: 7,
 		Result:      "FAILURE",
 		JenkinsURL:  endCellURL,
+		CellDoors:   endDoors,
 	}
 	if reqs[0] != want {
 		t.Fatalf("request = %+v, want %+v", reqs[0], want)

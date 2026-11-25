@@ -23,3 +23,21 @@ func TestHeadlessLocationURL(t *testing.T) {
 		})
 	}
 }
+
+// TestHeadlessDoorPrefix checks that the door prefix is the start of every
+// location URL of the cluster, and that an empty argument answers "".
+func TestHeadlessDoorPrefix(t *testing.T) {
+	if got := HeadlessDoorPrefix("", "core"); got != "" {
+		t.Errorf("HeadlessDoorPrefix with no origin = %q, want empty", got)
+	}
+	if got := HeadlessDoorPrefix("https://varroa.example.com", ""); got != "" {
+		t.Errorf("HeadlessDoorPrefix with no cluster = %q, want empty", got)
+	}
+	prefix := HeadlessDoorPrefix("https://varroa.example.com/", "core")
+	if prefix != "https://varroa.example.com/headless/core/" {
+		t.Errorf("HeadlessDoorPrefix = %q", prefix)
+	}
+	if door := HeadlessLocationURL("https://varroa.example.com/", "core", "cells", "cell-a"); door != prefix+"cells/cell-a/" {
+		t.Errorf("HeadlessLocationURL = %q, want it under %q", door, prefix)
+	}
+}

@@ -25,8 +25,19 @@ func IsHeadless(cr *Controller) bool {
 // This is the single place that builds this value. Every consumer (the
 // operator's location injection, break-glass, and the diff mirror) calls it.
 func HeadlessLocationURL(origin, cluster, namespace, name string) string {
-	if origin == "" || cluster == "" || namespace == "" || name == "" {
+	prefix := HeadlessDoorPrefix(origin, cluster)
+	if prefix == "" || namespace == "" || name == "" {
 		return ""
 	}
-	return strings.TrimRight(origin, "/") + "/headless/" + cluster + "/" + namespace + "/" + name + "/"
+	return prefix + namespace + "/" + name + "/"
+}
+
+// HeadlessDoorPrefix returns the part of every dashboard door of cluster under
+// origin that comes before the namespace. It returns "" when either argument
+// is empty. HeadlessLocationURL appends the namespace and the name to it.
+func HeadlessDoorPrefix(origin, cluster string) string {
+	if origin == "" || cluster == "" {
+		return ""
+	}
+	return strings.TrimRight(origin, "/") + "/headless/" + cluster + "/"
 }

@@ -50,12 +50,32 @@ type fakeLedgerActionRunner struct {
 	// that JenkinsLocationURL answers. A test sets it before the handler
 	// runs, and the timer goroutine only reads it.
 	locationURLs map[string]string
+	// endLocations maps "<namespace>/<name>" to the location URL that
+	// EndStatusLocation answers. A controller with no entry answers its
+	// locationURLs entry. doors is the door prefix that EndStatusLocation
+	// answers with a location URL.
+	endLocations map[string]string
+	doors        string
 }
 
 // JenkinsLocationURL answers the location URL that the test set for the
 // controller, or "".
 func (f *fakeLedgerActionRunner) JenkinsLocationURL(_ context.Context, namespace, name string) string {
 	return f.locationURLs[namespace+"/"+name]
+}
+
+// EndStatusLocation answers the location URL that the test set for the
+// controller and the door prefix, or "" for both.
+func (f *fakeLedgerActionRunner) EndStatusLocation(_ context.Context, namespace, name string) (string, string) {
+	key := namespace + "/" + name
+	cell, ok := f.endLocations[key]
+	if !ok {
+		cell = f.locationURLs[key]
+	}
+	if cell == "" {
+		return "", ""
+	}
+	return cell, f.doors
 }
 
 // ReleaseInstanceAgentPods records the call a release_instance_agents

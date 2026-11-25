@@ -201,7 +201,8 @@ type PullRequestReply struct {
 // of one build. The recorder sends it when it ends a run that Jenkins never
 // completes, and when a completed run of a dead branch job lost its branch
 // source. The operator writes only a status whose target URL is under
-// JenkinsURL, the location URL of the Jenkins that ran the build. It has no
+// JenkinsURL, the location URL of the Jenkins that ran the build, or, for a
+// Reason request, under the door of another cell in CellDoors. It has no
 // reply: the operator logs the outcome.
 type CommitStatusRequest struct {
 	Tenant      string `json:"tenant"`
@@ -215,6 +216,12 @@ type CommitStatusRequest struct {
 	// branch source. A request sets exactly one of Reason and Result.
 	Result     string `json:"result,omitempty"`
 	JenkinsURL string `json:"jenkinsURL"`
+	// CellDoors is the part of every dashboard door of the cluster before the
+	// namespace (v1alpha1.HeadlessDoorPrefix). A Reason request also matches
+	// the build URL under the door of another cell of the tenant, because a
+	// resume can move a run to another cell. Empty matches JenkinsURL alone.
+	// A Result request ignores it.
+	CellDoors string `json:"cellDoors,omitempty"`
 }
 
 // NewestStatusRequest asks the operator to put the result of the newest
