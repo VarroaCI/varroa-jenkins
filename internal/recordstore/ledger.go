@@ -525,13 +525,16 @@ func reanswerSameRun(ctx context.Context, tx pgx.Tx, req ClaimRequest, row store
 	if !sameInstance {
 		// The move stamps the claiming incarnation, because the claiming
 		// instance runs the build. The run then belongs to that incarnation.
+		// The namespace moves with the cell, so the pair names one controller.
 		var cluster string
 		if err := tx.QueryRow(ctx, `
 			UPDATE varroa.run_intents
-			SET cell = $1, cell_instance = $2, placement_generation = $3, granted_at = now(), incarnation = $5
+			SET namespace = $6, cell = $1, cell_instance = $2, placement_generation = $3, granted_at = now(),
+			    incarnation = $5
 			WHERE run_id = $4
 			RETURNING cluster
-		`, nullableString(req.Cell), nullableString(req.CellInstance), req.PlacementGeneration, row.runID, incarnation).
+		`, nullableString(req.Cell), nullableString(req.CellInstance), req.PlacementGeneration, row.runID, incarnation,
+			req.Namespace).
 			Scan(&cluster); err != nil {
 			return ClaimResponse{}, claimEffects{}, fmt.Errorf("move ownership: %w", err)
 		}
@@ -585,16 +588,17 @@ func transferIntent(ctx context.Context, tx pgx.Tx, req ClaimRequest, newRunID u
 	if err != nil {
 		return ClaimResponse{}, "", err
 	}
+	// The namespace moves with the cell, so the pair names one controller.
 	var cluster string
 	if err := tx.QueryRow(ctx, `
 		UPDATE varroa.run_intents
-		SET run_id = $1, created_at = $2, cell = $3, cell_instance = $4,
+		SET run_id = $1, created_at = $2, namespace = $9, cell = $3, cell_instance = $4,
 		    placement_generation = $5, build_number = $6, granted_at = now(), start_marked_at = NULL,
 		    incarnation = $8
 		WHERE intent_key = $7
 		RETURNING cluster
 	`, newRunID, newCreatedAt, nullableString(req.Cell), nullableString(req.CellInstance),
-		req.PlacementGeneration, buildNumber, req.IntentKey, incarnation).Scan(&cluster); err != nil {
+		req.PlacementGeneration, buildNumber, req.IntentKey, incarnation, req.Namespace).Scan(&cluster); err != nil {
 		return ClaimResponse{}, "", fmt.Errorf("transfer intent: %w", err)
 	}
 	return ClaimResponse{Decision: DecisionGranted, RunID: newRunID.String(), BuildNumber: buildNumber}, cluster, nil

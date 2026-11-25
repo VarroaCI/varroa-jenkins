@@ -16,6 +16,14 @@ import (
 func seedMeshSlotPlacement(t *testing.T, db *sql.DB, generation int64, slotOneInstance string,
 	jobHomes map[string]int32) {
 	t.Helper()
+	seedMeshSlotPlacementIn(t, db, generation, testNamespace, slotOneInstance, jobHomes)
+}
+
+// seedMeshSlotPlacementIn is seedMeshSlotPlacement with slot 1's cell in
+// slotOneNamespace. Slot 0 stays in testNamespace.
+func seedMeshSlotPlacementIn(t *testing.T, db *sql.DB, generation int64, slotOneNamespace, slotOneInstance string,
+	jobHomes map[string]int32) {
+	t.Helper()
 	now := time.Now().UTC()
 	confirmedAt := now.Add(-45 * time.Second)
 	dead := []TenantSyncDeadInstance{{Instance: meshDeadInstance, LastSeenAt: now.Add(-time.Minute), ConfirmedGoneAt: &confirmedAt}}
@@ -26,7 +34,7 @@ func seedMeshSlotPlacement(t *testing.T, db *sql.DB, generation int64, slotOneIn
 	members := []member{
 		{Cell: "cell-slot0", Namespace: testNamespace, Role: MemberRoleActive, Slot: slotPtr(0),
 			Instance: "pod-slot0", RehydratedInstance: "pod-slot0"},
-		{Cell: meshTargetCell, Namespace: testNamespace, Role: MemberRoleActive, Slot: slotPtr(1),
+		{Cell: meshTargetCell, Namespace: slotOneNamespace, Role: MemberRoleActive, Slot: slotPtr(1),
 			Instance: slotOneInstance, RehydratedInstance: slotOneInstance},
 	}
 	membersJSON, err := json.Marshal(members)
@@ -138,6 +146,112 @@ func TestTakeoverRepeatWritesNothing(t *testing.T) {
 	}
 	if generation != 7 {
 		t.Fatalf("fleet lock placement_generation = %d, want 7: a repeat writes nothing", generation)
+	}
+}
+
+// meshOtherNamespace is the namespace of the slot-1 cell in the test of a
+// move between two namespaces.
+const meshOtherNamespace = "ns-other"
+
+// TestTakeoverMovesTheNamespaceWithTheCell asserts a takeover to a cell
+// in another namespace moves the namespace with the cell, on run_intents
+// and on runs. It then asserts that each reader of the moved pair names
+// the target controller.
+func TestTakeoverMovesTheNamespaceWithTheCell(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	pool, db := setupLedgerPool(t)
+	conn := newTestActionConn(t)
+	received := collectActions(t, conn)
+
+	runID := seedMeshRunningRun(t, pool, db)
+	seedMeshSlotPlacementIn(t, db, 7, meshOtherNamespace, "pod-live", map[string]int32{testJobPath: 1})
+
+	if got := runTakeover(t, pool, conn, nil, nil); got != 1 {
+		t.Fatalf("published = %d, want 1", got)
+	}
+
+	var intentNamespace, intentCell, intentInstance string
+	if err := db.QueryRow(`SELECT namespace, cell, cell_instance FROM varroa.run_intents WHERE run_id = $1`, runID).
+		Scan(&intentNamespace, &intentCell, &intentInstance); err != nil {
+		t.Fatalf("read run_intents: %v", err)
+	}
+	if intentNamespace != meshOtherNamespace || intentCell != meshTargetCell || intentInstance != "pod-live" {
+		t.Fatalf("run_intents = %s/%s/%s, want %s/%s/pod-live",
+			intentNamespace, intentCell, intentInstance, meshOtherNamespace, meshTargetCell)
+	}
+
+	var runNamespace, runCell string
+	if err := db.QueryRow(`SELECT namespace, cell FROM varroa.runs WHERE run_id = $1`, runID).
+		Scan(&runNamespace, &runCell); err != nil {
+		t.Fatalf("read runs: %v", err)
+	}
+	if runNamespace != meshOtherNamespace || runCell != meshTargetCell {
+		t.Fatalf("runs = %s/%s, want %s/%s", runNamespace, runCell, meshOtherNamespace, meshTargetCell)
+	}
+
+	select {
+	case a := <-received:
+		if a.Kind != LedgerActionResumeRun || a.Namespace != meshOtherNamespace || a.Controller != meshTargetCell {
+			t.Fatalf("action = %+v, want a resume_run on %s/%s", a, meshOtherNamespace, meshTargetCell)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("want a resume_run action published")
+	}
+
+	// The gateway admits the target's log and state chunks only when the
+	// owner tuple names the target's namespace.
+	owner, err := lookupOwner(ctx, pool, ownerLookupRequest{RunID: runID.String()})
+	if err != nil {
+		t.Fatalf("lookupOwner: %v", err)
+	}
+	if owner.Namespace != meshOtherNamespace || owner.Cell != meshTargetCell || owner.Instance != "pod-live" {
+		t.Fatalf("owner = %+v, want %s/%s/pod-live", owner, meshOtherNamespace, meshTargetCell)
+	}
+
+	// The BFF sends a cancel, an input answer, and a log tail request to
+	// the controller of the run row.
+	reader := NewReader(pool)
+	run, _, err := reader.GetRun(ctx, runID.String())
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if run.Namespace != meshOtherNamespace || run.Cell != meshTargetCell {
+		t.Fatalf("GetRun = %s/%s, want %s/%s", run.Namespace, run.Cell, meshOtherNamespace, meshTargetCell)
+	}
+
+	// The door link of the target controller finds the run by its own
+	// namespace and cell.
+	page, err := reader.ListRuns(ctx, RunQuery{
+		Cluster: testCluster, Tenant: testTenant, JobPath: testJobPath,
+		Namespace: meshOtherNamespace, Cell: meshTargetCell, Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(page.Runs) != 1 || page.Runs[0].RunID != runID.String() {
+		t.Fatalf("ListRuns on %s/%s = %+v, want the moved run", meshOtherNamespace, meshTargetCell, page.Runs)
+	}
+
+	// The interruption sweep reads the roll cause and addresses its
+	// cancel_run, end_commit_status, and release_agents actions from
+	// this pair.
+	candidate := fetchRunningCandidate(t, pool, runID)
+	if candidate.namespace != meshOtherNamespace || candidate.cell != meshTargetCell {
+		t.Fatalf("sweep candidate = %s/%s, want %s/%s",
+			candidate.namespace, candidate.cell, meshOtherNamespace, meshTargetCell)
+	}
+
+	// The concurrency cancel addresses its cancel_run action from this
+	// pair.
+	cancels, err := selectConcurrencyCancelCandidates(ctx, pool, testCluster, testTenant, testJobPath,
+		time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("selectConcurrencyCancelCandidates: %v", err)
+	}
+	if len(cancels) != 1 || cancels[0].namespace != meshOtherNamespace || cancels[0].cell != meshTargetCell {
+		t.Fatalf("concurrency cancel candidates = %+v, want one on %s/%s", cancels, meshOtherNamespace, meshTargetCell)
 	}
 }
 

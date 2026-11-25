@@ -287,7 +287,8 @@ func TestDifferentRunIDSameGenerationDuplicate(t *testing.T) {
 // TestHigherGenerationTransfersOwnership: row 3 of the decision table —
 // a different run_id at a higher generation on a GRANTED intent with no
 // runs row answers granted and moves the ownership columns and the
-// build number.
+// build number. The new owner's cell sits in another namespace, and the
+// namespace moves with the cell.
 func TestHigherGenerationTransfersOwnership(t *testing.T) {
 	t.Parallel()
 
@@ -302,6 +303,7 @@ func TestHigherGenerationTransfersOwnership(t *testing.T) {
 	next := req
 	next.RunID = newTestUUIDv7String()
 	next.PlacementGeneration = 2
+	next.Namespace = "ns-other"
 	next.Cell = "cell-b"
 	next.CellInstance = "pod-b"
 
@@ -317,15 +319,16 @@ func TestHigherGenerationTransfersOwnership(t *testing.T) {
 	}
 	assertIntentRowCount(t, db, req.IntentKey, 1)
 
-	var cell, cellInstance string
+	var namespace, cell, cellInstance string
 	var generation int64
 	if err := db.QueryRow(`
-		SELECT cell, cell_instance, placement_generation FROM varroa.run_intents WHERE intent_key = $1
-	`, req.IntentKey).Scan(&cell, &cellInstance, &generation); err != nil {
+		SELECT namespace, cell, cell_instance, placement_generation FROM varroa.run_intents WHERE intent_key = $1
+	`, req.IntentKey).Scan(&namespace, &cell, &cellInstance, &generation); err != nil {
 		t.Fatalf("read row: %v", err)
 	}
-	if cell != "cell-b" || cellInstance != "pod-b" || generation != 2 {
-		t.Fatalf("want moved ownership cell-b/pod-b/2, got %s/%s/%d", cell, cellInstance, generation)
+	if namespace != "ns-other" || cell != "cell-b" || cellInstance != "pod-b" || generation != 2 {
+		t.Fatalf("want moved ownership ns-other/cell-b/pod-b/2, got %s/%s/%s/%d",
+			namespace, cell, cellInstance, generation)
 	}
 }
 
@@ -467,8 +470,10 @@ func TestRepeatConsumedIntentHigherGenerationDuplicate(t *testing.T) {
 
 // TestRepeatDifferentCellInstanceMovesOwnership: a repeat of the stored
 // run_id from a different cell instance, for a GRANTED intent with no
-// runs row, answers granted with cell, cell_instance, and
-// placement_generation moved to the request's values.
+// runs row, answers granted with namespace, cell, cell_instance, and
+// placement_generation moved to the request's values. The repeat comes
+// from a cell in another namespace, and the namespace moves with the
+// cell.
 func TestRepeatDifferentCellInstanceMovesOwnership(t *testing.T) {
 	t.Parallel()
 
@@ -481,6 +486,7 @@ func TestRepeatDifferentCellInstanceMovesOwnership(t *testing.T) {
 	first := mustGrant(t, ledger, req)
 
 	repeat := req
+	repeat.Namespace = "ns-other"
 	repeat.Cell = "cell-b"
 	repeat.CellInstance = "pod-b"
 
@@ -489,15 +495,16 @@ func TestRepeatDifferentCellInstanceMovesOwnership(t *testing.T) {
 		t.Fatalf("want granted with unchanged run_id %q, got %+v", first.RunID, resp)
 	}
 
-	var cell, cellInstance string
+	var namespace, cell, cellInstance string
 	var generation int64
 	if err := db.QueryRow(`
-		SELECT cell, cell_instance, placement_generation FROM varroa.run_intents WHERE intent_key = $1
-	`, req.IntentKey).Scan(&cell, &cellInstance, &generation); err != nil {
+		SELECT namespace, cell, cell_instance, placement_generation FROM varroa.run_intents WHERE intent_key = $1
+	`, req.IntentKey).Scan(&namespace, &cell, &cellInstance, &generation); err != nil {
 		t.Fatalf("read row: %v", err)
 	}
-	if cell != "cell-b" || cellInstance != "pod-b" || generation != 1 {
-		t.Fatalf("want moved ownership cell-b/pod-b/1, got %s/%s/%d", cell, cellInstance, generation)
+	if namespace != "ns-other" || cell != "cell-b" || cellInstance != "pod-b" || generation != 1 {
+		t.Fatalf("want moved ownership ns-other/cell-b/pod-b/1, got %s/%s/%s/%d",
+			namespace, cell, cellInstance, generation)
 	}
 }
 

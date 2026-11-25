@@ -371,10 +371,14 @@ func dispatchMeshResume(ctx context.Context, pool *pgxpool.Pool, metrics *Interr
 		return LedgerAction{}, false, nil
 	}
 
+	// The namespace moves with the cell here and in the runs statement
+	// below, so the stored pair always names one controller. The gateway's
+	// owner match compares the namespace too, and every action built from
+	// either row addresses that pair.
 	if _, err := tx.Exec(ctx, `
-		UPDATE varroa.run_intents SET cell = $2, cell_instance = $3
+		UPDATE varroa.run_intents SET namespace = $5, cell = $2, cell_instance = $3
 		 WHERE run_id = $1 AND cell_instance = $4
-	`, c.runID, target.cell, target.instance, c.cellInstance); err != nil {
+	`, c.runID, target.cell, target.instance, c.cellInstance, target.namespace); err != nil {
 		return LedgerAction{}, false, fmt.Errorf("move run intent owner: %w", err)
 	}
 
@@ -401,7 +405,7 @@ func dispatchMeshResume(ctx context.Context, pool *pgxpool.Pool, metrics *Interr
 	var files []byte
 	err = tx.QueryRow(ctx, `
 		UPDATE varroa.runs
-		   SET cell = $3,
+		   SET namespace = $7, cell = $3,
 		       payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('mesh',
 		         COALESCE(payload->'mesh', '{}'::jsonb) || jsonb_build_object('resume',
 		           COALESCE(payload->'mesh'->'resume', '{}'::jsonb) || jsonb_build_object(
@@ -410,7 +414,7 @@ func dispatchMeshResume(ctx context.Context, pool *pgxpool.Pool, metrics *Interr
 		   AND payload->'mesh'->'resume' IS NOT NULL
 		   AND payload->'mesh'->'resume'->'instance' IS NULL
 		RETURNING COALESCE(payload->'mesh'->'files', '[]'::jsonb)
-	`, c.runID, c.createdAt, target.cell, target.instance, now, deadline).Scan(&files)
+	`, c.runID, c.createdAt, target.cell, target.instance, now, deadline, target.namespace).Scan(&files)
 	switch {
 	// No row matched. A real completion can commit while this transaction
 	// is open, and the first two statements would then leave a finished
