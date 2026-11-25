@@ -161,17 +161,18 @@ func markRunWithOpenStages(t *testing.T, pool *pgxpool.Pool, reason string) (*In
 
 // TestMarkInterruptedEndsTheOpenStages asserts that every mark that ends a
 // RUNNING run ends each open stage of the run, at every depth: the root
-// stage, the parallel branch in it, and the stage in that branch. Each
-// open stage reads ABORTED at the mark time with no duration and the
-// mark's reason. The finished stage keeps its own end. The run read that
-// the build page uses answers the same stages.
+// stage, the parallel branch in it, and the stage in that branch. A
+// provisional mark does this too. Each open stage reads ABORTED at the
+// mark time with no duration and the mark's reason. The finished stage
+// keeps its own end. The run read that the build page uses answers the
+// same stages.
 func TestMarkInterruptedEndsTheOpenStages(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	for _, reason := range []string{ReasonCellLost, ReasonCellRolled, ReasonTenantMoved, ReasonNoHeartbeat,
-		ReasonResumeTimeout, ReasonResumeFailed} {
+		ReasonResumeTimeout, ReasonResumeFailed, ReasonHeartbeatLost, ReasonStartLost} {
 		t.Run(reason, func(t *testing.T) {
 			_, runID, _, at := markRunWithOpenStages(t, pool, reason)
 
@@ -196,23 +197,13 @@ func TestMarkInterruptedEndsTheOpenStages(t *testing.T) {
 	}
 }
 
-// TestMarkInterruptedKeepsTheOpenStagesOfAProvisionalMark asserts the
-// marks that keep the open stages. The owner of a heartbeat-lost or a
-// start-lost run can still run them. A QUEUED run keeps them too, because
-// a later run.started supersedes the mark of an accepted row.
-func TestMarkInterruptedKeepsTheOpenStagesOfAProvisionalMark(t *testing.T) {
+// TestMarkInterruptedKeepsTheOpenStagesOfAQueuedRun asserts the one mark
+// that keeps the open stages: the mark of a QUEUED run, because a later
+// run.started supersedes the mark of an accepted row.
+func TestMarkInterruptedKeepsTheOpenStagesOfAQueuedRun(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
-	for _, reason := range []string{ReasonHeartbeatLost, ReasonStartLost} {
-		t.Run(reason, func(t *testing.T) {
-			_, runID, _, _ := markRunWithOpenStages(t, pool, reason)
-			for _, id := range openStageIDs {
-				assertStageOpen(t, db, runID, id)
-			}
-		})
-	}
-
 	t.Run("a queued run", func(t *testing.T) {
 		intentKey := "manual:" + newTestUUIDv7String()
 		runID := seedGrantedIntent(t, pool, intentKey)
@@ -241,17 +232,47 @@ func TestMarkInterruptedKeepsTheOpenStagesOfAProvisionalMark(t *testing.T) {
 // arrival after a mark: the owner's terminal run.stage fact replaces the
 // stage that the mark ended. The real status, end, and duration win, and
 // the interrupted_reason key goes. The other ended stages keep the mark's
-// end.
+// end. The owner of a heartbeat-lost run is still alive, so its own end
+// replaces the mark's end in the same way.
 func TestOwnerStageEndReplacesAStageTheMarkEnded(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
-	g, runID, intentKey, at := markRunWithOpenStages(t, pool, ReasonNoHeartbeat)
+	for _, reason := range []string{ReasonNoHeartbeat, ReasonHeartbeatLost} {
+		t.Run(reason, func(t *testing.T) {
+			g, runID, intentKey, at := markRunWithOpenStages(t, pool, reason)
 
-	applyStage(t, g, runID, intentKey, "pod-a", ownerStageEnd(t, stageBuild))
+			applyStage(t, g, runID, intentKey, "pod-a", ownerStageEnd(t, stageBuild))
 
-	assertStageFromOwner(t, db, runID, stageBuild)
-	assertStageEndedByMark(t, db, runID, stageTest, ReasonNoHeartbeat, at)
+			assertStageFromOwner(t, db, runID, stageBuild)
+			assertStageEndedByMark(t, db, runID, stageTest, reason, at)
+		})
+	}
+}
+
+// TestFirstStageStartAfterAHeartbeatLostMarkStaysOpen asserts the stage
+// start that the owner sends after a heartbeat-lost mark. That fact proves
+// the owner ran after the mark, so the stage stays IN_PROGRESS until the
+// owner ends it. The owner's completion then ends it with the real result.
+func TestFirstStageStartAfterAHeartbeatLostMarkStaysOpen(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	g, runID, intentKey, _ := markRunWithOpenStages(t, pool, ReasonHeartbeatLost)
+
+	started := markAt(0)
+	applyStage(t, g, runID, intentKey, "pod-a", RunStagePayload{
+		StageID: stageDeploy, Name: "Deploy", NodeType: "stage", Status: "IN_PROGRESS", StartedAt: &started,
+	})
+	assertStageOpen(t, db, runID, stageDeploy)
+
+	endedAt := markAt(time.Minute)
+	if res := completeFrom(t, g, runID, intentKey, "pod-a", strPtr("SUCCESS"), endedAt); !res.CompletedOwner {
+		t.Fatal("CompletedOwner = false, want true")
+	}
+	for _, id := range append(append([]string{}, openStageIDs...), stageDeploy) {
+		assertStageEndedByCompletion(t, db, runID, id, "SUCCESS", endedAt)
+	}
 }
 
 // TestRedeliveredStageStartKeepsAStageTheMarkEnded asserts the second
@@ -350,4 +371,164 @@ func TestResumedTargetReplacesAStageTheMarkEnded(t *testing.T) {
 
 	applyStage(t, g, runID, intentKey, meshResumeTarget, ownerStageEnd(t, stageBuild))
 	assertStageFromOwner(t, db, runID, stageBuild)
+}
+
+// TestSweepHeartbeatLostMarkEndsTheOpenStages runs a provisional mark
+// through SweepInterruptedRuns. The owner of a RUNNING run sends no
+// heartbeat past liveOwnerSilentWindow, and no completion follows. The
+// sweep marks the run heartbeat-lost and ends each open stage at the sweep
+// time. The run read that the build page uses answers no open stage, and
+// a redelivered start opens no ended stage.
+func TestSweepHeartbeatLostMarkEndsTheOpenStages(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := seedRunningRun(t, pool, newTestClaimRequest(intentKey, 0))
+	g := NewIngester(pool, nil, nil)
+	openStageTree(t, g, runID, intentKey, "pod-a")
+	seedSilentRunOnLiveOwner(t, db, runID, liveOwnerSilentWindow+time.Minute, `{}`)
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	freshenSweepConsumer(t, conn)
+
+	at := markAt(0)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil, nil, nil,
+		DefaultSweepMaxPending, at, testGrace, "", nil)
+	if err != nil {
+		t.Fatalf("SweepInterruptedRuns: %v", err)
+	}
+	if marked != 1 {
+		t.Fatalf("marked = %d, want 1", marked)
+	}
+	var reason string
+	if err := db.QueryRow(`SELECT payload->>'interrupted_reason' FROM varroa.runs WHERE run_id = $1`, runID).Scan(&reason); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if reason != ReasonHeartbeatLost {
+		t.Fatalf("interrupted_reason = %q, want %q", reason, ReasonHeartbeatLost)
+	}
+
+	for _, id := range openStageIDs {
+		assertStageEndedByMark(t, db, runID, id, ReasonHeartbeatLost, at)
+	}
+	assertStageFromOwner(t, db, runID, stageCheckout)
+	_, stages, err := NewReader(pool).GetRun(context.Background(), runID.String())
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	for _, st := range stages {
+		if st.Status == "IN_PROGRESS" {
+			t.Errorf("GetRun stage %s is IN_PROGRESS on a heartbeat-lost run, want every stage ended", st.StageID)
+		}
+	}
+
+	openStageTree(t, g, runID, intentKey, "pod-a")
+	for _, id := range openStageIDs {
+		assertStageEndedByMark(t, db, runID, id, ReasonHeartbeatLost, at)
+	}
+}
+
+// startLostRunWithOpenStages seeds a marked intent of a live owner whose
+// start event never reached the store, applies the open stage tree from
+// that owner, and ends the run start-lost through EndMarkedLostIntents. It
+// answers the ingester, the run, its intent key, and the mark time.
+func startLostRunWithOpenStages(t *testing.T, pool *pgxpool.Pool, db *sql.DB) (*Ingester, uuid.UUID, string, time.Time) {
+	t.Helper()
+	runID := seedStaleMarkedRun(t, db, ClaimExpiryAge+time.Minute, `{}`)
+	intentKey := "manual:" + runID.String()
+	g := NewIngester(pool, nil, nil)
+	openStageTree(t, g, runID, intentKey, staleMarkedOwner)
+
+	conn, cleanup := newSweepTestBus(t)
+	t.Cleanup(cleanup)
+	freshenSweepConsumer(t, conn)
+	at := markAt(0)
+	ended, err := EndMarkedLostIntents(context.Background(), pool, conn, nil, nil, nil, nil, nil,
+		DefaultSweepMaxPending, at, testGrace, "", nil)
+	if err != nil {
+		t.Fatalf("EndMarkedLostIntents: %v", err)
+	}
+	if ended != 1 {
+		t.Fatalf("ended = %d, want 1", ended)
+	}
+	if _, _, reason, _, _, _ := readMarkedRun(t, db, runID); reason.String != ReasonStartLost {
+		t.Fatalf("interrupted_reason = %q, want %q", reason.String, ReasonStartLost)
+	}
+	return g, runID, intentKey, at
+}
+
+// TestStartLostMarkEndsTheOpenStages asserts the start-lost class of
+// EndMarkedLostIntents. The owner's stage facts reached the store and its
+// start event did not. The mark ends each open stage at the mark time, and
+// the finished stage keeps its own end.
+func TestStartLostMarkEndsTheOpenStages(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	_, runID, _, at := startLostRunWithOpenStages(t, pool, db)
+	for _, id := range openStageIDs {
+		assertStageEndedByMark(t, db, runID, id, ReasonStartLost, at)
+	}
+	assertStageFromOwner(t, db, runID, stageCheckout)
+}
+
+// TestRunStartedOpensTheStagesAStartLostMarkEnded asserts that the owner's
+// late run.started, which supersedes a start-lost mark, opens again each
+// stage that the mark ended. The run is RUNNING again, so its stages are
+// too. The finished stage keeps its own end. The owner's terminal stage
+// fact and its completion then end the stages as for any other run.
+func TestRunStartedOpensTheStagesAStartLostMarkEnded(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	g, runID, intentKey, at := startLostRunWithOpenStages(t, pool, db)
+	for _, id := range openStageIDs {
+		assertStageEndedByMark(t, db, runID, id, ReasonStartLost, at)
+	}
+
+	buildNumber := int64(6)
+	started := newTestEnvelope(t, runID, intentKey, KindRunStarted, RunStartedPayload{BuildNumber: &buildNumber})
+	if _, err := g.Apply(context.Background(), started); err != nil {
+		t.Fatalf("apply run.started: %v", err)
+	}
+	if status, _, _, _, _, _ := readMarkedRun(t, db, runID); status != StatusRunning {
+		t.Fatalf("status = %q, want RUNNING", status)
+	}
+	for _, id := range openStageIDs {
+		assertStageOpen(t, db, runID, id)
+	}
+	assertStageFromOwner(t, db, runID, stageCheckout)
+
+	applyStage(t, g, runID, intentKey, staleMarkedOwner, ownerStageEnd(t, stageBuild))
+	endedAt := markAt(time.Minute)
+	if res := completeFrom(t, g, runID, intentKey, staleMarkedOwner, strPtr("SUCCESS"), endedAt); !res.CompletedOwner {
+		t.Fatal("CompletedOwner = false, want true")
+	}
+	assertStageFromOwner(t, db, runID, stageBuild)
+	assertStageEndedByCompletion(t, db, runID, stageBranch, "SUCCESS", endedAt)
+	assertStageEndedByCompletion(t, db, runID, stageTest, "SUCCESS", endedAt)
+}
+
+// TestLateRunStartedKeepsTheStagesOfAMarkItDoesNotSupersede asserts that
+// a redelivered run.started opens no stage of a mark that it does not
+// supersede. Such a start leaves a heartbeat-lost mark and a final mark in
+// place, so each stage keeps the mark's end.
+func TestLateRunStartedKeepsTheStagesOfAMarkItDoesNotSupersede(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	for _, reason := range []string{ReasonHeartbeatLost, ReasonCellRolled} {
+		t.Run(reason, func(t *testing.T) {
+			g, runID, intentKey, at := markRunWithOpenStages(t, pool, reason)
+			started := newTestEnvelope(t, runID, intentKey, KindRunStarted, RunStartedPayload{})
+			if _, err := g.Apply(context.Background(), started); err != nil {
+				t.Fatalf("apply run.started: %v", err)
+			}
+			for _, id := range openStageIDs {
+				assertStageEndedByMark(t, db, runID, id, reason, at)
+			}
+		})
+	}
 }

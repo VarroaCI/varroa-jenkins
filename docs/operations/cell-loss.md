@@ -85,8 +85,9 @@ fleet lock the lost run held is released on the same schedule. A pod read that p
 gone ends the five-minute wait.
 
 A mark that ends a running build also sets each stage that is still open to `ABORTED`, at the time
-of the mark. A later stage event from the build replaces that end. A `start-lost` or
-`heartbeat-lost` mark keeps the open stages, because the build can still run them. When the build
+of the mark. A `start-lost` or `heartbeat-lost` mark does this too, so no stage of an ended build
+shows as running. A later stage event from the build replaces that end. A late start event of a
+`start-lost` build opens those stages again. When the build
 completes, each stage that it did not end takes the build's end time. The stage reads `SUCCESS`
 when the build succeeded, and `ABORTED` for every other result.
 

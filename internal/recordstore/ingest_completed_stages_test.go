@@ -278,22 +278,43 @@ func TestOwnerCompletionReplacesTheStagesAMarkEnded(t *testing.T) {
 	assertStageFromOwner(t, db, runID, stageCheckout)
 }
 
-// TestOwnerCompletionEndsTheStagesAHeartbeatLostMarkKept asserts the
-// completion of a heartbeat-lost run. The provisional mark keeps the open
-// stages, and the owner's later FAILURE completion ends them ABORTED.
-func TestOwnerCompletionEndsTheStagesAHeartbeatLostMarkKept(t *testing.T) {
+// TestOwnerCompletionReplacesTheStagesAHeartbeatLostMarkEnded asserts the
+// completion of a heartbeat-lost run whose owner was still alive. The
+// provisional mark ends the open stages, and the owner's later completion
+// ends them again with each result it can send: SUCCESS on a SUCCESS run,
+// and ABORTED for every other result and for no result. The stages take
+// the completion's end, and the interrupted_reason key goes.
+func TestOwnerCompletionReplacesTheStagesAHeartbeatLostMarkEnded(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
-	g, runID, intentKey, _ := markRunWithOpenStages(t, pool, ReasonHeartbeatLost)
-	for _, id := range openStageIDs {
-		assertStageOpen(t, db, runID, id)
-	}
+	for _, tc := range []struct {
+		name   string
+		result *string
+		want   string
+	}{
+		{"SUCCESS", strPtr("SUCCESS"), "SUCCESS"},
+		{"UNSTABLE", strPtr("UNSTABLE"), "ABORTED"},
+		{"FAILURE", strPtr("FAILURE"), "ABORTED"},
+		{"ABORTED", strPtr("ABORTED"), "ABORTED"},
+		{"NOT_BUILT", strPtr("NOT_BUILT"), "ABORTED"},
+		{"no result", nil, "ABORTED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g, runID, intentKey, at := markRunWithOpenStages(t, pool, ReasonHeartbeatLost)
+			for _, id := range openStageIDs {
+				assertStageEndedByMark(t, db, runID, id, ReasonHeartbeatLost, at)
+			}
 
-	endedAt := markAt(time.Minute)
-	completeFrom(t, g, runID, intentKey, "pod-a", strPtr("FAILURE"), endedAt)
-	for _, id := range openStageIDs {
-		assertStageEndedByCompletion(t, db, runID, id, "ABORTED", endedAt)
+			endedAt := markAt(time.Minute)
+			if res := completeFrom(t, g, runID, intentKey, "pod-a", tc.result, endedAt); !res.CompletedOwner {
+				t.Fatal("CompletedOwner = false, want true")
+			}
+			for _, id := range openStageIDs {
+				assertStageEndedByCompletion(t, db, runID, id, tc.want, endedAt)
+			}
+			assertStageFromOwner(t, db, runID, stageCheckout)
+		})
 	}
 }
 

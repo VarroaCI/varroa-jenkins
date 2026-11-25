@@ -31,7 +31,8 @@ import (
 // supersedes (startLostRunSQL). The mark records only that no start event
 // arrived in time, and this event is that start. The write sets the row
 // RUNNING, clears the result, the end, and the marking keys, and stamps
-// interrupted_superseded_at.
+// interrupted_superseded_at. It also opens again each stage that the mark
+// ended (openStartLostStages), because the build runs them.
 //
 // A run.started that reports a number below the intent's stored number,
 // from an instance other than the intent's current owner, describes a
@@ -143,6 +144,11 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 	}
 	if err := fillDownstreamUpstream(ctx, tx, intent, buildNumber); err != nil {
 		return dispatchResult{}, err
+	}
+	if status == StatusRunning {
+		if err := openStartLostStages(ctx, tx, intent); err != nil {
+			return dispatchResult{}, err
+		}
 	}
 
 	consumedAt := env.OccurredAt
