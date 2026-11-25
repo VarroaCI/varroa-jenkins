@@ -49,17 +49,17 @@ func (f *fakeCommitStatusWriter) calls() []forgeapi.CommitStatusRequest {
 	return append([]forgeapi.CommitStatusRequest(nil), f.reqs...)
 }
 
-// waitCalls waits until the ender records n requests, or fails the test.
-func waitCalls(t *testing.T, f *fakeCommitStatusWriter, n int) []forgeapi.CommitStatusRequest {
+// waitCalls waits until the ender records a request, or fails the test.
+func waitCalls(t *testing.T, f *fakeCommitStatusWriter) []forgeapi.CommitStatusRequest {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if got := f.calls(); len(got) >= n {
+		if got := f.calls(); len(got) > 0 {
 			return got
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("forge calls = %d, want %d", len(f.calls()), n)
+	t.Fatal("forge calls = 0, want 1")
 	return nil
 }
 
@@ -72,13 +72,17 @@ func marshalLedgerAction(t *testing.T, a recordstore.LedgerAction) []byte {
 	return data
 }
 
-// endCellURL is the Jenkins location URL of the cell in the end tests.
-const endCellURL = "https://varroa.example.org/headless/core/cells-ns/cell-a/"
+// endDoors is the door prefix of the cluster in the end tests, and endCellURL
+// is the Jenkins location URL of the cell.
+const (
+	endDoors   = "https://varroa.example.org/headless/core/"
+	endCellURL = endDoors + "cells-ns/cell-a/"
+)
 
 // endRunner returns a runner that names the location URL of the cell of
-// endCommitStatusAction.
+// endCommitStatusAction and the door prefix of the cluster.
 func endRunner() *fakeLedgerActionRunner {
-	return &fakeLedgerActionRunner{locationURLs: map[string]string{"cells-ns/cell-a": endCellURL}}
+	return &fakeLedgerActionRunner{locationURLs: map[string]string{"cells-ns/cell-a": endCellURL}, doors: endDoors}
 }
 
 func endCommitStatusAction(t *testing.T) []byte {
@@ -95,12 +99,12 @@ func endCommitStatusAction(t *testing.T) []byte {
 
 // TestHandleLedgerAction_EndCommitStatusCallsForge checks the field mapping
 // from the action to the forge request, with the location URL of the
-// action's cell.
+// action's cell and the door prefix of the cluster.
 func TestHandleLedgerAction_EndCommitStatusCallsForge(t *testing.T) {
 	ender := &fakeCommitStatusWriter{}
 	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
 		"varroa.ledger.actions.core", "core", endRunner(), ender, endCommitStatusAction(t))
-	reqs := waitCalls(t, ender, 1)
+	reqs := waitCalls(t, ender)
 	want := forgeapi.CommitStatusRequest{
 		Tenant:      "payments",
 		Repo:        "https://git.example.org/team/app",
@@ -109,9 +113,62 @@ func TestHandleLedgerAction_EndCommitStatusCallsForge(t *testing.T) {
 		BuildNumber: 7,
 		Reason:      "cell-lost",
 		JenkinsURL:  endCellURL,
+		CellDoors:   endDoors,
 	}
 	if reqs[0] != want {
 		t.Fatalf("request = %+v, want %+v", reqs[0], want)
+	}
+}
+
+// TestHandleLedgerAction_EndCommitStatusAfterAMoveNamesTheCellDoors checks a
+// run that a resume moved from cell-a to cell-b. The action names cell-b, and
+// the request carries the door prefix. The forge answerer then also matches
+// the pending status that cell-a wrote.
+func TestHandleLedgerAction_EndCommitStatusAfterAMoveNamesTheCellDoors(t *testing.T) {
+	bn := int64(7)
+	action := marshalLedgerAction(t, recordstore.LedgerAction{
+		Kind: recordstore.LedgerActionEndCommitStatus, Cluster: "core",
+		Namespace: "cells-ns", Controller: "cell-b", Actor: recordstore.LedgerActionRecorder,
+		RunID: "run-1", JobPath: "payments/app/main", BuildNumber: &bn, Tenant: "payments",
+		Repo: "https://git.example.org/acme/app", Revision: "0123456789abcdef0123456789abcdef01234567",
+		Reason: "resume-failed",
+	})
+	rec := &fakeLedgerActionRunner{
+		locationURLs: map[string]string{"cells-ns/cell-b": endDoors + "cells-ns/cell-b/"},
+		doors:        endDoors,
+	}
+	ender := &fakeCommitStatusWriter{}
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
+		"varroa.ledger.actions.core", "core", rec, ender, action)
+	reqs := waitCalls(t, ender)
+	if reqs[0].JenkinsURL != endDoors+"cells-ns/cell-b/" || reqs[0].CellDoors != endDoors || reqs[0].Reason != "resume-failed" {
+		t.Fatalf("request = %+v, want the door of cell-b, the door prefix, and the reason", reqs[0])
+	}
+}
+
+// TestHandleLedgerAction_EndCommitStatusOfADeletedCellUsesItsDoor checks a
+// cell whose Controller object is gone. The end write takes the door that
+// EndStatusLocation rebuilds. The restore write reads JenkinsLocationURL
+// alone, so it writes nothing for that cell.
+func TestHandleLedgerAction_EndCommitStatusOfADeletedCellUsesItsDoor(t *testing.T) {
+	setRestoreSettleDelay(t, 10*time.Millisecond)
+	const goneDoor = endDoors + "cells-ns/cell-a/"
+	rec := &fakeLedgerActionRunner{
+		endLocations: map[string]string{"cells-ns/cell-a": goneDoor},
+		doors:        endDoors,
+	}
+	writer := &fakeCommitStatusWriter{}
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
+		"varroa.ledger.actions.core", "core", rec, writer, endCommitStatusAction(t))
+	reqs := waitCalls(t, writer)
+	if reqs[0].JenkinsURL != goneDoor {
+		t.Fatalf("end request JenkinsURL = %q, want %q", reqs[0].JenkinsURL, goneDoor)
+	}
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
+		"varroa.ledger.actions.core", "core", rec, writer, marshalLedgerAction(t, restoreAction()))
+	time.Sleep(100 * time.Millisecond)
+	if n := len(writer.restoreCalls()); n != 0 {
+		t.Fatalf("restore calls = %d, want 0", n)
 	}
 }
 
@@ -182,7 +239,7 @@ func TestHandleLedgerAction_EndCommitStatusForgeErrorIsLogged(t *testing.T) {
 	rec := endRunner()
 	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t),
 		"varroa.ledger.actions.core", "core", rec, ender, endCommitStatusAction(t))
-	waitCalls(t, ender, 1)
+	waitCalls(t, ender)
 	if len(rec.sent) != 0 {
 		t.Fatalf("sent %d imperative commands, want 0", len(rec.sent))
 	}

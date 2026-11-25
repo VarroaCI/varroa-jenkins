@@ -89,8 +89,8 @@ func TestEndPendingStatus_SkipsOtherBuildNumber(t *testing.T) {
 
 // TestEndPendingStatus_LeavesPendingOfAnotherJenkins checks that a pending
 // status of another Jenkins, or of another cell, with the same job path and
-// build number stays pending. Only the status under the location URL of the
-// build's own cell is written.
+// build number stays pending. The request has no door prefix, so only the
+// status under the location URL of the build's own cell is written.
 func TestEndPendingStatus_LeavesPendingOfAnotherJenkins(t *testing.T) {
 	fx := newFixture(t, "agents-payments")
 	c := pushable()

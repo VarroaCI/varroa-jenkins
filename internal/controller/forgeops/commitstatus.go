@@ -8,6 +8,11 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/validation"
+
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/forge"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
 	"github.com/varroaci/varroa-jenkins/internal/forgeurl"
@@ -24,13 +29,17 @@ const maxUnescapePasses = 3
 // request sets error. A Result request sets the state that the Jenkins result
 // maps to. A context is changed only when its latest state is pending. A
 // Reason request changes a context whose target URL is the build URL of this
-// job and build number under req.JenkinsURL. A Result request also changes a
-// context whose target URL is the URL of the job itself under req.JenkinsURL.
-// The plugin writes the queued status with that URL, and a dead branch job
-// queues no other build. A Reason request never does this, because an
-// automatic retry's queued status has that URL. A context with an end state,
-// or a target URL of another Jenkins, is never changed. A request with no
-// JenkinsURL is refused, because the operator then cannot tell this
+// job and build number under req.JenkinsURL. It also changes a context whose
+// target URL is that build URL under the door of another cell in
+// req.CellDoors (cellDoorBuild, buildCell). A resume can move a run to another
+// cell after the first cell wrote the pending status. A Result request also
+// changes a context whose target URL is the URL of the job itself under
+// req.JenkinsURL. The plugin writes the queued status with that URL, and a
+// dead branch job queues no other build. A Reason request never does this,
+// because an automatic retry's queued status has that URL. A Result request
+// never reads req.CellDoors, because it can set success. A context with an end
+// state, or a target URL of another Jenkins, is never changed. A request with
+// no JenkinsURL is refused, because the operator then cannot tell this
 // Jenkins's statuses from another Jenkins's. It tries each pushing credential
 // in id order. A forge 403 moves to the next credential. A rate limit stops
 // the attempt. It returns the number of statuses that it wrote.
@@ -44,8 +53,9 @@ func (o *Ops) EndPendingStatus(ctx context.Context, req forgeapi.CommitStatusReq
 	if req.BuildNumber <= 0 {
 		return 0, replyErr(forgeapi.CodeInvalidRequest, "build number must be positive")
 	}
+	cells := map[string]bool{}
 	return o.writeStatuses(ctx, req.Tenant, req.Repo, func(w writer, fr forge.Repo) (int, error) {
-		return o.endStatusesWith(ctx, w, fr, req)
+		return o.endStatusesWith(ctx, w, fr, req, cells)
 	})
 }
 
@@ -88,8 +98,9 @@ func (o *Ops) writeStatuses(ctx context.Context, tenant, repoURL string, write f
 // endStatusesWith ends the pending statuses of the build with credential w. It
 // returns the count written and the first forge error, unchanged. A later
 // credential lists the statuses again. A status that an earlier credential
-// ended is not pending, so it is not written twice.
-func (o *Ops) endStatusesWith(ctx context.Context, w writer, fr forge.Repo, req forgeapi.CommitStatusRequest) (int, error) {
+// ended is not pending, so it is not written twice. cells keeps the answers
+// of buildCell for the whole request.
+func (o *Ops) endStatusesWith(ctx context.Context, w writer, fr forge.Repo, req forgeapi.CommitStatusRequest, cells map[string]bool) (int, error) {
 	statuses, err := w.Client.CommitStatuses(ctx, fr, req.SHA)
 	if err != nil {
 		return 0, err
@@ -97,7 +108,7 @@ func (o *Ops) endStatusesWith(ctx context.Context, w writer, fr forge.Repo, req 
 	state, description := endState(w.Kind, req)
 	written := 0
 	for _, s := range statuses {
-		if s.State != forge.StatePending || !statusOfBuild(s.TargetURL, req) {
+		if s.State != forge.StatePending || !o.statusOfBuild(ctx, s.TargetURL, req, cells) {
 			continue
 		}
 		next := forge.CommitStatus{
@@ -115,12 +126,99 @@ func (o *Ops) endStatusesWith(ctx context.Context, w writer, fr forge.Repo, req 
 }
 
 // statusOfBuild reports whether a pending status belongs to the request. A
-// Result request also matches the job URL of its branch job.
-func statusOfBuild(targetURL string, req forgeapi.CommitStatusRequest) bool {
+// Result request also matches the job URL of its branch job. A Reason request
+// also matches the build URL under the door of another cell that buildCell
+// accepts.
+func (o *Ops) statusOfBuild(ctx context.Context, targetURL string, req forgeapi.CommitStatusRequest, cells map[string]bool) bool {
 	if buildURLUnder(targetURL, req.JenkinsURL, req.JobPath, req.BuildNumber) {
 		return true
 	}
-	return req.Result != "" && jobURLUnder(targetURL, req.JenkinsURL, req.JobPath)
+	if req.Result != "" {
+		return jobURLUnder(targetURL, req.JenkinsURL, req.JobPath)
+	}
+	namespace, name, ok := cellDoorBuild(targetURL, req.CellDoors, req.Tenant, req.JobPath, req.BuildNumber)
+	return ok && o.buildCell(ctx, namespace, name, cells)
+}
+
+// cellDoorBuild answers the namespace and the name of the door when targetURL
+// is the build URL of build number of jobPath under the dashboard door of a
+// controller of the cluster. doors is v1alpha1.HeadlessDoorPrefix of the
+// cluster. The first segment of jobPath must be tenant. A cell holds each
+// tenant in a top-level folder with the tenant's name. The ledger numbers each
+// build of a cell by cluster, tenant, and job path, and it never reuses a
+// number. The two segments after doors must be Kubernetes names after
+// unescapeFully, so an encoded slash or a dot segment never names a door.
+// buildURLUnder then compares targetURL with that door by the rules of the
+// exact match.
+func cellDoorBuild(targetURL, doors, tenant, jobPath string, number int64) (string, string, bool) {
+	if doors == "" || tenant == "" {
+		return "", "", false
+	}
+	if first, _, _ := strings.Cut(jobPath, "/"); first != tenant {
+		return "", "", false
+	}
+	u, err := url.Parse(targetURL)
+	if err != nil || u.Opaque != "" || u.User != nil {
+		return "", "", false
+	}
+	d, err := url.Parse(doors)
+	if err != nil || d.Host == "" || d.Opaque != "" {
+		return "", "", false
+	}
+	if !strings.EqualFold(u.Scheme, d.Scheme) || !strings.EqualFold(u.Host, d.Host) {
+		return "", "", false
+	}
+	doorSegs := strings.Split(strings.TrimSuffix(d.EscapedPath(), "/"), "/")
+	segs := strings.Split(u.EscapedPath(), "/")
+	if len(segs) < len(doorSegs)+2 {
+		return "", "", false
+	}
+	for k, s := range doorSegs {
+		if unescapeFully(segs[k]) != unescapeFully(s) {
+			return "", "", false
+		}
+	}
+	namespace := unescapeFully(segs[len(doorSegs)])
+	name := unescapeFully(segs[len(doorSegs)+1])
+	if len(validation.IsDNS1123Label(namespace)) != 0 || len(validation.IsDNS1123Subdomain(name)) != 0 {
+		return "", "", false
+	}
+	root := strings.TrimSuffix(doors, "/") + "/" + namespace + "/" + name + "/"
+	if !buildURLUnder(targetURL, root, jobPath, number) {
+		return "", "", false
+	}
+	return namespace, name, true
+}
+
+// buildCell reports whether the controller namespace/name can hold a build
+// that the ledger numbered for a tenant: it is a cell, or it is gone. A
+// controller that is not a cell claims each build under its own ledger key,
+// so its build with the same job path and build number is another build. A
+// read error answers false. cells keeps each answer for one request.
+//
+// Constraint: a gone controller is accepted, because a cell that lost its pod
+// is often deleted before its run ends. A deleted controller that was not a
+// cell can have left a pending status with the same job path and build
+// number. That build can never complete, so its status turns from pending to
+// error. A Reason request never writes another state.
+func (o *Ops) buildCell(ctx context.Context, namespace, name string, cells map[string]bool) bool {
+	key := namespace + "/" + name
+	if ok, seen := cells[key]; seen {
+		return ok
+	}
+	cr, err := crdstore.Get[v1alpha1.Controller](ctx, o.store, name, namespace)
+	ok := false
+	switch {
+	case apierrors.IsNotFound(err):
+		ok = true
+	case err != nil:
+		o.logger.Warn("read the controller of a status link failed; the status stays pending",
+			"controller", key, "error", err)
+	default:
+		ok = v1alpha1.IsCell(cr)
+	}
+	cells[key] = ok
+	return ok
 }
 
 // splitJobURL splits targetURL after the job chain of jobPath. root is the

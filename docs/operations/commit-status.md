@@ -165,18 +165,22 @@ The operator changes only a status whose link is the build link of the build:
 - One `job/<name>` pair for each segment of the job path follows, then the build number.
 - Nothing, a slash, or `display/redirect` ends the link.
 
-A status of another Jenkins or another cell with the same job path and build number stays
-`pending`. A status that has an end state is never changed. A retry of the build has its own build
-number, so the retry keeps its own pending status.
+A resume can move a build to another cell. The operator then also accepts the door of another cell,
+or of a deleted controller. A controller that is not a cell keeps its status, because it numbers its
+own builds.
+
+A status of another Jenkins with the same job path and build number stays `pending`. A status that
+has an end state is never changed. A retry of the build has its own build number, so the retry keeps
+its own pending status.
 
 These builds keep their `pending` status:
 
 - A provisional end: `heartbeat-lost` and `start-lost`. The build can still finish. The build's own
   completion then writes its status.
 - A build with no recorded commit or no recorded repository.
-- A build whose cell has no location URL that the operator can name. A deleted cell has none. The
-  operator logs the build at `Warn`.
-- A build that a resume moved to another cell. Its status link names the first cell.
+- A build whose cell has no location URL that the operator can name. Without a dashboard URL, a
+  deleted cell has none. The operator logs the build at `Warn`.
+- A build that a resume moved to another cell, without a dashboard URL.
 - A build that started before a change of the dashboard URL.
 - A tenant whose only credential is a `githubApp` credential. The operator does not end a status
   with a GitHub App credential.
@@ -219,6 +223,7 @@ queued status that links to the job, `Build queued...`, because a dead branch jo
 That link must also start with the location URL of the build's cell.
 
 The credential, link, rate-limit, and four-write rules of [Interrupted builds](#interrupted-builds) apply.
+The result write does not accept the door of another cell.
 
 ## Pull-request revision
 
@@ -263,9 +268,10 @@ The operator writes only over a context that meets all of these rules:
 
 The operator never writes over a context that a pipeline step writes, such as `githubNotify`. It
 never writes over a status of another Jenkins with the same job path and build number. It writes
-only for a headless controller, such as a cell. After a cell move or a change of the dashboard
-URL, the old link does not match, so the operator writes nothing. A status that a person sets by
-hand with a default context name and the build link of an older run is written over too.
+only for a headless controller, such as a cell, that still exists. After a cell move or a change of
+the dashboard URL, the old link does not match, so the operator writes nothing. A status that a
+person sets by hand with a default context name and the build link of an older run is written over
+too.
 
 An older run can write its `pending` status after the newest run completed, for example at a
 late checkout. When the recorder then ends the older run, the end sets that status to `error`. The
