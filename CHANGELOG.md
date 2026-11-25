@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.10.2](https://github.com/VarroaCI/varroa-jenkins/compare/v0.10.1...v0.10.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **api:** answer 503 operator_unavailable when no operator receives a request ([b2dc8ad](https://github.com/VarroaCI/varroa-jenkins/commit/b2dc8adfd05468bbf0818bdfd8f06fe27f6fbc45))
+* **api:** answer 503 operator_unavailable when no operator takes a reconcile or reprovision ([eaeea78](https://github.com/VarroaCI/varroa-jenkins/commit/eaeea78f18050213600a94f7811838d28825688c))
+* **api:** take the brood operation status from the row codes ([4eab72d](https://github.com/VarroaCI/varroa-jenkins/commit/4eab72d3e677db7eac063a70effcc8437be8a0b6))
+* **gateway:** name the read-loop state on the presence record and end the stream of a mite that neither reads nor sends ([7a33610](https://github.com/VarroaCI/varroa-jenkins/commit/7a33610026f8fbb14b03c89de836283b95d236a6))
+* **mite:** bound each resend pass of the owed finalized markers ([d5e044d](https://github.com/VarroaCI/varroa-jenkins/commit/d5e044d132e61ef7c041061bbf3f54657fee1313))
+* **mite:** bound each stream send and read before the replay ([fffa636](https://github.com/VarroaCI/varroa-jenkins/commit/fffa636dfaedbf7872543b7e356688ce021ce8fd))
+* **operator:** end the pending status of a run that moved cells or whose cell is gone ([dc0132a](https://github.com/VarroaCI/varroa-jenkins/commit/dc0132a14c1376332a3ba59cbbb9f4bce489e79f))
+* **operator:** reply the result of a reconcile or reprovision step ([16f2858](https://github.com/VarroaCI/varroa-jenkins/commit/16f2858c39e4b5f238efb83b24539cef6164f51a))
+* **plugin:** make a restored queue item claim again and cancel it when its run already built ([6d7f4be](https://github.com/VarroaCI/varroa-jenkins/commit/6d7f4be9874cd07bb9b9f4b4bbfad29814f43b66))
+* **plugin:** report the warning result of a caught stage on the live path ([716a36e](https://github.com/VarroaCI/varroa-jenkins/commit/716a36ed5acfae259ff58736c50787bfae0191ea))
+* **recordstore:** count only stages that ran in the slowest stage median ([c2a33e4](https://github.com/VarroaCI/varroa-jenkins/commit/c2a33e477fc8bee13c0869ee5c6f21e31a217b99))
+* **recordstore:** end the open stages at each mark of a running run ([39c279e](https://github.com/VarroaCI/varroa-jenkins/commit/39c279e6516dd58b2c58a35f2318dddd17045372))
+* **recordstore:** grant the marked run to the replacement pod of its controller ([2e28953](https://github.com/VarroaCI/varroa-jenkins/commit/2e28953ba1cc78fd579fd15364f44d00fbe7a414))
+* **recordstore:** hold the events of a replacement pod until the operator announces it ([2feb50e](https://github.com/VarroaCI/varroa-jenkins/commit/2feb50ea15e211283a85d2dd71a0e0628e7b4807))
+* **recordstore:** keep the summary of a finished log when a run is marked interrupted ([bef2042](https://github.com/VarroaCI/varroa-jenkins/commit/bef204226c7df51af10a358b3c31828769370a0c))
+* **recordstore:** move the namespace with the cell on every owner move ([cbabb4c](https://github.com/VarroaCI/varroa-jenkins/commit/cbabb4caca3810c142f98a2ffb29056f0d084301))
+* **recordstore:** name the roll cause from the row of the run's own pod ([9746061](https://github.com/VarroaCI/varroa-jenkins/commit/974606125c88a96f149e77d184b112e313de470b))
+
 ## [0.10.1](https://github.com/VarroaCI/varroa-jenkins/compare/v0.10.0...v0.10.1) (2026-11-24)
 
 
