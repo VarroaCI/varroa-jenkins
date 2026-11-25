@@ -393,16 +393,21 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 	// A repeat from another instance waits while the stored grant can
 	// still be building. A repeat from another instance for a marked
 	// intent answers duplicate at once: the owner can have started the
-	// build, and its start event can be lost with its pod. Any other
-	// repeat answers granted; an unstarted intent moves to a new
+	// build, and its start event can be lost with its pod. The replacement
+	// pod of a controller with no cell role is the one exception, when its
+	// job counter proves that the build did not start (adoptMarkedIntent).
+	// Any other repeat answers granted; an unstarted intent moves to a new
 	// instance, and that move can refresh a stale build number.
 	if row.runID == reqRunID {
 		started, err := intentStarted(ctx, tx, row)
 		if err != nil {
 			return ClaimResponse{}, claimEffects{}, err
 		}
-		if started || (row.startMarkedAt != nil && storedOwner(row) != req.CellInstance) {
+		if started {
 			return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, claimEffects{}, nil
+		}
+		if row.startMarkedAt != nil && storedOwner(row) != req.CellInstance {
+			return adoptMarkedIntent(ctx, tx, req, row, incarnation)
 		}
 		held, message, err := hold.holds(ctx, tx, req, row, reading)
 		if err != nil {

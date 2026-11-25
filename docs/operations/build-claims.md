@@ -101,7 +101,10 @@ and `NOT_READY` marks nothing.
 A retried request with the same `intent_key` and `run_id` reads `granted` again while the run has
 not started. A `duplicate` means the intent key belongs to a different run, for example two
 triggers racing on the same commit. It also answers a redelivered repeat for a run that started or
-that another pod marked.
+that another pod marked. A controller with no cell role is the one exception. Its next pod reloads
+a marked item from the volume and claims again. That claim reads `granted` with the stored number
+when the job's next build number on the volume is not above it. A higher number means the volume
+can hold the build, and Jenkins resumes it with no claim.
 
 Before a granted item leaves the queue, the plugin sends a start mark on the claim route. This costs one
 round trip per build. The mark fails closed: with no `granted` answer, the build stays
