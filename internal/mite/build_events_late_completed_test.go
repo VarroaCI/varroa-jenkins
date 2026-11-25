@@ -149,6 +149,191 @@ func TestOnBuildEventCompletedInTimeWithNoChunkKeepsAFinishedLogComplete(t *test
 	}
 }
 
+// storedIndexHasFinal reports whether the stored log index of runID holds
+// an entry with final true.
+func storedIndexHasFinal(t *testing.T, store blob.Store, runID string) bool {
+	t.Helper()
+	entries, _, _, err := readLogIndex(context.Background(), store, blob.LogIndexKey(runID))
+	if err != nil {
+		t.Fatalf("read the stored log index: %v", err)
+	}
+	for _, e := range entries {
+		if e.Final {
+			return true
+		}
+	}
+	return false
+}
+
+// TestOnBuildEventCompletedInTimeAfterAQueuedChunkEndsLoudly proves that a
+// state that a chunk entered ends loudly at the deadline, in both orders
+// of the chunk and the COMPLETED event. The replica stored chunk 0 of the
+// writer, and the final chunk never came. The end publishes
+// finalize-deadline once, and a later chunk of the run publishes nothing
+// more.
+func TestOnBuildEventCompletedInTimeAfterAQueuedChunkEndsLoudly(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		chunkFirst bool
+	}{
+		{name: "chunk before the event", chunkFirst: true},
+		{name: "chunk after the event"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			owner := newFakeOwnerRequester()
+			runID := newTestRunID()
+			owner.setAnswer(runID, cell2Owner())
+			h, sender := newCompletedOwnerTestHandler(t, owner, &recordingSender{})
+			pub := &fakePublisher{}
+			h.publisher = pub
+			h.logFinalizeWait = 500 * time.Millisecond
+
+			completed := func() {
+				if err := h.OnBuildEvent("cell2", "ns1", 0, completedBuildEvent(runID, time.Now())); err != nil {
+					t.Fatalf("OnBuildEvent: %v", err)
+				}
+			}
+			if !tc.chunkFirst {
+				completed()
+			}
+			sendOwnerChunk(h, runID, 0, "a", false)
+			if got := waitForLogAcks(t, sender, 1)[0]; got.Status != logAckStatusStored || got.AckSeq != 0 {
+				t.Fatalf("expected chunk 0 STORED, got %+v", got)
+			}
+			st, ok := h.lookupRunState(runID)
+			if !ok {
+				t.Fatal("expected a run state before the deadline")
+			}
+			waitForIdleRun(t, st)
+			if tc.chunkFirst {
+				completed()
+			}
+			st.mu.Lock()
+			queued, quiet := st.chunkQueued, st.ownerReadTerminal
+			st.mu.Unlock()
+			if !queued || quiet {
+				t.Fatalf("chunkQueued=%v ownerReadTerminal=%v, want a queued chunk and no owner-read mark", queued, quiet)
+			}
+
+			waitFor(t, func() bool { return h.runRejectedForever(runID) }, 5*time.Second,
+				"the replica did not end the run at its finalize deadline")
+			waitForEviction(t, h, runID)
+			if incomplete, reason := h.runIncompleteness(runID); !incomplete || reason != logReasonFinalizeDeadline {
+				t.Fatalf("incomplete=%v reason=%q, want finalize-deadline", incomplete, reason)
+			}
+			assertOneFinalizeDeadlineMark(t, pub)
+
+			sendOwnerChunk(h, runID, 1, "", true)
+			if got := waitForLogAcks(t, sender, 2)[1]; got.Status != logAckStatusRejected || got.Reason != logReasonFinalizeDeadline {
+				t.Fatalf("expected the later chunk REJECTED finalize-deadline, got %+v", got)
+			}
+			assertOneFinalizeDeadlineMark(t, pub)
+		})
+	}
+}
+
+// assertOneFinalizeDeadlineMark fails the test unless pub holds exactly
+// one incomplete marker, and that marker names finalize-deadline.
+func assertOneFinalizeDeadlineMark(t *testing.T, pub *fakePublisher) {
+	t.Helper()
+	var marks []map[string]interface{}
+	for _, p := range runLogEnvelopes(pub) {
+		if p["incomplete"] == true {
+			marks = append(marks, p)
+		}
+	}
+	if len(marks) != 1 || marks[0]["incomplete_reason"] != logReasonFinalizeDeadline {
+		t.Fatalf("incomplete markers %v, want exactly one with finalize-deadline", marks)
+	}
+}
+
+// TestOnBuildEventQuietEndRefusesALaterChunkWithNoMark proves that a chunk
+// that reaches a replica after its quiet end gets
+// REJECTED{finalize-deadline} and publishes nothing. Replica B got the
+// owner's COMPLETED event inside the deadline and queued no chunk. The
+// refused chunk can repeat a part that replica A stored in a finished log,
+// or it can be a chunk of a short log. B holds no fact about the stored
+// log, so it cannot tell the two apart. A mark from B would stay over A's
+// finalized true. The recorder's sweep reads the stored index and marks
+// only the short log.
+func TestOnBuildEventQuietEndRefusesALaterChunkWithNoMark(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		finished  bool
+		late      *mitev1.LogChunk
+		busyFirst bool
+	}{
+		{
+			name: "a repeat of a finished log answered BUSY before the end", finished: true, busyFirst: true,
+			late: &mitev1.LogChunk{Seq: 0, Data: []byte("ab")},
+		},
+		{
+			name: "the final chunk of a short log",
+			late: &mitev1.LogChunk{Seq: 1, Data: []byte("c"), Final: true},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			owner := newFakeOwnerRequester()
+			runID := newTestRunID()
+			owner.setAnswer(runID, cell2Owner())
+
+			a, senderA := newCompletedOwnerTestHandler(t, owner, &recordingSender{})
+			a.publisher = &fakePublisher{}
+			a.logFinalizeWait = time.Hour
+			sendOwnerChunk(a, runID, 0, "ab", false)
+			wantAcks := 1
+			if tc.finished {
+				sendOwnerChunk(a, runID, 1, "", true)
+				wantAcks = 2
+			}
+			if last := waitForLogAcks(t, senderA, wantAcks)[wantAcks-1]; last.Status != logAckStatusStored {
+				t.Fatalf("expected replica A to store its last chunk, got %+v", last)
+			}
+			if tc.finished {
+				waitForEviction(t, a, runID)
+			}
+
+			b, senderB := newCompletedOwnerTestHandler(t, owner, &recordingSender{})
+			b.logStore = a.logStore
+			pubB := &fakePublisher{}
+			b.publisher = pubB
+			b.logFinalizeWait = 300 * time.Millisecond
+
+			if err := b.OnBuildEvent("cell2", "ns1", 0, completedBuildEvent(runID, time.Now())); err != nil {
+				t.Fatalf("OnBuildEvent: %v", err)
+			}
+			acks := 0
+			if tc.busyFirst {
+				b.logPendingMaxBytes = 1
+				sendOwnerChunk(b, runID, tc.late.Seq, string(tc.late.Data), tc.late.Final)
+				acks++
+				if got := waitForLogAcks(t, senderB, acks)[acks-1]; got.Status != logAckStatusBusy {
+					t.Fatalf("expected the chunk BUSY on replica B before the end, got %+v", got)
+				}
+			}
+			waitFor(t, func() bool { return b.runRejectedForever(runID) }, 5*time.Second,
+				"replica B did not end the run at its finalize deadline")
+			waitForEviction(t, b, runID)
+
+			sendOwnerChunk(b, runID, tc.late.Seq, string(tc.late.Data), tc.late.Final)
+			acks++
+			if got := waitForLogAcks(t, senderB, acks)[acks-1]; got.Status != logAckStatusRejected ||
+				got.Reason != logReasonFinalizeDeadline || got.AckSeq != tc.late.Seq {
+				t.Fatalf("expected the chunk after the quiet end REJECTED finalize-deadline, got %+v", got)
+			}
+			if envs := runLogEnvelopes(pubB); len(envs) != 0 {
+				t.Fatalf("replica B published run.log envelopes %v, want none", envs)
+			}
+			if incomplete, reason := b.runIncompleteness(runID); incomplete {
+				t.Fatalf("replica B recorded incomplete with reason %q, want no reason of its own", reason)
+			}
+			if got := storedIndexHasFinal(t, b.logStore, runID); got != tc.finished {
+				t.Fatalf("stored index final entry = %v, want %v", got, tc.finished)
+			}
+		})
+	}
+}
+
 // TestOnBuildEventLateCompletedWithNoLogStateLeavesAShortLogToTheSweep
 // proves that a late COMPLETED event on a replica with no log state still
 // leaves a short log to the recorder. Here the gateway restarted after

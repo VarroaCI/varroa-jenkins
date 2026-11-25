@@ -401,6 +401,13 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 	// A run past its finalize deadline rejects each chunk before the
 	// owner lookup. This check reads the state or the tombstone and never
 	// creates either.
+	//
+	// The refusal publishes no run.log. A loud end already published its
+	// reason once. A quiet end holds no fact about the stored log: the
+	// chunk can repeat a part that another replica stored in a finished
+	// log, and the recorder keeps an incomplete mark over finalized true.
+	// The recorder's finalizeStaleLogs reads the stored index and marks a
+	// short log of a quiet end.
 	if h.runRejectedForever(chunk.RunId) {
 		h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusRejected, logReasonFinalizeDeadline, 0)
 		return
