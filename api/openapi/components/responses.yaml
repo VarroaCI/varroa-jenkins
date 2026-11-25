@@ -66,7 +66,20 @@ Internal:
         $ref: './schemas.yaml#/Error'
 
 ClusterUnreachable:
-  description: Target cluster unreachable over the bus.
+  description: >
+    The operator of the target cluster did not answer over the bus in time.
+    The operator can have received the request, so a write can have taken
+    effect. Read the object before you send a write again.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'
+
+OperatorUnavailable:
+  description: >
+    No operator of the target cluster received the request (code
+    `operator_unavailable`). The operator restarts or has no leader.
+    Nothing changed, so you can send the request again later.
   content:
     application/json:
       schema:

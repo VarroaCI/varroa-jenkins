@@ -333,7 +333,7 @@ func (s *Server) handleCellGrants(w http.ResponseWriter, r *http.Request) {
 	claims := auth.ClaimsFromContext(r.Context())
 	grants, serr := s.CellGrants(r.Context(), claims, r.URL.Query().Get("cluster"), r.PathValue("namespace"), r.PathValue("name"))
 	if serr != nil {
-		s.writeJSONError(w, serr.Status, serr.Message)
+		s.writeServiceError(w, serr)
 		return
 	}
 	s.writeJSON(w, http.StatusOK, grants)

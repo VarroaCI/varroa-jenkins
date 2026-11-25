@@ -9,7 +9,10 @@ const STATUS_COPY: Record<number, string> = {
   413: "The script is too large.",
   429: "Too many requests. Please try again shortly.",
 };
-const CODE_COPY: Record<string, string> = { PREFLIGHT_FAILED: "Preflight checks failed." };
+const CODE_COPY: Record<string, string> = {
+  PREFLIGHT_FAILED: "Preflight checks failed.",
+  operator_unavailable: "No operator received the request. Nothing changed. Try again later.",
+};
 
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string, public readonly body?: unknown) {

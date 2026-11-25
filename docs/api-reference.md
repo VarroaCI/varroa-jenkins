@@ -42,4 +42,13 @@ The update routes of composed bundles, catalog sources, Jenkins roles, Jenkins r
 
 On a `409` without a code, read the object again and repeat the change. If that read answers `404`, send the change without `metadata.resourceVersion`.
 
+## Requests that an operator serves
+
+The BFF sends each write, and each read of a member cluster, to the operator of the target cluster. Two answers mean that the operator did not reply:
+
+- `503` with the code `operator_unavailable`: no operator of the cluster received the request. The operator restarts or has no leader. Nothing changed, so send the request again later.
+- `502` with the text `cluster <name> unreachable`: the operator did not answer in time. It can have received the request. Read the object before you send a write again.
+
+A brood operation row of a cluster that no operator answered carries the code `operator_unavailable`. A create or preview that succeeds on no cluster answers `503` when such a row exists and no row names an unreachable cluster.
+
 For exhaustive schemas, examples, and media types, defer to the OpenAPI document rather than duplicating it here.

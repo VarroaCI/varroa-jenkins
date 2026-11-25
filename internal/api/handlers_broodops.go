@@ -327,17 +327,21 @@ func (s *Server) handleBroodCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Zero successes.
-	anyTransport := false
+	rows := make([]fanoutRow, 0, len(failed))
 	for _, f := range failed {
-		if strings.Contains(f.Error, "unreachable") {
-			anyTransport = true
-			break
-		}
+		rows = append(rows, fanoutRow{code: f.Code, err: f.Error})
 	}
 
 	msg := "all clusters failed"
-	if anyTransport {
+	switch fanoutTransportStatus(rows) {
+	case http.StatusBadGateway:
 		s.writeJSONErrorStatus(w, http.StatusBadGateway, msg, map[string]interface{}{
+			"clusters": results,
+		})
+		return
+	case http.StatusServiceUnavailable:
+		s.writeJSONErrorStatus(w, http.StatusServiceUnavailable, noOperatorFanoutText, map[string]interface{}{
+			"code":     codeOperatorUnavailable,
 			"clusters": results,
 		})
 		return
@@ -470,16 +474,20 @@ func (s *Server) handleBroodPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Zero resolved.
-	anyTransport := false
+	rows := make([]fanoutRow, 0, len(results))
 	for _, r := range results {
-		if strings.Contains(r.Error, "unreachable") {
-			anyTransport = true
-			break
-		}
+		rows = append(rows, fanoutRow{code: r.Code, err: r.Error})
 	}
 
-	if anyTransport {
+	switch fanoutTransportStatus(rows) {
+	case http.StatusBadGateway:
 		s.writeJSONErrorStatus(w, http.StatusBadGateway, "all clusters unreachable", map[string]interface{}{
+			"clusters": results,
+		})
+		return
+	case http.StatusServiceUnavailable:
+		s.writeJSONErrorStatus(w, http.StatusServiceUnavailable, noOperatorFanoutText, map[string]interface{}{
+			"code":     codeOperatorUnavailable,
 			"clusters": results,
 		})
 		return
@@ -1030,6 +1038,33 @@ func sendSSEClosed(w http.ResponseWriter, flusher http.Flusher, reason, message 
 }
 
 // --- Helpers ---
+
+// noOperatorFanoutText is the error of a fan-out with no success whose
+// transport failures are all requests that no operator received.
+const noOperatorFanoutText = "no operator of a target cluster received the request; try again later"
+
+// fanoutRow is the code and the error text of one failed fan-out row.
+type fanoutRow struct {
+	code string
+	err  string
+}
+
+// fanoutTransportStatus returns the status of a fan-out with no success.
+// A row that names an unreachable cluster makes it 502, because that
+// operator can have acted. Otherwise a row that no operator received makes
+// it 503. It returns 0 when no row holds a transport failure.
+func fanoutTransportStatus(rows []fanoutRow) int {
+	status := 0
+	for _, r := range rows {
+		switch {
+		case r.code == codeOperatorUnavailable:
+			status = http.StatusServiceUnavailable
+		case strings.Contains(r.err, "unreachable"):
+			return http.StatusBadGateway
+		}
+	}
+	return status
+}
 
 func mapCodeToHTTP(code string) int {
 	switch code {

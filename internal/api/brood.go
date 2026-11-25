@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -81,12 +82,73 @@ type ErrClusterUnreachable struct {
 // a timeout included, keeps the unreachable text.
 func (e *ErrClusterUnreachable) Error() string {
 	if bus.IsNoResponder(e.Err) {
-		return fmt.Sprintf("no operator of cluster %s received the request: the operator restarts or has no leader; try again later", e.Cluster)
+		return noOperatorText(e.Cluster)
 	}
 	return fmt.Sprintf("cluster %s unreachable: %v", e.Cluster, e.Err)
 }
 
 func (e *ErrClusterUnreachable) Unwrap() error { return e.Err }
+
+// noOperatorText is the text of a request that no operator of cluster
+// received.
+func noOperatorText(cluster string) string {
+	return fmt.Sprintf("no operator of cluster %s received the request: the operator restarts or has no leader; try again later", cluster)
+}
+
+// clusterRequestFailure is the HTTP answer of a request to the operator of
+// cluster that failed with the bus error err. A request that no operator
+// received is 503 with the code operator_unavailable: NATS delivered no copy,
+// so the caller can send it again. Any other bus error is 502, because the
+// operator can have received the request and acted on it.
+func clusterRequestFailure(cluster string, err error) *ServiceError {
+	if bus.IsNoResponder(err) {
+		return &ServiceError{Status: http.StatusServiceUnavailable, Code: codeOperatorUnavailable, Message: noOperatorText(cluster)}
+	}
+	return &ServiceError{Status: http.StatusBadGateway, Message: "cluster " + cluster + " unreachable"}
+}
+
+// writeClusterRequestFailure writes the answer of clusterRequestFailure.
+func writeClusterRequestFailure(w http.ResponseWriter, cluster string, err error) {
+	serr := clusterRequestFailure(cluster, err)
+	body := map[string]string{"error": serr.Message}
+	if serr.Code != "" {
+		body["code"] = serr.Code
+	}
+	writeJSON(w, serr.Status, body)
+}
+
+// ActionRequestError returns err as an ErrClusterUnreachable when a
+// controller action got no reply from the operator of cluster. The HTTP
+// action routes and the MCP action tools then name the missing operator.
+// Any other error stays as it is.
+func ActionRequestError(cluster string, err error) error {
+	var unreachable *ErrClusterUnreachable
+	if !bus.IsNoReply(err) || errors.As(err, &unreachable) {
+		return err
+	}
+	return &ErrClusterUnreachable{Cluster: cluster, Err: err}
+}
+
+// writeUnreachable writes the answer of the ErrClusterUnreachable in err and
+// reports true. It writes nothing for any other error.
+func writeUnreachable(w http.ResponseWriter, err error) bool {
+	var unreachable *ErrClusterUnreachable
+	if !errors.As(err, &unreachable) {
+		return false
+	}
+	writeClusterRequestFailure(w, unreachable.Cluster, unreachable.Err)
+	return true
+}
+
+// clusterRowFailure returns the code and the text of a fan-out row whose
+// request to the operator of cluster failed with the bus error err. A row
+// that no operator received carries the code operator_unavailable.
+func clusterRowFailure(cluster string, err error) (code, msg string) {
+	if bus.IsNoResponder(err) {
+		code = codeOperatorUnavailable
+	}
+	return code, (&ErrClusterUnreachable{Cluster: cluster, Err: err}).Error()
+}
 
 // Brood is the abstract interface for controller CRUD across clusters (§4).
 type Brood interface {

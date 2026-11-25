@@ -28,6 +28,12 @@ describe("bffFetch errors", () => {
     expect(error.message).not.toContain("internal");
     expect(error.body).toMatchObject({ checks: [{ id: "version" }] });
   });
+  it("names a request that no operator received", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "no operator of cluster core received the request", code: "operator_unavailable" }), { status: 503, headers: { "content-type": "application/json" } })));
+    const error = await bffFetch("/test").catch((value) => value) as ApiError;
+    expect(error).toMatchObject({ status: 503, message: "No operator received the request. Nothing changed. Try again later.", code: "operator_unavailable" });
+    expect(error.serverMessage).toBe("no operator of cluster core received the request");
+  });
   it("uses status zero for network failures", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("private network detail")));
     const error = await bffFetch("/test").catch((value) => value) as ApiError;
@@ -54,6 +60,7 @@ describe("defaultQueryRetry", () => {
   });
   it("retries another failure once", () => {
     expect(defaultQueryRetry(0, new ApiError(503, "unavailable", {}))).toBe(true);
+    expect(defaultQueryRetry(0, new ApiError(503, "no operator", { code: "operator_unavailable" }))).toBe(true);
     expect(defaultQueryRetry(0, new Error("x"))).toBe(true);
   });
   it("stops after one retry", () => {

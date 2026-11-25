@@ -9,7 +9,7 @@ varroactl broodop run restart --selector tier=canary --max-parallel 2 --watch
 
 Choose exactly one target form: `--names` or `--selector`. A selector can be limited with `--namespaces` and `--clusters`; use `all` only from an operator namespace. Filters for `phase`, `version`, and `bundle` further narrow selector results.
 
-`--clusters all` targets the local cluster and every member cluster, healthy or not. A member that does not reply gets a failed row in the result. The other clusters still run.
+`--clusters all` targets the local cluster and every member cluster, healthy or not. A member that does not reply gets a failed row in the result. The other clusters still run. A row of a cluster where no operator received the request has the code `operator_unavailable`, and you can send the run again later.
 
 To name controllers on more than one cluster, write each name as `cluster/namespace/name`. Do not set `--clusters` with this form. Use it only from an operator namespace. The server refuses the run with 400 when a name holds a cluster that is not the local cluster or a member cluster.
 

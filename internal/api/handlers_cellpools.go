@@ -239,7 +239,7 @@ func (s *Server) HandleCellPoolDispatch(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleGetCellPool(w http.ResponseWriter, r *http.Request, name string) {
 	pool, serr := s.GetCellPool(r.Context(), auth.ClaimsFromContext(r.Context()), r.URL.Query().Get("cluster"), name)
 	if serr != nil {
-		s.writeJSONError(w, serr.Status, serr.Message)
+		s.writeServiceError(w, serr)
 		return
 	}
 	s.writeJSON(w, http.StatusOK, cellPoolEntryForCluster(pool))
@@ -263,7 +263,7 @@ func (s *Server) handlePatchCellPool(w http.ResponseWriter, r *http.Request, nam
 
 	pool, serr := s.ScaleCellPool(r.Context(), claims, r.URL.Query().Get("cluster"), name, dials)
 	if serr != nil {
-		s.writeJSONError(w, serr.Status, serr.Message)
+		s.writeServiceError(w, serr)
 		return
 	}
 	s.notifyActivity(activity.Event{

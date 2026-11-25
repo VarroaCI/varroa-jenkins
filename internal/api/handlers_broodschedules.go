@@ -116,6 +116,9 @@ func (s *Server) handleBroodScheduleCreate(w http.ResponseWriter, r *http.Reques
 
 	resp, err := scheds.Create(r.Context(), req.Cluster, ns, req.Name, req.Spec)
 	if err != nil {
+		if writeUnreachable(w, err) {
+			return
+		}
 		s.writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -177,6 +180,9 @@ func (s *Server) handleBroodScheduleGet(w http.ResponseWriter, r *http.Request, 
 
 	resp, err := scheds.Get(r.Context(), "", ns, name)
 	if err != nil {
+		if writeUnreachable(w, err) {
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			s.writeJSONError(w, http.StatusNotFound, "not found")
 			return
@@ -208,6 +214,9 @@ func (s *Server) handleBroodScheduleDelete(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := scheds.Delete(r.Context(), "", ns, name); err != nil {
+		if writeUnreachable(w, err) {
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			s.writeJSONError(w, http.StatusNotFound, "not found")
 			return
@@ -245,6 +254,9 @@ func (s *Server) handleBroodScheduleSuspend(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := scheds.Suspend(r.Context(), "", ns, name, req.Suspend); err != nil {
+		if writeUnreachable(w, err) {
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			s.writeJSONError(w, http.StatusNotFound, "not found")
 			return

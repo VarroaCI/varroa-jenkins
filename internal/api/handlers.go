@@ -1067,7 +1067,10 @@ func (s *Server) handleControllerDetail(w http.ResponseWriter, r *http.Request, 
 	if err != nil {
 		s.deps.Logger.Error("get controller failed", "cluster", cluster, "namespace", namespace, "name", name, "error", err)
 		var fe *BroodError
+		var unreachable *ErrClusterUnreachable
 		switch {
+		case errors.As(err, &unreachable):
+			writeClusterRequestFailure(w, cluster, unreachable.Err)
 		case errors.As(err, &fe) && fe.Code == bus.CodeNotFound,
 			!errors.As(err, &fe) && strings.Contains(err.Error(), "not found"):
 			s.writeJSONError(w, http.StatusNotFound, "controller not found")
@@ -1236,9 +1239,13 @@ func (s *Server) handleControllerYAML(w http.ResponseWriter, r *http.Request, cl
 	if err != nil {
 		s.deps.Logger.Error("get controller yaml failed", "cluster", cluster, "namespace", namespace, "name", name, "error", err)
 		var fe *BroodError
-		if errors.As(err, &fe) && fe.Code != bus.CodeNotFound {
+		var unreachable *ErrClusterUnreachable
+		switch {
+		case errors.As(err, &unreachable):
+			writeClusterRequestFailure(w, cluster, unreachable.Err)
+		case errors.As(err, &fe) && fe.Code != bus.CodeNotFound:
 			s.writeJSONError(w, http.StatusBadGateway, "cluster unreachable or errored")
-		} else {
+		default:
 			s.writeJSONError(w, http.StatusNotFound, "controller not found")
 		}
 		return
@@ -1711,7 +1718,7 @@ func (s *Server) handleApproveRestart(w http.ResponseWriter, r *http.Request, cl
 			s.writeJSONError(w, http.StatusConflict, err.Error())
 			return
 		}
-		s.writeActionError(w, err)
+		s.writeActionError(w, cluster, err)
 		return
 	}
 
@@ -1761,6 +1768,9 @@ func (s *Server) handleApproveDeletion(w http.ResponseWriter, r *http.Request, c
 	}
 
 	if err := s.deps.Reconciler.ApproveDeletion(r.Context(), cluster, namespace, name, body.Path); err != nil {
+		if writeUnreachable(w, ActionRequestError(cluster, err)) {
+			return
+		}
 		if strings.Contains(err.Error(), "no pending deletion") {
 			s.writeJSONError(w, http.StatusConflict, err.Error())
 			return
@@ -2020,7 +2030,7 @@ func (s *Server) handleHibernate(w http.ResponseWriter, r *http.Request, cluster
 		return
 	}
 	if err := s.deps.Reconciler.Hibernate(r.Context(), cluster, ns, name); err != nil {
-		s.writeActionError(w, err)
+		s.writeActionError(w, cluster, err)
 		return
 	}
 	if ActorFrom(claims) != "" {
@@ -2055,7 +2065,7 @@ func (s *Server) handleWake(w http.ResponseWriter, r *http.Request, cluster, ns,
 		return
 	}
 	if err := s.deps.Reconciler.Wake(r.Context(), cluster, ns, name); err != nil {
-		s.writeActionError(w, err)
+		s.writeActionError(w, cluster, err)
 		return
 	}
 	if ActorFrom(claims) != "" {
@@ -2075,8 +2085,13 @@ func (s *Server) handleWake(w http.ResponseWriter, r *http.Request, cluster, ns,
 // writeActionError maps a controller action refusal to its HTTP status. The
 // operator's "conflict" code (e.g. hibernate/wake against a Stopped controller)
 // is a 409; anything the operator refused with another code keeps the same
-// not_found/invalid/internal mapping the brood error writer uses.
-func (s *Server) writeActionError(w http.ResponseWriter, err error) {
+// not_found/invalid/internal mapping the brood error writer uses. An action
+// that got no reply from the operator of cluster goes through
+// writeUnreachable.
+func (s *Server) writeActionError(w http.ResponseWriter, cluster string, err error) {
+	if writeUnreachable(w, ActionRequestError(cluster, err)) {
+		return
+	}
 	var ae *controller.ActionError
 	if !errors.As(err, &ae) {
 		s.writeJSONError(w, http.StatusInternalServerError, err.Error())
@@ -3145,7 +3160,7 @@ func (s *Server) writeJSONError(w http.ResponseWriter, status int, msg string) {
 }
 
 // writeBroodError maps a BroodError to its HTTP status per §2.1 and
-// ErrClusterUnreachable to 502.
+// ErrClusterUnreachable through writeUnreachable.
 func writeBroodError(w http.ResponseWriter, err error) {
 	writeBroodErrorChecks(w, err, nil)
 }
@@ -3178,9 +3193,7 @@ func writeBroodErrorChecks(w http.ResponseWriter, err error, checks []bus.Check)
 		}
 		return
 	}
-	var ec *ErrClusterUnreachable
-	if errors.As(err, &ec) {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "cluster " + ec.Cluster + " unreachable"})
+	if writeUnreachable(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

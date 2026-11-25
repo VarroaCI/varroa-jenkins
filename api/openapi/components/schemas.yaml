@@ -17,6 +17,7 @@ Error:
         not answer; the response is 503 and a retry can succeed.
         The value federated_copy means that the object is a federated copy. The response is 409, and a retry does not succeed.
         The value federated_label means that the request body sets the label varroa.dev/federated-from. The response is 400, and a repeat of the same body does not succeed.
+        The value operator_unavailable means that no operator of the target cluster received the request. The response is 503, nothing changed, and a retry can succeed.
   additionalProperties: false
 
 ApproveConflict:
@@ -3772,6 +3773,11 @@ BroodRunClusterStatus:
       type: string
     ok:
       type: boolean
+    code:
+      type: string
+      description: >
+        The reply code of the cluster's operator, or operator_unavailable when
+        no operator of the cluster received the request.
     error:
       type: string
 
@@ -3871,15 +3877,31 @@ BroodRunSummaryRow:
 
 BroodCreateFailure:
   type: object
-  description: Error body when zero clusters succeed on create.
+  description: Error body when zero clusters succeed on create or preview.
   required: [error, clusters]
   properties:
     error:
       type: string
+    code:
+      type: string
+      description: >
+        operator_unavailable on a 503: no operator of a failed cluster
+        received the request, and nothing changed.
     clusters:
       type: array
       items:
         $ref: '#/BroodRunClusterStatus'
+
+BroodUnavailable:
+  description: >
+    The 503 body of a brood operation create or preview. An Error body means
+    that the brood operations store is not configured, or that the BFF cannot
+    read the cluster list. A BroodCreateFailure body with the code
+    operator_unavailable means that no operator of a failed cluster received
+    the request.
+  oneOf:
+    - $ref: '#/Error'
+    - $ref: '#/BroodCreateFailure'
 
 BroodPreviewResponse:
   type: object
@@ -3896,6 +3918,12 @@ BroodPreviewResponse:
             type: string
           ok:
             type: boolean
+          code:
+            type: string
+            description: >
+              The reply code of the cluster's operator, or
+              operator_unavailable when no operator of the cluster received
+              the request.
           error:
             type: string
           targets:

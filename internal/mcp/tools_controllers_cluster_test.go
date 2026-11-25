@@ -3,8 +3,10 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/nats-io/nats.go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -232,5 +234,49 @@ func TestDeleteController_LocalDeleteGoesThroughTheBrood(t *testing.T) {
 	}
 	if len(sink.events) != 1 || sink.events[0].Cluster != "core" {
 		t.Errorf("events = %+v, want one event on core", sink.events)
+	}
+}
+
+// noOperatorReconciler answers each controller action with the relay error of
+// a request that no operator received.
+type noOperatorReconciler struct{ *guardReconciler }
+
+func (noOperatorReconciler) ApproveRestart(context.Context, string, string, string, string, string) error {
+	return fmt.Errorf("approve restart relay: %w", nats.ErrNoResponders)
+}
+
+func (noOperatorReconciler) Hibernate(context.Context, string, string, string) error {
+	return fmt.Errorf("hibernate relay: %w", nats.ErrNoResponders)
+}
+
+func (noOperatorReconciler) Wake(context.Context, string, string, string) error {
+	return fmt.Errorf("wake relay: %w", nats.ErrNoResponders)
+}
+
+// An action that no operator received names the missing operator of the
+// target cluster, and no event is emitted.
+func TestControllerActions_NoOperatorNamesTheOperator(t *testing.T) {
+	for tool, verb := range map[string]string{
+		"restart_controller":   "restart",
+		"hibernate_controller": "hibernate",
+		"wake_controller":      "wake",
+	} {
+		t.Run(tool, func(t *testing.T) {
+			deps := adminDeps()
+			sink := &recordingSink{}
+			deps.ActivityPublisher = sink
+			withControllerBrood(deps)
+			deps.Reconciler = noOperatorReconciler{&guardReconciler{}}
+			tr := callWithClaims(t, deps, mcpAdminClaims, tool, map[string]any{
+				"namespace": "ns", "name": "hibernated", "cluster": "member-b",
+			})
+			want := "failed to " + verb + " controller: no operator of cluster member-b received the request: the operator restarts or has no leader; try again later"
+			if !tr.IsError || toolText(tr) != want {
+				t.Fatalf("result = %q, want %q", toolText(tr), want)
+			}
+			if len(sink.events) != 0 {
+				t.Errorf("events = %+v, want none", sink.events)
+			}
+		})
 	}
 }

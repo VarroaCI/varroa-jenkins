@@ -246,7 +246,7 @@ func cellPoolServiceError(err error, cluster, fallback string) *ServiceError {
 	case errors.Is(err, cells.ErrCellPoolConflict):
 		return &ServiceError{Status: http.StatusConflict, Message: cellPoolConflictMessage}
 	case errors.As(err, &unreachable):
-		return &ServiceError{Status: http.StatusBadGateway, Message: "cluster " + cluster + " unreachable"}
+		return clusterRequestFailure(cluster, unreachable.Err)
 	case errors.As(err, &brood):
 		switch brood.Code {
 		case bus.CodeInvalid:

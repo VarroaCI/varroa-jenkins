@@ -26,6 +26,7 @@ type fakeActionReconciler struct {
 	hibernateErr error
 	wakeErr      error
 	approveErr   error
+	deletionErr  error
 	hibernate    int
 	wake         int
 	// expected records the reviewed content hash of the last approve.
@@ -40,7 +41,7 @@ func (f *fakeActionReconciler) ApproveRestart(_ context.Context, _, _, _, _, exp
 	return f.approveErr
 }
 func (f *fakeActionReconciler) ApproveDeletion(_ context.Context, _, _, _, _ string) error {
-	return nil
+	return f.deletionErr
 }
 func (f *fakeActionReconciler) Hibernate(_ context.Context, _, _, _ string) error {
 	f.hibernate++

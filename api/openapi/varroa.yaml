@@ -185,7 +185,8 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/components_schemas_Error'
-      description: Target cluster unreachable over the bus.
+      description: |
+        The operator of the target cluster did not answer over the bus in time. The operator can have received the request, so a write can have taken effect. Read the object before you send a write again.
     components_responses_Conflict:
       content:
         application/json:
@@ -223,6 +224,13 @@ components:
           schema:
             $ref: '#/components/schemas/components_schemas_Error'
       description: Not implemented.
+    components_responses_OperatorUnavailable:
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/components_schemas_Error'
+      description: |
+        No operator of the target cluster received the request (code `operator_unavailable`). The operator restarts or has no leader. Nothing changed, so you can send the request again later.
     components_responses_PayloadTooLarge:
       content:
         application/json:
@@ -969,6 +977,10 @@ components:
           items:
             properties:
               cluster:
+                type: string
+              code:
+                description: |
+                  The reply code of the cluster's operator, or operator_unavailable when no operator of the cluster received the request.
                 type: string
               error:
                 type: string
@@ -1981,7 +1993,7 @@ components:
       properties:
         code:
           description: |
-            Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed. The value federated_copy means that the object is a federated copy. The response is 409, and a retry does not succeed. The value federated_label means that the request body sets the label varroa.dev/federated-from. The response is 400, and a repeat of the same body does not succeed.
+            Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed. The value federated_copy means that the object is a federated copy. The response is 409, and a retry does not succeed. The value federated_label means that the request body sets the label varroa.dev/federated-from. The response is 400, and a repeat of the same body does not succeed. The value operator_unavailable means that no operator of the target cluster received the request. The response is 503, nothing changed, and a retry can succeed.
           type: string
         error:
           description: Human-readable error message.
@@ -5836,12 +5848,16 @@ components:
       - port
       type: object
     components_schemas_BroodCreateFailure:
-      description: Error body when zero clusters succeed on create.
+      description: Error body when zero clusters succeed on create or preview.
       properties:
         clusters:
           items:
             $ref: '#/components/schemas/components_schemas_BroodRunClusterStatus'
           type: array
+        code:
+          description: |
+            operator_unavailable on a 503: no operator of a failed cluster received the request, and nothing changed.
+          type: string
         error:
           type: string
       required:
@@ -6039,6 +6055,10 @@ components:
             properties:
               cluster:
                 type: string
+              code:
+                description: |
+                  The reply code of the cluster's operator, or operator_unavailable when no operator of the cluster received the request.
+                type: string
               error:
                 type: string
               ok:
@@ -6149,6 +6169,10 @@ components:
       description: Per-cluster fan-out outcome row.
       properties:
         cluster:
+          type: string
+        code:
+          description: |
+            The reply code of the cluster's operator, or operator_unavailable when no operator of the cluster received the request.
           type: string
         error:
           type: string
@@ -6300,6 +6324,12 @@ components:
       - schedule
       - template
       type: object
+    components_schemas_BroodUnavailable:
+      description: |
+        The 503 body of a brood operation create or preview. An Error body means that the brood operations store is not configured, or that the BFF cannot read the cluster list. A BroodCreateFailure body with the code operator_unavailable means that no operator of a failed cluster received the request.
+      oneOf:
+      - $ref: '#/components/schemas/components_schemas_Error'
+      - $ref: '#/components/schemas/components_schemas_BroodCreateFailure'
     components_schemas_BroodUpgradePolicy:
       additionalProperties: false
       description: Governs the upgrade verb. Every field absent means enabled, the
@@ -8557,7 +8587,7 @@ components:
       properties:
         code:
           description: |
-            Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed. The value federated_copy means that the object is a federated copy. The response is 409, and a retry does not succeed. The value federated_label means that the request body sets the label varroa.dev/federated-from. The response is 400, and a repeat of the same body does not succeed.
+            Stable machine-readable reason, present only where a client branches on it. The value record_store_unreachable means the record store did not answer; the response is 503 and a retry can succeed. The value federated_copy means that the object is a federated copy. The response is 409, and a retry does not succeed. The value federated_label means that the request body sets the label varroa.dev/federated-from. The response is 400, and a repeat of the same body does not succeed. The value operator_unavailable means that no operator of the target cluster received the request. The response is 503, nothing changed, and a retry can succeed.
           type: string
         error:
           description: Human-readable error message.
@@ -15873,7 +15903,15 @@ paths:
                 $ref: '#/components/schemas/components_schemas_BroodCreateFailure'
           description: All clusters failed or unreachable.
         "503":
-          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_BroodUnavailable'
+          description: The brood operations store is not configured, or the BFF cannot
+            read the cluster list (an Error body). Or no operator of a failed cluster
+            received the request, and no failed row names an unreachable cluster (a
+            BroodCreateFailure body with the code operator_unavailable). Nothing changed
+            on a failed cluster.
       summary: Creates a new brood operation. Operator+.
       tags:
       - broodops
@@ -16034,7 +16072,15 @@ paths:
                 $ref: '#/components/schemas/components_schemas_BroodCreateFailure'
           description: All clusters unreachable.
         "503":
-          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_BroodUnavailable'
+          description: The brood operations store is not configured, or the BFF cannot
+            read the cluster list (an Error body). Or no operator of a failed cluster
+            received the request, and no failed row names an unreachable cluster (a
+            BroodCreateFailure body with the code operator_unavailable). Nothing changed
+            on a failed cluster.
       summary: Previews which controllers a brood operation would target. Viewer+.
       tags:
       - broodops
@@ -16317,6 +16363,8 @@ paths:
           $ref: '#/components/responses/components_responses_NotFound'
         "502":
           $ref: '#/components/responses/components_responses_ClusterUnreachable'
+        "503":
+          $ref: '#/components/responses/components_responses_OperatorUnavailable'
       summary: Gets one cell pool's spec and status from the named cluster, or from
         the BFF's own cluster when no cluster is named. Requires the cellpools:read
         verb on a cluster-wide binding.
@@ -16352,6 +16400,8 @@ paths:
           $ref: '#/components/responses/components_responses_Conflict'
         "502":
           $ref: '#/components/responses/components_responses_ClusterUnreachable'
+        "503":
+          $ref: '#/components/responses/components_responses_OperatorUnavailable'
       summary: Scales a cell pool. The body carries only the four scale dials; a body
         naming profileRef or cellTemplate is refused with 400. The write goes to the
         pool of the named cluster, or of the BFF's own cluster when no cluster is
@@ -16392,6 +16442,8 @@ paths:
           $ref: '#/components/responses/components_responses_NotFound'
         "502":
           $ref: '#/components/responses/components_responses_ClusterUnreachable'
+        "503":
+          $ref: '#/components/responses/components_responses_OperatorUnavailable'
       summary: Returns the grants that reach each tenant of one cell.
       tags:
       - Cells
@@ -17830,6 +17882,8 @@ paths:
           $ref: '#/components/responses/components_responses_Internal'
         "502":
           $ref: '#/components/responses/components_responses_ClusterUnreachable'
+        "503":
+          $ref: '#/components/responses/components_responses_OperatorUnavailable'
       summary: Cancel a drain on a cluster (rejoin it to the brood).
       tags:
       - clusters
@@ -17879,6 +17933,8 @@ paths:
           $ref: '#/components/responses/components_responses_Internal'
         "502":
           $ref: '#/components/responses/components_responses_ClusterUnreachable'
+        "503":
+          $ref: '#/components/responses/components_responses_OperatorUnavailable'
       summary: Start a drain on a cluster (deletes all controllers, Jenkins data not
         migrated).
       tags:

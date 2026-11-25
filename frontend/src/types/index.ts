@@ -1323,6 +1323,8 @@ export interface BroodOperation {
 export interface BroodRunClusterStatus {
   cluster: string;
   ok: boolean;
+  /** The operator reply code, or operator_unavailable when no operator received the request. */
+  code?: string;
   error?: string;
 }
 
@@ -1371,6 +1373,8 @@ export interface BroodPreviewTarget {
 export interface BroodPreviewSection {
   cluster: string;
   ok: boolean;
+  /** The operator reply code, or operator_unavailable when no operator received the request. */
+  code?: string;
   error?: string;
   targets?: BroodPreviewTarget[];
 }
