@@ -25,6 +25,12 @@ import java.util.function.LongSupplier;
  * completion callback passed to {@link VarroaClaimQueue#offer(Queue.Item,
  * Job, Runnable)}, and in every case after one hour, through a lazy sweep
  * on each {@code canRun} pass (ruling q).
+ *
+ * <p>Only a grant that this Jenkins process received releases an item. A
+ * queue item that Jenkins loads from disk holds no grant, because its build
+ * can have started before a hard stop. The dispatcher blocks it and offers
+ * its claim again, and the claimer cancels it when a build already carries
+ * its run id.
  */
 @Extension
 public class VarroaClaimDispatcher extends QueueTaskDispatcher {

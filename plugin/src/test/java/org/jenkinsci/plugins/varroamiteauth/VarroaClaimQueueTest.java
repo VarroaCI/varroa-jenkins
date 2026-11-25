@@ -340,6 +340,28 @@ public class VarroaClaimQueueTest {
         assertTrue(DuplicateRegistry.get().contains("run-1"));
     }
 
+    /**
+     * A queue item that Jenkins loads from disk can name a run whose build
+     * already started. The claimer cancels it before any claim, because a
+     * claim can give the same run a second number.
+     */
+    @Test
+    public void anItemWhoseRunAlreadyBuiltIsCancelledWithNoClaim() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("built-job");
+        j.assertBuildStatusSuccess(project.scheduleBuild2(0, new VarroaIntentAction("run-1", "", null, 1_000_000L)));
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":2}");
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
+        assertTrue(queue.offer(item, project));
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled");
+        assertEquals("the claimer sends no claim", 0, calls.get());
+        assertEquals("the claimer sends no start mark", 0, markCalls.get());
+        assertTrue(DuplicateRegistry.get().contains("run-1"));
+        assertEquals("the job counter stays", 2, project.getNextBuildNumber());
+    }
+
     @Test
     public void fencedCancelsWithNoSecondClaim() throws Exception {
         FreeStyleProject project = j.createFreeStyleProject("vetoed-job");
