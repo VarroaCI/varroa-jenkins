@@ -7811,7 +7811,7 @@
         "type": "object"
       },
       "components_schemas_BroodCreateFailure": {
-        "description": "Error body when zero clusters succeed on create or preview.",
+        "description": "Error body when zero clusters succeed on create or preview. The row codes set the status. A row with no code holds no operator reply that the BFF can read, and one such row makes the status 502. Otherwise the first operator reply sets the status: not_found 404, conflict 409, invalid 400, and any other code 500. When each row has the code operator_unavailable, the status is 503.\n",
         "properties": {
           "clusters": {
             "items": {
@@ -7820,7 +7820,7 @@
             "type": "array"
           },
           "code": {
-            "description": "operator_unavailable on a 503: no operator of a failed cluster received the request, and nothing changed.\n",
+            "description": "operator_unavailable on a 503: no operator of any target cluster received the request, and nothing changed.\n",
             "type": "string"
           },
           "error": {
@@ -8457,7 +8457,7 @@
         "type": "object"
       },
       "components_schemas_BroodUnavailable": {
-        "description": "The 503 body of a brood operation create or preview. An Error body means that the brood operations store is not configured, or that the BFF cannot read the cluster list. A BroodCreateFailure body with the code operator_unavailable means that no operator of a failed cluster received the request.\n",
+        "description": "The 503 body of a brood operation create or preview. An Error body means that the brood operations store is not configured, or that the BFF cannot read the cluster list. A BroodCreateFailure body with the code operator_unavailable means that no operator of any target cluster received the request.\n",
         "oneOf": [
           {
             "$ref": "#/components/schemas/components_schemas_Error"
@@ -21179,7 +21179,7 @@
                 }
               }
             },
-            "description": "Conflict (uniform across clusters)."
+            "description": "No cluster succeeded, and the first operator reply is conflict. Each other row holds an operator reply or the code operator_unavailable."
           },
           "502": {
             "content": {
@@ -21189,7 +21189,7 @@
                 }
               }
             },
-            "description": "All clusters failed or unreachable."
+            "description": "No cluster succeeded, and a row holds no operator reply that the BFF can read. That operator did not answer in time, or its reply was unreadable. It can have acted."
           },
           "503": {
             "content": {
@@ -21199,7 +21199,7 @@
                 }
               }
             },
-            "description": "The brood operations store is not configured, or the BFF cannot read the cluster list (an Error body). Or no operator of a failed cluster received the request, and no failed row names an unreachable cluster (a BroodCreateFailure body with the code operator_unavailable). Nothing changed on a failed cluster."
+            "description": "The brood operations store is not configured, or the BFF cannot read the cluster list (an Error body). Or no operator of any target cluster received the request (a BroodCreateFailure body with the code operator_unavailable). Nothing changed."
           }
         },
         "summary": "Creates a new brood operation. Operator+.",
@@ -21250,7 +21250,7 @@
                 }
               }
             },
-            "description": "All clusters unreachable."
+            "description": "No cluster succeeded, and a row holds no operator reply that the BFF can read. That operator did not answer in time, or its reply was unreadable."
           },
           "503": {
             "content": {
@@ -21260,7 +21260,7 @@
                 }
               }
             },
-            "description": "The brood operations store is not configured, or the BFF cannot read the cluster list (an Error body). Or no operator of a failed cluster received the request, and no failed row names an unreachable cluster (a BroodCreateFailure body with the code operator_unavailable). Nothing changed on a failed cluster."
+            "description": "The brood operations store is not configured, or the BFF cannot read the cluster list (an Error body). Or no operator of any target cluster received the request (a BroodCreateFailure body with the code operator_unavailable)."
           }
         },
         "summary": "Previews which controllers a brood operation would target. Viewer+.",

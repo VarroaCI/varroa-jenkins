@@ -853,16 +853,23 @@ func (s *stubBroodOps) Preview(ctx context.Context, clusters []string, ns string
 	return results
 }
 
+// broodReply is the code and the text of a failed fan-out row.
+type broodReply struct {
+	code, err string
+}
+
 // countingBroodOps counts the create and preview calls that reach the store
 // and keeps the clusters of the last call. A cluster in unreachable answers
 // with the row of a cluster that does not reply. A cluster in noOperator
-// answers with the row of a cluster whose operator received nothing.
+// answers with the row of a cluster whose operator received nothing. A
+// cluster in replies answers with that failed row.
 type countingBroodOps struct {
 	stubBroodOps
 	creates, previews int
 	clusters          []string
 	unreachable       map[string]bool
 	noOperator        map[string]bool
+	replies           map[string]broodReply
 }
 
 func (c *countingBroodOps) Create(ctx context.Context, clusters []string, ns, name string, specs map[string]v1alpha1.BroodOperationSpec, startedBy string) []ClusterCreateResult {
@@ -871,11 +878,15 @@ func (c *countingBroodOps) Create(ctx context.Context, clusters []string, ns, na
 	results := c.stubBroodOps.Create(ctx, clusters, ns, name, specs, startedBy)
 	for i, r := range results {
 		if c.unreachable[r.Cluster] {
-			results[i] = ClusterCreateResult{Cluster: r.Cluster, Error: "cluster " + r.Cluster + " unreachable: nats: timeout"}
+			code, msg := clusterRowFailure(r.Cluster, nats.ErrTimeout)
+			results[i] = ClusterCreateResult{Cluster: r.Cluster, Code: code, Error: msg}
 		}
 		if c.noOperator[r.Cluster] {
 			code, msg := clusterRowFailure(r.Cluster, nats.ErrNoResponders)
 			results[i] = ClusterCreateResult{Cluster: r.Cluster, Code: code, Error: msg}
+		}
+		if reply, ok := c.replies[r.Cluster]; ok {
+			results[i] = ClusterCreateResult{Cluster: r.Cluster, Code: reply.code, Error: reply.err}
 		}
 	}
 	return results
@@ -887,11 +898,15 @@ func (c *countingBroodOps) Preview(ctx context.Context, clusters []string, ns st
 	results := c.stubBroodOps.Preview(ctx, clusters, ns, specs)
 	for i, r := range results {
 		if c.unreachable[r.Cluster] {
-			results[i] = ClusterPreviewResult{Cluster: r.Cluster, Error: "cluster " + r.Cluster + " unreachable: nats: timeout"}
+			code, msg := clusterRowFailure(r.Cluster, nats.ErrTimeout)
+			results[i] = ClusterPreviewResult{Cluster: r.Cluster, Code: code, Error: msg}
 		}
 		if c.noOperator[r.Cluster] {
 			code, msg := clusterRowFailure(r.Cluster, nats.ErrNoResponders)
 			results[i] = ClusterPreviewResult{Cluster: r.Cluster, Code: code, Error: msg}
+		}
+		if reply, ok := c.replies[r.Cluster]; ok {
+			results[i] = ClusterPreviewResult{Cluster: r.Cluster, Code: reply.code, Error: reply.err}
 		}
 	}
 	return results

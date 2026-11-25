@@ -166,27 +166,84 @@ func TestClusterRowFailure(t *testing.T) {
 	}
 }
 
-func TestFanoutTransportStatus(t *testing.T) {
-	noOp := fanoutRow{code: codeOperatorUnavailable, err: noOperatorText("core")}
-	timeout := fanoutRow{err: "cluster member-b unreachable: nats: timeout"}
-	invalid := fanoutRow{code: bus.CodeInvalid, err: "bad spec"}
+func TestBroodFailureStatus(t *testing.T) {
+	noOp := codeOperatorUnavailable
 	cases := []struct {
-		name string
-		rows []fanoutRow
-		want int
+		name  string
+		codes []string
+		want  int
 	}{
-		{"reply codes only", []fanoutRow{invalid}, 0},
-		{"no operator only", []fanoutRow{noOp, noOp}, http.StatusServiceUnavailable},
-		{"no operator and a reply code", []fanoutRow{invalid, noOp}, http.StatusServiceUnavailable},
-		{"timeout only", []fanoutRow{timeout}, http.StatusBadGateway},
-		{"no operator and a timeout", []fanoutRow{noOp, timeout}, http.StatusBadGateway},
+		{"no operator only", []string{noOp, noOp}, http.StatusServiceUnavailable},
+		{"no operator and a reply", []string{noOp, bus.CodeConflict}, http.StatusConflict},
+		{"a reply and no operator", []string{bus.CodeInternal, noOp}, http.StatusInternalServerError},
+		{"two replies answer the first", []string{noOp, bus.CodeInvalid, bus.CodeConflict}, http.StatusBadRequest},
+		{"an unknown reply code", []string{noOp, bus.CodeDraining}, http.StatusInternalServerError},
+		{"no reply only", []string{""}, http.StatusBadGateway},
+		{"no operator and no reply", []string{noOp, ""}, http.StatusBadGateway},
+		{"a reply and no reply", []string{bus.CodeNotFound, ""}, http.StatusBadGateway},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := fanoutTransportStatus(tc.rows); got != tc.want {
+			if got := broodFailureStatus(tc.codes); got != tc.want {
 				t.Errorf("status = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestBroodHandlers_MixedFailureStatus pins the status of a create or preview
+// with no success for each mix of failed rows. The fan-out targets core first,
+// then member-b.
+func TestBroodHandlers_MixedFailureStatus(t *testing.T) {
+	body := `{"spec":{"action":{"verb":"reconcile"},"targets":{"selector":{},"namespaces":["all"]}},"clusters":["core","member-b"]}`
+	conflict := broodReply{code: bus.CodeConflict, err: "already exists"}
+	internal := broodReply{code: bus.CodeInternal, err: "create: dial tcp 10.0.0.1:443: connect: host unreachable"}
+	invalid := broodReply{code: bus.CodeInvalid, err: "invalid spec"}
+	unreadable := broodReply{err: "invalid response"}
+	cases := []struct {
+		name        string
+		noOperator  []string
+		unreachable []string
+		replies     map[string]broodReply
+		want        int
+		wantCode    string
+	}{
+		{name: "no operator and a conflict reply", noOperator: []string{"core"}, replies: map[string]broodReply{"member-b": conflict}, want: http.StatusConflict},
+		{name: "a conflict reply and no operator", noOperator: []string{"member-b"}, replies: map[string]broodReply{"core": conflict}, want: http.StatusConflict},
+		{name: "no operator and an internal reply", noOperator: []string{"core"}, replies: map[string]broodReply{"member-b": internal}, want: http.StatusInternalServerError},
+		{name: "an internal reply that names an unreachable host", replies: map[string]broodReply{"core": internal, "member-b": invalid}, want: http.StatusInternalServerError},
+		{name: "two replies answer the first", replies: map[string]broodReply{"core": invalid, "member-b": conflict}, want: http.StatusBadRequest},
+		{name: "no operator and a timeout", noOperator: []string{"core"}, unreachable: []string{"member-b"}, want: http.StatusBadGateway},
+		{name: "a timeout and a reply", unreachable: []string{"core"}, replies: map[string]broodReply{"member-b": conflict}, want: http.StatusBadGateway},
+		{name: "no operator and an unreadable reply", noOperator: []string{"core"}, replies: map[string]broodReply{"member-b": unreadable}, want: http.StatusBadGateway},
+		{name: "no operator on each cluster", noOperator: []string{"core", "member-b"}, want: http.StatusServiceUnavailable, wantCode: codeOperatorUnavailable},
+	}
+	for _, path := range []string{"/brood-operations", "/brood-operations/preview"} {
+		for _, tc := range cases {
+			t.Run(path+" "+tc.name, func(t *testing.T) {
+				ops := &countingBroodOps{noOperator: map[string]bool{}, unreachable: map[string]bool{}, replies: tc.replies}
+				for _, c := range tc.noOperator {
+					ops.noOperator[c] = true
+				}
+				for _, c := range tc.unreachable {
+					ops.unreachable[c] = true
+				}
+				srv := newBroodTestServer()
+				srv.deps.Brood = broodWithMembers()
+				srv.deps.BroodOps = ops
+				w := postBroodAsAdmin(srv, path, body)
+				if w.Code != tc.want {
+					t.Fatalf("status = %d, want %d: %s", w.Code, tc.want, w.Body.String())
+				}
+				_, code := errorBody(t, w)
+				if code != tc.wantCode {
+					t.Errorf("code = %q, want %q", code, tc.wantCode)
+				}
+				if rows := broodClusterRows(t, w); len(rows) != 2 {
+					t.Errorf("rows = %+v, want two", rows)
+				}
+			})
+		}
 	}
 }
 
@@ -401,7 +458,7 @@ func TestBusBroodOps_NoResponderRowCarriesTheCode(t *testing.T) {
 	created := f.Create(context.Background(), []string{"member-b"}, "team-ns", "op", spec, "alice")
 	canceled := f.Cancel(context.Background(), []string{"member-b"}, "team-ns", "op")
 	previewed := f.Preview(context.Background(), []string{"member-b"}, "team-ns", spec)
-	rows := []fanoutRow{
+	rows := []broodReply{
 		{code: created[0].Code, err: created[0].Error},
 		{code: canceled[0].Code, err: canceled[0].Error},
 		{code: previewed[0].Code, err: previewed[0].Error},

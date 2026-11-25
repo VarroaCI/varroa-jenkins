@@ -1457,11 +1457,11 @@ type ComponentsSchemasBreakGlassTarget struct {
 	Service   string `json:"service"`
 }
 
-// ComponentsSchemasBroodCreateFailure Error body when zero clusters succeed on create or preview.
+// ComponentsSchemasBroodCreateFailure Error body when zero clusters succeed on create or preview. The row codes set the status. A row with no code holds no operator reply that the BFF can read, and one such row makes the status 502. Otherwise the first operator reply sets the status: not_found 404, conflict 409, invalid 400, and any other code 500. When each row has the code operator_unavailable, the status is 503.
 type ComponentsSchemasBroodCreateFailure struct {
 	Clusters []ComponentsSchemasBroodRunClusterStatus `json:"clusters"`
 
-	// Code operator_unavailable on a 503: no operator of a failed cluster received the request, and nothing changed.
+	// Code operator_unavailable on a 503: no operator of any target cluster received the request, and nothing changed.
 	Code  *string `json:"code,omitempty"`
 	Error string  `json:"error"`
 }
@@ -1710,7 +1710,7 @@ type ComponentsSchemasBroodScheduleSpec struct {
 // ComponentsSchemasBroodScheduleSpecConcurrencyPolicy How to handle overlapping executions.
 type ComponentsSchemasBroodScheduleSpecConcurrencyPolicy string
 
-// ComponentsSchemasBroodUnavailable The 503 body of a brood operation create or preview. An Error body means that the brood operations store is not configured, or that the BFF cannot read the cluster list. A BroodCreateFailure body with the code operator_unavailable means that no operator of a failed cluster received the request.
+// ComponentsSchemasBroodUnavailable The 503 body of a brood operation create or preview. An Error body means that the brood operations store is not configured, or that the BFF cannot read the cluster list. A BroodCreateFailure body with the code operator_unavailable means that no operator of any target cluster received the request.
 type ComponentsSchemasBroodUnavailable struct {
 	union json.RawMessage
 }
