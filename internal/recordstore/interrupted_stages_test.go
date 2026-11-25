@@ -395,7 +395,7 @@ func TestSweepHeartbeatLostMarkEndsTheOpenStages(t *testing.T) {
 
 	at := markAt(0)
 	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil, nil, nil,
-		DefaultSweepMaxPending, at, testGrace, "", nil)
+		nil, DefaultSweepMaxPending, at, testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -446,7 +446,7 @@ func startLostRunWithOpenStages(t *testing.T, pool *pgxpool.Pool, db *sql.DB) (*
 	freshenSweepConsumer(t, conn)
 	at := markAt(0)
 	ended, err := EndMarkedLostIntents(context.Background(), pool, conn, nil, nil, nil, nil, nil,
-		DefaultSweepMaxPending, at, testGrace, "", nil)
+		nil, DefaultSweepMaxPending, at, testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("EndMarkedLostIntents: %v", err)
 	}

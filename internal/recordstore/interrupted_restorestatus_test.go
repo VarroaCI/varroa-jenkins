@@ -68,7 +68,7 @@ func TestSweepRestoresTheNewestStatusAfterAnOlderRunIsMarked(t *testing.T) {
 	seedTenantPlacementLiveness(t, db, "pod-a", false, &past, &past, nil)
 
 	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil, nil, nil,
-		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+		nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil || marked != 1 {
 		t.Fatalf("SweepInterruptedRuns: marked %d, err %v; want 1, nil", marked, err)
 	}

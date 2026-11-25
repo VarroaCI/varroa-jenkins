@@ -97,7 +97,7 @@ const indexReadFailedMsExpr = `(CASE WHEN (payload->>'` + indexReadFailedKey + `
 // for one run from a blob tier that does not answer.
 const finalizeProbeRunID = "00000000-0000-0000-0000-000000000000"
 
-// finalizeStaleLogs is step 10 of the maintenance round. It selects a run
+// finalizeStaleLogs is step 11 of the maintenance round. It selects a run
 // whose status is terminal, or whose owning cell liveness reports gone,
 // whose log summary is absent or reports finalized false, and whose wait
 // anchor is older than wait. It then reads the run's stored log index
@@ -393,6 +393,27 @@ func waitAnchor(c finalizeCandidate) *time.Time {
 	return nil
 }
 
+// logNotFinalizedMarkSQL is the jsonb that a writer merges over a stored
+// log summary when the stored log index proves no final entry. It sets
+// finalized and incomplete true. It writes the reason not-finalized only
+// when the summary holds no reason of the same or a higher rank. The
+// log-finalization sweep and the interrupted-run marking both use it.
+var logNotFinalizedMarkSQL = `'{"finalized": true, "incomplete": true, "incomplete_reason": "` + logReasonNotFinalized + `"}'::jsonb
+				|| ` + logReasonKeepSQL(`payload->'log_summary'->>'incomplete_reason'`, `'`+logReasonNotFinalized+`'`)
+
+// logFinalEntryMarkSQL returns the jsonb that a writer merges over a
+// stored log summary when the stored log index holds the final entry. It
+// sets finalized true and adds no incomplete mark, as the gateway's own
+// marker does. chunkCount names the SQL parameter that holds the chunk
+// count of the final entry. The write stores that count only when the
+// summary holds no chunk_count. The log-finalization sweep and the
+// interrupted-run marking both use it.
+func logFinalEntryMarkSQL(chunkCount string) string {
+	return `'{"finalized": true}'::jsonb
+				|| (CASE WHEN payload->'log_summary'->'chunk_count' IS NULL
+				         THEN jsonb_build_object('chunk_count', ` + chunkCount + `::bigint) ELSE '{}'::jsonb END)`
+}
+
 // finalizeLogSummary creates runs.payload.log_summary when absent, then
 // sets finalized true. When finalChunks is above 0, the stored index
 // holds the final entry, so it adds no incomplete mark, as the gateway's
@@ -418,13 +439,10 @@ func waitAnchor(c finalizeCandidate) *time.Time {
 func finalizeLogSummary(ctx context.Context, db maintDB, runID string, writerHeartbeatRaw *string, cutoff time.Time,
 	finalChunks int64) (bool, error) {
 	args := []any{runID, writerHeartbeatRaw, cutoff}
-	mark := `'{"finalized": true, "incomplete": true, "incomplete_reason": "` + logReasonNotFinalized + `"}'::jsonb
-				|| ` + logReasonKeepSQL(`payload->'log_summary'->>'incomplete_reason'`, `'`+logReasonNotFinalized+`'`)
+	mark := logNotFinalizedMarkSQL
 	if finalChunks > 0 {
 		args = append(args, finalChunks)
-		mark = `'{"finalized": true}'::jsonb
-				|| (CASE WHEN payload->'log_summary'->'chunk_count' IS NULL
-				         THEN jsonb_build_object('chunk_count', $4::bigint) ELSE '{}'::jsonb END)`
+		mark = logFinalEntryMarkSQL("$4")
 	}
 	tag, err := db.Exec(ctx, `
 		UPDATE varroa.runs

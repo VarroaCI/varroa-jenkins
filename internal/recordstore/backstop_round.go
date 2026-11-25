@@ -58,8 +58,10 @@ type BackstopConfig struct {
 	// LogStore follows. cmd/recorder passes a blob.Store value.
 	StateDeleter ObjectDeleter
 	// LogReader reads a moved run's stored console log, so a resume
-	// action names the next log sequence. A nil LogReader sends no
-	// sequence. cmd/recorder passes a blob.Store value.
+	// action names the next log sequence. The interrupted sweep and the end
+	// of marked lost runs read each run's stored log index through it
+	// before the mark. A nil LogReader sends no sequence and reads no
+	// index. cmd/recorder passes a blob.Store value.
 	LogReader LogIndexReader
 	// Now returns the round's reference time. A nil Now defaults to
 	// time.Now in UTC, so a test can pin the round to a fixed instant.
@@ -130,7 +132,7 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 	// records no build. This end runs before the sweep, so the sweep never
 	// marks that row as a queued run.
 	if _, err := EndMarkedLostIntents(ctx, pool, conn, cfg.ActivityPublisher, cfg.RunNotifier, cfg.SweepMetrics, cfg.ActionMetrics,
-		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, cfg.DashboardURL, logger); err != nil {
+		cfg.StateDeleter, cfg.LogReader, cfg.MaxSweepPending, now, grace, cfg.DashboardURL, logger); err != nil {
 		logger.Warn("marked lost intent round failed", "error", err)
 	}
 
@@ -139,7 +141,7 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 	}
 
 	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.ActivityPublisher, cfg.RunNotifier, cfg.SweepMetrics, cfg.ActionMetrics,
-		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, cfg.DashboardURL, logger); err != nil {
+		cfg.StateDeleter, cfg.LogReader, cfg.MaxSweepPending, now, grace, cfg.DashboardURL, logger); err != nil {
 		logger.Warn("interrupted sweep failed", "error", err)
 	}
 

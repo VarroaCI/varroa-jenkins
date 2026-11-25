@@ -100,6 +100,10 @@ type runInterruptCandidate struct {
 	// placement generation zero, so a controller with no cell role owns
 	// the run. A run with no intent answers false.
 	generationZero bool
+	// logFinalized is true when the candidate read found the run's log
+	// summary finalized. Such a run needs no index read before its mark.
+	// The marking write tests the stored field again.
+	logFinalized bool
 }
 
 // livenessBaseline is the moved and silent tests' anchor: the recorder's
@@ -295,7 +299,7 @@ func scanCandidates(rows pgx.Rows) ([]runInterruptCandidate, error) {
 		)
 		if err := rows.Scan(&c.runID, &c.createdAt, &c.cluster, &c.namespace, &c.cell, &c.tenant, &c.jobPath,
 			&c.status, &c.buildNumber, &actor, &c.params, &c.heartbeatReceivedAt, &c.acceptedAt, &owningInstance,
-			&meshRaw, &c.scmRevision, &c.scmURL, &c.generationZero); err != nil {
+			&meshRaw, &c.scmRevision, &c.scmURL, &c.generationZero, &c.logFinalized); err != nil {
 			return nil, fmt.Errorf("scan interrupt candidate: %w", err)
 		}
 		c.mesh = decodeMeshRecord(meshRaw)
@@ -322,7 +326,8 @@ const candidatesQuery = `
 	       r.payload->'mesh',
 	       COALESCE(r.scm_revision, ''),
 	       COALESCE(NULLIF(r.payload->'run.source'->>'scm_url', ''), r.payload->'run.started'->'payload'->>'scm_url', ''),
-	       COALESCE(ri.placement_generation = 0, false)
+	       COALESCE(ri.placement_generation = 0, false),
+	       COALESCE(r.payload->'log_summary'->>'finalized' = 'true', false)
 	FROM varroa.runs r
 	LEFT JOIN varroa.run_intents ri ON ri.run_id = r.run_id
 	WHERE r.status IN ('QUEUED', 'RUNNING')`
@@ -349,8 +354,8 @@ func selectCandidatesForTenant(ctx context.Context, pool *pgxpool.Pool, cluster,
 
 // markInterrupted performs the whole marking transaction for one run:
 // the terminal write conditioned on status = the status the round
-// observed, the log-summary finalize marker, and the build.interrupted
-// activity row, all in one transaction. It reports whether the
+// observed, the log-summary finalize marker (markInterruptedTx), and the
+// build.interrupted activity row, all in one transaction. It reports whether the
 // conditional update changed the row; a miss means a real terminal
 // event already won the race, and the caller counts it in
 // recorder_interrupted_skipped_total. It leaves a QUEUED run's accepted
@@ -379,19 +384,24 @@ func selectCandidatesForTenant(ctx context.Context, pool *pgxpool.Pool, cluster,
 // A heartbeat-lost mark also keeps the run's pending input set. Its owner
 // can still wait on that input, and no later event restores a set on a
 // completed row. The owner's run.completed clears it.
-// markInterrupted marks one run without publishing. Production paths call
-// markInterruptedAndPublish; this form serves the tests.
+// markInterrupted marks one run without publishing and with no log index
+// reader. Production paths call markInterruptedAndPublish; this form
+// serves the tests.
 //
 //nolint:unparam // the tests pass no dashboard URL; production passes one through markInterruptedAndPublish
 func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCandidate, reason string, now time.Time,
 	dashboardURL string) (bool, error) {
-	return markInterruptedAndPublish(ctx, pool, nil, run, reason, now, dashboardURL)
+	return markInterruptedAndPublish(ctx, pool, nil, nil, run, reason, now, dashboardURL)
 }
 
 // markInterruptedAndPublish marks one run and sends its activity row to
 // activityPub after the commit. A nil activityPub writes the row and publishes nothing.
-func markInterruptedAndPublish(ctx context.Context, pool *pgxpool.Pool, activityPub *activity.Publisher, run runInterruptCandidate,
-	reason string, now time.Time, dashboardURL string) (bool, error) {
+// It reads the run's stored log index through logs before the transaction
+// opens (readMarkLogFinal). A nil logs reads no index.
+func markInterruptedAndPublish(ctx context.Context, pool *pgxpool.Pool, activityPub *activity.Publisher, logs LogRangeReader,
+	run runInterruptCandidate, reason string, now time.Time, dashboardURL string) (bool, error) {
+	finalChunks := readMarkLogFinal(ctx, logs, run, slog.Default())
+
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("begin interrupted-run marking: %w", err)
@@ -399,7 +409,7 @@ func markInterruptedAndPublish(ctx context.Context, pool *pgxpool.Pool, activity
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var out activityOutbox
-	changed, err := markInterruptedTx(ctx, tx, run, reason, now, dashboardURL, &out)
+	changed, err := markInterruptedTx(ctx, tx, run, reason, now, dashboardURL, finalChunks, &out)
 	if err != nil || !changed {
 		return false, err
 	}
@@ -427,8 +437,19 @@ func markInterruptedAndPublish(ctx context.Context, pool *pgxpool.Pool, activity
 // readCellRollCause finds the roll. Every mark removes a stored detail
 // first, so the key always belongs to the stored reason. A failed or slow
 // read stores no detail and never stops the mark.
+//
+// Every mark finalizes the run's log summary, because the run's cell sends
+// no more chunks. The stored field log_summary.finalized decides first, at
+// write time. A summary that reports it true keeps every field: its writer
+// already stored what it knows about the log. Otherwise finalChunks
+// decides. It is the chunk count that the final entry of the stored log
+// index proves (readMarkLogFinal), or 0. Above 0, the write sets finalized
+// true and chunk_count with no incomplete mark, as the log-finalization
+// sweep does (logFinalEntryMarkSQL). At 0, an existing summary gets the
+// not-finalized mark (logNotFinalizedMarkSQL), and a run with no summary
+// gets the reason no-summary.
 func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate, reason string, now time.Time,
-	dashboardURL string, out *activityOutbox) (bool, error) {
+	dashboardURL string, finalChunks int64, out *activityOutbox) (bool, error) {
 	detail := ""
 	if reason == ReasonCellRolled {
 		var err error
@@ -448,9 +469,12 @@ func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate
 		                       ELSE jsonb_build_object('interrupted_detail', $6::text) END)
 		        || jsonb_build_object('log_summary',
 		             CASE
-		                 WHEN payload -> 'log_summary' IS NOT NULL
-		                 THEN COALESCE(payload -> 'log_summary', '{}'::jsonb) || '{"finalized": true, "incomplete": true, "incomplete_reason": "`+logReasonNotFinalized+`"}'::jsonb
-		                      || `+logReasonKeepSQL(`payload->'log_summary'->>'incomplete_reason'`, `'`+logReasonNotFinalized+`'`)+`
+		                 WHEN payload->'log_summary'->>'finalized' = 'true'
+		                 THEN payload->'log_summary'
+		                 WHEN $7::bigint > 0
+		                 THEN COALESCE(payload->'log_summary', '{}'::jsonb) || `+logFinalEntryMarkSQL("$7")+`
+		                 WHEN payload->'log_summary' IS NOT NULL
+		                 THEN payload->'log_summary' || `+logNotFinalizedMarkSQL+`
 		                 ELSE '{"finalized": true, "incomplete": true, "incomplete_reason": "no-summary"}'::jsonb
 		             END)
 		WHERE run_id = $1 AND status = $4
@@ -466,7 +490,7 @@ func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate
 		  AND ($3::text <> '`+ReasonHeartbeatLost+`'
 		       OR heartbeat_received_at IS NULL
 		       OR heartbeat_received_at <= $5)
-	`, run.runID, now, reason, run.status, now.Add(-liveOwnerSilentWindow), detail)
+	`, run.runID, now, reason, run.status, now.Add(-liveOwnerSilentWindow), detail, finalChunks)
 	if err != nil {
 		return false, fmt.Errorf("mark run interrupted: %w", err)
 	}
@@ -511,6 +535,33 @@ func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate
 		return false, err
 	}
 	return true, nil
+}
+
+// markLogIndexReadTimeout bounds the stored log index read before one mark.
+const markLogIndexReadTimeout = 2 * time.Second
+
+// readMarkLogFinal reads the stored log index of a run that a mark is about
+// to end, and answers the chunk count that its final entry proves
+// (storedLogFinal), or 0. It runs before the marking transaction opens, so
+// no blob read holds a transaction open. It reads nothing and answers 0 for
+// a nil logs, and for a candidate whose log summary the candidate read found
+// finalized: the marking write keeps such a summary. A read that fails or
+// runs longer than markLogIndexReadTimeout answers 0 and logs one warning.
+// The mark then writes its incomplete mark, so the read never stops the
+// mark.
+func readMarkLogFinal(ctx context.Context, logs LogRangeReader, run runInterruptCandidate, logger *slog.Logger) int64 {
+	if logs == nil || run.logFinalized {
+		return 0
+	}
+	readCtx, cancel := context.WithTimeout(ctx, markLogIndexReadTimeout)
+	defer cancel()
+	finalChunks, _, err := storedLogFinal(readCtx, logs, run.runID.String())
+	if err != nil {
+		logger.Warn("interrupted mark: the stored log index read failed; the mark writes the incomplete log mark",
+			"run_id", run.runID, "error", err)
+		return 0
+	}
+	return finalChunks
 }
 
 // interruptedActivityMessage renders the build.interrupted activity
@@ -878,9 +929,10 @@ func markedStatusLabel(status string) string {
 //
 // Each mark sends one run notification through notifier after its
 // commit. The notification names the runs row that the marking read. A
-// nil notifier publishes nothing.
+// nil notifier publishes nothing. logs reads the stored log index of each
+// run before its mark (readMarkLogFinal). A nil logs reads no index.
 func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, activityPub *activity.Publisher, notifier *RunNotifier,
-	metrics *InterruptedMetrics, actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, cluster, tenant string,
+	metrics *InterruptedMetrics, actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, logs LogRangeReader, cluster, tenant string,
 	row tenantPlacementLivenessRow, now time.Time, grace time.Duration, dashboardURL string, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -902,7 +954,7 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 		if !ok || reason == ReasonNoHeartbeat || reason == ReasonHeartbeatLost {
 			continue
 		}
-		changed, err := markInterruptedAndPublish(ctx, pool, activityPub, c, reason, now, dashboardURL)
+		changed, err := markInterruptedAndPublish(ctx, pool, activityPub, logs, c, reason, now, dashboardURL)
 		if err != nil {
 			logger.Warn("announce-triggered interrupted marking failed", "run_id", c.runID, "error", err)
 			continue
@@ -968,10 +1020,11 @@ func sweepConsumerSkip(info *nats.ConsumerInfo, maxPending uint64, now time.Time
 //
 // Each mark sends one run notification through notifier after its
 // commit. The notification names the runs row that the sweep read. A nil
-// notifier publishes nothing.
+// notifier publishes nothing. logs reads the stored log index of each run
+// before its mark (readMarkLogFinal). A nil logs reads no index.
 func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, activityPub *activity.Publisher, notifier *RunNotifier,
-	metrics *InterruptedMetrics, actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, maxPending uint64, now time.Time,
-	grace time.Duration, dashboardURL string, logger *slog.Logger) (int, error) {
+	metrics *InterruptedMetrics, actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, logs LogRangeReader, maxPending uint64,
+	now time.Time, grace time.Duration, dashboardURL string, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -1005,7 +1058,7 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 		if !ok {
 			continue
 		}
-		changed, err := markInterruptedAndPublish(ctx, pool, activityPub, c, reason, now, dashboardURL)
+		changed, err := markInterruptedAndPublish(ctx, pool, activityPub, logs, c, reason, now, dashboardURL)
 		if err != nil {
 			logger.Warn("interrupted sweep: mark failed", "run_id", c.runID, "error", err)
 			continue
