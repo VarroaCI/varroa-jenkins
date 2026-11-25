@@ -2102,14 +2102,15 @@ func jitteredDelay(d time.Duration) time.Duration {
 // byte total: a part above the recovered run is not counted, and its
 // writer's later chunk gets its entry at the true offset.
 //
-// It also restores the run's final-marker state from the index's own
-// durable evidence: a restarted gateway that reads back an entry whose
-// final field is true needs no memory to know the run is already
-// finished (design.md D4, "A restarted gateway reads the entry back and
-// needs no memory"). Without this, a redelivered final chunk after a
-// restart would start the writer heartbeat over an already-finished run
-// and leave the recorder's finalize sweep free to call it not-finalized
-// despite the durable evidence sitting right there in the index.
+// It also restores the run's final-marker state from the index: an entry
+// whose final field is true shows that the log is finished, so a
+// restarted gateway needs no memory of it. The first chunk after the
+// read then publishes the finalized marker before its ack
+// (finalizedBeforeAck). Without the restored state, the writer heartbeat
+// of a terminal run would hold the recorder's sweep off until the
+// finalize deadline, and that deadline would mark the whole log
+// finalize-deadline. The recorder's finalizeStaleLogs sweep reads the
+// same entry when no marker reaches the record.
 func (h *BusHandler) recoverRunState(ctx context.Context, runID string, st *runLogState) error {
 	entries, maxSeq, finalSeen, err := readLogIndex(ctx, h.logStore, blob.LogIndexKey(runID))
 	if err != nil {
