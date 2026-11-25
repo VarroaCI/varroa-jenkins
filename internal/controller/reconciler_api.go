@@ -9,7 +9,8 @@ import "context"
 type ReconcilerAPI interface {
 	// TriggerReconcile asks the operator of cluster to enqueue an on-demand
 	// reconcile for the given controller. A nil error means that the operator
-	// took the request. The reconcile itself runs later.
+	// recorded the request. The reconcile itself runs later. A refusal is an
+	// *ActionError: code "not_found" for a missing controller.
 	TriggerReconcile(ctx context.Context, cluster, name, namespace string) error
 
 	// WakeController asks the operator of cluster to signal the
@@ -18,7 +19,9 @@ type ReconcilerAPI interface {
 
 	// Reprovision asks the operator of cluster to make the next reconcile
 	// re-push the full desired state to the mite, bypassing the convergence
-	// short-circuit. A nil error means that the operator took the request.
+	// short-circuit. A nil error means that the operator stamped the
+	// request on the controller. A refusal is an *ActionError: code
+	// "not_found" for a missing controller.
 	Reprovision(ctx context.Context, cluster, namespace, name string) error
 
 	// ApproveRestart applies a pending configuration change. action must be

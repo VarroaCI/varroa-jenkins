@@ -1453,11 +1453,11 @@ type hibernationCommandRunner interface {
 	WakeControllerAction(ctx context.Context, namespace, name string) error
 }
 
-// hibernationCommandErrorCode maps an authenticated hibernate/wake action
-// error to a bus error code. ErrControllerStopped is a conflict (hard power
-// beats hibernation); a missing Controller is 404, matching the route contract
-// in api/openapi/paths/controllers.yaml; everything else is internal.
-func hibernationCommandErrorCode(err error) string {
+// controllerActionErrorCode maps a controller action error to a bus error
+// code. ErrControllerStopped is a conflict (hard power beats hibernation); a
+// missing Controller is 404, matching the route contract in
+// api/openapi/paths/controllers.yaml; everything else is internal.
+func controllerActionErrorCode(err error) string {
 	switch {
 	case errors.Is(err, controller.ErrControllerStopped):
 		return bus.CodeConflict
@@ -1481,7 +1481,7 @@ func handleHibernate(ctx context.Context, logger *slog.Logger, rec hibernationCo
 		logger.Warn("hibernate failed",
 			"controller", req.Namespace+"/"+req.Name,
 			"error", err)
-		resp, _ := json.Marshal(bus.HibernateResponse{Error: err.Error(), Code: hibernationCommandErrorCode(err)})
+		resp, _ := json.Marshal(bus.HibernateResponse{Error: err.Error(), Code: controllerActionErrorCode(err)})
 		return resp
 	}
 	resp, _ := json.Marshal(bus.HibernateResponse{})
@@ -1500,10 +1500,34 @@ func handleWake(ctx context.Context, logger *slog.Logger, rec hibernationCommand
 		logger.Warn("wake failed",
 			"controller", req.Namespace+"/"+req.Name,
 			"error", err)
-		resp, _ := json.Marshal(bus.WakeResponse{Error: err.Error(), Code: hibernationCommandErrorCode(err)})
+		resp, _ := json.Marshal(bus.WakeResponse{Error: err.Error(), Code: controllerActionErrorCode(err)})
 		return resp
 	}
 	resp, _ := json.Marshal(bus.WakeResponse{})
+	return resp
+}
+
+// controllerRequestAction is the step of a reconcile or reprovision request.
+type controllerRequestAction func(ctx context.Context, namespace, name string) error
+
+// handleReconcileRequest implements the operator.<cluster>.reconcile and
+// operator.<cluster>.reprovision request-reply handlers. It replies after act
+// ends. A failed act replies with the error text and its bus code.
+func handleReconcileRequest(ctx context.Context, logger *slog.Logger, op string, act controllerRequestAction, data []byte) []byte {
+	var req bus.ReconcileRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		logger.Warn(op+" request decode failed", "error", err)
+		resp, _ := json.Marshal(bus.ReconcileResponse{Error: "invalid request", Code: bus.CodeInvalid})
+		return resp
+	}
+	if err := act(ctx, req.Namespace, req.Name); err != nil {
+		logger.Warn(op+" failed",
+			"controller", req.Namespace+"/"+req.Name,
+			"error", err)
+		resp, _ := json.Marshal(bus.ReconcileResponse{Error: err.Error(), Code: controllerActionErrorCode(err)})
+		return resp
+	}
+	resp, _ := json.Marshal(bus.ReconcileResponse{})
 	return resp
 }
 
@@ -1863,9 +1887,9 @@ func (r *operatorCommandRunner) commandResponders(ctx context.Context) []command
 	}
 
 	responders := []commandResponder{
-		{"reconcile", bus.OperatorReconcileSubject(r.cluster), reconcileAction("reconcile", func(req bus.ReconcileRequest) {
-			r.reconciler.TriggerReconcile(r.cluster, req.Name, req.Namespace)
-		}), serialResponder},
+		{"reconcile", bus.OperatorReconcileSubject(r.cluster), func(data []byte) []byte {
+			return handleReconcileRequest(ctx, r.logger, "reconcile", r.reconciler.ReconcileAction, data)
+		}, serialResponder},
 		{"nudge", bus.OperatorNudgeSubject(r.cluster), reconcileAction("nudge", func(req bus.ReconcileRequest) {
 			r.reconciler.WakeController(r.cluster, req.Namespace, req.Name)
 		}), serialResponder},
@@ -1875,9 +1899,9 @@ func (r *operatorCommandRunner) commandResponders(ctx context.Context) []command
 		{"wake", bus.OperatorWakeSubject(r.cluster), func(data []byte) []byte {
 			return handleWake(ctx, r.logger, r.reconciler, data)
 		}, serialResponder},
-		{"reprovision", bus.OperatorReprovisionSubject(r.cluster), reconcileAction("reprovision", func(req bus.ReconcileRequest) {
-			r.reconciler.Reprovision(r.cluster, req.Namespace, req.Name)
-		}), serialResponder},
+		{"reprovision", bus.OperatorReprovisionSubject(r.cluster), func(data []byte) []byte {
+			return handleReconcileRequest(ctx, r.logger, "reprovision", r.reconciler.ReprovisionAction, data)
+		}, serialResponder},
 		{"controllers.list", bus.OperatorControllersSubject(r.cluster, "list"), r.crud.HandleList, serialResponder},
 		{"controllers.get", bus.OperatorControllersSubject(r.cluster, "get"), r.crud.HandleGet, serialResponder},
 		{"controllers.create", bus.OperatorControllersSubject(r.cluster, "create"), r.crud.HandleCreate, serialResponder},

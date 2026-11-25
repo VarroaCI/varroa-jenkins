@@ -108,18 +108,21 @@ type ClusterDrainCancelResponse struct {
 	Code  string `json:"code,omitempty"`
 }
 
-// ReconcileRequest is the payload for operator.<cluster>.reconcile and
-// operator.<cluster>.nudge.
+// ReconcileRequest is the payload for operator.<cluster>.reconcile,
+// operator.<cluster>.reprovision, and operator.<cluster>.nudge.
 type ReconcileRequest struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
 }
 
-// ReconcileResponse is the reply for operator.<cluster>.reconcile and
-// operator.<cluster>.nudge.
-// An empty Error field indicates success.
+// ReconcileResponse is the reply for operator.<cluster>.reconcile,
+// operator.<cluster>.reprovision, and operator.<cluster>.nudge. An empty
+// Error field indicates success. Code is "not_found" when the controller
+// does not exist and "internal" when the operator could not record the
+// request.
 type ReconcileResponse struct {
 	Error string `json:"error,omitempty"`
+	Code  string `json:"code,omitempty"`
 }
 
 // HibernateRequest is the payload for operator.<cluster>.hibernate.
