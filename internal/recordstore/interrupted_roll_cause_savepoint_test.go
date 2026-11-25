@@ -24,7 +24,7 @@ func TestReadCellRollCauseLogsATimeoutAndKeepsTheTransaction(t *testing.T) {
 	runID := startRunOnCell(t, pool, "manual:"+newTestUUIDv7String(), "savepoint-a")
 	c := fetchRunningCandidate(t, pool, runID)
 	mark := livenessBaseline(c).Add(10 * time.Minute).UTC().Truncate(time.Microsecond)
-	ingestActivityEvent(t, pool, cellRolledRow("savepoint-a", mark.Add(-time.Second), "MiteUnreachable"))
+	ingestActivityEvent(t, pool, cellRolledRow("savepoint-a", c.cellInstance, mark.Add(-time.Second), "MiteUnreachable"))
 
 	locker, err := db.BeginTx(ctx, nil)
 	if err != nil {

@@ -1026,21 +1026,24 @@ type ComponentsSchemasAPIRule struct {
 
 // ComponentsSchemasActivityEvent A single activity feed event.
 type ComponentsSchemasActivityEvent struct {
-	Actor       *string                                `json:"actor,omitempty"`
-	BuildNumber *int64                                 `json:"buildNumber,omitempty"`
-	Cluster     *string                                `json:"cluster,omitempty"`
-	Controller  *string                                `json:"controller,omitempty"`
-	ItemPath    *string                                `json:"itemPath,omitempty"`
-	Message     string                                 `json:"message"`
-	Namespace   *string                                `json:"namespace,omitempty"`
-	Phase       *string                                `json:"phase,omitempty"`
-	Reason      *string                                `json:"reason,omitempty"`
-	Result      *string                                `json:"result,omitempty"`
-	Severity    ComponentsSchemasActivityEventSeverity `json:"severity"`
-	Source      ComponentsSchemasActivityEventSource   `json:"source"`
-	Timestamp   time.Time                              `json:"timestamp"`
-	Type        string                                 `json:"type"`
-	Url         *string                                `json:"url,omitempty"`
+	Actor       *string `json:"actor,omitempty"`
+	BuildNumber *int64  `json:"buildNumber,omitempty"`
+	Cluster     *string `json:"cluster,omitempty"`
+	Controller  *string `json:"controller,omitempty"`
+
+	// Instance The metadata.uid of the pod that the event is about. The operator sets it on a cell.rolled or pod.replaced event: the pod that it deleted.
+	Instance  *string                                `json:"instance,omitempty"`
+	ItemPath  *string                                `json:"itemPath,omitempty"`
+	Message   string                                 `json:"message"`
+	Namespace *string                                `json:"namespace,omitempty"`
+	Phase     *string                                `json:"phase,omitempty"`
+	Reason    *string                                `json:"reason,omitempty"`
+	Result    *string                                `json:"result,omitempty"`
+	Severity  ComponentsSchemasActivityEventSeverity `json:"severity"`
+	Source    ComponentsSchemasActivityEventSource   `json:"source"`
+	Timestamp time.Time                              `json:"timestamp"`
+	Type      string                                 `json:"type"`
+	Url       *string                                `json:"url,omitempty"`
 }
 
 // ComponentsSchemasActivityEventSeverity defines model for ComponentsSchemasActivityEvent.Severity.
@@ -4786,7 +4789,7 @@ type ComponentsSchemasRunDetail struct {
 	// Inputs The input steps the run waits on, read from the run's stored inputs column. This field is absent until a run.input event arrives, and absent for a run that holds no pending input.
 	Inputs *[]ComponentsSchemasRunInput `json:"inputs,omitempty"`
 
-	// InterruptedDetail The condition reason of the cell roll that ended a cell-rolled run, such as MiteUnreachable or NotProvisioned. Set only when result is INTERRUPTED and the record store held the roll at the mark.
+	// InterruptedDetail The reason word of the operator pod delete that removed the pod of a cell-rolled run: MiteUnreachable or NotProvisioned for a cell roll, JenkinsBootFailed for a replaced boot-failed pod. Set only when result is INTERRUPTED and the record store held the delete at the mark.
 	InterruptedDetail *string `json:"interruptedDetail,omitempty"`
 
 	// InterruptedReason Set only when result is INTERRUPTED.

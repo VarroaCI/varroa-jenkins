@@ -121,8 +121,8 @@ func (s *stubClient) StreamPodLogs(ctx context.Context, namespace, podName strin
 func (s *stubClient) DeleteControllerPod(ctx context.Context, namespace, name string) error {
 	return nil
 }
-func (s *stubClient) DeleteControllerPodGrace(_ context.Context, _, _ string, _ types.UID, _ int64) error {
-	return nil
+func (s *stubClient) DeleteControllerPodUID(_ context.Context, _, _ string, _ types.UID, _ int64) (bool, error) {
+	return false, nil
 }
 func (s *stubClient) ListResourceQuotas(ctx context.Context, namespace string) ([]corev1.ResourceQuota, error) {
 	return nil, nil

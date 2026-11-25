@@ -71,14 +71,20 @@ activity feed. The reason names the signal that decided. A completion webhook al
 | `start-lost` | no start event arrived 75 minutes after the start mark |
 | `heartbeat-lost` | the running build was silent for 60 minutes |
 
-A `cell-rolled` mark can also name the cause of the roll. The operator writes a `cell.rolled`
-activity row when its cell readiness rule deletes the pod. At the mark, the recorder reads the
-oldest such row of the cell after the build's last heartbeat. That first roll removed the build's
-pod. A later roll removed the replacement pod. The recorder keeps the row's condition reason,
-`MiteUnreachable` or `NotProvisioned`, and never the row's message. The build page, `GET /runs/{run}`,
-and the `get_run` tool show it as `interruptedDetail`. A pod change from another cause, such as a
-node loss, writes no row. A row that reaches the record store after the mark adds nothing. A read
-that fails or takes more than two seconds adds nothing, and the mark still ends the build.
+A `cell-rolled` mark can also name the cause of the pod change. Two operator pod deletes write an
+activity row that names the deleted pod:
+
+| Activity row | Written when | Cause |
+|---|---|---|
+| `cell.rolled` | the cell readiness rule deletes the pod | `MiteUnreachable` or `NotProvisioned` |
+| `pod.replaced` | the operator deletes a boot-failed pod that lags the StatefulSet revision | `JenkinsBootFailed` |
+
+At the mark, the recorder reads the row of the pod that held the build. A delete of another pod of
+the cell names nothing, also inside the same window. The recorder keeps the row's cause word, and
+never the row's message. The build page, `GET /runs/{run}`, and the `get_run` tool show it as
+`interruptedDetail`. A restart, a plugin or version roll, a node loss, or a manual delete names no
+cause. A row that reaches the record store after the mark adds nothing. A read that fails or takes
+more than two seconds adds nothing, and the mark still ends the build.
 
 A `cell-lost` mark sends no cancel command: the pod is gone. A
 fleet lock the lost run held is released on the same schedule. A pod read that proved its owner

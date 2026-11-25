@@ -133,10 +133,15 @@ type testClient struct {
 	controllers []*v1alpha1.Controller
 	// deleteControllerPodCalls records each call to DeleteControllerPod.
 	deleteControllerPodCalls int
-	// podGraceDeletes records each call to DeleteControllerPodGrace.
-	podGraceDeletes  []podGraceDelete
-	controllerPod    *corev1.Pod
-	controllerPodErr error // injected error for GetControllerPod
+	// podUIDDeletes records each DeleteControllerPodUID call that the
+	// controllerPod UID admits. podUIDDeleteRefusals counts the calls that it
+	// refuses: no pod, or a pod with another UID. beforePodUIDDelete runs
+	// before the precondition check, so a test can replace the pod there.
+	podUIDDeletes        []podUIDDelete
+	podUIDDeleteRefusals int
+	beforePodUIDDelete   func()
+	controllerPod        *corev1.Pod
+	controllerPodErr     error // injected error for GetControllerPod
 	// pullEvents answers ListPodPullEvents; pullEventsErr fails it.
 	// listPullEventsCalls counts the calls.
 	pullEvents          []corev1.Event
@@ -839,16 +844,31 @@ func (t *testClient) DeleteControllerPod(_ context.Context, _, _ string) error {
 	return nil
 }
 
-// podGraceDelete is one recorded DeleteControllerPodGrace call.
-type podGraceDelete struct {
+// podUIDDelete is one recorded DeleteControllerPodUID call that the
+// precondition admitted.
+type podUIDDelete struct {
 	namespace, pod string
 	uid            types.UID
 	graceSeconds   int64
 }
 
-func (t *testClient) DeleteControllerPodGrace(_ context.Context, namespace, podName string, uid types.UID, graceSeconds int64) error {
-	t.podGraceDeletes = append(t.podGraceDeletes, podGraceDelete{namespace: namespace, pod: podName, uid: uid, graceSeconds: graceSeconds})
-	return nil
+// podDeletes counts the pod deletes of both kinds: by name, and by UID.
+func (t *testClient) podDeletes() int {
+	return t.deleteControllerPodCalls + len(t.podUIDDeletes)
+}
+
+// DeleteControllerPodUID honours the UID precondition the way the API server
+// does: it admits the delete only while controllerPod carries uid.
+func (t *testClient) DeleteControllerPodUID(_ context.Context, namespace, podName string, uid types.UID, graceSeconds int64) (bool, error) {
+	if t.beforePodUIDDelete != nil {
+		t.beforePodUIDDelete()
+	}
+	if t.controllerPod == nil || t.controllerPod.UID != uid {
+		t.podUIDDeleteRefusals++
+		return false, nil
+	}
+	t.podUIDDeletes = append(t.podUIDDeletes, podUIDDelete{namespace: namespace, pod: podName, uid: uid, graceSeconds: graceSeconds})
+	return true, nil
 }
 
 // ScaleStatefulSetToZero models the ClientsetClient contract on the test

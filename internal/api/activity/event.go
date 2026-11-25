@@ -27,6 +27,10 @@ type Event struct {
 	BuildNumber int64     `json:"buildNumber,omitempty"`
 	Result      string    `json:"result,omitempty"`
 	URL         string    `json:"url,omitempty"`
+	// Instance is the metadata.uid of the pod that the event is about. The
+	// operator sets it on each row of a pod delete that it makes. The record
+	// store matches it with the owning instance of an interrupted run.
+	Instance string `json:"instance,omitempty"`
 }
 
 var errorSeverityTokens = []string{"failed", "failure", "error", "denied", "unhealthy", "disconnected"}

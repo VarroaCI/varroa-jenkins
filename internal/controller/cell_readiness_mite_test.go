@@ -91,8 +91,8 @@ func TestCellRollHoldsForReadyPod(t *testing.T) {
 
 	for _, at := range []time.Duration{grace + time.Minute, 2*grace + time.Minute, cellMiteRollHoldCap - time.Minute} {
 		rec.evaluateCellReadiness(context.Background(), cr, t0.Add(at))
-		if client.deleteControllerPodCalls != 0 {
-			t.Fatalf("at %v: expected no delete for a Ready pod, got %d", at, client.deleteControllerPodCalls)
+		if client.podDeletes() != 0 {
+			t.Fatalf("at %v: expected no delete for a Ready pod, got %d", at, client.podDeletes())
 		}
 		cond = findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
 		if cond.Reason != v1alpha1.ReasonMiteUnreachable || !strings.HasPrefix(cond.Message, cellRollHeldPrefix) {
@@ -110,8 +110,8 @@ func TestCellRollHoldsForReadyPod(t *testing.T) {
 	}
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(cellMiteRollHoldCap))
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("past the hold cap: expected one delete, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("past the hold cap: expected one delete, got %d", client.podDeletes())
 	}
 	cond = findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
 	if cond.Reason != v1alpha1.ReasonCellRolled || cond.Message != v1alpha1.ReasonMiteUnreachable {
@@ -129,8 +129,8 @@ func TestCellRollHoldsForReadyPod(t *testing.T) {
 	if !cr.Status.Cell.Evacuate {
 		t.Fatal("expected evacuate one grace after the roll")
 	}
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("expected still one delete, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("expected still one delete, got %d", client.podDeletes())
 	}
 }
 
@@ -144,8 +144,8 @@ func TestCellEvacuateOneGraceAfterTimelyRoll(t *testing.T) {
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace))
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("expected the roll at the grace, got %d deletes", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("expected the roll at the grace, got %d deletes", client.podDeletes())
 	}
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(2*grace-time.Second))
 	if cr.Status.Cell.Evacuate {
@@ -168,12 +168,12 @@ func TestCellRollGraceLongerThanHoldCap(t *testing.T) {
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace-time.Minute))
-	if client.deleteControllerPodCalls != 0 {
-		t.Fatalf("expected no delete before the grace, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 0 {
+		t.Fatalf("expected no delete before the grace, got %d", client.podDeletes())
 	}
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace))
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("expected one delete at the grace, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("expected one delete at the grace, got %d", client.podDeletes())
 	}
 }
 
@@ -185,8 +185,8 @@ func TestCellRollGoesForNotReadyPod(t *testing.T) {
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+time.Minute))
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("expected one delete for a pod that is not Ready, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("expected one delete for a pod that is not Ready, got %d", client.podDeletes())
 	}
 	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
 	if cond.Reason != v1alpha1.ReasonCellRolled {
@@ -202,8 +202,8 @@ func TestCellRollHoldsOnPodReadFailure(t *testing.T) {
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+time.Minute))
-	if client.deleteControllerPodCalls != 0 {
-		t.Fatalf("expected no delete after a failed pod read, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 0 {
+		t.Fatalf("expected no delete after a failed pod read, got %d", client.podDeletes())
 	}
 	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
 	if !strings.Contains(cond.Message, "pod read failed") {
@@ -211,8 +211,8 @@ func TestCellRollHoldsOnPodReadFailure(t *testing.T) {
 	}
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(cellMiteRollHoldCap))
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("past the hold cap: expected one delete, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("past the hold cap: expected one delete, got %d", client.podDeletes())
 	}
 }
 
@@ -227,8 +227,8 @@ func TestCellRollNotProvisionedIgnoresPodReady(t *testing.T) {
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+time.Minute))
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("expected one delete for NotProvisioned, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("expected one delete for NotProvisioned, got %d", client.podDeletes())
 	}
 }
 
@@ -245,8 +245,8 @@ func TestCellRollClockWaitsAfterPresenceFault(t *testing.T) {
 	rec.notePresenceFault("ns/cell1", fault)
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+time.Minute))
-	if client.deleteControllerPodCalls != 0 {
-		t.Fatalf("expected no delete inside the grace after a presence fault, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 0 {
+		t.Fatalf("expected no delete inside the grace after a presence fault, got %d", client.podDeletes())
 	}
 	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
 	if !strings.Contains(cond.Message, "presence read failed") {
@@ -254,8 +254,8 @@ func TestCellRollClockWaitsAfterPresenceFault(t *testing.T) {
 	}
 
 	rec.evaluateCellReadiness(context.Background(), cr, fault.Add(grace))
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("expected one delete one grace after the presence fault, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("expected one delete one grace after the presence fault, got %d", client.podDeletes())
 	}
 }
 
@@ -270,8 +270,8 @@ func TestCellRollPresenceFaultOfOtherCellKeepsClock(t *testing.T) {
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.notePresenceFault("ns/other-cell", t0.Add(8*time.Minute))
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace))
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("expected the roll at the grace, got %d deletes", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("expected the roll at the grace, got %d deletes", client.podDeletes())
 	}
 }
 
@@ -291,15 +291,15 @@ func TestCellRollPresenceFaultTrickleRollsAtDeadline(t *testing.T) {
 		now := t0.Add(at)
 		rec.notePresenceFault("ns/cell1", now)
 		rec.evaluateCellReadiness(context.Background(), cr, now)
-		if rolledAt < 0 && client.deleteControllerPodCalls > 0 {
+		if rolledAt < 0 && client.podDeletes() > 0 {
 			rolledAt = at
 		}
 		if evacuatedAt < 0 && cr.Status.Cell.Evacuate {
 			evacuatedAt = at
 		}
 	}
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("deletes = %d, want exactly one", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("deletes = %d, want exactly one", client.podDeletes())
 	}
 	if rolledAt != cellMiteRollHoldCap {
 		t.Fatalf("rolled at %v, want the deadline %v", rolledAt, cellMiteRollHoldCap)
@@ -323,14 +323,14 @@ func TestCellRollReadyPodAndFaultTrickleRollsAtDeadline(t *testing.T) {
 		rec.notePresenceFault("ns/cell1", now)
 		rec.evaluateCellReadiness(context.Background(), cr, now)
 	}
-	if client.deleteControllerPodCalls != 0 {
-		t.Fatalf("expected no delete before the deadline, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 0 {
+		t.Fatalf("expected no delete before the deadline, got %d", client.podDeletes())
 	}
 	deadline := t0.Add(cellMiteRollHoldCap)
 	rec.notePresenceFault("ns/cell1", deadline)
 	rec.evaluateCellReadiness(context.Background(), cr, deadline)
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("expected one delete at the deadline, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("expected one delete at the deadline, got %d", client.podDeletes())
 	}
 }
 
@@ -346,12 +346,12 @@ func TestCellRollDeadlineKeepsNewPodGrace(t *testing.T) {
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.evaluateCellReadiness(context.Background(), cr, initDone.Add(time.Minute))
-	if client.deleteControllerPodCalls != 0 {
-		t.Fatalf("expected no delete one minute after the init finish, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 0 {
+		t.Fatalf("expected no delete one minute after the init finish, got %d", client.podDeletes())
 	}
 	rec.evaluateCellReadiness(context.Background(), cr, initDone.Add(grace))
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("expected one delete one grace after the init finish, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("expected one delete one grace after the init finish, got %d", client.podDeletes())
 	}
 }
 
@@ -445,8 +445,8 @@ func TestReconcileCellPresenceFaultFeedsRollClock(t *testing.T) {
 	if err := rec.reconcileController(ctx, cr); err != nil {
 		t.Fatalf("pass 2: %v", err)
 	}
-	if client.deleteControllerPodCalls != 0 {
-		t.Fatalf("pass 2: expected no delete right after a presence fault, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 0 {
+		t.Fatalf("pass 2: expected no delete right after a presence fault, got %d", client.podDeletes())
 	}
 	cond = findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
 	if !strings.Contains(cond.Message, "presence read failed") {
@@ -459,8 +459,8 @@ func TestReconcileCellPresenceFaultFeedsRollClock(t *testing.T) {
 	if err := rec.reconcileController(ctx, cr); err != nil {
 		t.Fatalf("pass 3: %v", err)
 	}
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("pass 3: expected the roll once the fault is old, got %d deletes", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("pass 3: expected the roll once the fault is old, got %d deletes", client.podDeletes())
 	}
 	cond = findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
 	if cond.Reason != v1alpha1.ReasonCellRolled {
@@ -482,8 +482,8 @@ func TestCellRollHoldsForSilentOpenStream(t *testing.T) {
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	for _, at := range []time.Duration{grace + time.Minute, cellMiteRollHoldCap - time.Minute} {
 		rec.evaluateCellReadiness(context.Background(), cr, t0.Add(at))
-		if client.deleteControllerPodCalls != 0 {
-			t.Fatalf("at %v: expected no delete while the stream is open, got %d", at, client.deleteControllerPodCalls)
+		if client.podDeletes() != 0 {
+			t.Fatalf("at %v: expected no delete while the stream is open, got %d", at, client.podDeletes())
 		}
 		cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
 		if !strings.HasPrefix(cond.Message, cellRollHeldPrefix) ||
@@ -496,8 +496,8 @@ func TestCellRollHoldsForSilentOpenStream(t *testing.T) {
 	}
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(cellMiteRollHoldCap))
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("past the hold cap: expected one delete, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("past the hold cap: expected one delete, got %d", client.podDeletes())
 	}
 }
 
@@ -534,14 +534,14 @@ func TestCellRollGoesAfterTheGatewayStops(t *testing.T) {
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+time.Minute))
-	if client.deleteControllerPodCalls != 0 {
-		t.Fatalf("expected no delete while the stream is open, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 0 {
+		t.Fatalf("expected no delete while the stream is open, got %d", client.podDeletes())
 	}
 
 	mites.drop("cell1", "ns")
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+2*time.Minute))
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("expected one delete after the record aged out, got %d", client.deleteControllerPodCalls)
+	if client.podDeletes() != 1 {
+		t.Fatalf("expected one delete after the record aged out, got %d", client.podDeletes())
 	}
 	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
 	if cond.Reason != v1alpha1.ReasonCellRolled {
