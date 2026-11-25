@@ -184,13 +184,45 @@ func provisionalMark(reason string) bool {
 	return reason == ReasonHeartbeatLost
 }
 
-// endsOpenStages reports whether a mark with reason ends the open stages of
-// run. A heartbeat-lost mark and a start-lost mark keep them, because the
-// owner can still run them, and a later run.started supersedes a start-lost
-// mark. A QUEUED run keeps them too: a later run.started supersedes the mark
-// of an accepted row.
-func endsOpenStages(run runInterruptCandidate, reason string) bool {
-	return run.status == StatusRunning && !provisionalMark(reason) && reason != ReasonStartLost
+// endsOpenStages reports whether a mark ends the open stages of run. Every
+// mark of a RUNNING run ends them, and a provisional mark does too. The mark
+// is the last recorder write to the run, because no sweep round reads a
+// marked run again. A stage that the mark keeps open therefore stays open
+// when no owner completion follows.
+//
+// The owner of a provisional mark can still send its facts. Its terminal
+// stage fact replaces the row, and its run.completed ends the row again with
+// the real result (endStagesAtCompletion). A run.started that supersedes a
+// start-lost mark opens the stages of that mark again (openStartLostStages).
+//
+// A QUEUED run keeps its open stages: a later run.started supersedes the
+// mark of an accepted row.
+func endsOpenStages(run runInterruptCandidate) bool {
+	return run.status == StatusRunning
+}
+
+// openStartLostStages opens again each stage of the run that a start-lost
+// mark ended. applyRunStarted calls it in its own transaction, after the
+// write that supersedes the mark. The row takes back IN_PROGRESS and no end,
+// and the payload loses interrupted_reason, so the row holds what the
+// owner's IN_PROGRESS fact wrote.
+//
+// The payload key selects the rows. Only a start-lost mark writes the value
+// start-lost, and both later writes remove it from the run's stages: the
+// owner's completion ends the row again, and the owner's terminal stage fact
+// replaces the whole payload. A row that holds the value therefore belongs
+// to the start-lost mark that the run row still holds.
+func openStartLostStages(ctx context.Context, tx pgx.Tx, intent *intentRow) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE varroa.run_stages
+		SET status = 'IN_PROGRESS',
+		    ended_at = NULL,
+		    payload = payload - 'interrupted_reason'
+		WHERE run_id = $1 AND payload->>'interrupted_reason' = $2
+	`, intent.runID, ReasonStartLost); err != nil {
+		return fmt.Errorf("open the stages of the superseded start-lost mark: %w", err)
+	}
+	return nil
 }
 
 // resumeDispatched reports whether the mesh moved this run's owner to a
@@ -388,7 +420,8 @@ func markInterruptedAndPublish(ctx context.Context, pool *pgxpool.Pool, activity
 // so no stage median counts the row. The stage payload takes the key
 // interrupted_reason, which names a stage that the recorder ended. A later
 // terminal run.stage fact of the owner replaces the whole row and that key
-// (applyRunStage).
+// (applyRunStage). The owner's run.completed ends the row again with the
+// real result (endStagesAtCompletion).
 //
 // A cell-rolled mark also writes the payload key interrupted_detail when
 // readCellRollCause finds the roll. Every mark removes a stored detail
@@ -441,7 +474,7 @@ func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate
 		return false, nil
 	}
 
-	if endsOpenStages(run, reason) {
+	if endsOpenStages(run) {
 		if _, err := tx.Exec(ctx, `
 			UPDATE varroa.run_stages
 			SET status = 'ABORTED',
