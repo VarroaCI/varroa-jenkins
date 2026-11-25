@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
 // seedRunningRun grants req through a real Ledger.Claim, applies
@@ -306,6 +308,190 @@ func TestMarkInterruptedSummaryDecodesAsAPIExpects(t *testing.T) {
 	}
 	if !decoded.LogSummary.Finalized || !decoded.LogSummary.Incomplete || decoded.LogSummary.IncompleteReason != "no-summary" {
 		t.Fatalf("decoded log_summary = %+v, want finalized/incomplete true and reason no-summary", decoded.LogSummary)
+	}
+}
+
+// TestMarkInterruptedLogSummaryFollowsTheStoredIndex asserts the log summary
+// that a mark writes. A summary that reports finalized true keeps every
+// field, and the mark reads no index for it. Otherwise a final entry in the
+// stored index finalizes the log with its chunk count and no incomplete
+// mark. No final entry, no index, and a failed read keep the incomplete
+// mark: not-finalized for a stored summary, no-summary for none.
+func TestMarkInterruptedLogSummaryFollowsTheStoredIndex(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	store := blob.NewPGBlobStore(pool)
+
+	const (
+		clean2       = "finalized=true incomplete=absent reason=absent chunk_count=2"
+		clean3       = "finalized=true incomplete=absent reason=absent chunk_count=3"
+		notFinalized = `finalized=true incomplete=true reason="not-finalized" chunk_count=absent`
+		noSummary    = `finalized=true incomplete=true reason="no-summary" chunk_count=absent`
+	)
+	cases := []struct {
+		name string
+		// logPayload is the run.log payload applied before the mark. nil
+		// applies none, so the run holds no log summary.
+		logPayload map[string]any
+		// chunks is the number of indexed log parts. 0 writes no index.
+		chunks int64
+		final  bool
+		// failRead makes every index read fail.
+		failRead  bool
+		want      string
+		wantReads int
+	}{
+		{
+			name:       "the gateway marker keeps the whole log",
+			logPayload: map[string]any{"finalized": true},
+			chunks:     3, final: true,
+			want:      "finalized=true incomplete=absent reason=absent chunk_count=absent",
+			wantReads: 0,
+		},
+		{
+			name:       "a finalized complete summary keeps incomplete false",
+			logPayload: map[string]any{"finalized": true, "incomplete": false, "chunk_count": 3},
+			want:       "finalized=true incomplete=false reason=absent chunk_count=3",
+			wantReads:  0,
+		},
+		{
+			name:       "a final entry finalizes an open summary",
+			logPayload: map[string]any{"finalized": false},
+			chunks:     3, final: true,
+			want: clean3, wantReads: 1,
+		},
+		{
+			name:   "a final entry finalizes a run with no summary",
+			chunks: 2, final: true,
+			want: clean2, wantReads: 1,
+		},
+		{
+			name:       "a final entry keeps a stored gateway reason",
+			logPayload: map[string]any{"incomplete": true, "incomplete_reason": "gateway-gap"},
+			chunks:     3, final: true,
+			want:      `finalized=true incomplete=true reason="gateway-gap" chunk_count=3`,
+			wantReads: 1,
+		},
+		{
+			name:       "an index with no final entry marks the summary",
+			logPayload: map[string]any{"finalized": false},
+			chunks:     2,
+			want:       notFinalized, wantReads: 1,
+		},
+		{
+			name: "no index and no summary mark no-summary",
+			want: noSummary, wantReads: 1,
+		},
+		{
+			name:       "a failed read keeps the not-finalized mark",
+			logPayload: map[string]any{"finalized": false},
+			chunks:     3, final: true, failRead: true,
+			want: notFinalized, wantReads: 1,
+		},
+		{
+			name:   "a failed read keeps the no-summary mark",
+			chunks: 2, final: true, failRead: true,
+			want: noSummary, wantReads: 1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			intentKey := "manual:" + newTestUUIDv7String()
+			runID := startRunForFinalize(t, pool, intentKey)
+			if tc.logPayload != nil {
+				env := newTestEnvelope(t, runID, intentKey, KindRunLog, tc.logPayload)
+				if _, err := NewIngester(pool, nil, nil).Apply(context.Background(), env); err != nil {
+					t.Fatalf("apply run.log: %v", err)
+				}
+			}
+			if tc.chunks > 0 {
+				writeIndexedLog(t, store, runID, tc.chunks, tc.final)
+			}
+			reader := &failingIndexReader{store: store, failKey: "no-such-key"}
+			if tc.failRead {
+				reader.failKey = ""
+			}
+
+			c := fetchRunningCandidate(t, pool, runID)
+			changed, err := markInterruptedAndPublish(context.Background(), pool, nil, reader, c, ReasonCellLost, time.Now(), "")
+			if err != nil || !changed {
+				t.Fatalf("markInterruptedAndPublish changed=%v err=%v, want true and nil", changed, err)
+			}
+			if got := readLogSummaryFields(t, db, runID); got.String() != tc.want {
+				t.Fatalf("log summary %s, want %s", got, tc.want)
+			}
+			if reader.reads != tc.wantReads {
+				t.Fatalf("index reads = %d, want %d", reader.reads, tc.wantReads)
+			}
+		})
+	}
+}
+
+// TestMarkInterruptedKeepsALogFinalizedAfterTheCandidateRead asserts that
+// the stored field decides at write time. A gateway marker that lands after
+// the candidate read keeps the log whole, although the candidate read found
+// it open and the index read found no index.
+func TestMarkInterruptedKeepsALogFinalizedAfterTheCandidateRead(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := startRunForFinalize(t, pool, intentKey)
+	c := fetchRunningCandidate(t, pool, runID)
+	if c.logFinalized {
+		t.Fatal("candidate reports the log finalized before the marker")
+	}
+
+	marker := newTestEnvelope(t, runID, intentKey, KindRunLog, map[string]any{"finalized": true, "chunk_count": 4})
+	if _, err := NewIngester(pool, nil, nil).Apply(context.Background(), marker); err != nil {
+		t.Fatalf("apply the finalized marker: %v", err)
+	}
+
+	changed, err := markInterruptedAndPublish(context.Background(), pool, nil, blob.NewPGBlobStore(pool), c, ReasonCellLost,
+		time.Now(), "")
+	if err != nil || !changed {
+		t.Fatalf("markInterruptedAndPublish changed=%v err=%v, want true and nil", changed, err)
+	}
+	want := "finalized=true incomplete=absent reason=absent chunk_count=4"
+	if got := readLogSummaryFields(t, db, runID); got.String() != want {
+		t.Fatalf("log summary %s, want %s", got, want)
+	}
+}
+
+// deadlineIndexReader fails each read, and records whether the read
+// context carried a deadline no later than markLogIndexReadTimeout.
+type deadlineIndexReader struct {
+	bounded bool
+}
+
+func (r *deadlineIndexReader) NewRangeReader(ctx context.Context, _ string, _, _ int64) (io.ReadCloser, error) {
+	deadline, ok := ctx.Deadline()
+	r.bounded = ok && time.Until(deadline) <= markLogIndexReadTimeout
+	return nil, context.DeadlineExceeded
+}
+
+// TestMarkInterruptedBoundsTheIndexRead asserts that the index read before a
+// mark carries the markLogIndexReadTimeout bound, and that a read that ends
+// on the bound still lets the mark commit with the incomplete mark.
+func TestMarkInterruptedBoundsTheIndexRead(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
+	c := fetchRunningCandidate(t, pool, runID)
+
+	reader := &deadlineIndexReader{}
+	changed, err := markInterruptedAndPublish(context.Background(), pool, nil, reader, c, ReasonCellLost, time.Now(), "")
+	if err != nil || !changed {
+		t.Fatalf("markInterruptedAndPublish changed=%v err=%v, want true and nil", changed, err)
+	}
+	if !reader.bounded {
+		t.Fatalf("the index read had no deadline within %s", markLogIndexReadTimeout)
+	}
+	want := `finalized=true incomplete=true reason="no-summary" chunk_count=absent`
+	if got := readLogSummaryFields(t, db, runID); got.String() != want {
+		t.Fatalf("log summary %s, want %s", got, want)
 	}
 }
 
@@ -885,7 +1071,7 @@ func TestSweepInterruptedRunsMarksASilentRun(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -917,6 +1103,39 @@ func TestSweepInterruptedRunsMarksASilentRun(t *testing.T) {
 	}
 }
 
+// TestSweepInterruptedRunsReadsTheStoredLogIndex asserts that the sweep
+// passes its log reader to the mark. A silent run whose stored index holds
+// the final entry gets a finalized log with its chunk count and no
+// incomplete mark.
+func TestSweepInterruptedRunsReadsTheStoredLogIndex(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	store := blob.NewPGBlobStore(pool)
+	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
+	writeIndexedLog(t, store, runID, 3, true)
+
+	past := time.Now().Add(-17 * time.Minute)
+	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2`, past, runID); err != nil {
+		t.Fatalf("backdate heartbeat_received_at: %v", err)
+	}
+	seedTenantPlacementLiveness(t, db, "pod-a", false, &past, &past, nil)
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	freshenSweepConsumer(t, conn)
+
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil, nil, nil, store,
+		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	if err != nil || marked != 1 {
+		t.Fatalf("SweepInterruptedRuns marked=%d err=%v, want 1 and nil", marked, err)
+	}
+	want := "finalized=true incomplete=absent reason=absent chunk_count=3"
+	if got := readLogSummaryFields(t, db, runID); got.String() != want {
+		t.Fatalf("log summary %s, want %s", got, want)
+	}
+}
+
 // TestSweepInterruptedRunsNotifiesEachMarkedRun asserts the sweep sends one
 // run notification for each run that it marks, a RUNNING run and a QUEUED
 // run alike. Each notification names the run row that the sweep read, on
@@ -942,7 +1161,7 @@ func TestSweepInterruptedRunsNotifiesEachMarkedRun(t *testing.T) {
 	defer notifier.Close()
 
 	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, notifier, nil, nil, nil,
-		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+		nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -971,7 +1190,7 @@ func TestSweepInterruptedRunsNotifiesEachMarkedRun(t *testing.T) {
 	}
 
 	again, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, notifier, nil, nil, nil,
-		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+		nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("second SweepInterruptedRuns: %v", err)
 	}
@@ -1007,7 +1226,7 @@ func TestSweepInterruptedRunsSkipsOnPendingBacklog(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, 1, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, nil, 1, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1050,7 +1269,7 @@ func TestSweepInterruptedRunsSkipsOnStaleConsumer(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1197,7 +1416,7 @@ func TestSweepMarksQueuedRunWithDeadAcceptingInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1262,7 +1481,7 @@ func TestSweepLeavesQueuedRunWithLiveAcceptingInstanceAlone(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1304,7 +1523,7 @@ func TestSweepSkipsQueuedPlaceholderWithNoOwningInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1362,7 +1581,7 @@ func TestSweepMarksClaimedQueuedRunThroughIntentInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(ctx, pool, conn, nil, nil, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+	marked, err := SweepInterruptedRuns(ctx, pool, conn, nil, nil, metrics, nil, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1605,7 +1824,7 @@ func TestSweepMarksCellLostAndCountsIt(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil,
-		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+		nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1653,7 +1872,7 @@ func TestSweepMarksCellLostOnAnIdleConsumer(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, metrics, nil, nil,
-		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+		nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1759,7 +1978,7 @@ func TestMarkInterruptedPublishesTheActivityRow(t *testing.T) {
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	c := fetchRunningCandidate(t, pool, runID)
 
-	changed, err := markInterruptedAndPublish(context.Background(), pool, pub, c, ReasonNoHeartbeat, time.Now(), "")
+	changed, err := markInterruptedAndPublish(context.Background(), pool, pub, nil, c, ReasonNoHeartbeat, time.Now(), "")
 	if err != nil || !changed {
 		t.Fatalf("markInterruptedAndPublish changed=%v err=%v, want true and nil", changed, err)
 	}

@@ -442,7 +442,7 @@ func TestSweepLeavesTheRunOfAReplacedControllerPod(t *testing.T) {
 				cell: "cell-a", cellInstance: "pod-b", cellAlive: true, cellAliveAt: &now,
 				deadInstances: []TenantSyncDeadInstance{{Instance: "pod-a", LastSeenAt: confirmed, ConfirmedGoneAt: &confirmed}},
 			})
-			marked, err := MarkMovedRunsForTenant(context.Background(), pool, nil, nil, nil, nil, nil, nil,
+			marked, err := MarkMovedRunsForTenant(context.Background(), pool, nil, nil, nil, nil, nil, nil, nil,
 				testCluster, testTenant, row, now, testGrace, "", nil)
 			if err != nil {
 				t.Fatalf("MarkMovedRunsForTenant: %v", err)

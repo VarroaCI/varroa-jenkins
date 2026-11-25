@@ -170,7 +170,7 @@ func TestSweepEndsASilentRunOnALiveOwner(t *testing.T) {
 	defer notifier.Close()
 
 	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, notifier, metrics, nil, store,
-		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+		nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestSweepLeavesASilentRunOnALiveOwnerInsideTheWindow(t *testing.T) {
 	freshenSweepConsumer(t, conn)
 
 	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil, nil, nil,
-		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
+		nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestMarkMovedRunsForTenantSkipsHeartbeatLost(t *testing.T) {
 
 	fresh := time.Now()
 	row := resolveLivenessMembers(tenantPlacementLivenessRow{cellInstance: "pod-a", cellAlive: true, cellAliveAt: &fresh})
-	marked, err := MarkMovedRunsForTenant(context.Background(), pool, nil, nil, nil, nil, nil, nil, testCluster, testTenant,
+	marked, err := MarkMovedRunsForTenant(context.Background(), pool, nil, nil, nil, nil, nil, nil, nil, testCluster, testTenant,
 		row, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("MarkMovedRunsForTenant: %v", err)

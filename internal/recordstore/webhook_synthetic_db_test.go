@@ -338,7 +338,7 @@ func TestEndStaleMarkedIntent_EnqueuesStartLostDelivery(t *testing.T) {
 	if len(candidates) != 1 {
 		t.Fatalf("candidates = %d, want 1", len(candidates))
 	}
-	if !endStaleMarkedIntent(context.Background(), pool, nil, nil, nil, candidates[0], now, "", slog.Default()) {
+	if !endStaleMarkedIntent(context.Background(), pool, nil, nil, nil, nil, candidates[0], now, "", slog.Default()) {
 		t.Fatal("endStaleMarkedIntent changed = false, want true")
 	}
 
@@ -388,7 +388,7 @@ func TestStartLostThenSweepMark_EnqueuesTwoSyntheticRows(t *testing.T) {
 	if err != nil || len(candidates) != 1 {
 		t.Fatalf("selectStaleMarkedIntents = %d candidates, err %v", len(candidates), err)
 	}
-	if !endStaleMarkedIntent(context.Background(), pool, nil, nil, nil, candidates[0], now, "", slog.Default()) {
+	if !endStaleMarkedIntent(context.Background(), pool, nil, nil, nil, nil, candidates[0], now, "", slog.Default()) {
 		t.Fatal("endStaleMarkedIntent changed = false, want true")
 	}
 
