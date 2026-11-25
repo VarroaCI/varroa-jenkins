@@ -147,6 +147,49 @@ public class VarroaRunRecorderStatusTest {
     }
 
     @Test
+    public void eachWarningResultMapsTheWayTheChunkStatusMapsIt() {
+        assertEquals("FAILURE", statusOfOneWarning(Result.FAILURE));
+        assertEquals("UNSTABLE", statusOfOneWarning(Result.UNSTABLE));
+        assertEquals("ABORTED", statusOfOneWarning(Result.ABORTED));
+        assertEquals("NOT_EXECUTED", statusOfOneWarning(Result.NOT_BUILT));
+        assertEquals("SUCCESS", statusOfOneWarning(Result.SUCCESS));
+    }
+
+    @Test
+    public void theWorstWarningInTheBlockSetsTheStatusInEitherOrder() {
+        FlowNode start = mock(FlowNode.class);
+        FlowNode end = mock(FlowNode.class);
+        FlowNode unstable = mock(FlowNode.class);
+        when(unstable.getAction(WarningAction.class)).thenReturn(new WarningAction(Result.UNSTABLE));
+        FlowNode failure = mock(FlowNode.class);
+        when(failure.getAction(WarningAction.class)).thenReturn(new WarningAction(Result.FAILURE));
+
+        assertEquals("FAILURE",
+                VarroaRunRecorder.deriveActionStatus(start, end, List.of(end, unstable, failure, start)));
+        assertEquals("FAILURE",
+                VarroaRunRecorder.deriveActionStatus(start, end, List.of(end, failure, unstable, start)));
+    }
+
+    @Test
+    public void anErrorOnTheBlockEndOutranksAWarning() {
+        FlowNode start = mock(FlowNode.class);
+        FlowNode end = mock(FlowNode.class);
+        when(end.getAction(ErrorAction.class)).thenReturn(new ErrorAction(new RuntimeException("boom")));
+        FlowNode inner = mock(FlowNode.class);
+        when(inner.getAction(WarningAction.class)).thenReturn(new WarningAction(Result.UNSTABLE));
+
+        assertEquals("FAILURE", VarroaRunRecorder.deriveActionStatus(start, end, List.of(start, inner, end)));
+    }
+
+    private static String statusOfOneWarning(Result result) {
+        FlowNode start = mock(FlowNode.class);
+        FlowNode end = mock(FlowNode.class);
+        FlowNode inner = mock(FlowNode.class);
+        when(inner.getAction(WarningAction.class)).thenReturn(new WarningAction(result));
+        return VarroaRunRecorder.deriveActionStatus(start, end, List.of(start, inner, end));
+    }
+
+    @Test
     public void aNotExecutedStartNodeReportsNotExecuted() {
         FlowNode start = mock(FlowNode.class);
         FlowNode end = mock(FlowNode.class);

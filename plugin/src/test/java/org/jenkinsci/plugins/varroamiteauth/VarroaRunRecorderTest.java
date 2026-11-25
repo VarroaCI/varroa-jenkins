@@ -15,7 +15,9 @@ import hudson.model.StringParameterDefinition;
 import hudson.model.StringParameterValue;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 
@@ -670,6 +672,99 @@ public class VarroaRunRecorderTest {
         assertNotNull("the completion rebuild carries the stage " + name, rebuilt);
         assertEquals("the rebuilt status of " + name, "NOT_EXECUTED", rebuilt.getStatus());
         assertEquals("the rebuilt error of " + name, "", rebuilt.getError());
+    }
+
+    // --- A stage that catches its own error reports one status on both paths ---
+
+    @Test
+    public void aStageThatCatchesItsErrorReportsTheSameStatusOnBothPaths() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "catch-error");
+        job.setDefinition(new CpsFlowDefinition("pipeline {\n  agent any\n  stages {\n"
+                + "    stage('caught-failure') { steps {\n"
+                + "      catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { error('one') } } }\n"
+                + "    stage('caught-unstable') { steps {\n"
+                + "      catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') { error('two') } } }\n"
+                + "    stage('caught-default') { steps { catchError { error('three') } } }\n"
+                + "    stage('caught-aborted') { steps {\n"
+                + "      catchError(buildResult: 'SUCCESS', stageResult: 'ABORTED') { error('four') } } }\n"
+                + "    stage('caught-not-built') { steps {\n"
+                + "      catchError(buildResult: 'SUCCESS', stageResult: 'NOT_BUILT') { error('five') } } }\n"
+                + "    stage('warned') { steps { warnError('six') { error('six') } } }\n"
+                + "    stage('marked-unstable') { steps { unstable('seven') } }\n"
+                + "    stage('worst-wins') { steps {\n"
+                + "      unstable('eight')\n"
+                + "      catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { error('nine') } } }\n"
+                + "    stage('outer') {\n      parallel {\n"
+                + "        stage('inner-caught') { steps {\n"
+                + "          catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { error('ten') } } }\n"
+                + "        stage('inner-ok') { steps { echo 'ok' } }\n"
+                + "      }\n    }\n"
+                + "    stage('after') { steps { echo 'after' } }\n"
+                + "  }\n}\n", true));
+
+        WorkflowRun run = job.scheduleBuild2(0, grantedAction("")).get();
+        j.assertBuildStatus(hudson.model.Result.FAILURE, run);
+
+        List<BuildEvent> events = BuildEventSink.get().drain(200).events;
+        assertStatusOnBothPaths(events, "caught-failure", "FAILURE");
+        assertStatusOnBothPaths(events, "caught-unstable", "UNSTABLE");
+        assertStatusOnBothPaths(events, "caught-default", "SUCCESS");
+        assertStatusOnBothPaths(events, "caught-aborted", "ABORTED");
+        assertStatusOnBothPaths(events, "warned", "UNSTABLE");
+        assertStatusOnBothPaths(events, "marked-unstable", "UNSTABLE");
+        assertStatusOnBothPaths(events, "worst-wins", "FAILURE");
+        assertStatusOnBothPaths(events, "inner-caught", "FAILURE");
+        assertStatusOnBothPaths(events, "inner-ok", "SUCCESS");
+        assertStatusOnBothPaths(events, "outer", "FAILURE");
+        assertStatusOnBothPaths(events, "after", "SUCCESS");
+        List<BuildStage> rebuilt = byPhase(events, BuildEvent.PHASE_COMPLETED).get(0).getStages();
+        assertEquals("FAILURE", findStageByBranch(rebuilt, "inner-caught").getStatus());
+        assertEquals("SUCCESS", findStageByBranch(rebuilt, "inner-ok").getStatus());
+        assertEveryStageAgreesOnBothPaths(events);
+    }
+
+    /**
+     * Asserts that the last live {@code STAGE} event and the completion
+     * rebuild both report the stage {@code name} with {@code status}.
+     */
+    private static void assertStatusOnBothPaths(List<BuildEvent> events, String name, String status) {
+        BuildStage live = null;
+        for (BuildEvent e : byPhase(events, BuildEvent.PHASE_STAGE)) {
+            BuildStage s = findStageByName(e.getStages(), name);
+            if (s != null) {
+                live = s;
+            }
+        }
+        assertNotNull("a live STAGE event carries the stage " + name, live);
+        assertEquals("the live status of " + name, status, live.getStatus());
+
+        List<BuildEvent> completed = byPhase(events, BuildEvent.PHASE_COMPLETED);
+        assertEquals(1, completed.size());
+        BuildStage rebuilt = findStageByName(completed.get(0).getStages(), name);
+        assertNotNull("the completion rebuild carries the stage " + name, rebuilt);
+        assertEquals("the rebuilt status of " + name, status, rebuilt.getStatus());
+    }
+
+    /**
+     * Asserts that each stage and branch of the completion rebuild carries
+     * the status of its last live {@code STAGE} event.
+     */
+    private static void assertEveryStageAgreesOnBothPaths(List<BuildEvent> events) {
+        Map<String, String> live = new HashMap<>();
+        for (BuildEvent e : byPhase(events, BuildEvent.PHASE_STAGE)) {
+            for (BuildStage s : e.getStages()) {
+                live.put(s.getStageId(), s.getStatus());
+            }
+        }
+        List<BuildEvent> completed = byPhase(events, BuildEvent.PHASE_COMPLETED);
+        assertEquals(1, completed.size());
+        assertFalse(completed.get(0).getStages().isEmpty());
+        for (BuildStage rebuilt : completed.get(0).getStages()) {
+            String label = rebuilt.getName() + " (" + rebuilt.getNodeType() + ")";
+            assertTrue("a live STAGE event carries " + label, live.containsKey(rebuilt.getStageId()));
+            assertEquals("the live and rebuilt status of " + label, rebuilt.getStatus(),
+                    live.get(rebuilt.getStageId()));
+        }
     }
 
     // --- 5.9a: every D3 field, not a subset ---

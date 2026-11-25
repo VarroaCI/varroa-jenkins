@@ -2543,7 +2543,7 @@ public final class VarroaRunRecorder {
     /**
      * Derives a stage status from node actions (D2), checked in order: a
      * stage that did not run, an interrupted-typed error, any other error,
-     * a warning-typed unstable result anywhere in the block, else success.
+     * the worst warning result anywhere in the block, else success.
      * The not-run test comes first, because declarative throws the earlier
      * error again inside each stage that it skips for a failure. This runs
      * at a block end, when the run may still be in progress and a
@@ -2560,13 +2560,34 @@ public final class VarroaRunRecorder {
         if (hasError(start) || hasError(end)) {
             return "FAILURE";
         }
-        for (FlowNode n : blockNodes) {
-            WarningAction warning = (WarningAction) n.getAction(WarningAction.class);
-            if (warning != null && Result.UNSTABLE.equals(warning.getResult())) {
-                return "UNSTABLE";
-            }
+        Result warning = worstWarning(blockNodes);
+        if (warning != null) {
+            return mapGenericStatus(GenericStatus.fromResult(warning), "SUCCESS");
         }
         return "SUCCESS";
+    }
+
+    /**
+     * Answers the worst result of the warning actions in a block, or null
+     * when the block holds none. {@code catchError} writes its {@code
+     * stageResult} in such an action, and {@code warnError} and {@code
+     * unstable} write {@code UNSTABLE}. The completion rebuild reads the
+     * same worst result through {@code computeChunkStatus2}, so the live
+     * status and the rebuilt status agree.
+     */
+    static Result worstWarning(List<FlowNode> blockNodes) {
+        Result worst = null;
+        for (FlowNode n : blockNodes) {
+            WarningAction warning = (WarningAction) n.getAction(WarningAction.class);
+            if (warning == null || warning.getResult() == null) {
+                continue;
+            }
+            Result result = warning.getResult();
+            if (worst == null || result.isWorseThan(worst)) {
+                worst = result;
+            }
+        }
+        return worst;
     }
 
     /**
