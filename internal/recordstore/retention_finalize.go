@@ -94,7 +94,9 @@ const indexReadFailedMsExpr = `(CASE WHEN (payload->>'` + indexReadFailedKey + `
 
 // finalizeProbeRunID names a run that no gateway writes, because each
 // run id is a UUIDv7. A read of its index key tells an index that fails
-// for one run from a blob tier that does not answer.
+// for one run from a blob tier that does not answer. The key holds no
+// part, so on an object-store tier an answer proves only that a listing
+// works. A tier that lists but fails each GET answers the probe.
 const finalizeProbeRunID = "00000000-0000-0000-0000-000000000000"
 
 // finalizeStaleLogs is step 11 of the maintenance round. It selects a run
@@ -118,7 +120,9 @@ const finalizeProbeRunID = "00000000-0000-0000-0000-000000000000"
 // run is then deferred: later rounds read it under
 // finalizeIndexDeferredReadBudget. A deferred read that fails at least
 // finalizeIndexGiveUpAge after the stored time marks the run
-// not-finalized. One transient error therefore never marks a run.
+// not-finalized. One failed read therefore never marks a run. A gap in
+// the reads of a run never moves the stored time, so after a gap of
+// finalizeIndexGiveUpAge or more the next failed read marks the run.
 //
 // It reads candidates in keyset batches of retentionBatchSize, ordered by
 // (created_at, run_id), so one hourly round never holds an unbounded
@@ -261,7 +265,8 @@ func blobTierAnswers(ctx context.Context, logs LogRangeReader) bool {
 // gateway writes a final entry only after every lower entry, and its own
 // restart recovery reads that entry as a finished log. An index that
 // does not parse holds no final entry that a reader can use. A nil logs
-// holds no index.
+// holds no index. It reads no dropped count, because only the plugin
+// reports plugin-drop.
 func storedLogFinal(ctx context.Context, logs LogRangeReader, runID string) (finalChunks int64, found bool, err error) {
 	if logs == nil {
 		return 0, false, nil
