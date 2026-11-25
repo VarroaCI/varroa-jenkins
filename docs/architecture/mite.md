@@ -34,6 +34,8 @@ Registration fails closed if the bootstrap token, certificate authority, or cont
 
 The mite sends a heartbeat every 15 seconds. A broken stream reconnects with exponential backoff capped at two minutes. Gateway replicas need no sticky routing.
 
+When one message to the mite makes no progress for 60 seconds, the gateway ends the stream. The mite then connects again.
+
 Each desired-state command has a deadline. The default is 20 minutes. Set `ProvisioningDefaults.spec.commandDeadlineSec` to change it.
 
 The gateway extends the 60-second ack wait of a running one-shot command every 15 seconds, so a slow command does not repeat.
@@ -93,8 +95,8 @@ restart at any tier costs a delay and not a lost event.
    wait, the gateway ends the stream and the mite reconnects.
 
 After a reconnect the mite replays every retained event, in order, before it forwards anything
-new. A mite restart loses its retention set, but the plugin's spool resends each
-unacknowledged event.
+new. It reads the acknowledgements of the gateway during the replay. A mite restart loses its
+retention set, but the plugin's spool resends each unacknowledged event.
 
 ## Diagnose a Mite
 

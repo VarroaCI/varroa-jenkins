@@ -607,38 +607,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.Logger.Info("stream connected")
 		a.writeOperatorStatus(true)
 
-		// Replay every retained build event and log chunk before anything
-		// else uses the new stream, so a reconnect never lets a fresh
-		// forward overtake one from before the disconnect.
-		a.replayRetainedEvents()
-		a.replayRetainedLogChunks()
-
-		// The stream just (re)connected: the next job-schedule attach must
-		// carry the last known set even if its hash is unchanged.
-		a.markStreamReconnected()
-		a.sendStateSnapshot(ctx)
-		a.resendInventoryIfStale(ctx)
-
-		streamCtx, streamCancel := context.WithCancel(ctx)
-		go a.sendHeartbeats(streamCtx)
-		go a.startTokenRefreshLoop(streamCtx)
-		go a.startHealthProbe(streamCtx)
-		go a.startObservabilityProbe(streamCtx)
-		go a.startFingerprintTicker(streamCtx)
-		go a.startActivityPoller(streamCtx)
-		go a.startJobSchedulePoller(streamCtx)
-		go a.startScriptApprovalPoller(streamCtx)
-		go a.startPluginInventoryCollector(streamCtx)
-		// The run loop is the only writer of a.sess, so it reads it here
-		// without sendMu.
-		go a.startCertRenewalLoop(streamCtx, a.sess.client)
-		// Wire the reactive refresh path: on session loss + token expiry,
-		// the client triggers a refresh before re-establishing.
-		a.getJenkinsClient().OnTokenExpired = func() {
-			a.requestTokenRefresh(ctx)
-		}
-		a.processCommands(streamCtx)
-		streamCancel()
+		a.runSession(ctx)
 
 		a.teardownSession()
 		a.writeOperatorStatus(false)
@@ -651,6 +620,64 @@ func (a *Agent) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+}
+
+// runSession runs the session that openStream installed, until its stream
+// ends or ctx ends. Call it only from the run loop.
+//
+// The receive loop starts before the first send. The gateway answers each
+// replayed event and log chunk with an ack. With no receive loop, those
+// acks fill the flow-control window of the stream, the gateway then stops
+// reading, and the replay send, which holds sendMu, waits with no bound.
+func (a *Agent) runSession(ctx context.Context) {
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	defer streamCancel()
+
+	// Wire the reactive refresh path: on session loss + token expiry,
+	// the client triggers a refresh before re-establishing.
+	a.getJenkinsClient().OnTokenExpired = func() {
+		a.requestTokenRefresh(ctx)
+	}
+
+	// The run loop is the only writer of a.sess, so it reads it here
+	// without sendMu.
+	sess := a.sess
+
+	// The end of the receive loop ends the session at once, as
+	// teardownSession does: a startup send below can hold sendMu while
+	// flow control stalls it, and only the connection close releases it.
+	recvDone := make(chan struct{})
+	go func() {
+		defer close(recvDone)
+		a.processCommands(streamCtx)
+		streamCancel()
+		sess.closeConn()
+	}()
+
+	// Replay every retained build event and log chunk before anything
+	// else uses the new stream, so a reconnect never lets a fresh
+	// forward overtake one from before the disconnect.
+	a.replayRetainedEvents()
+	a.replayRetainedLogChunks()
+
+	// The stream just (re)connected: the next job-schedule attach must
+	// carry the last known set even if its hash is unchanged.
+	a.markStreamReconnected()
+	a.sendStateSnapshot(streamCtx)
+	a.resendInventoryIfStale(streamCtx)
+
+	go a.sendHeartbeats(streamCtx)
+	go a.startTokenRefreshLoop(streamCtx)
+	go a.startHealthProbe(streamCtx)
+	go a.startObservabilityProbe(streamCtx)
+	go a.startFingerprintTicker(streamCtx)
+	go a.startActivityPoller(streamCtx)
+	go a.startJobSchedulePoller(streamCtx)
+	go a.startScriptApprovalPoller(streamCtx)
+	go a.startPluginInventoryCollector(streamCtx)
+	go a.startCertRenewalLoop(streamCtx, sess.client)
+
+	<-recvDone
 }
 
 // sleepContext waits for d or until ctx is cancelled. Returns false if ctx
@@ -1483,10 +1510,10 @@ func (a *Agent) processCommands(ctx context.Context) {
 
 	// The receive goroutines use the session captured here. They never
 	// read a.sess, which the run loop clears when this function returns.
-	// This function runs on the run-loop goroutine, the only writer of
-	// a.sess, so it reads a.sess without sendMu. It must never take
-	// sendMu: a send that flow control stalls holds it, and the receive
-	// loop must still start.
+	// The run loop writes a.sess only before it starts this function and
+	// after this function returns, so this function reads a.sess without
+	// sendMu. It must never take sendMu: a send that flow control stalls
+	// holds it, and only this loop reads the acks that free the window.
 	sess := a.sess
 	if sess == nil {
 		return
@@ -1592,8 +1619,9 @@ func (a *Agent) processCommands(ctx context.Context) {
 			req := m.ContentRequest
 			if req != nil && req.RequestId != "" {
 				resp := buildContentResponse(a.miteDir, req.RequestId)
-				// Send off the run loop: the run loop must never wait for
-				// sendMu, which a send that flow control stalls holds.
+				// Send off the receive loop: the receive loop must never
+				// wait for sendMu, which a send that flow control stalls
+				// holds.
 				go func() {
 					sendErr := a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_ContentResponse{ContentResponse: resp}})
 					// A session that ends before this send is an ordinary

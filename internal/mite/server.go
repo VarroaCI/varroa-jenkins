@@ -43,6 +43,17 @@ type Server struct {
 	ServerEndpoint string
 
 	Logger *slog.Logger
+
+	// sendStallAfter overrides streamSendStallAfter in a test.
+	sendStallAfter time.Duration
+}
+
+// sendStallBound returns the bound of one Send on a mite stream.
+func (s *Server) sendStallBound() time.Duration {
+	if s.sendStallAfter > 0 {
+		return s.sendStallAfter
+	}
+	return streamSendStallAfter
 }
 
 // NewServer creates a new Mite gRPC server with TLS credentials issued by
@@ -266,18 +277,23 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 	streamEvents, _ := handler.(streamBuildEventHandler)
 	streamInstance, _ := handler.(streamInstanceHandler)
 
-	// Create a sender function bound to this stream, protected by a mutex
-	// so background goroutines can send safely.
-	var sendMu sync.Mutex
-	send := func(msg *mitev1.OperatorMessage) error {
-		sendMu.Lock()
-		defer sendMu.Unlock()
+	// Every send of this stream, the read loop's own acks included, goes
+	// through one writer goroutine and has a bound (streamSender).
+	stallAfter := s.sendStallBound()
+	sender := newStreamSender(func(msg *mitev1.OperatorMessage) error {
 		if ds := msg.GetDesiredState(); ds != nil {
 			span := trace.SpanFromContext(stream.Context())
 			span.AddEvent("desiredState.push", trace.WithAttributes(attribute.String("command_id", ds.CommandId)))
 		}
 		return stream.Send(msg)
-	}
+	}, stream.Context().Done(), stallAfter, func(kind string) {
+		if s.Logger != nil {
+			s.Logger.Warn("mite stream stalled: a send made no progress, ending the stream",
+				"controller", controllerName, "namespace", namespace, "message", kind, "stallAfter", stallAfter)
+		}
+	})
+	defer sender.end()
+	send := sender.Send
 
 	connToken := handler.OnConnect(controllerName, namespace, hello.Version, leaf.NotAfter, send)
 	defer handler.OnDisconnect(controllerName, namespace, connToken)
@@ -290,8 +306,18 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 	stopPresence := keepPresence(stream.Context(), handler, controllerName, namespace, connToken, loop)
 	defer stopPresence()
 
+	// A stalled send ends the stream. Only the end of the stream releases
+	// the Send that flow control holds. The mite then connects again and
+	// replays what it retains.
+	stalled := func() error {
+		return status.Errorf(codes.Unavailable, "mite stream stalled: a send made no progress for %s", stallAfter)
+	}
+
 	// Read loop: process incoming messages from the mite.
 	for {
+		if sender.isStalled() {
+			return stalled()
+		}
 		loop.set(readLoopRecv)
 		msg, err := stream.Recv()
 		if err != nil {
@@ -299,6 +325,9 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 				return nil
 			}
 			return status.Errorf(codes.Internal, "recv: %v", err)
+		}
+		if sender.isStalled() {
+			return stalled()
 		}
 
 		// The mite may have reconnected while this stream was still open. Its
