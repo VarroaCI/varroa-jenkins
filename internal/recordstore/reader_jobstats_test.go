@@ -11,12 +11,12 @@ import (
 
 // seedJobStatsStage inserts one varroa.run_stages row directly, so a
 // test can build a stage fixture without going through the ingester.
-func seedJobStatsStage(t *testing.T, db *sql.DB, runID uuid.UUID, createdAt time.Time, name string, durationMs int64) {
+func seedJobStatsStage(t *testing.T, db *sql.DB, runID uuid.UUID, createdAt time.Time, name, status string, durationMs int64) {
 	t.Helper()
 	if _, err := db.Exec(`
 		INSERT INTO varroa.run_stages (run_id, stage_id, created_at, name, node_type, status, duration_ms)
-		VALUES ($1, $2, $3, $4, 'stage', 'SUCCESS', $5)
-	`, runID, uuid.New().String(), createdAt, name, durationMs); err != nil {
+		VALUES ($1, $2, $3, $4, 'stage', $5, $6)
+	`, runID, uuid.New().String(), createdAt, name, status, durationMs); err != nil {
 		t.Fatalf("seed stage %s for run %s: %v", name, runID, err)
 	}
 }
@@ -70,11 +70,11 @@ func TestJobWindowStatsComputesRateMedianAndSlowestStage(t *testing.T) {
 	// "Build" stage runs fast and consistently; "Deploy" runs slower and
 	// only on two of the three runs, so its median must still beat
 	// "Build"'s median rather than being diluted by a missing stage.
-	seedJobStatsStage(t, db, run1, base, "Build", 500)
-	seedJobStatsStage(t, db, run1, base, "Deploy", 9000)
-	seedJobStatsStage(t, db, run2, base.Add(time.Minute), "Build", 700)
-	seedJobStatsStage(t, db, run2, base.Add(time.Minute), "Deploy", 1000)
-	seedJobStatsStage(t, db, run3, base.Add(2*time.Minute), "Build", 600)
+	seedJobStatsStage(t, db, run1, base, "Build", "SUCCESS", 500)
+	seedJobStatsStage(t, db, run1, base, "Deploy", "SUCCESS", 9000)
+	seedJobStatsStage(t, db, run2, base.Add(time.Minute), "Build", "SUCCESS", 700)
+	seedJobStatsStage(t, db, run2, base.Add(time.Minute), "Deploy", "SUCCESS", 1000)
+	seedJobStatsStage(t, db, run3, base.Add(2*time.Minute), "Build", "SUCCESS", 600)
 
 	stats, err := reader.JobWindowStats(ctx, testCluster, testTenant, jobPath, base.Add(-time.Hour))
 	if err != nil {
@@ -97,6 +97,84 @@ func TestJobWindowStatsComputesRateMedianAndSlowestStage(t *testing.T) {
 	}
 	if stats.SlowestStage.Name != "Deploy" || stats.SlowestStage.DurationMs != 5000 {
 		t.Fatalf("SlowestStage = %+v, want Deploy at 5000ms (median of 1000 and 9000)", stats.SlowestStage)
+	}
+}
+
+// TestJobWindowStatsSlowestStageCountsOnlyStagesThatRan seeds a job whose
+// Deploy stage runs in four builds and does not run in four others. A
+// stage that did not run holds a duration of a few milliseconds. The
+// median of Deploy reads only the four builds that ran it: a SUCCESS, an
+// UNSTABLE, a FAILURE, and an ABORTED stage. Each of the four changes the
+// median when it is absent. NOT_EXECUTED and NOT_BUILT give no sample.
+func TestJobWindowStatsSlowestStageCountsOnlyStagesThatRan(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	reader := NewReader(pool)
+	ctx := context.Background()
+
+	base := time.Now().UTC().Add(-time.Hour)
+	jobPath := "acme/app-skipped-stage"
+	builds := []struct {
+		result      string
+		deployState string
+		deployMs    int64
+	}{
+		{"SUCCESS", "SUCCESS", 60000},
+		{"UNSTABLE", "UNSTABLE", 70000},
+		{"FAILURE", "FAILURE", 80000},
+		{"ABORTED", "ABORTED", 90000},
+		{"SUCCESS", "NOT_EXECUTED", 3},
+		{"SUCCESS", "NOT_EXECUTED", 4},
+		{"FAILURE", "NOT_EXECUTED", 6},
+		{"SUCCESS", "NOT_BUILT", 5},
+	}
+	for i, b := range builds {
+		at := base.Add(time.Duration(i) * time.Minute)
+		runMs := int64(100000)
+		runID := seedJobSummaryRun(t, db, jobPath, at, b.result, &runMs)
+		seedJobStatsStage(t, db, runID, at, "Build", "SUCCESS", 4000)
+		seedJobStatsStage(t, db, runID, at, "Deploy", b.deployState, b.deployMs)
+	}
+
+	stats, err := reader.JobWindowStats(ctx, testCluster, testTenant, jobPath, base.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("JobWindowStats: %v", err)
+	}
+	if stats.SlowestStage == nil {
+		t.Fatalf("SlowestStage = nil, want Deploy")
+	}
+	if stats.SlowestStage.Name != "Deploy" || stats.SlowestStage.DurationMs != 75000 {
+		t.Fatalf("SlowestStage = %+v, want Deploy at 75000ms (median of the four builds that ran it)", *stats.SlowestStage)
+	}
+}
+
+// TestJobWindowStatsSlowestStageAbsentWhenNoStageRan asserts a window
+// whose stage rows all hold a stage that did not run names no slowest
+// stage.
+func TestJobWindowStatsSlowestStageAbsentWhenNoStageRan(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	reader := NewReader(pool)
+	ctx := context.Background()
+
+	base := time.Now().UTC().Add(-time.Hour)
+	jobPath := "acme/app-no-stage-ran"
+	runMs := int64(1000)
+	runID := seedJobSummaryRun(t, db, jobPath, base, "SUCCESS", &runMs)
+	seedJobStatsStage(t, db, runID, base, "Release", "NOT_EXECUTED", 5)
+	seedJobStatsStage(t, db, runID, base, "Publish", "NOT_BUILT", 4)
+
+	stats, err := reader.JobWindowStats(ctx, testCluster, testTenant, jobPath, base.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("JobWindowStats: %v", err)
+	}
+	if stats.Builds != 1 {
+		t.Fatalf("Builds = %d, want 1", stats.Builds)
+	}
+	if stats.SlowestStage != nil {
+		t.Fatalf("SlowestStage = %+v, want nil", *stats.SlowestStage)
 	}
 }
 
