@@ -1,6 +1,7 @@
 package mite
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -59,5 +60,58 @@ func TestBusHandler_HeartbeatKeepsPresenceFields(t *testing.T) {
 	}
 	if gauges.RunningBuilds != 2 {
 		t.Errorf("RunningBuilds = %d, want 2", gauges.RunningBuilds)
+	}
+}
+
+// TestPresenceVersionIsTheMiteVersion pins the one meaning of the presence
+// Version field: the mite version. Every writer carries it: the connect,
+// a snapshot, the timer, a watch change, and a heartbeat. A heartbeat with a
+// new version replaces it. The Jenkins version of a snapshot never enters
+// the record.
+func TestPresenceVersionIsTheMiteVersion(t *testing.T) {
+	h, kv := presenceTestHandler(t)
+	token := h.OnConnect("ctl", "ns", "mite-1.4.0", time.Now().Add(time.Hour), noSend)
+	t.Cleanup(func() { h.OnDisconnect("ctl", "ns", token) })
+
+	version := func() string {
+		t.Helper()
+		p, _, found := readPresenceRecord(t, kv, "ctl")
+		if !found {
+			t.Fatal("no presence record")
+		}
+		return p.Version
+	}
+	steps := []struct {
+		name  string
+		write func()
+		want  string
+	}{
+		{"connect", func() {}, "mite-1.4.0"},
+		{"snapshot", func() {
+			h.OnSnapshot("ctl", "ns", &mitev1.StateSnapshot{JenkinsVersion: "2.504.3", JenkinsHealth: "healthy"})
+		}, "mite-1.4.0"},
+		{"timer", func() {
+			if _, ok := h.refreshPresence("ctl", "ns", token, 0, time.Hour, recvLoop); !ok {
+				t.Fatal("refreshPresence answered not current for the live token")
+			}
+		}, "mite-1.4.0"},
+		{"watch change", func() {
+			h.markWatchDegraded(context.Background(), "ns", "ctl", "desired", "desired watch setup failing")
+		}, "mite-1.4.0"},
+		{"heartbeat with a new version", func() {
+			h.OnHeartbeat("ctl", "ns", &mitev1.Heartbeat{Version: "mite-1.4.1"})
+		}, "mite-1.4.1"},
+		{"heartbeat with no version", func() {
+			h.OnHeartbeat("ctl", "ns", &mitev1.Heartbeat{})
+		}, "mite-1.4.1"},
+		{"snapshot after the new version", func() {
+			h.OnSnapshot("ctl", "ns", &mitev1.StateSnapshot{JenkinsVersion: "2.504.3"})
+		}, "mite-1.4.1"},
+	}
+	for _, step := range steps {
+		step.write()
+		if got := version(); got != step.want {
+			t.Errorf("%s: record Version = %q, want the mite version %q", step.name, got, step.want)
+		}
 	}
 }

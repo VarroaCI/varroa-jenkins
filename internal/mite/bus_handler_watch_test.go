@@ -691,7 +691,7 @@ func TestPresenceLocksRetiredOnDisconnect(t *testing.T) {
 	}
 
 	// A stale write from the departed connection must not resurrect the entry.
-	h.putPresence("varroa", "ctl", "v1")
+	h.putPresence("varroa", "ctl")
 	h.mu.Lock()
 	_, resurrected := h.presenceLocks["varroa/ctl"]
 	h.mu.Unlock()

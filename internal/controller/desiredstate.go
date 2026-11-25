@@ -7,9 +7,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/overlay"
+	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
 
 // pluginRollDecision is the outcome of the gated plugins-checksum evaluation
@@ -416,19 +418,39 @@ func presenceMissCounts(miss presenceMiss, lastSeen *metav1.Time, faultAt, now t
 	}
 }
 
-// presenceMissDetail is the cause text for the MiteConnected message and the log.
-func presenceMissDetail(miss presenceMiss, readErr error) string {
+// presenceMissDetail is the cause text for the MiteConnected message and the
+// log. info is the presence record of the pass. A silent miss names the
+// state of the gateway read loop from it.
+func presenceMissDetail(miss presenceMiss, readErr error, info transport.MiteInfo) string {
 	switch miss {
 	case presenceMissMissing:
 		return "no presence record"
 	case presenceMissStale:
 		return fmt.Sprintf("heartbeat older than %s", staleMiteThreshold)
 	case presenceMissSilent:
-		return fmt.Sprintf("stream open on the gateway, heartbeat older than %s", staleMiteThreshold)
+		return fmt.Sprintf("stream open on the gateway, heartbeat older than %s", staleMiteThreshold) +
+			readLoopDetail(info.ReadLoop, info.ReadLoopSince)
 	case presenceMissUnreadable:
 		return fmt.Sprintf("presence record unreadable: %v", readErr)
 	}
 	return ""
+}
+
+// readLoopDetail names the state of the gateway read loop of a silent
+// stream. An empty state gives an empty text: the gateway did not report
+// it yet.
+func readLoopDetail(state string, since time.Time) string {
+	if state == "" {
+		return ""
+	}
+	at := ""
+	if !since.IsZero() {
+		at = " since " + since.UTC().Format(time.RFC3339)
+	}
+	if state == bus.PresenceReadLoopRecv {
+		return "; the gateway read loop waits for a mite message" + at
+	}
+	return fmt.Sprintf("; the gateway read loop is blocked in the %s handler%s", state, at)
 }
 
 // deriveMiteHealth turns a transport observation into desired status. Pure:

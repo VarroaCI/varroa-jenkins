@@ -75,7 +75,7 @@ func TestRefreshPresenceCarriesLastHeartbeat(t *testing.T) {
 	h.presenceWrittenAt["ns/ctl"] = old
 	h.mu.Unlock()
 
-	seen, ok := h.refreshPresence("ctl", "ns", token, time.Minute)
+	seen, ok := h.refreshPresence("ctl", "ns", token, time.Minute, time.Hour, recvLoop)
 	if !ok {
 		t.Fatal("refreshPresence answered not current for the live token")
 	}
@@ -103,7 +103,7 @@ func TestRefreshPresenceSkipsAfterARecentWrite(t *testing.T) {
 	if !found {
 		t.Fatal("OnConnect wrote no presence record")
 	}
-	if _, ok := h.refreshPresence("ctl", "ns", token, time.Hour); !ok {
+	if _, ok := h.refreshPresence("ctl", "ns", token, time.Hour, time.Hour, recvLoop); !ok {
 		t.Fatal("refreshPresence answered not current for the live token")
 	}
 	if _, after, _ := readPresenceRecord(t, kv, "ctl"); after != before {
@@ -115,12 +115,12 @@ func TestRefreshPresenceStopsForAnOldConnection(t *testing.T) {
 	h, kv := presenceTestHandler(t)
 	first := h.OnConnect("ctl", "ns", "v1", time.Now().Add(time.Hour), noSend)
 	second := h.OnConnect("ctl", "ns", "v1", time.Now().Add(time.Hour), noSend)
-	if _, ok := h.refreshPresence("ctl", "ns", first, 0); ok {
+	if _, ok := h.refreshPresence("ctl", "ns", first, 0, time.Hour, recvLoop); ok {
 		t.Error("refreshPresence answered current for a superseded token")
 	}
 
 	h.OnDisconnect("ctl", "ns", second)
-	if _, ok := h.refreshPresence("ctl", "ns", second, 0); ok {
+	if _, ok := h.refreshPresence("ctl", "ns", second, 0, time.Hour, recvLoop); ok {
 		t.Error("refreshPresence answered current after the disconnect")
 	}
 	if _, _, found := readPresenceRecord(t, kv, "ctl"); found {
@@ -140,22 +140,68 @@ func TestPresenceWriteSkipsASupersededEpoch(t *testing.T) {
 	if !found {
 		t.Fatal("OnConnect wrote no presence record")
 	}
-	if got := h.writePresence("ns", "ctl", "stale", first, presenceGuarded); got != presenceNewer {
+	if got := h.writePresence("ns", "ctl", first, presenceGuarded); got != presenceNewer {
 		t.Errorf("write of a superseded epoch = %v, want presenceNewer", got)
 	}
 	if _, after, _ := readPresenceRecord(t, kv, "ctl"); after != before {
 		t.Fatalf("revision %d -> %d: a superseded epoch wrote the record", before, after)
 	}
 
-	if got := h.writePresence("ns", "ctl", "live", second, presenceGuarded); got != presenceWritten {
+	if got := h.writePresence("ns", "ctl", second, presenceGuarded); got != presenceWritten {
 		t.Errorf("write of the live epoch = %v, want presenceWritten", got)
 	}
 	p, after, _ := readPresenceRecord(t, kv, "ctl")
 	if after == before {
 		t.Fatal("the live epoch did not write the record")
 	}
-	if p.Epoch != second || p.Version != "live" {
-		t.Errorf("record = %+v, want epoch %d and version live", p, second)
+	if p.Epoch != second {
+		t.Errorf("record = %+v, want epoch %d", p, second)
+	}
+}
+
+// recvLoop reports a read loop that waits for the next mite message.
+func recvLoop() (string, time.Time) { return readLoopRecv, time.Now() }
+
+// TestRefreshPresenceNamesTheReadLoopOfASilentStream pins the read-loop
+// note of the presence record. A heartbeat older than the silent limit
+// puts the read-loop state in the record, also within one interval of the
+// last write. The same state writes nothing more. The next heartbeat
+// clears the note, and a fresh heartbeat never sets it.
+func TestRefreshPresenceNamesTheReadLoopOfASilentStream(t *testing.T) {
+	h, kv := presenceTestHandler(t)
+	token := h.OnConnect("ctl", "ns", "v1", time.Now().Add(time.Hour), noSend)
+	t.Cleanup(func() { h.OnDisconnect("ctl", "ns", token) })
+
+	since := time.Now().Add(-3 * time.Minute).Truncate(time.Second)
+	blocked := func() (string, time.Time) { return "log_chunk", since }
+	if _, ok := h.refreshPresence("ctl", "ns", token, time.Hour, time.Minute, blocked); !ok {
+		t.Fatal("refreshPresence answered not current for the live token")
+	}
+	if p, _, _ := readPresenceRecord(t, kv, "ctl"); p.ReadLoop != "" {
+		t.Fatalf("record ReadLoop = %q for a fresh heartbeat, want none", p.ReadLoop)
+	}
+
+	h.mu.Lock()
+	h.lastHeartbeat["ns/ctl"] = time.Now().Add(-2 * time.Minute)
+	h.mu.Unlock()
+	if _, ok := h.refreshPresence("ctl", "ns", token, time.Hour, time.Minute, blocked); !ok {
+		t.Fatal("refreshPresence answered not current for the live token")
+	}
+	p, rev, _ := readPresenceRecord(t, kv, "ctl")
+	if p.ReadLoop != "log_chunk" || !p.ReadLoopSince.Equal(since) {
+		t.Fatalf("record ReadLoop = %q since %s, want log_chunk since %s, within one interval of the last write",
+			p.ReadLoop, p.ReadLoopSince, since)
+	}
+	if _, ok := h.refreshPresence("ctl", "ns", token, time.Hour, time.Minute, blocked); !ok {
+		t.Fatal("refreshPresence answered not current for the live token")
+	}
+	if _, again, _ := readPresenceRecord(t, kv, "ctl"); again != rev {
+		t.Errorf("revision %d -> %d: the same read-loop state wrote again within one interval", rev, again)
+	}
+
+	h.OnHeartbeat("ctl", "ns", &mitev1.Heartbeat{Version: "v1"})
+	if p, _, _ := readPresenceRecord(t, kv, "ctl"); p.ReadLoop != "" || !p.ReadLoopSince.IsZero() {
+		t.Errorf("record ReadLoop = %q since %s after a heartbeat, want none", p.ReadLoop, p.ReadLoopSince)
 	}
 }
 
@@ -347,15 +393,16 @@ func TestGatewayIntegration_SilentStreamKeepsPresence(t *testing.T) {
 
 // TestGatewayIntegration_PresenceTimerEndsWithTheStream holds the read
 // loop inside a handler. The timer reports the silent stream with the
-// message kind of that handler. When the peer goes away, gRPC ends the
-// stream context, and the timer stops while the handler still blocks.
-// OnDisconnect has not run then, so a gateway that lost the stream stops
-// its writes by the stream context alone, and the record ages out.
+// message kind of that handler, in the log and in the presence record.
+// When the peer goes away, gRPC ends the stream context, and the timer
+// stops while the handler still blocks. OnDisconnect has not run then, so
+// a gateway that lost the stream stops its writes by the stream context
+// alone, and the record ages out.
 func TestGatewayIntegration_PresenceTimerEndsWithTheStream(t *testing.T) {
 	natsSrv := startNATS(t)
 	var out lockedBuffer
 	var keeper *keeperHandler
-	_, lis, certAuth := startGatewayWrapped(t, natsSrv.ClientURL(),
+	busConn, lis, certAuth := startGatewayWrapped(t, natsSrv.ClientURL(),
 		func(h *BusHandler) StreamHandler { keeper = newKeeperHandler(h, true); return keeper },
 		func(h *BusHandler) {
 			h.presenceRefreshEvery = 20 * time.Millisecond
@@ -384,6 +431,14 @@ func TestGatewayIntegration_PresenceTimerEndsWithTheStream(t *testing.T) {
 	waitFor(t, func() bool {
 		return strings.Contains(out.String(), "readLoop=heartbeat")
 	}, 10*time.Second, "no WARN line that names the blocked heartbeat handler")
+	kv, err := busConn.EnsureKV(bus.KVPresenceBucket, bus.PresenceTTL)
+	if err != nil {
+		t.Fatalf("presence kv: %v", err)
+	}
+	waitFor(t, func() bool {
+		p, _, found := readPresenceRecord(t, kv, name)
+		return found && p.StreamOpen && p.ReadLoop == "heartbeat" && !p.ReadLoopSince.IsZero()
+	}, 10*time.Second, "the presence record does not name the blocked heartbeat handler")
 
 	_ = gconn.Close()
 	select {

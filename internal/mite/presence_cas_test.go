@@ -173,7 +173,7 @@ func TestRefreshPresenceRewritesALostRecord(t *testing.T) {
 			t.Cleanup(func() { h.OnDisconnect("ctl", "ns", token) })
 			tc.lose(t, kv)
 
-			if _, ok := h.refreshPresence("ctl", "ns", token, 0); !ok {
+			if _, ok := h.refreshPresence("ctl", "ns", token, 0, time.Hour, recvLoop); !ok {
 				t.Fatal("refreshPresence stopped after the record was lost")
 			}
 			p, _, found := readPresenceRecord(t, kv, "ctl")
@@ -217,7 +217,7 @@ func TestPresenceMisorderedEpochsRecover(t *testing.T) {
 		t.Fatalf("record epoch = %d after B's connect, want %d: the connect write claims the key", p.Epoch, tokB)
 	}
 
-	if _, ok := a.refreshPresence("ctl", "ns", skewed, 0); !ok {
+	if _, ok := a.refreshPresence("ctl", "ns", skewed, 0, time.Hour, recvLoop); !ok {
 		t.Fatal("A's timer stopped at a record of an older epoch")
 	}
 	b.OnHeartbeat("ctl", "ns", &mitev1.Heartbeat{Version: "v1"})

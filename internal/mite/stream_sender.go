@@ -108,6 +108,12 @@ func (s *streamSender) markStalled(kind string) {
 	})
 }
 
+// stalledCh returns a channel that closes when one Send passes the stall
+// bound.
+func (s *streamSender) stalledCh() <-chan struct{} {
+	return s.stalled
+}
+
 // isStalled reports whether one Send passed the stall bound.
 func (s *streamSender) isStalled() bool {
 	select {

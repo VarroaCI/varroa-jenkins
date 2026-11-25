@@ -4126,7 +4126,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		// stale True while the controller waits in Running.
 		cr.Status.Conditions = removeConditionByType(cr.Status.Conditions,
 			v1alpha1.ConditionMiteStreamDegraded)
-		detail := presenceMissDetail(health.Miss, readErr)
+		detail := presenceMissDetail(health.Miss, readErr, info)
 		misses := r.countPresenceMiss(key)
 		if misses < streamLossMisses {
 			// Grace period: mite may be reconnecting after operator restart.

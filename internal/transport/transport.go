@@ -24,6 +24,7 @@ var ErrMiteUnreachable = errors.New("no gateway forwarded the desired state to t
 
 // MiteInfo is what the presence record of one mite holds.
 type MiteInfo struct {
+	// Version is the version of the mite binary, never the Jenkins version.
 	Version       string
 	LastHeartbeat time.Time
 	CertExpiry    time.Time
@@ -31,6 +32,25 @@ type MiteInfo struct {
 	// open stream of the mite. With a stale LastHeartbeat, the stream is
 	// open and silent.
 	StreamOpen bool
+	// ReadLoop names what the gateway read loop of a silent stream does
+	// (bus.Presence.ReadLoop), and ReadLoopSince is when it started. Both
+	// are empty while the heartbeat is fresh.
+	ReadLoop      string
+	ReadLoopSince time.Time
+}
+
+// miteInfoFromPresence returns the MiteInfo of one presence record. Every
+// presence reader decodes through it, so the readers return the same
+// fields.
+func miteInfoFromPresence(p bus.Presence) MiteInfo {
+	return MiteInfo{
+		Version:       p.Version,
+		LastHeartbeat: p.LastHeartbeat,
+		CertExpiry:    p.CertExpiry,
+		StreamOpen:    p.StreamOpen,
+		ReadLoop:      p.ReadLoop,
+		ReadLoopSince: p.ReadLoopSince,
+	}
 }
 
 // HeartbeatStale reports whether LastHeartbeat is older than

@@ -139,9 +139,15 @@ type BusHandler struct {
 	// the presence record so the operator can surface it as a Controller
 	// condition; a retry that keeps failing must not stay invisible.
 	watchDegraded map[string]map[string]string
-	// miteVersion caches the version reported at connect so a degraded-state
-	// change can re-write presence immediately instead of waiting a heartbeat.
+	// miteVersion caches the mite version from the hello, then from each
+	// heartbeat. Every presence write carries it, so the record has one
+	// version for every writer.
 	miteVersion map[string]string
+	// silentReadLoop holds the read-loop state of a silent stream, per
+	// controller ("ns/name"). The presence timer sets it, and a heartbeat
+	// or a snapshot clears it (touchLiveness). Every presence write
+	// carries it.
+	silentReadLoop map[string]silentReadLoop
 	// lastHeartbeat records when the mite itself was last heard from. presence
 	// writes triggered by gateway-side events (a watch degrading) must carry
 	// this rather than time.Now(), or a mite whose stream half-dies keeps
@@ -441,6 +447,7 @@ func NewBusHandler(mp metric.MeterProvider, cluster string, conn *bus.Conn, snap
 		presenceRev:                make(map[string]uint64),
 		watchDegraded:              make(map[string]map[string]string),
 		miteVersion:                make(map[string]string),
+		silentReadLoop:             make(map[string]silentReadLoop),
 		scheduleRetained:           make(map[string]*mitev1.JobScheduleSet),
 		scheduleStreamMissingUntil: make(map[string]time.Time),
 		cellInstances:              make(map[string]string),
@@ -493,8 +500,8 @@ func (h *BusHandler) Close() {
 // guarded write (presenceGuarded). The heartbeat, snapshot, and watch paths
 // call it. A record of a newer epoch, which another gateway replica wrote
 // for a newer stream of the same mite, stays in place.
-func (h *BusHandler) putPresence(ns, name, version string) {
-	h.writePresence(ns, name, version, 0, presenceGuarded)
+func (h *BusHandler) putPresence(ns, name string) {
+	h.writePresence(ns, name, 0, presenceGuarded)
 }
 
 // presenceWriteMode names how a presence write treats the record that the
@@ -531,9 +538,11 @@ const presenceCASReads = 2
 // OnDisconnect has already run (cancels entry gone), the write is skipped to
 // avoid clobbering CertExpiry with a zero value from a stale in-flight call.
 // Every write comes from a live connection, so every record sets StreamOpen.
-// A non-zero epoch writes only while that epoch is the live connection of
-// this handler, and answers presenceNewer otherwise.
-func (h *BusHandler) writePresence(ns, name, version string, epoch int64, mode presenceWriteMode) presenceOutcome {
+// Every write carries the cached mite version (miteVersion) and the
+// read-loop note of a silent stream (silentReadLoop), so no writer changes
+// the meaning of a field. A non-zero epoch writes only while that epoch is
+// the live connection of this handler, and answers presenceNewer otherwise.
+func (h *BusHandler) writePresence(ns, name string, epoch int64, mode presenceWriteMode) presenceOutcome {
 	if h.presenceKV == nil {
 		return presenceNotWritten
 	}
@@ -557,6 +566,8 @@ func (h *BusHandler) writePresence(ns, name, version string, epoch int64, mode p
 	}
 	h.mu.Lock()
 	ep := h.connectEpoch[key]
+	version := h.miteVersion[key]
+	loop := h.silentReadLoop[key]
 	gaugesJSON := h.idleGauges[key]
 	gaugesAt := h.idleGaugesAt[key]
 	installedHash := h.installedPluginsHash[key]
@@ -576,6 +587,8 @@ func (h *BusHandler) writePresence(ns, name, version string, epoch int64, mode p
 		CertExpiry:           ce,
 		Epoch:                ep,
 		StreamOpen:           true,
+		ReadLoop:             loop.state,
+		ReadLoopSince:        loop.since,
 		IdleGaugesJSON:       gaugesJSON,
 		IdleGaugesReceivedAt: gaugesAt,
 		InstalledPluginsHash: installedHash,
@@ -737,9 +750,11 @@ func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{},
 	// runs setup, the stale mark survives for its whole life.
 	delete(h.watchDegraded, key)
 	// The write marks of the superseded connection must not let the presence
-	// timer of this one skip a tick, or guard its first write.
+	// timer of this one skip a tick, or guard its first write. Its read-loop
+	// note describes another stream.
 	delete(h.presenceWrittenAt, key)
 	delete(h.presenceRev, key)
+	delete(h.silentReadLoop, key)
 	if h.presenceLocks == nil {
 		h.presenceLocks = make(map[string]*sync.Mutex)
 	}
@@ -770,7 +785,7 @@ func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{},
 
 	// The connect write replaces any record: the newest stream claims the
 	// key, also when an older stream of another replica wrote last.
-	h.writePresence(ns, name, version, epoch, presenceClaim)
+	h.writePresence(ns, name, epoch, presenceClaim)
 	h.publishBroodEvent("connected", ns, name, version)
 	return epoch
 }
@@ -805,7 +820,26 @@ func (h *BusHandler) OnHeartbeat(name, ns string, hb *mitev1.Heartbeat) {
 		h.installedPluginsHash[key] = hb.InstalledPluginsHash
 		h.mu.Unlock()
 	}
-	h.putPresence(ns, name, hb.Version)
+	h.cacheMiteVersion(ns, name, hb.Version)
+	h.putPresence(ns, name)
+}
+
+// cacheMiteVersion replaces the cached mite version of a live connection.
+// An empty version keeps the cached one.
+func (h *BusHandler) cacheMiteVersion(ns, name, version string) {
+	if version == "" {
+		return
+	}
+	key := ns + "/" + name
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, live := h.cancels[key]; !live {
+		return
+	}
+	if h.miteVersion == nil {
+		h.miteVersion = make(map[string]string)
+	}
+	h.miteVersion[key] = version
 }
 
 // OnSnapshot publishes the snapshot to the bus, writes it to KV, refreshes
@@ -845,7 +879,9 @@ func (h *BusHandler) OnSnapshot(name, ns string, snap *mitev1.StateSnapshot) {
 	_ = h.kv.Put(bus.SnapshotKey(h.cluster, ns, name), snapData)
 
 	h.publishBroodEvent("snapshot", ns, name, snap.JenkinsVersion)
-	h.putPresence(ns, name, snap.JenkinsVersion)
+	// The record keeps the mite version. The snapshot KV above carries the
+	// Jenkins version.
+	h.putPresence(ns, name)
 
 	h.handleJobSchedules(ns, name, schedules)
 	h.handleJobBranches(ns, name, branches)
@@ -1570,6 +1606,7 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 	delete(h.lastHeartbeat, key)
 	delete(h.presenceWrittenAt, key)
 	delete(h.presenceRev, key)
+	delete(h.silentReadLoop, key)
 	// Purge any content requests associated with this mite (no reply coming).
 	for reqID, nsKey := range h.pendingContentNS {
 		if nsKey == key {
@@ -1661,13 +1698,16 @@ func (h *BusHandler) retryEstablish(ctx context.Context, ns, name, watchKind str
 
 // touchLiveness records that the mite itself was just heard from. Only
 // mite-originated events (connect, heartbeat, snapshot) may call this —
-// gateway-side presence writes must not refresh liveness.
+// gateway-side presence writes must not refresh liveness. The stream is no
+// longer silent, so the read-loop note goes in the same critical section.
 func (h *BusHandler) touchLiveness(ns, name string) {
+	key := ns + "/" + name
 	h.mu.Lock()
 	if h.lastHeartbeat == nil {
 		h.lastHeartbeat = make(map[string]time.Time)
 	}
-	h.lastHeartbeat[ns+"/"+name] = time.Now()
+	h.lastHeartbeat[key] = time.Now()
+	delete(h.silentReadLoop, key)
 	h.mu.Unlock()
 }
 
@@ -1756,10 +1796,9 @@ func (h *BusHandler) markWatchDegraded(ctx context.Context, ns, name, watchKind,
 	}
 	changed := h.watchDegraded[key][watchKind] != reason
 	h.watchDegraded[key][watchKind] = reason
-	version := h.miteVersion[key]
 	h.mu.Unlock()
 	if changed {
-		h.putPresence(ns, name, version)
+		h.putPresence(ns, name)
 	}
 }
 
@@ -1778,10 +1817,9 @@ func (h *BusHandler) clearWatchDegraded(ctx context.Context, ns, name, watchKind
 	if len(kinds) == 0 {
 		delete(h.watchDegraded, key)
 	}
-	version := h.miteVersion[key]
 	h.mu.Unlock()
 	if was {
-		h.putPresence(ns, name, version)
+		h.putPresence(ns, name)
 	}
 }
 
