@@ -20,6 +20,11 @@ const (
 	// silent. The operator, the dashboard back end, and the gateway warning
 	// use this one value.
 	PresenceStaleAfter = 2 * time.Minute
+
+	// PresenceReadLoopRecv is the ReadLoop value of a gateway read loop
+	// that waits for the next mite message. Every other value is the oneof
+	// field name of the mite message whose handler blocks the loop.
+	PresenceReadLoopRecv = "recv"
 )
 
 // Presence is the gateway-written liveness record for a connected mite.
@@ -27,6 +32,9 @@ const (
 // the actual heartbeat timestamp (as observed by the gateway) and cert
 // expiry from the mTLS handshake.
 type Presence struct {
+	// Version is the version of the mite binary, from the hello or the
+	// last heartbeat of the mite. It is never the Jenkins version: the
+	// state snapshot carries that.
 	Version string `json:"version"`
 	// LastHeartbeat is the time of the last mite message that refreshed
 	// liveness, never the time of the write. A record of a silent stream
@@ -41,6 +49,15 @@ type Presence struct {
 	// message arrives. A record with StreamOpen and a stale LastHeartbeat
 	// is a silent open stream, not a lost one.
 	StreamOpen bool `json:"streamOpen"`
+
+	// ReadLoop names what the gateway read loop of a silent stream does:
+	// PresenceReadLoopRecv while it waits for a mite message, else the
+	// message kind whose handler blocks it, for example "log_chunk". The
+	// gateway sets it only while LastHeartbeat is older than
+	// PresenceStaleAfter. The next heartbeat or snapshot clears it.
+	ReadLoop string `json:"readLoop,omitempty"`
+	// ReadLoopSince is the time at which the read loop entered ReadLoop.
+	ReadLoopSince time.Time `json:"readLoopSince,omitzero"`
 
 	// IdleGaugesJSON is the JSON-serialized idle gauges from the latest
 	// heartbeat, or empty if none have been received.

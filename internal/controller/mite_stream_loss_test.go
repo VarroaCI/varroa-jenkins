@@ -73,15 +73,21 @@ func (s *staleTransport) Info(_, _ string) (transport.MiteInfo, bool, error) {
 
 // silentTransport decorates a Transport so Info reports an open stream whose
 // last heartbeat is older than staleMiteThreshold: a gateway holds the
-// stream, and no mite message reaches it.
+// stream, and no mite message reaches it. readLoop and since are the
+// read-loop note of the record.
 type silentTransport struct {
 	transport.Transport
+	readLoop string
+	since    time.Time
 }
 
 func (s *silentTransport) Info(_, _ string) (transport.MiteInfo, bool, error) {
 	return transport.MiteInfo{Version: "v1.0", LastHeartbeat: time.Now().Add(-2 * staleMiteThreshold),
-		CertExpiry: time.Now().Add(time.Hour), StreamOpen: true}, true, nil
+		CertExpiry: time.Now().Add(time.Hour), StreamOpen: true, ReadLoop: s.readLoop, ReadLoopSince: s.since}, true, nil
 }
+
+// silentLoopSince is the read-loop start of the silent stream cases.
+var silentLoopSince = time.Date(2026, 11, 24, 4, 0, 0, 0, time.UTC)
 
 // TestHandleRunning_StaleHeartbeatIsNotAReconnect asserts that handleRunning
 // applies the same stale-heartbeat rule as handleConnected. A presence record
@@ -398,6 +404,18 @@ func TestHandleConnected_StreamLossNamesCause(t *testing.T) {
 			func(b transport.Transport) transport.Transport { return &staleTransport{Transport: b} }},
 		{"silent", "silent", "stream open on the gateway, heartbeat older than", 10 * time.Second,
 			func(b transport.Transport) transport.Transport { return &silentTransport{Transport: b} }},
+		{"silent with the read loop waiting", "silent",
+			"stream open on the gateway, heartbeat older than 2m0s; the gateway read loop waits for a mite message since 2026-11-24T04:00:00Z; last heartbeat",
+			10 * time.Second,
+			func(b transport.Transport) transport.Transport {
+				return &silentTransport{Transport: b, readLoop: "recv", since: silentLoopSince}
+			}},
+		{"silent with a blocked handler", "silent",
+			"stream open on the gateway, heartbeat older than 2m0s; the gateway read loop is blocked in the log_chunk handler since 2026-11-24T04:00:00Z; last heartbeat",
+			10 * time.Second,
+			func(b transport.Transport) transport.Transport {
+				return &silentTransport{Transport: b, readLoop: "log_chunk", since: silentLoopSince}
+			}},
 		{"unreadable", "unreadable", "presence record unreadable", 3 * time.Minute,
 			func(b transport.Transport) transport.Transport { return &presenceReadErrTransport{Transport: b} }},
 	}

@@ -10,7 +10,14 @@ import (
 // readLoopRecv is the read loop state while the loop waits for the next
 // mite message. Every other state is the oneof field name of the message
 // that the loop handles, for example "log_chunk".
-const readLoopRecv = "recv"
+const readLoopRecv = bus.PresenceReadLoopRecv
+
+// silentReadLoop is the read-loop state of a silent stream, as the presence
+// record carries it: the state and the time at which the loop entered it.
+type silentReadLoop struct {
+	state string
+	since time.Time
+}
 
 // presenceRefreshInterval returns the interval of the presence timer.
 func (h *BusHandler) presenceRefreshInterval() time.Duration {
@@ -46,9 +53,11 @@ func (h *BusHandler) presenceSilentLimit() time.Duration {
 // bus.PresenceTTL.
 //
 // loop reports what the read loop of the stream does, and since when. A
-// stream with no heartbeat for longer than the silent limit logs one WARN
-// line that names that state, and one more line after each further limit.
-// The first heartbeat after a WARN line logs one INFO line.
+// stream with no heartbeat for longer than the silent limit puts that
+// state in the presence record (bus.Presence.ReadLoop), so the operator can
+// name it after the gateway log is gone. It also logs one WARN line that
+// names the state, and one more line after each further limit. The first
+// heartbeat after a WARN line logs one INFO line.
 func (h *BusHandler) KeepPresence(ctx context.Context, name, ns string, token int64, loop func() (string, time.Time)) {
 	every := h.presenceRefreshInterval()
 	limit := h.presenceSilentLimit()
@@ -67,7 +76,7 @@ func (h *BusHandler) KeepPresence(ctx context.Context, name, ns string, token in
 		if ctx.Err() != nil {
 			return
 		}
-		seen, ok := h.refreshPresence(name, ns, token, every)
+		seen, ok := h.refreshPresence(name, ns, token, every, limit, loop)
 		if !ok {
 			return
 		}
@@ -93,30 +102,60 @@ func (h *BusHandler) KeepPresence(ctx context.Context, name, ns string, token in
 
 // refreshPresence writes the presence record of the connection that token
 // names, and returns the time of the last mite message that refreshed
-// liveness. It skips the write when an accepted write is younger than
-// every. The write is guarded, so it never replaces a record of a newer
-// epoch. ok is false when token no longer names the live connection, or
-// when the key holds a record of a newer epoch: a newer stream of the mite
-// is open, on this gateway or on another replica, and the timer stops for
-// good.
-func (h *BusHandler) refreshPresence(name, ns string, token int64, every time.Duration) (time.Time, bool) {
+// liveness. A heartbeat older than limit makes the stream silent: the
+// record then carries the read-loop state that loop reports
+// (noteSilentReadLoopLocked). It skips the write when an accepted write is
+// younger than every and that state did not change. The write is guarded,
+// so it never replaces a record of a newer epoch. ok is false when token no
+// longer names the live connection, or when the key holds a record of a
+// newer epoch: a newer stream of the mite is open, on this gateway or on
+// another replica, and the timer stops for good.
+func (h *BusHandler) refreshPresence(name, ns string, token int64, every, limit time.Duration, loop func() (string, time.Time)) (time.Time, bool) {
 	key := ns + "/" + name
+	state, since := loop()
 	h.mu.Lock()
 	current, claimed := h.connectEpoch[key]
 	_, connected := h.cancels[key]
+	live := connected && (token == 0 || (claimed && current == token))
 	seen := h.lastHeartbeat[key]
 	written, wrote := h.presenceWrittenAt[key]
-	version := h.miteVersion[key]
+	noted := false
+	if live {
+		noted = h.noteSilentReadLoopLocked(key, seen, limit, silentReadLoop{state: state, since: since})
+	}
 	h.mu.Unlock()
-	if !connected || (token != 0 && (!claimed || current != token)) {
+	if !live {
 		return time.Time{}, false
 	}
-	if wrote && time.Since(written) < every {
+	if wrote && !noted && time.Since(written) < every {
 		return seen, true
 	}
-	if h.writePresence(ns, name, version, token, presenceGuarded) == presenceNewer {
+	if h.writePresence(ns, name, token, presenceGuarded) == presenceNewer {
 		h.log().Info("presence timer stopped: a newer stream holds the record", "controller", key, "epoch", token)
 		return seen, false
 	}
 	return seen, true
+}
+
+// noteSilentReadLoopLocked keeps the read-loop note of key in step with
+// the heartbeat age: a heartbeat older than limit records loop, and a
+// fresher heartbeat clears the note. It reports whether the note changed.
+// The caller holds h.mu, the lock that touchLiveness takes, so a heartbeat
+// that arrives at the same time always clears the note.
+func (h *BusHandler) noteSilentReadLoopLocked(key string, seen time.Time, limit time.Duration, loop silentReadLoop) bool {
+	cur, had := h.silentReadLoop[key]
+	if time.Since(seen) <= limit {
+		if had {
+			delete(h.silentReadLoop, key)
+		}
+		return had
+	}
+	if had && cur.state == loop.state && cur.since.Equal(loop.since) {
+		return false
+	}
+	if h.silentReadLoop == nil {
+		h.silentReadLoop = make(map[string]silentReadLoop)
+	}
+	h.silentReadLoop[key] = loop
+	return true
 }

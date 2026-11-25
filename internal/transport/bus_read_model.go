@@ -67,7 +67,7 @@ func (m *BusReadModel) Info(ns, name string) (info MiteInfo, ok bool, err error)
 	if err := json.Unmarshal(data, &p); err != nil {
 		return MiteInfo{}, false, fmt.Errorf("decode presence %s/%s: %w", ns, name, err)
 	}
-	return MiteInfo{Version: p.Version, LastHeartbeat: p.LastHeartbeat, CertExpiry: p.CertExpiry, StreamOpen: p.StreamOpen}, true, nil
+	return miteInfoFromPresence(p), true, nil
 }
 
 // StreamDegraded reports whether the gateway's bus→gRPC bridge for this mite

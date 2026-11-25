@@ -158,16 +158,22 @@ func TestBusTransport_PresenceInfo(t *testing.T) {
 	if err != nil || !ok || info.Version != "2.4" || !info.LastHeartbeat.Equal(hb) || !info.CertExpiry.Equal(ce) {
 		t.Fatalf("Info mismatch: info=%+v ok=%v err=%v", info, ok, err)
 	}
+	if info.ReadLoop != "" || !info.ReadLoopSince.IsZero() {
+		t.Errorf("Info ReadLoop = %q since %s for a record with no read-loop note, want none", info.ReadLoop, info.ReadLoopSince)
+	}
 }
 
 // TestPresenceSilentOpenStream asserts that both presence readers report a
-// record of a silent open stream: Info carries StreamOpen, and Connected
-// answers false, because the heartbeat is stale.
+// record of a silent open stream: Info carries StreamOpen and the state of
+// the gateway read loop, and Connected answers false, because the heartbeat
+// is stale.
 func TestPresenceSilentOpenStream(t *testing.T) {
 	s := startNATS(t)
 	tr := newBusTransport(t, s)
 	m := newBusReadModel(t, s)
-	silent, err := json.Marshal(bus.Presence{Version: "2.4", LastHeartbeat: time.Now().Add(-2 * bus.PresenceStaleAfter), StreamOpen: true})
+	since := time.Now().Add(-3 * time.Minute).Truncate(time.Second)
+	silent, err := json.Marshal(bus.Presence{Version: "2.4", LastHeartbeat: time.Now().Add(-2 * bus.PresenceStaleAfter),
+		StreamOpen: true, ReadLoop: "log_chunk", ReadLoopSince: since})
 	if err != nil {
 		t.Fatalf("marshal presence: %v", err)
 	}
@@ -186,6 +192,9 @@ func TestPresenceSilentOpenStream(t *testing.T) {
 		info, ok, err := reader.info()
 		if err != nil || !ok || !info.StreamOpen || !info.HeartbeatStale(time.Now()) {
 			t.Errorf("%s: Info = %+v ok=%v err=%v, want a stale record with StreamOpen", reader.name, info, ok, err)
+		}
+		if info.ReadLoop != "log_chunk" || !info.ReadLoopSince.Equal(since) {
+			t.Errorf("%s: Info ReadLoop = %q since %s, want log_chunk since %s", reader.name, info.ReadLoop, info.ReadLoopSince, since)
 		}
 		if reader.conn() {
 			t.Errorf("%s: Connected = true for a silent open stream", reader.name)

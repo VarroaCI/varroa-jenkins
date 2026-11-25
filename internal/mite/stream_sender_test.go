@@ -269,6 +269,83 @@ func TestGatewayIntegration_UnreadAcksEndTheStream(t *testing.T) {
 	}
 }
 
+// pushingHandler sends messages of about 1 KiB from its own goroutine
+// after the connect, as the desired-state bridge does, until a send fails.
+type pushingHandler struct {
+	recordingHandler
+	disconnected chan struct{}
+	pushErr      chan error
+}
+
+func (h *pushingHandler) OnConnect(_, _ string, _ string, _ interface{}, send Sender) int64 {
+	go func() {
+		for seq := int64(1); ; seq++ {
+			if err := send(&mitev1.OperatorMessage{Message: &mitev1.OperatorMessage_LogAck{LogAck: &mitev1.LogAck{
+				RunId: "run-1", AckSeq: seq, Status: logAckStatusBusy, Reason: strings.Repeat("x", 1024),
+			}}}); err != nil {
+				h.pushErr <- err
+				return
+			}
+		}
+	}()
+	return 1
+}
+
+func (h *pushingHandler) OnDisconnect(_, _ string, _ int64) { close(h.disconnected) }
+
+// TestGatewayIntegration_MiteThatNeitherReadsNorSendsEndsTheStream covers
+// a mite that sends its hello and then neither reads nor sends. The
+// gateway pushes from another goroutine until the window is full. The read
+// loop waits for a message that never comes, so only the stall can end the
+// stream. The stream must end with Unavailable at the send bound, and the
+// blocked send must return.
+func TestGatewayIntegration_MiteThatNeitherReadsNorSendsEndsTheStream(t *testing.T) {
+	certAuth, err := ca.NewCA()
+	if err != nil {
+		t.Fatalf("new ca: %v", err)
+	}
+	h := &pushingHandler{disconnected: make(chan struct{}), pushErr: make(chan error, 1)}
+	var out lockedBuffer
+	srv := NewServer(certAuth, NewTokenSigner([]byte(certAuth.PrivateKey())), h, "localhost")
+	srv.sendStallAfter = 200 * time.Millisecond
+	srv.Logger = slog.New(slog.NewTextHandler(&out, nil))
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go func() { _ = srv.GRPCServer().Serve(lis) }()
+	t.Cleanup(srv.GRPCServer().Stop)
+
+	const ns, name = "quiet-ns", "ctl"
+	addr := lis.Addr().String()
+	gconn := dialWithMiteCert(t, addr, certAuth, name, ns, pinnedWindow()...)
+	stream, end := openSilentStream(t, addr, func() mitev1.MiteClient { return mitev1.NewMiteClient(gconn) }, name, ns)
+	defer end()
+
+	select {
+	case <-h.disconnected:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the gateway kept the stream of a mite that neither reads nor sends")
+	}
+	select {
+	case err := <-h.pushErr:
+		if !errors.Is(err, errStreamStalled) && !errors.Is(err, errStreamEnded) {
+			t.Errorf("blocked send = %v, want errStreamStalled or errStreamEnded", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("the blocked send did not return after the stream ended")
+	}
+	if logs := out.String(); !strings.Contains(logs, "mite stream stalled") {
+		t.Errorf("gateway log = %q, want the stall WARN line", logs)
+	}
+	for err == nil {
+		_, err = stream.Recv()
+	}
+	if status.Code(err) != codes.Unavailable || !strings.Contains(err.Error(), "stalled") {
+		t.Fatalf("the stream ended with %v, want Unavailable with the stall message", err)
+	}
+}
+
 // TestGatewayIntegration_ReadingMiteTakesABacklog sends the same backlog
 // while the receive loop already runs, as the mite does now. Every ack
 // arrives, the heartbeat after the backlog reaches the gateway, and the

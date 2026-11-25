@@ -313,13 +313,27 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 		return status.Errorf(codes.Unavailable, "mite stream stalled: a send made no progress for %s", stallAfter)
 	}
 
+	// Recv runs on its own goroutine, so the loop waits for the next message
+	// and for a stalled send at once. A mite that neither reads nor sends
+	// otherwise keeps the loop in Recv, and the writer in Send, until the
+	// transport ends.
+	recvDone := make(chan struct{})
+	defer close(recvDone)
+	recvs := receiveStream(stream, recvDone)
+
 	// Read loop: process incoming messages from the mite.
 	for {
 		if sender.isStalled() {
 			return stalled()
 		}
 		loop.set(readLoopRecv)
-		msg, err := stream.Recv()
+		var r streamRecv
+		select {
+		case r = <-recvs:
+		case <-sender.stalledCh():
+			return stalled()
+		}
+		msg, err := r.msg, r.err
 		if err != nil {
 			if err == io.EOF {
 				return nil
@@ -466,6 +480,37 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 			}
 		}
 	}
+}
+
+// streamRecv is the result of one Recv of a mite stream.
+type streamRecv struct {
+	msg *mitev1.MiteMessage
+	err error
+}
+
+// receiveStream calls Recv of stream on one goroutine and gives each result
+// to the returned channel. After the hello, no other caller may call Recv,
+// because gRPC does not allow two concurrent Recv calls on one stream. The
+// goroutine holds at most one message that the read loop did not take. It
+// returns after the first error, or when done closes. gRPC ends the stream
+// context when the CommandStream handler returns, which ends a Recv that
+// waits.
+func receiveStream(stream mitev1.Mite_CommandStreamServer, done <-chan struct{}) <-chan streamRecv {
+	out := make(chan streamRecv)
+	go func() {
+		for {
+			msg, err := stream.Recv()
+			select {
+			case out <- streamRecv{msg: msg, err: err}:
+			case <-done:
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return out
 }
 
 // readLoopState records what the read loop of one stream does: it waits for
