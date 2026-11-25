@@ -24,11 +24,9 @@ const cellUsageWindow = 24 * time.Hour
 // the partitions, and the running scan must find a build older than the
 // window.
 //
-// Neither runs aggregate carries a namespace term. The ledger moves an
-// intent's cell on an ownership transfer, and it does not move the
-// intent's namespace. A namespace term would drop a run the cell did
-// execute. The term is also unnecessary, because a tenant holds one
-// placement row.
+// Neither runs aggregate carries a namespace term. The term is
+// unnecessary, because a tenant holds one placement row, so the tenant
+// and the cell name one member.
 //
 // The jobs aggregate counts distinct job paths. The job_schedules
 // primary key is (cluster, tenant, job_path, trigger_type), so one job
