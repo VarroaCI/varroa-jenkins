@@ -2,11 +2,14 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -232,6 +235,112 @@ func TestRouting_TriggerReconcile(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected local enqueue")
+	}
+}
+
+// nonOwnedKey returns a namespace and name that the held set does not own.
+func nonOwnedKey(t *testing.T, ring *sharding.Ring, held *sharding.ShardSet) (string, string) {
+	t.Helper()
+	for _, ns := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
+		for _, name := range []string{"x", "y", "z", "w"} {
+			if !held.Held(ring.ShardFor(ns + "/" + name)) {
+				return ns, name
+			}
+		}
+	}
+	t.Fatal("could not find a key that the held set does not own")
+	return "", ""
+}
+
+// TestReconcileAction_MissingControllerIsNotFound pins that the
+// request-reply reconcile reads the controller first: a missing controller
+// returns NotFound, and nothing is enqueued or patched.
+func TestReconcileAction_MissingControllerIsNotFound(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+
+	err := rec.ReconcileAction(context.Background(), "ns", "ghost")
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("err = %v, want NotFound", err)
+	}
+	select {
+	case ev := <-rec.reconcileEvents:
+		t.Fatalf("unexpected enqueue for %s/%s", ev.Object.GetNamespace(), ev.Object.GetName())
+	default:
+	}
+	if n := len(client.store.MetaPatches(controllerGVR)); n != 0 {
+		t.Fatalf("meta patches = %d, want 0", n)
+	}
+}
+
+// TestReconcileAction_OwnedEnqueues pins that the owning replica enqueues
+// the reconcile and returns nil.
+func TestReconcileAction_OwnedEnqueues(t *testing.T) {
+	client := newTestClient()
+	crdstore.MustSeed(client.store, &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "ctrl"}})
+	rec := newTestReconciler(client)
+
+	if err := rec.ReconcileAction(context.Background(), "ns", "ctrl"); err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	select {
+	case ev := <-rec.reconcileEvents:
+		if ev.Object.GetNamespace() != "ns" || ev.Object.GetName() != "ctrl" {
+			t.Errorf("unexpected event: %s/%s", ev.Object.GetNamespace(), ev.Object.GetName())
+		}
+	default:
+		t.Fatal("expected local enqueue")
+	}
+}
+
+// TestReconcileAction_NonOwnedReturnsPatchError pins that a replica that
+// does not own the controller returns the error of the wake-requested
+// annotation patch.
+func TestReconcileAction_NonOwnedReturnsPatchError(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := sharding.NewShardSet()
+	held.Add(0)
+	ns, name := nonOwnedKey(t, ring, held)
+
+	client := newTestClient()
+	crdstore.MustSeed(client.store, &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}})
+	rec := newTestReconciler(client)
+	rec.SetShardOwnership(ring, held)
+
+	if err := rec.ReconcileAction(context.Background(), ns, name); err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if n := len(client.store.MetaPatches(controllerGVR)); n != 1 {
+		t.Fatalf("meta patches = %d, want 1", n)
+	}
+
+	client.store.FailNext("patchmeta", controllerGVR, errors.New("apiserver down"))
+	err := rec.ReconcileAction(context.Background(), ns, name)
+	if err == nil || !strings.Contains(err.Error(), "apiserver down") {
+		t.Fatalf("err = %v, want the patch error", err)
+	}
+}
+
+// TestReprovisionAction_ReturnsPatchError pins that the request-reply
+// reprovision returns the error of the force-reprovision annotation patch,
+// a NotFound included.
+func TestReprovisionAction_ReturnsPatchError(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	gr := schema.GroupResource{Group: controllerGVR.Group, Resource: controllerGVR.Resource}
+
+	client.store.FailNext("patchmeta", controllerGVR, apierrors.NewNotFound(gr, "ghost"))
+	if err := rec.ReprovisionAction(context.Background(), "ns", "ghost"); !apierrors.IsNotFound(err) {
+		t.Fatalf("err = %v, want NotFound", err)
+	}
+
+	client.store.FailNext("patchmeta", controllerGVR, errors.New("apiserver down"))
+	if err := rec.ReprovisionAction(context.Background(), "ns", "ctrl"); err == nil || !strings.Contains(err.Error(), "apiserver down") {
+		t.Fatalf("err = %v, want the patch error", err)
+	}
+
+	if err := rec.ReprovisionAction(context.Background(), "ns", "ctrl"); err != nil {
+		t.Fatalf("err = %v, want nil", err)
 	}
 }
 

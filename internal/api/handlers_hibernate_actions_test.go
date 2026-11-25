@@ -159,6 +159,47 @@ func TestHibernateStoppedReturns409(t *testing.T) {
 	}
 }
 
+// TestReconcileAndReprovision_OperatorRefusalStatus pins the status of an
+// operator refusal on both routes: not_found is 404 and internal is 500. The
+// body carries the operator's text, and no activity event is published.
+func TestReconcileAndReprovision_OperatorRefusalStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		code   string
+		status int
+	}{
+		{"missing controller", bus.CodeNotFound, http.StatusNotFound},
+		{"failed step", bus.CodeInternal, http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, sink := publishTestServer(t)
+			refusal := &controller.ActionError{Code: tc.code, Msg: "operator text"}
+			srv.deps.Reconciler = &fakeActionReconciler{reconcileErr: refusal, reprovisionErr: refusal}
+			for action, handle := range map[string]func(http.ResponseWriter, *http.Request, string, string, string){
+				"reconcile":   srv.handleReconcile,
+				"reprovision": srv.handleReprovision,
+			} {
+				w := httptest.NewRecorder()
+				r := withClaims(httptest.NewRequest(http.MethodPost, "/clusters/member-b/controllers/ns/ctrl/"+action, nil))
+				handle(w, r, "member-b", "ns", "ctrl")
+				if w.Code != tc.status {
+					t.Fatalf("%s status = %d, want %d: %s", action, w.Code, tc.status, w.Body.String())
+				}
+				var body map[string]string
+				if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+					t.Fatalf("decode %s body: %v", action, err)
+				}
+				if body["error"] != "operator text" {
+					t.Errorf("%s error = %q, want the operator's text", action, body["error"])
+				}
+			}
+			if len(sink.events) != 0 {
+				t.Errorf("events = %+v, want none", sink.events)
+			}
+		})
+	}
+}
+
 // TestControllerDetailCarriesHibernation pins the detail projection: a
 // hibernated controller's detail response carries hibernated and hibernatedAt
 // while powerState keeps reporting the spec intent.

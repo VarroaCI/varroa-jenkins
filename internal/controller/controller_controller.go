@@ -1348,6 +1348,22 @@ func (r *Reconciler) TriggerReconcile(cluster, name, namespace string) {
 	r.wakeController(namespace + "/" + name)
 }
 
+// ReconcileAction is the request-reply form of TriggerReconcile. It reads
+// the controller first, so a missing controller returns a NotFound error.
+// On the owning replica it enqueues the reconcile and returns nil. A full
+// event queue drops that event, and the periodic tick then reconciles the
+// controller. On any other replica it returns the error of the
+// wake-requested annotation patch.
+func (r *Reconciler) ReconcileAction(ctx context.Context, namespace, name string) error {
+	if _, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, namespace); err != nil {
+		return fmt.Errorf("get controller: %w", err)
+	}
+	if err := r.routeWake(ctx, namespace, name); err != nil {
+		return fmt.Errorf("request reconcile: %w", err)
+	}
+	return nil
+}
+
 // TriggerOwnedReconcile enqueues a reconcile for the Controller only when
 // this replica owns it. It never routes a wake to another shard. Use it for
 // a broadcast that every replica receives, because the owner receives the
@@ -1947,16 +1963,23 @@ func (r *Reconciler) wakeController(key string) {
 	if !ok {
 		return
 	}
-	if r.ownsController(ns, name) {
-		r.enqueueReconcile(key)
-		return
-	}
-	ts := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := crdstore.PatchAnnotations[v1alpha1.Controller](context.Background(), r.store, name, ns,
-		map[string]*string{annotationWakeRequested: &ts}); err != nil {
+	if err := r.routeWake(context.Background(), ns, name); err != nil {
 		r.Logger.Warn("wake routing patch failed; owner will pick up on next periodic tick",
 			"controller", key, "error", err)
 	}
+}
+
+// routeWake is the step of wakeController. On the owning replica it
+// enqueues locally and returns nil. On any other replica it returns the
+// error of the wake-requested annotation patch.
+func (r *Reconciler) routeWake(ctx context.Context, ns, name string) error {
+	if r.ownsController(ns, name) {
+		r.enqueueReconcile(ns + "/" + name)
+		return nil
+	}
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	return crdstore.PatchAnnotations[v1alpha1.Controller](ctx, r.store, name, ns,
+		map[string]*string{annotationWakeRequested: &ts})
 }
 
 // enqueueReconcile pushes a controller-runtime reconcile event for the
@@ -2116,11 +2139,21 @@ func (r *Reconciler) Wake(ctx context.Context, cluster, namespace, name string) 
 // the owning replica's watch fires on it.
 func (r *Reconciler) Reprovision(cluster, namespace, name string) {
 	_ = cluster // operator always acts on its own cluster
-	ts := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := crdstore.PatchAnnotations[v1alpha1.Controller](context.Background(), r.store, name, namespace,
-		map[string]*string{annotationForceReprovision: &ts}); err != nil {
+	if err := r.ReprovisionAction(context.Background(), namespace, name); err != nil {
 		r.Logger.Warn("reprovision annotation patch failed", "controller", namespace+"/"+name, "error", err)
 	}
+}
+
+// ReprovisionAction is the request-reply form of Reprovision. It returns the
+// error of the force-reprovision annotation patch. The apiserver answers
+// NotFound for a patch of a missing controller.
+func (r *Reconciler) ReprovisionAction(ctx context.Context, namespace, name string) error {
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := crdstore.PatchAnnotations[v1alpha1.Controller](ctx, r.store, name, namespace,
+		map[string]*string{annotationForceReprovision: &ts}); err != nil {
+		return fmt.Errorf("stamp force-reprovision annotation: %w", err)
+	}
+	return nil
 }
 
 // ErrNoPendingRestart is the refusal of an approval for a controller with no

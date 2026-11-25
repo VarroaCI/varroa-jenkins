@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -65,7 +66,7 @@ func TestNATSReconcilerProxy_ReconcileActionsReturnNoResponder(t *testing.T) {
 
 // TestNATSReconcilerProxy_ReconcileActionsReadTheReply pins that each action
 // sends the controller, returns nil for an empty reply, and returns the
-// operator's error text for a refusal.
+// operator's refusal as an *ActionError with the operator's code and text.
 func TestNATSReconcilerProxy_ReconcileActionsReadTheReply(t *testing.T) {
 	conn := startTestSyncBus(t)
 	p := NewNATSReconcilerProxy(conn)
@@ -84,6 +85,14 @@ func TestNATSReconcilerProxy_ReconcileActionsReadTheReply(t *testing.T) {
 			err := a.call(context.Background())
 			if err == nil || bus.IsNoReply(err) || !strings.Contains(err.Error(), "bad request") {
 				t.Fatalf("err = %v, want the operator's refusal", err)
+			}
+		})
+		t.Run(name+"/not_found", func(t *testing.T) {
+			serveReconcileReply(t, conn, a.subject, bus.ReconcileResponse{Error: `controllers "ctl" not found`, Code: bus.CodeNotFound})
+			err := a.call(context.Background())
+			var ae *ActionError
+			if !errors.As(err, &ae) || ae.Code != bus.CodeNotFound || ae.Msg != `controllers "ctl" not found` {
+				t.Fatalf("err = %#v, want an *ActionError with code %q and the operator's text", err, bus.CodeNotFound)
 			}
 		})
 	}

@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	natsReconcileTimeout = 5 * time.Second  // fast operation (channel send or annotation patch)
+	natsReconcileTimeout = 5 * time.Second  // fast operation (controller read, channel send, or annotation patch)
 	natsApproveTimeout   = 60 * time.Second // real work (bundle resolve, CRD patch, mite send)
 )
 
@@ -48,8 +48,9 @@ func (p *NATSReconcilerProxy) Reprovision(ctx context.Context, cluster, namespac
 }
 
 // requestReconcile sends a ReconcileRequest on subject and decodes the
-// ReconcileResponse. The operator replies after it takes the request, not
-// after the reconcile ends. A request that gets no reply returns the bus
+// ReconcileResponse. The operator replies after it records the request, not
+// after the reconcile ends. A refusal returns an *ActionError with the
+// operator's code and text. A request that gets no reply returns the bus
 // error wrapped, so bus.IsNoResponder and bus.IsNoReply still match it.
 func (p *NATSReconcilerProxy) requestReconcile(ctx context.Context, op, subject, namespace, name string) error {
 	data, _ := json.Marshal(bus.ReconcileRequest{Name: name, Namespace: namespace})
@@ -62,7 +63,7 @@ func (p *NATSReconcilerProxy) requestReconcile(ctx context.Context, op, subject,
 		return fmt.Errorf("%s decode response: %w", op, err)
 	}
 	if resp.Error != "" {
-		return fmt.Errorf("%s: %s", op, resp.Error)
+		return &ActionError{Code: resp.Code, Msg: resp.Error}
 	}
 	return nil
 }

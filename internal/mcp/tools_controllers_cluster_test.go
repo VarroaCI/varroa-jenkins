@@ -11,6 +11,8 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -255,6 +257,34 @@ func (noOperatorReconciler) Hibernate(context.Context, string, string, string) e
 
 func (noOperatorReconciler) Wake(context.Context, string, string, string) error {
 	return fmt.Errorf("wake relay: %w", nats.ErrNoResponders)
+}
+
+// refusingReconciler answers a reconcile with the operator's refusal of a
+// missing controller.
+type refusingReconciler struct{ *guardReconciler }
+
+func (refusingReconciler) TriggerReconcile(context.Context, string, string, string) error {
+	return &controller.ActionError{Code: bus.CodeNotFound, Msg: `get controller: controllers.varroa.dev "ghost" not found`}
+}
+
+// A reconcile that the operator refuses shows the operator's text, and no
+// event is emitted.
+func TestReconcileController_OperatorRefusalShowsTheText(t *testing.T) {
+	deps := adminDeps()
+	sink := &recordingSink{}
+	deps.ActivityPublisher = sink
+	withControllerBrood(deps)
+	deps.Reconciler = refusingReconciler{&guardReconciler{}}
+	tr := callWithClaims(t, deps, mcpAdminClaims, "reconcile_controller", map[string]any{
+		"namespace": "ns", "name": "ghost", "cluster": "member-b",
+	})
+	want := `failed to reconcile controller: get controller: controllers.varroa.dev "ghost" not found`
+	if !tr.IsError || toolText(tr) != want {
+		t.Fatalf("result = %q, want %q", toolText(tr), want)
+	}
+	if len(sink.events) != 0 {
+		t.Errorf("events = %+v, want none", sink.events)
+	}
 }
 
 // An action that no operator received names the missing operator of the
