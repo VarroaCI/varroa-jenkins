@@ -6,6 +6,15 @@ import (
 	"time"
 )
 
+// timedStageSQL matches a stage row that a stage duration aggregate
+// reads: the stage ran, and the row holds a duration. A stage that ran
+// ends SUCCESS, UNSTABLE, FAILURE, or ABORTED. A stage that did not run
+// holds NOT_EXECUTED, or NOT_BUILT in an older row. Its duration of a few
+// milliseconds does not measure work. A row that the recorder ended holds
+// no duration. Every stage duration aggregate uses this predicate. The
+// predicate names its columns by the alias "rs".
+const timedStageSQL = `(rs.duration_ms IS NOT NULL AND rs.status IN ('SUCCESS', 'UNSTABLE', 'FAILURE', 'ABORTED'))`
+
 // StageStat names one stage and its duration, in milliseconds.
 type StageStat struct {
 	Name       string
@@ -16,9 +25,9 @@ type StageStat struct {
 // the pipeline job page's "Last 30 days" card. PassRate is nil when the
 // window holds no counted run, because a rate over zero runs has no
 // value to report. MedianDurationMs is nil for the same reason.
-// SlowestStage is nil when no run in the window carries a finished
-// stage. MedianQueueWaitMs is nil when no run in the window has both
-// queued_at and started_at set.
+// SlowestStage is nil when no run in the window carries a stage row that
+// timedStageSQL matches. MedianQueueWaitMs is nil when no run in the
+// window has both queued_at and started_at set.
 type JobWindowStats struct {
 	Builds            int64
 	PassRate          *float64
@@ -40,7 +49,9 @@ type JobWindowStats struct {
 // card answers "did the pipeline work", not "did it merely finish".
 // SlowestStage compares each stage name's median duration across the
 // window's runs, not its single slowest run: a median resists one
-// outlier run inflating a stage that usually runs fast.
+// outlier run inflating a stage that usually runs fast. A stage median
+// reads only the rows that timedStageSQL matches, so a build that did not
+// run the stage does not pull its median down.
 //
 // A row outside the job's history counts in no value here
 // (historyRunSQL). A run whose result is TRIGGER_FAILED, or a run whose
@@ -70,7 +81,7 @@ func (r *pgReader) JobWindowStats(ctx context.Context, cluster, tenant, jobPath 
 			       ROUND(percentile_cont(0.5) WITHIN GROUP (ORDER BY rs.duration_ms)::numeric)::bigint AS median_duration_ms
 			FROM varroa.run_stages rs
 			JOIN window_runs wr ON wr.run_id = rs.run_id
-			WHERE rs.duration_ms IS NOT NULL
+			WHERE `+timedStageSQL+`
 			GROUP BY rs.name
 		)
 		SELECT

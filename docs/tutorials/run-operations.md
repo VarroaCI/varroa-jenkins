@@ -61,7 +61,8 @@ The card shows up to five parts. Each part appears on its own.
 | Failed cases | At most ten failed cases by class and test name. Each links to that case's history |
 
 A stage that did not run reads `NOT_EXECUTED`, labelled **Not executed**. It carries no error, and
-the card never names it. Jenkins does not run a declarative stage in these cases:
+the card never names it. The **Slowest stage** of a job's **Last 30 days** card does not count it.
+Jenkins does not run a declarative stage in these cases:
 
 - An earlier stage failed.
 - An earlier stage is unstable, and the pipeline sets the `skipStagesAfterUnstable` option.
