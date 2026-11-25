@@ -278,6 +278,44 @@ func TestControllerActions_NoOperatorIs503(t *testing.T) {
 	}
 }
 
+// TestReconcileAndReprovision_NoReplyMapsThroughClusterRequestFailure pins
+// that both actions answer 503 or 502 when the operator does not reply, 500
+// when the operator refuses, and publish no activity event in either case.
+func TestReconcileAndReprovision_NoReplyMapsThroughClusterRequestFailure(t *testing.T) {
+	assertInternal := func(t *testing.T, w *httptest.ResponseRecorder, _ string) {
+		t.Helper()
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500: %s", w.Code, w.Body.String())
+		}
+	}
+	for _, tc := range []struct {
+		name   string
+		err    error
+		assert func(*testing.T, *httptest.ResponseRecorder, string)
+	}{
+		{"no responder", fmt.Errorf("reconcile relay: %w", nats.ErrNoResponders), assertNoOperator},
+		{"timeout", fmt.Errorf("reconcile relay: %w", nats.ErrTimeout), assertUnreachable},
+		{"operator refusal", errors.New("reconcile: bad request"), assertInternal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, sink := publishTestServer(t)
+			srv.deps.Reconciler = &fakeActionReconciler{reconcileErr: tc.err, reprovisionErr: tc.err}
+			for action, handle := range map[string]func(http.ResponseWriter, *http.Request, string, string, string){
+				"reconcile":   srv.handleReconcile,
+				"reprovision": srv.handleReprovision,
+			} {
+				w := httptest.NewRecorder()
+				r := withClaims(httptest.NewRequest(http.MethodPost, "/clusters/member-b/controllers/ns/ctrl/"+action, nil))
+				handle(w, r, "member-b", "ns", "ctrl")
+				tc.assert(t, w, "member-b")
+			}
+			if len(sink.events) != 0 {
+				t.Errorf("events = %+v, want none", sink.events)
+			}
+		})
+	}
+}
+
 func TestCellGrants_MemberNoOperatorIs503(t *testing.T) {
 	srv := memberCellGrantsServer(&memberGrantsBrood{err: &ErrClusterUnreachable{Cluster: "member-c", Err: nats.ErrNoResponders}})
 	rec := doCellRequest(t, srv.handleCellGrants, "/cells/ns-a/cell-a/grants?cluster=member-c",

@@ -1658,7 +1658,11 @@ func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request, cluster
 	}
 	// TriggerReconcile and WakeController share one implementation (both
 	// enqueue an immediate reconcile); one bus round-trip is enough.
-	s.deps.Reconciler.TriggerReconcile(cluster, name, namespace)
+	if err := s.deps.Reconciler.TriggerReconcile(r.Context(), cluster, name, namespace); err != nil {
+		s.deps.Logger.Warn("trigger reconcile failed", "cluster", cluster, "controller", namespace+"/"+name, "error", err)
+		s.writeActionError(w, cluster, err)
+		return
+	}
 
 	// Emit reconcile trigger event when an authenticated user triggers it.
 	if ActorFrom(claims) != "" {
@@ -1961,7 +1965,11 @@ func (s *Server) handleReprovision(w http.ResponseWriter, r *http.Request, clust
 	}
 	// Reprovision forces a full desired-state re-push to the mite (bypassing the
 	// convergence short-circuit) and wakes the controller immediately.
-	s.deps.Reconciler.Reprovision(cluster, ns, name)
+	if err := s.deps.Reconciler.Reprovision(r.Context(), cluster, ns, name); err != nil {
+		s.deps.Logger.Warn("reprovision failed", "cluster", cluster, "controller", ns+"/"+name, "error", err)
+		s.writeActionError(w, cluster, err)
+		return
+	}
 
 	if ActorFrom(claims) != "" {
 		s.notifyActivity(activity.Event{

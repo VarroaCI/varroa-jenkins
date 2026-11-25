@@ -19,23 +19,29 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
 
-// fakeActionReconciler is a ReconcilerAPI fake for the hibernate/wake action
-// handlers. Only the two request-reply actions record their calls; the rest
-// are no-ops.
+// fakeActionReconciler is a ReconcilerAPI fake for the controller action
+// handlers. Each action returns its configured error; WakeController is a
+// no-op.
 type fakeActionReconciler struct {
-	hibernateErr error
-	wakeErr      error
-	approveErr   error
-	deletionErr  error
-	hibernate    int
-	wake         int
+	hibernateErr   error
+	wakeErr        error
+	approveErr     error
+	deletionErr    error
+	reconcileErr   error
+	reprovisionErr error
+	hibernate      int
+	wake           int
 	// expected records the reviewed content hash of the last approve.
 	expected string
 }
 
-func (f *fakeActionReconciler) TriggerReconcile(_, _, _ string) {}
-func (f *fakeActionReconciler) WakeController(_, _, _ string)   {}
-func (f *fakeActionReconciler) Reprovision(_, _, _ string)      {}
+func (f *fakeActionReconciler) TriggerReconcile(_ context.Context, _, _, _ string) error {
+	return f.reconcileErr
+}
+func (f *fakeActionReconciler) WakeController(_ context.Context, _, _, _ string) error { return nil }
+func (f *fakeActionReconciler) Reprovision(_ context.Context, _, _, _ string) error {
+	return f.reprovisionErr
+}
 func (f *fakeActionReconciler) ApproveRestart(_ context.Context, _, _, _, _, expectedContentHash string) error {
 	f.expected = expectedContentHash
 	return f.approveErr

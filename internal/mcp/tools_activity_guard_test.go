@@ -236,9 +236,9 @@ func (g *guardConfigBrood) GetProvisioningDefaults(_ context.Context, _, _ strin
 // reaches its emit call.
 type guardReconciler struct{}
 
-func (g *guardReconciler) TriggerReconcile(_, _, _ string) {}
-func (g *guardReconciler) WakeController(_, _, _ string)   {}
-func (g *guardReconciler) Reprovision(_, _, _ string)      {}
+func (g *guardReconciler) TriggerReconcile(_ context.Context, _, _, _ string) error { return nil }
+func (g *guardReconciler) WakeController(_ context.Context, _, _, _ string) error   { return nil }
+func (g *guardReconciler) Reprovision(_ context.Context, _, _, _ string) error      { return nil }
 
 func (g *guardReconciler) ApproveRestart(_ context.Context, _, _, _, _, _ string) error { return nil }
 func (g *guardReconciler) ApproveDeletion(_ context.Context, _, _, _, _ string) error {

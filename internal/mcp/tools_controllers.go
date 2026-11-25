@@ -353,7 +353,9 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if deps.Reconciler == nil {
 			return mcp.NewToolResultError("reconciler not available"), nil
 		}
-		deps.Reconciler.TriggerReconcile(cluster, name, ns)
+		if err := deps.Reconciler.TriggerReconcile(ctx, cluster, name, ns); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to reconcile controller: %v", api.ActionRequestError(cluster, err))), nil
+		}
 		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:       "reconcile.triggered",
 			Message:    "Controller " + name + " reconcile triggered in " + ns,

@@ -241,6 +241,10 @@ func TestDeleteController_LocalDeleteGoesThroughTheBrood(t *testing.T) {
 // a request that no operator received.
 type noOperatorReconciler struct{ *guardReconciler }
 
+func (noOperatorReconciler) TriggerReconcile(context.Context, string, string, string) error {
+	return fmt.Errorf("reconcile relay: %w", nats.ErrNoResponders)
+}
+
 func (noOperatorReconciler) ApproveRestart(context.Context, string, string, string, string, string) error {
 	return fmt.Errorf("approve restart relay: %w", nats.ErrNoResponders)
 }
@@ -257,6 +261,7 @@ func (noOperatorReconciler) Wake(context.Context, string, string, string) error 
 // target cluster, and no event is emitted.
 func TestControllerActions_NoOperatorNamesTheOperator(t *testing.T) {
 	for tool, verb := range map[string]string{
+		"reconcile_controller": "reconcile",
 		"restart_controller":   "restart",
 		"hibernate_controller": "hibernate",
 		"wake_controller":      "wake",
