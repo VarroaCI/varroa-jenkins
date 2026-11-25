@@ -1,12 +1,17 @@
 package mite
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/nats-io/nats.go"
 )
 
 // owedMarkerCount returns the number of owed finalized markers.
@@ -131,7 +136,8 @@ func TestFinalizedMarkerOutagePastTheWaitIsSentAgain(t *testing.T) {
 
 // TestOwedFinalizedMarkerAgeBound proves that a marker owed for
 // logMarkerResendAge is dropped with no publish. The recorder's sweep
-// marks such a run, and a later marker changes nothing.
+// finalizes such a run from the stored index, and a later marker changes
+// nothing.
 func TestOwedFinalizedMarkerAgeBound(t *testing.T) {
 	runID := newTestRunID()
 	h, clock, _ := newIdleSweepTestHandler(t, newFakeOwnerRequester(), &recordingSender{}, newTestLogStore(t))
@@ -213,5 +219,228 @@ func TestCloseEndsTheFinalizedPublishWait(t *testing.T) {
 	}
 	if got := finalizedPublishes(pub, runID); got != 0 {
 		t.Fatalf("published %d finalized envelopes, want 0", got)
+	}
+}
+
+// slowPublisher is a fakePublisher whose each JetStream publish takes
+// cost on clock, as a slow bus that still takes each publish.
+type slowPublisher struct {
+	*fakePublisher
+	clock *stepClock
+	cost  time.Duration
+}
+
+func (p *slowPublisher) PublishJetStream(subject string, data []byte) (*nats.PubAck, error) {
+	p.clock.advance(p.cost)
+	return p.fakePublisher.PublishJetStream(subject, data)
+}
+
+// oweMarkers owes the marker of each run in ids on h, in order, one step
+// apart on clock.
+func oweMarkers(h *BusHandler, clock *stepClock, ids []string, step time.Duration) {
+	for _, id := range ids {
+		h.oweFinalizedMarker("ns1", "cell1", id, "tenant-a/build")
+		clock.advance(step)
+	}
+}
+
+// markerRunIDs returns n run ids with prefix that sort in index order.
+func markerRunIDs(prefix string, n int) []string {
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("%s-%05d", prefix, i)
+	}
+	return ids
+}
+
+// publishedRunIDs returns the run id of each envelope that pub took, in
+// publish order.
+func publishedRunIDs(pub *fakePublisher) []string {
+	ids := make([]string, pub.publishedCount())
+	for i := range ids {
+		ids[i] = pub.envelopeAt(i).RunID
+	}
+	return ids
+}
+
+// bufferLogger returns a logger that writes Info and above to buf.
+func bufferLogger(buf *bytes.Buffer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+}
+
+// logLines returns the lines in buf.
+func logLines(buf *bytes.Buffer) []string {
+	text := strings.TrimSpace(buf.String())
+	if text == "" {
+		return nil
+	}
+	return strings.Split(text, "\n")
+}
+
+// TestOwedMarkerResendPassBound proves that one resend pass sends at
+// most logMarkerResendPassMax owed markers, the marker tried longest ago
+// first, and keeps the rest for the next pass. Each publish takes 100 ms
+// on the step clock, as on a slow bus. The idle sweep round runs after
+// the pass on the same goroutine, so the pass time is the time that the
+// round waits.
+func TestOwedMarkerResendPassBound(t *testing.T) {
+	h, clock, _ := newIdleSweepTestHandler(t, newFakeOwnerRequester(), &recordingSender{}, newTestLogStore(t))
+	var logs bytes.Buffer
+	h.Logger = bufferLogger(&logs)
+	const cost = 100 * time.Millisecond
+	pub := &slowPublisher{fakePublisher: &fakePublisher{}, clock: clock, cost: cost}
+	h.publisher = pub
+
+	ids := markerRunIDs("run", logMarkersOwedMax)
+	oweMarkers(h, clock, ids, time.Millisecond)
+
+	start := clock.Now()
+	h.resendOwedMarkers(context.Background())
+	held := clock.Now().Sub(start)
+	sent := publishedRunIDs(pub.fakePublisher)
+	if len(sent) != logMarkerResendPassMax || held != logMarkerResendPassMax*cost {
+		t.Fatalf("a pass over %d owed markers made %d publishes and held the idle sweep for %v, want %d publishes and %v",
+			logMarkersOwedMax, len(sent), held, logMarkerResendPassMax, logMarkerResendPassMax*cost)
+	}
+	if held >= logIdleSweepInterval {
+		t.Fatalf("a full pass held the idle sweep for %v, want less than the round interval %v", held, logIdleSweepInterval)
+	}
+	for i, id := range sent {
+		if id != ids[i] {
+			t.Fatalf("publish %d sent %s, want %s: the pass sends the marker tried longest ago first", i, id, ids[i])
+		}
+	}
+	if n := owedMarkerCount(h); n != logMarkersOwedMax-logMarkerResendPassMax {
+		t.Fatalf("owed markers after the pass = %d, want %d", n, logMarkersOwedMax-logMarkerResendPassMax)
+	}
+
+	h.resendOwedMarkers(context.Background())
+	sent = publishedRunIDs(pub.fakePublisher)
+	if len(sent) != 2*logMarkerResendPassMax || sent[logMarkerResendPassMax] != ids[logMarkerResendPassMax] {
+		t.Fatalf("two passes made %d publishes, want %d, and the second pass starts at %s",
+			len(sent), 2*logMarkerResendPassMax, ids[logMarkerResendPassMax])
+	}
+}
+
+// TestOwedMarkerResendKeepsATriedMarkerAheadOfNewerOnes proves that a
+// marker owed after a failed pass never goes ahead of the marker that the
+// pass tried. A pass at the bound therefore cannot starve a marker that
+// failed once, and every marker reaches the front of a later pass.
+func TestOwedMarkerResendKeepsATriedMarkerAheadOfNewerOnes(t *testing.T) {
+	h, clock, _ := newIdleSweepTestHandler(t, newFakeOwnerRequester(), &recordingSender{}, newTestLogStore(t))
+	var logs bytes.Buffer
+	h.Logger = bufferLogger(&logs)
+	pub := downPublisher()
+	h.publisher = pub
+
+	const tried = "run-z"
+	oweMarkers(h, clock, []string{tried}, time.Minute)
+	h.resendOwedMarkers(context.Background())
+	if got := syncPublishCalls(pub); got != 1 {
+		t.Fatalf("the pass during the outage made %d publish attempts, want 1", got)
+	}
+
+	clock.advance(time.Second)
+	newer := markerRunIDs("run-a", logMarkerResendPassMax)
+	oweMarkers(h, clock, newer, time.Millisecond)
+	bringPublisherUp(pub)
+	h.resendOwedMarkers(context.Background())
+	sent := publishedRunIDs(pub)
+	if len(sent) == 0 || sent[0] != tried {
+		first := ""
+		if len(sent) > 0 {
+			first = sent[0]
+		}
+		t.Fatalf("the pass after the outage sent %d markers, %q first, want %s first", len(sent), first, tried)
+	}
+	if len(sent) != logMarkerResendPassMax {
+		t.Fatalf("the pass after the outage sent %d markers, want the bound %d", len(sent), logMarkerResendPassMax)
+	}
+	newest := newer[len(newer)-1]
+	if n := owedMarkerCount(h); n != 1 || finalizedPublishes(pub, newest) != 0 {
+		t.Fatalf("owed markers = %d, want only the newest marker %s left", n, newest)
+	}
+
+	h.resendOwedMarkers(context.Background())
+	if got := finalizedPublishes(pub, newest); got != 1 || owedMarkerCount(h) != 0 {
+		t.Fatalf("the next pass published %d markers of %s and left %d owed, want 1 and 0", got, newest, owedMarkerCount(h))
+	}
+}
+
+// TestOwedMarkerBoundsSendAFullSetBeforeTheAgeBound proves that the
+// count, pass, and age bounds fit together. A full owed set on a bus that
+// takes each publish goes out in passes one idle sweep interval apart,
+// and no marker reaches its age bound first.
+func TestOwedMarkerBoundsSendAFullSetBeforeTheAgeBound(t *testing.T) {
+	h, clock, pub := newIdleSweepTestHandler(t, newFakeOwnerRequester(), &recordingSender{}, newTestLogStore(t))
+	var logs bytes.Buffer
+	h.Logger = bufferLogger(&logs)
+
+	oweMarkers(h, clock, markerRunIDs("run", logMarkersOwedMax), 0)
+	passes := 0
+	for owedMarkerCount(h) > 0 && passes < logMarkersOwedMax {
+		clock.advance(logIdleSweepInterval)
+		h.resendOwedMarkers(context.Background())
+		passes++
+	}
+	if got := pub.publishedCount(); got != logMarkersOwedMax {
+		t.Fatalf("published %d markers of a full owed set, want each of the %d once", got, logMarkersOwedMax)
+	}
+	if took := time.Duration(passes) * logIdleSweepInterval; took >= logMarkerResendAge {
+		t.Fatalf("a full owed set took %d passes (%v), want less than the age bound %v", passes, took, logMarkerResendAge)
+	}
+}
+
+// TestOwedMarkerResendPassWritesOneSummaryLine proves that a pass writes
+// one log line that counts the markers it sent, the failed publish, and
+// the markers it dropped by age. A pass with no owed marker writes none.
+func TestOwedMarkerResendPassWritesOneSummaryLine(t *testing.T) {
+	h, clock, pub := newIdleSweepTestHandler(t, newFakeOwnerRequester(), &recordingSender{}, newTestLogStore(t))
+	var logs bytes.Buffer
+	h.Logger = bufferLogger(&logs)
+
+	oweMarkers(h, clock, markerRunIDs("old", 2), 0)
+	clock.advance(logMarkerResendAge - time.Minute)
+	oweMarkers(h, clock, markerRunIDs("new", 3), 0)
+	clock.advance(time.Minute)
+	logs.Reset()
+	h.resendOwedMarkers(context.Background())
+	lines := logLines(&logs)
+	if len(lines) != 1 || !strings.Contains(lines[0], "sent=3 failed=0 dropped_by_age=2 owed=0") ||
+		!strings.Contains(lines[0], "level=WARN") {
+		t.Fatalf("a pass that sent 3 markers and dropped 2 wrote %d lines, want one warning:\n%s", len(lines), logs.String())
+	}
+	if got := pub.publishedCount(); got != 3 {
+		t.Fatalf("published %d markers, want 3", got)
+	}
+
+	logs.Reset()
+	h.resendOwedMarkers(context.Background())
+	if lines := logLines(&logs); len(lines) != 0 {
+		t.Fatalf("a pass with no owed marker wrote:\n%s", logs.String())
+	}
+
+	oweMarkers(h, clock, markerRunIDs("sent", 2), 0)
+	logs.Reset()
+	h.resendOwedMarkers(context.Background())
+	if lines := logLines(&logs); len(lines) != 1 || !strings.Contains(lines[0], "level=INFO") ||
+		!strings.Contains(lines[0], "sent=2 failed=0 dropped_by_age=0 owed=0") {
+		t.Fatalf("a pass that sent 2 markers wrote %d lines, want one info line:\n%s", len(lines), logs.String())
+	}
+
+	h.publisher = downPublisher()
+	oweMarkers(h, clock, markerRunIDs("late", 2), 0)
+	logs.Reset()
+	h.resendOwedMarkers(context.Background())
+	lines = logLines(&logs)
+	var summaries []string
+	for _, line := range lines {
+		if strings.Contains(line, "sent=") {
+			summaries = append(summaries, line)
+		}
+	}
+	if len(lines) != 2 || len(summaries) != 1 || !strings.Contains(summaries[0], "level=WARN") ||
+		!strings.Contains(summaries[0], "sent=0 failed=1 dropped_by_age=0 owed=2") {
+		t.Fatalf("a failed pass wrote %d lines, want the publish failure and one warning summary:\n%s", len(lines), logs.String())
 	}
 }

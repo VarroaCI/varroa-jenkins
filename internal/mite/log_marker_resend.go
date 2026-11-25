@@ -20,6 +20,14 @@ const (
 	// marker over the bound, and the recorder's sweep finalizes its run
 	// from the stored index.
 	logMarkersOwedMax = 10000
+
+	// logMarkerResendPassMax bounds the publishes of one resend pass. The
+	// idle sweep round runs after the pass on the same goroutine, so the
+	// bound also limits how long a slow bus holds the round. A full owed
+	// set takes logMarkersOwedMax/logMarkerResendPassMax passes (20
+	// minutes), which is less than logMarkerResendAge. A bus that takes
+	// each publish therefore gets each owed marker before its age bound.
+	logMarkerResendPassMax = 500
 )
 
 // owedFinalizedMarker is a finalized marker that did not reach the bus
@@ -29,9 +37,18 @@ type owedFinalizedMarker struct {
 	ns, name, jobPath string
 	// since is when the marker became owed, on h.logClock.
 	since time.Time
-	// lastTry is when a resend pass last tried the marker, on h.logClock.
-	// A pass tries the markers with the oldest value first.
+	// lastTry is when a publish of the marker was last tried, on
+	// h.logClock. oweFinalizedMarker sets it to since, because the drain
+	// tried the marker until then. A pass tries the markers with the
+	// oldest value first, so a marker owed later never goes ahead of a
+	// marker that a pass tried before it.
 	lastTry time.Time
+}
+
+// owedResend is one owed marker that a resend pass sends.
+type owedResend struct {
+	runID string
+	m     owedFinalizedMarker
 }
 
 // logStopping reports whether Close ran.
@@ -58,7 +75,7 @@ func (h *BusHandler) oweFinalizedMarker(ns, name, runID, jobPath string) {
 	_, known := h.logMarkersOwed[runID]
 	full := !known && len(h.logMarkersOwed) >= logMarkersOwedMax
 	if !known && !full {
-		h.logMarkersOwed[runID] = &owedFinalizedMarker{ns: ns, name: name, jobPath: jobPath, since: now}
+		h.logMarkersOwed[runID] = &owedFinalizedMarker{ns: ns, name: name, jobPath: jobPath, since: now, lastTry: now}
 	}
 	h.logMarkerMu.Unlock()
 	if full {
@@ -70,45 +87,22 @@ func (h *BusHandler) oweFinalizedMarker(ns, name, runID, jobPath string) {
 		"run_id", runID, "controller", ns+"/"+name)
 }
 
-// resendOwedMarkers sends each owed finalized marker again, the marker
-// tried longest ago first. It drops a marker older than
-// logMarkerResendAge with no publish. The first failed publish ends the
-// pass: the bus is most likely still down, and each failure can hold the
-// pass for one publish wait. The pass stamps lastTry before each publish,
-// so a marker that keeps failing goes behind each marker that the pass
-// did not reach. It holds no lock while it publishes.
+// resendOwedMarkers runs one resend pass. It drops each owed marker
+// older than logMarkerResendAge with no publish. It then sends at most
+// logMarkerResendPassMax owed markers again, the marker tried longest ago
+// first, and keeps the others for the next pass. The first failed
+// publish ends the pass: the bus is most likely still down, and each
+// failure can hold the pass for one publish wait. The pass stamps lastTry
+// before each publish, so a marker that keeps failing goes behind each
+// marker that the pass did not reach. It holds no lock while it
+// publishes. It writes one summary line, and no line for each marker.
 func (h *BusHandler) resendOwedMarkers(ctx context.Context) {
 	now := h.logClock()
-	type owed struct {
-		runID string
-		m     owedFinalizedMarker
-	}
-	var items []owed
-	var expired []string
-	h.logMarkerMu.Lock()
-	for runID, m := range h.logMarkersOwed {
-		if now.Sub(m.since) >= logMarkerResendAge {
-			delete(h.logMarkersOwed, runID)
-			expired = append(expired, runID)
-			continue
-		}
-		items = append(items, owed{runID: runID, m: *m})
-	}
-	h.logMarkerMu.Unlock()
-
-	for _, runID := range expired {
-		h.log().Warn("an owed finalized marker reached its age bound, the recorder's sweep finalizes the run",
-			"run_id", runID)
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if !items[i].m.lastTry.Equal(items[j].m.lastTry) {
-			return items[i].m.lastTry.Before(items[j].m.lastTry)
-		}
-		return items[i].runID < items[j].runID
-	})
+	items, dropped := h.owedMarkersForPass(now)
+	sent, failed := 0, 0
 	for _, it := range items {
 		if ctx.Err() != nil {
-			return
+			break
 		}
 		h.logMarkerMu.Lock()
 		if m, ok := h.logMarkersOwed[it.runID]; ok {
@@ -116,12 +110,63 @@ func (h *BusHandler) resendOwedMarkers(ctx context.Context) {
 		}
 		h.logMarkerMu.Unlock()
 		if !h.publishRunLogBestEffort(it.m.ns, it.m.name, it.runID, it.m.jobPath, map[string]interface{}{"finalized": true}) {
-			h.log().Warn("the resend of an owed finalized marker failed, the pass ends", "run_id", it.runID)
-			return
+			failed++
+			break
 		}
 		h.logMarkerMu.Lock()
 		delete(h.logMarkersOwed, it.runID)
 		h.logMarkerMu.Unlock()
-		h.log().Info("sent an owed finalized marker", "run_id", it.runID, "controller", it.m.ns+"/"+it.m.name)
+		sent++
 	}
+	h.logResendPass(sent, failed, dropped)
+}
+
+// owedMarkersForPass deletes each owed marker older than
+// logMarkerResendAge and returns how many it deleted. It returns at most
+// logMarkerResendPassMax of the other markers, the marker tried longest
+// ago first.
+func (h *BusHandler) owedMarkersForPass(now time.Time) ([]owedResend, int) {
+	var items []owedResend
+	dropped := 0
+	h.logMarkerMu.Lock()
+	for runID, m := range h.logMarkersOwed {
+		if now.Sub(m.since) >= logMarkerResendAge {
+			delete(h.logMarkersOwed, runID)
+			dropped++
+			continue
+		}
+		items = append(items, owedResend{runID: runID, m: *m})
+	}
+	h.logMarkerMu.Unlock()
+
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].m.lastTry.Equal(items[j].m.lastTry) {
+			return items[i].m.lastTry.Before(items[j].m.lastTry)
+		}
+		return items[i].runID < items[j].runID
+	})
+	if len(items) > logMarkerResendPassMax {
+		items = items[:logMarkerResendPassMax]
+	}
+	return items, dropped
+}
+
+// logResendPass writes the summary line of one resend pass, with the
+// owed markers left after it. A pass that dropped no marker and tried
+// none writes no line. A failed publish or a dropped marker makes the
+// line a warning: the recorder's sweep finalizes each dropped run from
+// the stored index.
+func (h *BusHandler) logResendPass(sent, failed, dropped int) {
+	if sent+failed+dropped == 0 {
+		return
+	}
+	h.logMarkerMu.Lock()
+	owed := len(h.logMarkersOwed)
+	h.logMarkerMu.Unlock()
+	write := h.log().Info
+	if failed > 0 || dropped > 0 {
+		write = h.log().Warn
+	}
+	write("a resend pass of the owed finalized markers ended",
+		"sent", sent, "failed", failed, "dropped_by_age", dropped, "owed", owed, "max", logMarkerResendPassMax)
 }

@@ -81,9 +81,11 @@ func (h *BusHandler) startLogIdleSweep(every time.Duration) {
 }
 
 // runLogIdleSweep runs one round every interval until ctx ends. Each
-// round first sends the owed finalized markers again. The marker pass
-// comes first because a bus outage also fails the owner reads, and the
-// first failed owner read ends the round.
+// round first runs one resend pass of the owed finalized markers. The
+// marker pass comes first because a bus outage also fails the owner
+// reads, and the first failed owner read ends the round. The pass sends
+// at most logMarkerResendPassMax markers, so it holds the round for a
+// bounded time.
 func (h *BusHandler) runLogIdleSweep(ctx context.Context, every time.Duration) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
