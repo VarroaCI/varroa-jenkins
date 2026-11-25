@@ -1196,11 +1196,13 @@ type ResourceClient interface {
 	// The StatefulSet recreates it. Idempotent: a missing pod is not an error.
 	DeleteControllerPod(ctx context.Context, namespace, name string) error
 
-	// DeleteControllerPodGrace deletes the named pod with graceSeconds as
-	// the delete grace, only while its UID equals uid. A missing pod and a
-	// pod created again under the same name are not errors. graceSeconds
-	// must be above 0: a force delete can run two pods for one ordinal.
-	DeleteControllerPodGrace(ctx context.Context, namespace, podName string, uid types.UID, graceSeconds int64) error
+	// DeleteControllerPodUID deletes the named pod only while its UID equals
+	// uid. graceSeconds above 0 sets the delete grace, and 0 keeps the pod's
+	// own termination grace. It never force deletes: a force delete can run
+	// two pods for one ordinal. It answers true when the API server accepted
+	// the delete, and false with no error when the pod is gone or a pod
+	// created again under the same name holds another UID.
+	DeleteControllerPodUID(ctx context.Context, namespace, podName string, uid types.UID, graceSeconds int64) (bool, error)
 
 	// GetControllerPod returns the Jenkins pod for a controller. Returns nil
 	// without error when the pod does not exist.
@@ -5244,14 +5246,41 @@ func (r *Reconciler) replaceStaleBootFailedPod(ctx context.Context, cr *v1alpha1
 	if !rollout.RollingUpdate || rollout.UpdateRevision == "" || rollout.UpdateRevision == podRevision {
 		return
 	}
-	if err := r.client.DeleteControllerPod(ctx, cr.Namespace, cr.Name); err != nil {
+	deleted, err := r.deleteControllerPodAs(ctx, cr, pod.Name, pod.UID, 0)
+	if err != nil {
 		r.Logger.Warn("delete stale boot-failed pod failed", "controller", cr.Namespace+"/"+cr.Name, "error", err)
 		return
 	}
+	if !deleted {
+		r.Logger.Info("stale boot-failed pod delete skipped: the pod is gone or another pod holds its name",
+			"controller", cr.Namespace+"/"+cr.Name, "uid", pod.UID)
+		return
+	}
 	r.Logger.Info("deleted boot-failed pod that lags the statefulset revision",
-		"controller", cr.Namespace+"/"+cr.Name, "podRevision", podRevision, "updateRevision", rollout.UpdateRevision)
-	r.emitOperatorEvent("pod.replaced", cr,
-		"deleted the boot-failed pod so the StatefulSet can roll the new revision", "")
+		"controller", cr.Namespace+"/"+cr.Name, "uid", pod.UID, "podRevision", podRevision, "updateRevision", rollout.UpdateRevision)
+	r.emitPodDeletedEvent("pod.replaced", cr,
+		"deleted the boot-failed pod so the StatefulSet can roll the new revision",
+		v1alpha1.ReasonJenkinsBootFailed, string(pod.UID))
+}
+
+// deleteControllerPodAs deletes the Jenkins pod of cr that uid names, under a
+// UID precondition, and reports whether the API server accepted the delete.
+// A pod that is gone, or a new pod under the same name, answers false: the
+// caller then writes no pod delete row, because a row names the UID of a pod
+// that the operator removed. An empty podName takes PodName(cr, 0).
+//
+// An empty uid means that no read named the pod. The delete then goes by
+// name with no precondition, as DeleteControllerPod does, and answers true.
+// The caller's row then names no pod, so the record store gives it to no run.
+func (r *Reconciler) deleteControllerPodAs(ctx context.Context, cr *v1alpha1.Controller, podName string, uid types.UID,
+	graceSeconds int64) (bool, error) {
+	if uid == "" {
+		return true, r.client.DeleteControllerPod(ctx, cr.Namespace, cr.Name)
+	}
+	if podName == "" {
+		podName = PodName(cr, 0)
+	}
+	return r.client.DeleteControllerPodUID(ctx, cr.Namespace, podName, uid, graceSeconds)
 }
 
 // jenkinsContainerReady reports the Jenkins container's own readiness, which is
@@ -7361,6 +7390,35 @@ func (r *Reconciler) emitOperatorEvent(eventType string, cr *v1alpha1.Controller
 		Message:    message,
 		Reason:     reason,
 	})
+}
+
+// emitPodDeletedEvent emits the operator activity event of a pod delete that
+// the operator made. See podDeletedEvent.
+func (r *Reconciler) emitPodDeletedEvent(eventType string, cr *v1alpha1.Controller, message, reason, instance string) {
+	if r.activityPublisher == nil {
+		return
+	}
+	r.activityPublisher.Publish(podDeletedEvent(eventType, cr, message, reason, instance))
+}
+
+// podDeletedEvent builds the operator activity event of a pod delete that the
+// operator made. instance is the metadata.uid of the deleted pod. The record
+// store matches it with the owning instance of an interrupted run, and copies
+// reason onto that run as the cause of its end. reason must therefore be one
+// condition reason word, never free text: a tenant reader reads the run. The
+// severity is fixed, so Normalize never reads a word such as
+// JenkinsBootFailed as an error token.
+func podDeletedEvent(eventType string, cr *v1alpha1.Controller, message, reason, instance string) activity.Event {
+	return activity.Event{
+		Type:       eventType,
+		Source:     "operator",
+		Severity:   "info",
+		Controller: cr.Name,
+		Namespace:  cr.Namespace,
+		Message:    message,
+		Reason:     reason,
+		Instance:   instance,
+	}
 }
 
 // phaseEventReason returns the cause of a stream-loss phase change: the

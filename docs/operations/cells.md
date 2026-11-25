@@ -266,7 +266,8 @@ stream ends. A failed presence read of the cell starts
 the grace count again. These waits end 30 minutes after `unreadySince`, or at the grace when the
 grace is longer. After such a roll, the eviction waits one more grace period, so the new pod can
 connect. The operator logs each pod delete at WARN with the cause, and the `cell.rolled` activity
-event carries it. The cause names the age of the last mite heartbeat that the operator saw.
+event carries it. The cause names the age of the last mite heartbeat that the operator saw. The
+event also names the deleted pod in its `instance` field.
 
 **Teardown** frees the placement record and the name at once.
 

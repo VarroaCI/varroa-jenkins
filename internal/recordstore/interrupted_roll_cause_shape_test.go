@@ -8,10 +8,10 @@ import (
 )
 
 // TestCellRollCauseShapeAdmitsTheOperatorReasons asserts that the shape
-// admits each reason the operator's cell readiness rule writes on a
-// cell.rolled row, and refuses text that is not one reason word.
+// admits each reason the operator writes on a cell.rolled or pod.replaced
+// row, and refuses text that is not one reason word.
 func TestCellRollCauseShapeAdmitsTheOperatorReasons(t *testing.T) {
-	for _, reason := range []string{v1alpha1.ReasonMiteUnreachable, v1alpha1.ReasonNotProvisioned} {
+	for _, reason := range []string{v1alpha1.ReasonMiteUnreachable, v1alpha1.ReasonNotProvisioned, v1alpha1.ReasonJenkinsBootFailed} {
 		if !cellRollCauseShape.MatchString(reason) {
 			t.Errorf("the shape refuses the operator reason %q", reason)
 		}

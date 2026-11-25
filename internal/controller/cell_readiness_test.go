@@ -467,8 +467,9 @@ func TestCellRollNeverFiresForConfigGates(t *testing.T) {
 
 // TestCellRolledActivityEvent asserts task 5.5: a roll publishes exactly
 // one activity event of type cell.rolled through the reconciler's ordinary
-// activityPublisher. It follows the embedded-NATS pattern in
-// controller_activity_test.go, gated the same way.
+// activityPublisher. The roll deletes the observed pod under its UID, and
+// the event names the base reason and that UID. It follows the embedded-NATS
+// pattern in controller_activity_test.go, gated the same way.
 func TestCellRolledActivityEvent(t *testing.T) {
 	if os.Getenv("NATS_TEST") == "" && os.Getenv("CI") == "" {
 		t.Skip("skipping NATS integration test; set NATS_TEST=1 to run")
@@ -493,6 +494,7 @@ func TestCellRolledActivityEvent(t *testing.T) {
 
 	pub := activity.NewPublisher(bus.DefaultCluster, conn)
 	client := newTestClient()
+	client.controllerPod = startedCellPod("pod-uid-1")
 	rec := newTestReconciler(client)
 	rec.SetActivityPublisher(pub)
 	rec.SetClaimGate("1")
@@ -555,6 +557,14 @@ done:
 	}
 	if len(rolled) != 1 {
 		t.Fatalf("expected exactly 1 cell.rolled event, got %d (%+v)", len(rolled), got)
+	}
+	if rolled[0].Reason != v1alpha1.ReasonNotProvisioned || rolled[0].Instance != "pod-uid-1" {
+		t.Fatalf("cell.rolled reason = %q, instance = %q, want %q and pod-uid-1",
+			rolled[0].Reason, rolled[0].Instance, v1alpha1.ReasonNotProvisioned)
+	}
+	if client.deleteControllerPodCalls != 0 || len(client.podUIDDeletes) != 1 || client.podUIDDeletes[0].uid != "pod-uid-1" {
+		t.Fatalf("deletes = %d by name and %+v by UID, want one UID delete of pod-uid-1",
+			client.deleteControllerPodCalls, client.podUIDDeletes)
 	}
 }
 

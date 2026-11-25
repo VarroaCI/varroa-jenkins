@@ -522,9 +522,13 @@ func interruptedActivityMessage(run runInterruptCandidate, reason string) string
 	return fmt.Sprintf("%s was interrupted (%s)", run.jobPath, reason)
 }
 
-// cellRolledActivityType is the activity type that the operator writes when
-// its cell readiness rule deletes a cell pod.
-const cellRolledActivityType = "cell.rolled"
+// rollCauseActivityTypes are the activity types of the operator pod deletes
+// that name a cause. The operator writes cell.rolled when its cell readiness
+// rule deletes a cell pod, with the reason MiteUnreachable or
+// NotProvisioned. It writes pod.replaced when it deletes a boot-failed pod
+// that lags the StatefulSet revision, with the reason JenkinsBootFailed. Each
+// row names the deleted pod in its instance field.
+var rollCauseActivityTypes = []string{"cell.rolled", "pod.replaced"}
 
 // cellRollCauseShape admits one condition reason word, such as
 // MiteUnreachable. A tenant reader reads the stored detail, so the mark
@@ -532,15 +536,19 @@ const cellRolledActivityType = "cell.rolled"
 // raw presence read error, and the operator can change its text.
 var cellRollCauseShape = regexp.MustCompile(`^[A-Z][A-Za-z0-9]{0,63}$`)
 
-// cellRollCauseReadTimeout bounds the cell.rolled read of a cell-rolled
+// cellRollCauseReadTimeout bounds the pod delete read of a cell-rolled
 // mark. The detail is not needed to end the run, so a slow activity table
 // must not hold the mark or the locks that its transaction already holds.
 const cellRollCauseReadTimeout = 2 * time.Second
 
-// readCellRollCause answers the reason word of the oldest cell.rolled
-// activity row of the run's cell, from after the run's liveness baseline to
-// the mark time. The first roll after the run's last sign of life removed
-// the pod of the run. A later roll in the window removed a replacement pod.
+// readCellRollCause answers the reason word of the operator pod delete that
+// removed the pod of the run. The row is of a rollCauseActivityTypes type,
+// on the run's cell, and its instance equals the run's owning instance. Its
+// time is after the run's creation and at or before the mark time. Only the
+// instance proves that the delete removed the run's pod: a delete of
+// another pod of the cell in the same window names the wrong cause, and no
+// time order can tell the two apart. The creation time bounds the scan of
+// the cell's rows. When two rows name the pod, the first delete removed it.
 // It answers "" when no row matches or the reason word has another shape.
 //
 // The row comes from the operator through the activity stream, so it can
@@ -585,11 +593,12 @@ func queryCellRollCause(ctx context.Context, sp pgx.Tx, run runInterruptCandidat
 	var cause string
 	err := sp.QueryRow(ctx, `
 		SELECT reason FROM varroa.activity
-		WHERE type = $1 AND cluster = $2 AND namespace = $3 AND controller = $4
+		WHERE type = ANY($1) AND cluster = $2 AND namespace = $3 AND controller = $4
 		  AND ts > $5 AND ts <= $6
+		  AND payload->>'instance' = $7
 		ORDER BY ts ASC
 		LIMIT 1
-	`, cellRolledActivityType, run.cluster, run.namespace, run.cell, livenessBaseline(run), now).Scan(&cause)
+	`, rollCauseActivityTypes, run.cluster, run.namespace, run.cell, run.createdAt, now, run.cellInstance).Scan(&cause)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}

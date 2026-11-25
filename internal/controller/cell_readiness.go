@@ -503,21 +503,26 @@ func (r *Reconciler) evaluateCellReadiness(ctx context.Context, cr *v1alpha1.Con
 		cell.RolledAt = roll.RolledAt
 		cond.Reason, cond.Message = roll.Reason, roll.Message
 		if roll.DeletePod {
-			if err := r.rollCellPod(ctx, cr, obs); err != nil {
-				if r.Logger != nil {
+			uid := rolledPodInstance(obs, cell)
+			deleted, err := r.rollCellPod(ctx, cr, obs, uid)
+			if err != nil || !deleted {
+				if r.Logger != nil && err != nil {
 					r.Logger.Warn("roll cell pod failed", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+				} else if r.Logger != nil {
+					r.Logger.Info("cell pod roll skipped: the pod is gone or another pod holds its name",
+						"controller", cr.Namespace+"/"+cr.Name, "uid", uid)
 				}
 				// The delete did not happen: revert the tentative roll
-				// marker so the next tick retries instead of skipping it.
+				// marker so the next tick decides again instead of skipping it.
 				cell.RolledAt = previousRolledAt
 				cond.Reason, cond.Message = baseReason, ""
 			} else {
 				cause := cellRollCause(cr, baseReason, now.Sub(roll.UnreadySince.Time), now)
 				if r.Logger != nil {
 					r.Logger.Warn("cell pod rolled", "controller", cr.Namespace+"/"+cr.Name,
-						"pod", obs.Name, "reason", baseReason, "podReady", obs.Ready, "cause", cause)
+						"pod", obs.Name, "uid", uid, "reason", baseReason, "podReady", obs.Ready, "cause", cause)
 				}
-				r.emitOperatorEvent("cell.rolled", cr, "rolled the cell pod: "+cause, baseReason)
+				r.emitPodDeletedEvent("cell.rolled", cr, "rolled the cell pod: "+cause, baseReason, uid)
 			}
 		}
 	default:
@@ -601,14 +606,37 @@ func (r *Reconciler) cellPodPullWindows(ctx context.Context, cr *v1alpha1.Contro
 	return pullWindowsByContainer(events)
 }
 
-// rollCellPod deletes the cell pod. A pod whose main containers have not
-// started gets a short delete grace and a UID precondition, because the pod
-// grace covers a Jenkins drain that such a pod does not need.
-func (r *Reconciler) rollCellPod(ctx context.Context, cr *v1alpha1.Controller, obs initObservation) error {
-	if obs.Present && !obs.MainStarted && obs.UID != "" {
-		return r.client.DeleteControllerPodGrace(ctx, cr.Namespace, obs.Name, obs.UID, cellInitPodDeleteGrace)
+// rolledPodInstance answers the metadata.uid of the pod that a cell roll
+// deletes: the observed pod when the roll read it, else the pod that
+// status.cell.instance names from updateCellInstance earlier in this tick.
+// The delete carries the answer as its UID precondition, so the cell.rolled
+// row never names a pod that the delete did not remove. An empty answer
+// means that no read named a pod.
+func rolledPodInstance(obs initObservation, cell *v1alpha1.CellStatus) string {
+	if obs.UID != "" {
+		return string(obs.UID)
 	}
-	return r.client.DeleteControllerPod(ctx, cr.Namespace, cr.Name)
+	if cell == nil {
+		return ""
+	}
+	return cell.Instance
+}
+
+// rollCellPod deletes the cell pod that uid names and reports whether the
+// API server accepted the delete (deleteControllerPodAs). A pod whose main
+// containers have not started gets a short delete grace, because the pod
+// grace covers a Jenkins drain that such a pod does not need. Every other pod
+// keeps its own grace.
+func (r *Reconciler) rollCellPod(ctx context.Context, cr *v1alpha1.Controller, obs initObservation, uid string) (bool, error) {
+	podName := ""
+	grace := int64(0)
+	if obs.Present && obs.UID != "" && obs.UID == types.UID(uid) {
+		podName = obs.Name
+		if !obs.MainStarted {
+			grace = cellInitPodDeleteGrace
+		}
+	}
+	return r.deleteControllerPodAs(ctx, cr, podName, types.UID(uid), grace)
 }
 
 // sortedTenantCopy returns a sorted copy of in, or nil for an empty in.

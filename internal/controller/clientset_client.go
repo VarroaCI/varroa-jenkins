@@ -5574,21 +5574,27 @@ func (c *ClientsetClient) DeleteControllerPod(ctx context.Context, namespace, na
 	return nil
 }
 
-// DeleteControllerPodGrace deletes one pod with graceSeconds as the delete
-// grace and a UID precondition. NotFound and Conflict answer nil: in both
-// cases the observed pod is gone.
-func (c *ClientsetClient) DeleteControllerPodGrace(ctx context.Context, namespace, podName string, uid types.UID, graceSeconds int64) error {
-	if graceSeconds <= 0 {
-		return fmt.Errorf("delete pod %s/%s: grace must be above 0, got %d", namespace, podName, graceSeconds)
+// DeleteControllerPodUID deletes one pod under a UID precondition. A grace
+// of 0 sends no GracePeriodSeconds, so the pod keeps its own termination
+// grace; a 0 in the request would force the delete. NotFound and Conflict
+// answer false and no error: the pod is gone, or a new pod holds the name.
+func (c *ClientsetClient) DeleteControllerPodUID(ctx context.Context, namespace, podName string, uid types.UID, graceSeconds int64) (bool, error) {
+	if graceSeconds < 0 {
+		return false, fmt.Errorf("delete pod %s/%s: grace must not be negative, got %d", namespace, podName, graceSeconds)
 	}
-	err := c.clientset.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{
-		GracePeriodSeconds: &graceSeconds,
-		Preconditions:      &metav1.Preconditions{UID: &uid},
-	})
-	if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
-		return err
+	opts := metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}}
+	if graceSeconds > 0 {
+		opts.GracePeriodSeconds = &graceSeconds
 	}
-	return nil
+	err := c.clientset.CoreV1().Pods(namespace).Delete(ctx, podName, opts)
+	switch {
+	case err == nil:
+		return true, nil
+	case apierrors.IsNotFound(err), apierrors.IsConflict(err):
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 // ListTenantAgentPods lists the pods in namespace that carry the kubernetes

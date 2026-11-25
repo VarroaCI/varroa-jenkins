@@ -175,6 +175,7 @@ var activityListOutputSchema = listOutputSchema("Activity event.", []schemaField
 	{Name: "buildNumber", Type: "integer", Desc: "Jenkins build number, if any."},
 	{Name: "result", Type: "string", Desc: "Build result, if any."},
 	{Name: "url", Type: "string", Desc: "Link to the build, if any."},
+	{Name: "instance", Type: "string", Desc: "UID of the pod that an operator pod delete removed, if any."},
 })
 
 // searchListOutputSchema describes the result of search: api.SearchResult

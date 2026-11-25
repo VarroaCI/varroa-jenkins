@@ -45,9 +45,9 @@ func TestCellRollHoldsWhileInitProgressing(t *testing.T) {
 	for _, at := range []time.Duration{0, 11 * time.Minute, 21 * time.Minute, 25 * time.Minute} {
 		rec.evaluateCellReadiness(context.Background(), cr, t0.Add(at))
 	}
-	if client.deleteControllerPodCalls != 0 || len(client.podGraceDeletes) != 0 {
-		t.Fatalf("expected no delete while plugins-init progresses, got %d plain and %d grace deletes",
-			client.deleteControllerPodCalls, len(client.podGraceDeletes))
+	if client.deleteControllerPodCalls != 0 || len(client.podUIDDeletes) != 0 {
+		t.Fatalf("expected no delete while plugins-init progresses, got %d plain and %d UID deletes",
+			client.deleteControllerPodCalls, len(client.podUIDDeletes))
 	}
 	if cr.Status.Cell.Evacuate {
 		t.Fatal("expected no evacuate while plugins-init progresses, past twice the grace period")
@@ -80,9 +80,9 @@ func TestCellRollHoldsBetweenInitContainers(t *testing.T) {
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(24*time.Minute))
-	if client.deleteControllerPodCalls != 0 || len(client.podGraceDeletes) != 0 {
-		t.Fatalf("expected no delete between init containers, got %d plain and %d grace deletes",
-			client.deleteControllerPodCalls, len(client.podGraceDeletes))
+	if client.deleteControllerPodCalls != 0 || len(client.podUIDDeletes) != 0 {
+		t.Fatalf("expected no delete between init containers, got %d plain and %d UID deletes",
+			client.deleteControllerPodCalls, len(client.podUIDDeletes))
 	}
 	if cr.Status.Cell.Evacuate {
 		t.Fatal("expected no evacuate between init containers")
@@ -104,8 +104,8 @@ func TestCellRollFiresPastInitCap(t *testing.T) {
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(cellInitRollCap+time.Minute))
-	if len(client.podGraceDeletes) != 1 {
-		t.Fatalf("expected one roll past the init cap, got %d grace deletes", len(client.podGraceDeletes))
+	if len(client.podUIDDeletes) != 1 {
+		t.Fatalf("expected one roll past the init cap, got %d grace deletes", len(client.podUIDDeletes))
 	}
 	if !cr.Status.Cell.Evacuate {
 		t.Fatal("expected evacuate past the init cap and twice the grace period")
@@ -130,8 +130,8 @@ func TestCellRollFiresOnInitCrashLoop(t *testing.T) {
 			client.controllerPod = pod
 			rec.evaluateCellReadiness(context.Background(), cr, t0)
 			rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+time.Minute))
-			if len(client.podGraceDeletes) != 1 {
-				t.Fatalf("expected one roll, got %d grace deletes", len(client.podGraceDeletes))
+			if len(client.podUIDDeletes) != 1 {
+				t.Fatalf("expected one roll, got %d grace deletes", len(client.podUIDDeletes))
 			}
 		})
 	}
@@ -153,19 +153,18 @@ func TestCellRollClockStartsAtInitFinish(t *testing.T) {
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(20*time.Minute))
-	if client.deleteControllerPodCalls != 0 || len(client.podGraceDeletes) != 0 {
-		t.Fatalf("expected no roll four minutes after init finish, got %d plain and %d grace deletes",
-			client.deleteControllerPodCalls, len(client.podGraceDeletes))
+	if client.deleteControllerPodCalls != 0 || len(client.podUIDDeletes) != 0 {
+		t.Fatalf("expected no roll four minutes after init finish, got %d plain and %d UID deletes",
+			client.deleteControllerPodCalls, len(client.podUIDDeletes))
 	}
 	if cr.Status.Cell.Evacuate {
 		t.Fatal("expected no evacuate four minutes after init finish")
 	}
 	rec.evaluateCellReadiness(context.Background(), cr, finished.Add(grace+time.Second))
-	if client.deleteControllerPodCalls != 1 {
-		t.Fatalf("expected one plain delete of a started pod once the init-finish clock passes the grace, got %d", client.deleteControllerPodCalls)
-	}
-	if len(client.podGraceDeletes) != 0 {
-		t.Fatalf("expected no short-grace delete for a pod whose main containers run, got %d", len(client.podGraceDeletes))
+	want := podUIDDelete{namespace: "ns", pod: "cell1-abcd1234-0", uid: "pod-uid-1", graceSeconds: 0}
+	if client.deleteControllerPodCalls != 0 || len(client.podUIDDeletes) != 1 || client.podUIDDeletes[0] != want {
+		t.Fatalf("expected one UID delete with the pod's own grace once the init-finish clock passes the grace, got %d plain and %+v",
+			client.deleteControllerPodCalls, client.podUIDDeletes)
 	}
 }
 
@@ -185,7 +184,7 @@ func TestCellEvacuateStickyWithinUnreadyPeriod(t *testing.T) {
 	if !cr.Status.Cell.Evacuate {
 		t.Fatal("expected evacuate to stay true within the same unready period")
 	}
-	if client.deleteControllerPodCalls != 0 || len(client.podGraceDeletes) != 0 {
+	if client.deleteControllerPodCalls != 0 || len(client.podUIDDeletes) != 0 {
 		t.Fatal("expected no second roll within the same unready period")
 	}
 	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
@@ -228,9 +227,9 @@ func TestCellRollSkipsTerminatingPod(t *testing.T) {
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+time.Minute))
-	if client.deleteControllerPodCalls != 0 || len(client.podGraceDeletes) != 0 {
-		t.Fatalf("expected no delete of a terminating pod, got %d plain and %d grace deletes",
-			client.deleteControllerPodCalls, len(client.podGraceDeletes))
+	if client.deleteControllerPodCalls != 0 || len(client.podUIDDeletes) != 0 {
+		t.Fatalf("expected no delete of a terminating pod, got %d plain and %d UID deletes",
+			client.deleteControllerPodCalls, len(client.podUIDDeletes))
 	}
 	if cr.Status.Cell.RolledAt != nil {
 		t.Fatalf("expected rolledAt unset, got %v", cr.Status.Cell.RolledAt)
@@ -252,9 +251,9 @@ func TestCellRollInitPodUsesShortGraceAndUID(t *testing.T) {
 	if client.deleteControllerPodCalls != 0 {
 		t.Fatalf("expected no plain delete for an init-stage pod, got %d", client.deleteControllerPodCalls)
 	}
-	want := podGraceDelete{namespace: "ns", pod: "cell1-abcd1234-0", uid: "pod-uid-1", graceSeconds: 30}
-	if len(client.podGraceDeletes) != 1 || client.podGraceDeletes[0] != want {
-		t.Fatalf("grace deletes = %+v, want exactly %+v", client.podGraceDeletes, want)
+	want := podUIDDelete{namespace: "ns", pod: "cell1-abcd1234-0", uid: "pod-uid-1", graceSeconds: 30}
+	if len(client.podUIDDeletes) != 1 || client.podUIDDeletes[0] != want {
+		t.Fatalf("grace deletes = %+v, want exactly %+v", client.podUIDDeletes, want)
 	}
 	if cr.Status.Cell.RolledAt == nil {
 		t.Fatal("expected rolledAt set after the short-grace delete")
@@ -410,9 +409,9 @@ func TestCellRollHoldsWhileFirstInitPulls(t *testing.T) {
 	for _, at := range []time.Duration{0, 11 * time.Minute, 21 * time.Minute, 25 * time.Minute} {
 		rec.evaluateCellReadiness(context.Background(), cr, t0.Add(at))
 	}
-	if client.deleteControllerPodCalls != 0 || len(client.podGraceDeletes) != 0 {
-		t.Fatalf("expected no delete while the image pulls, got %d plain and %d grace deletes",
-			client.deleteControllerPodCalls, len(client.podGraceDeletes))
+	if client.deleteControllerPodCalls != 0 || len(client.podUIDDeletes) != 0 {
+		t.Fatalf("expected no delete while the image pulls, got %d plain and %d UID deletes",
+			client.deleteControllerPodCalls, len(client.podUIDDeletes))
 	}
 	if cr.Status.Cell.Evacuate {
 		t.Fatal("expected no evacuate while the image pulls, past twice the grace period")
@@ -473,8 +472,8 @@ func TestCellRollFiresOnFirstInitWaitWithoutPull(t *testing.T) {
 			client.pullEventsErr = tc.err
 			rec.evaluateCellReadiness(context.Background(), cr, t0)
 			rec.evaluateCellReadiness(context.Background(), cr, t0.Add(grace+time.Minute))
-			if len(client.podGraceDeletes) != 1 {
-				t.Fatalf("expected one roll, got %d grace deletes", len(client.podGraceDeletes))
+			if len(client.podUIDDeletes) != 1 {
+				t.Fatalf("expected one roll, got %d grace deletes", len(client.podUIDDeletes))
 			}
 			if cr.Status.Cell.RolledAt == nil {
 				t.Fatal("expected rolledAt set after the roll")
@@ -492,8 +491,8 @@ func TestCellRollFiresPastInitCapWhilePulling(t *testing.T) {
 
 	rec.evaluateCellReadiness(context.Background(), cr, t0)
 	rec.evaluateCellReadiness(context.Background(), cr, t0.Add(cellInitRollCap+time.Minute))
-	if len(client.podGraceDeletes) != 1 {
-		t.Fatalf("expected one roll past the init cap while pulling, got %d grace deletes", len(client.podGraceDeletes))
+	if len(client.podUIDDeletes) != 1 {
+		t.Fatalf("expected one roll past the init cap while pulling, got %d grace deletes", len(client.podUIDDeletes))
 	}
 	if !cr.Status.Cell.Evacuate {
 		t.Fatal("expected evacuate past the init cap and twice the grace period")

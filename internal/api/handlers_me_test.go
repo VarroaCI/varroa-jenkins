@@ -512,8 +512,8 @@ func (f *fakeResourceClient) StreamPodLogs(_ context.Context, _, _ string, _ cor
 	return nil, nil
 }
 func (f *fakeResourceClient) DeleteControllerPod(_ context.Context, _, _ string) error { return nil }
-func (f *fakeResourceClient) DeleteControllerPodGrace(_ context.Context, _, _ string, _ types.UID, _ int64) error {
-	return nil
+func (f *fakeResourceClient) DeleteControllerPodUID(_ context.Context, _, _ string, _ types.UID, _ int64) (bool, error) {
+	return false, nil
 }
 func (f *fakeResourceClient) ListResourceQuotas(_ context.Context, _ string) ([]corev1.ResourceQuota, error) {
 	return nil, nil

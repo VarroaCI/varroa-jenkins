@@ -193,7 +193,7 @@ of the job. The `tab` URL parameter keeps the active tab.
 Each pipelines page sets the browser tab title.
 
 An interrupted build shows a banner naming the reason, and a link to its retry when one exists.
-A `cell-rolled` banner names the cause (`MiteUnreachable`).
+A `cell-rolled` banner names the cause (`MiteUnreachable` or `JenkinsBootFailed`).
 
 A stage still open when the build completes takes the build's end time and no duration. It
 reads `SUCCESS` for a successful build, else `ABORTED`.

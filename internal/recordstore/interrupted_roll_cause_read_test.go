@@ -82,7 +82,7 @@ func TestCellRolledMarkCommitsWhenTheActivityReadFails(t *testing.T) {
 	runID := startRunOnCell(t, pool, "manual:"+newTestUUIDv7String(), "refused-a")
 	c := fetchRunningCandidate(t, pool, runID)
 	mark := livenessBaseline(c).Add(10 * time.Minute).UTC().Truncate(time.Microsecond)
-	ingestActivityEvent(t, pool, cellRolledRow("refused-a", mark.Add(-time.Second), "MiteUnreachable"))
+	ingestActivityEvent(t, pool, cellRolledRow("refused-a", c.cellInstance, mark.Add(-time.Second), "MiteUnreachable"))
 	refuseActivityReads(t, db)
 
 	changed, err := markInterrupted(context.Background(), pool, c, ReasonCellRolled, mark, "")
@@ -114,7 +114,7 @@ func TestCellRolledMarkCommitsWhenTheActivityReadTimesOut(t *testing.T) {
 	runID := startRunOnCell(t, pool, "manual:"+newTestUUIDv7String(), "slow-a")
 	c := fetchRunningCandidate(t, pool, runID)
 	mark := livenessBaseline(c).Add(10 * time.Minute).UTC().Truncate(time.Microsecond)
-	ingestActivityEvent(t, pool, cellRolledRow("slow-a", mark.Add(-time.Second), "MiteUnreachable"))
+	ingestActivityEvent(t, pool, cellRolledRow("slow-a", c.cellInstance, mark.Add(-time.Second), "MiteUnreachable"))
 
 	locker, err := db.BeginTx(context.Background(), nil)
 	if err != nil {

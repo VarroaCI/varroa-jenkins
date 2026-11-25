@@ -280,6 +280,10 @@ components:
           type: string
         controller:
           type: string
+        instance:
+          description: 'The metadata.uid of the pod that the event is about. The operator
+            sets it on a cell.rolled or pod.replaced event: the pod that it deleted.'
+          type: string
         itemPath:
           type: string
         message:
@@ -3760,9 +3764,10 @@ components:
             $ref: '#/components/schemas/components_schemas_RunInput'
           type: array
         interruptedDetail:
-          description: The condition reason of the cell roll that ended a cell-rolled
-            run, such as MiteUnreachable or NotProvisioned. Set only when result is
-            INTERRUPTED and the record store held the roll at the mark.
+          description: 'The reason word of the operator pod delete that removed the
+            pod of a cell-rolled run: MiteUnreachable or NotProvisioned for a cell
+            roll, JenkinsBootFailed for a replaced boot-failed pod. Set only when
+            result is INTERRUPTED and the record store held the delete at the mark.'
           type: string
         interruptedReason:
           description: Set only when result is INTERRUPTED.
@@ -5018,6 +5023,10 @@ components:
         cluster:
           type: string
         controller:
+          type: string
+        instance:
+          description: 'The metadata.uid of the pod that the event is about. The operator
+            sets it on a cell.rolled or pod.replaced event: the pod that it deleted.'
           type: string
         itemPath:
           type: string
@@ -11901,9 +11910,10 @@ components:
             $ref: '#/components/schemas/components_schemas_RunInput'
           type: array
         interruptedDetail:
-          description: The condition reason of the cell roll that ended a cell-rolled
-            run, such as MiteUnreachable or NotProvisioned. Set only when result is
-            INTERRUPTED and the record store held the roll at the mark.
+          description: 'The reason word of the operator pod delete that removed the
+            pod of a cell-rolled run: MiteUnreachable or NotProvisioned for a cell
+            roll, JenkinsBootFailed for a replaced boot-failed pod. Set only when
+            result is INTERRUPTED and the record store held the delete at the mark.'
           type: string
         interruptedReason:
           description: Set only when result is INTERRUPTED.

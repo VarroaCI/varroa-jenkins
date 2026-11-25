@@ -979,6 +979,8 @@ export interface ActivityEvent {
   phase?: string;
   reason?: string;
   severity?: "info" | "warning" | "error";
+  // metadata.uid of the pod that an operator pod delete removed
+  instance?: string;
 }
 
 export interface ActivityPage {
@@ -2229,7 +2231,7 @@ export interface RunDetail {
   logComplete?: boolean;
   /** Set only when result is INTERRUPTED. */
   interruptedReason?: string;
-  /** The condition reason of the cell roll that ended a cell-rolled run, such as MiteUnreachable. Set only when result is INTERRUPTED and the record store held the roll at the mark. */
+  /** The reason word of the operator pod delete that removed the pod of a cell-rolled run, such as MiteUnreachable or JenkinsBootFailed. Set only when result is INTERRUPTED and the record store held the delete at the mark. */
   interruptedDetail?: string;
   /** The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED. */
   triggerError?: string;
