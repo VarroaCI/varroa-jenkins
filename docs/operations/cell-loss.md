@@ -125,7 +125,8 @@ sends no new claim.
 The recorder gives the run to the new pod when the placement announcement names that pod as the
 controller's current pod. The first heartbeat, stage, or completion from the new pod moves the run.
 The move also gives the run's fleet locks to the new pod. The gateway accepts the new pod's log and
-completion facts at once. An event from the replaced pod changes nothing after the move.
+completion facts at once. Before that announcement, the gateway and the recorder hold the new pod's
+log and completion for at most one minute. An event from the replaced pod changes nothing after the move.
 
 A pod read of the replaced pod does not end such a build. Only `no-heartbeat`, after fifteen
 minutes with no live pod, and `heartbeat-lost` end it. The same read does not finalize its log.

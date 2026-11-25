@@ -123,7 +123,7 @@ func (h *BusHandler) onRestartSourceChunk(name, ns string, chunk *mitev1.RunStat
 	case ownerForeign:
 		h.rejectRestartSource(ctx, ns, name, chunk, stateReasonForeignRun)
 		return
-	case ownerUnknown:
+	case ownerUnknown, ownerNotReady:
 		h.sendRunStateAckKind(ns, name, chunk, stateAckStatusBusy, stateReasonBudgetFull, stateBudgetPauseMinMS, true)
 		return
 	}

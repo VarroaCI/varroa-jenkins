@@ -279,7 +279,7 @@ func (h *BusHandler) OnStreamRunStateChunk(name, ns, cellInstance string, chunk 
 	case ownerForeign:
 		h.rejectRunState(ctx, ns, name, chunk, stateReasonForeignRun)
 		return
-	case ownerUnknown:
+	case ownerUnknown, ownerNotReady:
 		h.sendRunStateAck(ns, name, chunk, stateAckStatusBusy, stateReasonBudgetFull, stateBudgetPauseMinMS)
 		return
 	}

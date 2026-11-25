@@ -41,6 +41,11 @@ type ownerLookupRequest struct {
 // lookup, found or not. It carries a short reason only when the lookup
 // itself failed, so the caller never mistakes a database error for a
 // genuine miss.
+//
+// NotReady is true when the caller can be the replacement pod of a
+// controller with no cell role that the operator has not announced yet
+// (awaitingAnnounceSQL). Instance then names the stored owner. The
+// gateway answers such a caller with a bounded, retryable refusal.
 type ownerLookupResponse struct {
 	Found        bool   `json:"found"`
 	Cluster      string `json:"cluster,omitempty"`
@@ -49,6 +54,7 @@ type ownerLookupResponse struct {
 	Instance     string `json:"instance,omitempty"`
 	Status       string `json:"status,omitempty"`
 	AnchorUnixMs int64  `json:"anchorUnixMs,omitempty"`
+	NotReady     bool   `json:"notReady,omitempty"`
 	Error        string `json:"error,omitempty"`
 }
 
@@ -111,13 +117,15 @@ func handleOwnerLookup(logger *slog.Logger, pool *pgxpool.Pool, data []byte) []b
 // The answer names the caller as the owner when replacementPodSQL holds
 // for it. The ingest write applies the same rule and moves the run, but
 // the gateway decides on a chunk or a completion before any write
-// reaches the recorder. The answer writes nothing.
+// reaches the recorder. The answer sets NotReady when
+// awaitingAnnounceSQL holds for the caller. The answer writes nothing.
 func lookupOwner(ctx context.Context, pool *pgxpool.Pool, req ownerLookupRequest) (ownerLookupResponse, error) {
 	row := pool.QueryRow(ctx, `
 		SELECT ri.cluster, ri.namespace, ri.cell,
 		       CASE WHEN `+replacementPodSQL("ri", "$2", "$3", "$4", "$5")+` THEN $2::text ELSE ri.cell_instance END,
 		       r.status,
-		       `+anchorExpr+`
+		       `+anchorExpr+`,
+		       COALESCE(`+awaitingAnnounceSQL("ri", "$2", "$3", "$4", "$5")+`, false)
 		FROM varroa.run_intents ri
 		LEFT JOIN varroa.runs r ON r.run_id = ri.run_id AND `+recordsBuildRunSQL+`
 		WHERE ri.run_id = $1
@@ -126,7 +134,8 @@ func lookupOwner(ctx context.Context, pool *pgxpool.Pool, req ownerLookupRequest
 	var cluster, namespace string
 	var cell, cellInstance, status *string
 	var anchor *time.Time
-	if err := row.Scan(&cluster, &namespace, &cell, &cellInstance, &status, &anchor); err != nil {
+	var notReady bool
+	if err := row.Scan(&cluster, &namespace, &cell, &cellInstance, &status, &anchor, &notReady); err != nil {
 		if err == pgx.ErrNoRows {
 			return ownerLookupResponse{Found: false}, nil
 		}
@@ -140,6 +149,7 @@ func lookupOwner(ctx context.Context, pool *pgxpool.Pool, req ownerLookupRequest
 		Cell:      derefString(cell),
 		Instance:  derefString(cellInstance),
 		Status:    derefString(status),
+		NotReady:  notReady,
 	}
 	if anchor != nil {
 		resp.AnchorUnixMs = anchor.UnixMilli()
