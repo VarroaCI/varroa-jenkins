@@ -17,6 +17,12 @@ import java.util.List;
  * item. The claimer thread in {@link VarroaClaimQueue} later sets the
  * origin, the intent key, the revision, and the granted flag.
  *
+ * <p>The granted flag is transient, so Jenkins never writes it to
+ * {@code queue.xml}. The queue saves that file up to a minute after an item
+ * enters or leaves, so the build of a saved item can start before a hard
+ * stop. A queue item that Jenkins loads from disk therefore holds no grant,
+ * and it claims again.
+ *
  * <p>{@code actor} carries the calling identity the claim reports to the
  * ledger (D5). {@link VarroaRunTriggerAction} stamps a caller-supplied
  * value on a cross-tenant trigger; {@link VarroaQueueDecisionHandler}
@@ -45,7 +51,7 @@ public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAc
     private volatile String intentKey = "";
     private volatile String revision = "";
     private volatile String forgeRevision = "";
-    private volatile boolean granted;
+    private transient volatile boolean granted;
     private volatile String actor = "";
     private volatile long grantedNumber;
     private volatile long numberConflict;
@@ -144,6 +150,7 @@ public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAc
         this.forgeRevision = forgeRevision != null ? forgeRevision : "";
     }
 
+    /** Returns true after this Jenkins process received the grant and its start mark. */
     public boolean isGranted() {
         return granted;
     }
@@ -254,5 +261,15 @@ public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAc
             }
         }
         return true;
+    }
+
+    /**
+     * Clears the grant when XStream restores this action. A stored file can
+     * still hold the granted element, because XStream reads a transient
+     * field that the file names. A restored action must claim again.
+     */
+    private Object readResolve() {
+        granted = false;
+        return this;
     }
 }

@@ -4,6 +4,7 @@ import groovy.json.JsonSlurper;
 import hudson.model.Cause;
 import hudson.model.Job;
 import hudson.model.Queue;
+import hudson.model.Run;
 import net.sf.json.JSONObject;
 
 import java.io.IOException;
@@ -46,6 +47,12 @@ import java.util.logging.Logger;
  * hold the grants of every job. A {@code duplicate} answer cancels the
  * item. Any other answer opens the gate, leaves the item blocked, and
  * defers the next claim by the backoff step of its failure count.
+ *
+ * <p>Before the first attempt of a claim, the claimer reads the job's
+ * builds. A build that carries the item's run id cancels the item, and no
+ * claim is sent. A queue item that Jenkins loads from disk can name a run
+ * that started before a hard stop, and Jenkins can resume that build. A
+ * claim for it can then grant a second number to the same run.
  *
  * <p>A claimer thread runs one attempt of a claim and then releases the
  * thread. An answer that retries parks the claim on the
@@ -401,6 +408,9 @@ public class VarroaClaimQueue {
             pc.started = true;
             pc.deadline = now + LIFETIME_MILLIS;
             pc.revisionDeadline = now + IntentKey.WAIT_DEADLINE_MILLIS;
+            if (cancelWhenBuilt(item, job, action)) {
+                return true;
+            }
         }
         IntentKey.Result derived = deriver.derive(item, job, action, now, pc.revisionDeadline);
         if (derived == null) {
@@ -518,6 +528,32 @@ public class VarroaClaimQueue {
                 cancel(item);
                 return true;
         }
+    }
+
+    /**
+     * Cancels the item and answers true when a build of {@code job} already
+     * carries the item's run id. The ledger cannot always see that build. A
+     * pod that restarts in place keeps its instance, and its start event can
+     * be lost in the stop. A claim from that instance gets the stored number,
+     * the job counter refuses it, and the next claim gets a fresh number. A
+     * failed read answers false, and the ledger decides.
+     */
+    private boolean cancelWhenBuilt(Queue.Item item, Job<?, ?> job, VarroaIntentAction action) {
+        Run<?, ?> build;
+        try {
+            build = VarroaRunTriggerAction.findBuildForRunId(job, action.getRunId());
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "VarroaClaimQueue: failed to read the builds of job " + job.getFullName(), e);
+            return false;
+        }
+        if (build == null) {
+            return false;
+        }
+        DuplicateRegistry.get().record(action.getRunId());
+        LOGGER.log(Level.INFO, "VarroaClaimQueue: run {0} already built as {1}; cancelled the queue item",
+                new Object[] {action.getRunId(), build.getExternalizableId()});
+        cancel(item);
+        return true;
     }
 
     /**
