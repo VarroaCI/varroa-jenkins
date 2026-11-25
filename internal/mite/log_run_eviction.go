@@ -255,6 +255,10 @@ type finishedRunAnswer struct {
 // run then answers each chunk as an abandoned run does. The caller holds
 // h.logMu and has admitted the sender through checkOwner.
 //
+// A rejected tombstone marks nothing lost, for the reason that the
+// rejectedForever check in OnLogChunk gives: a loud end published its
+// reason once, and a quiet end holds no fact about the stored log.
+//
 // A repeat of the run's last writer needs no store read. The state ran
 // each overlap check of that writer when it first stored the chunk. A
 // repeat of another writer needs the read: a mesh takeover can move a run

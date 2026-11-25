@@ -102,6 +102,35 @@ func TestDrainRetryEndsWhenTheOwnerReadFindsTheRunTerminal(t *testing.T) {
 	}
 }
 
+// TestOwnerReadQuietEndRefusesALaterChunkWithNoMark proves that a chunk
+// that reaches the replica after the quiet end of an owner read gets
+// REJECTED{finalize-deadline} and publishes nothing. The chunk can repeat
+// a part that another replica stored, so the replica cannot tell a lost
+// chunk from a repeat. The recorder's sweep reads the stored index.
+func TestOwnerReadQuietEndRefusesALaterChunkWithNoMark(t *testing.T) {
+	runID := newTestRunID()
+	h, owner, sender, pub, appends := newStuckDrainHandler(t, runID)
+	startStuckRun(t, h, runID, appends)
+
+	owner.setAnswer(runID, completedOwnerAnswer(time.Now().Add(-2*time.Hour)))
+	if ack := waitForLogAcks(t, sender, 1)[0]; ack.Status != logAckStatusRejected || ack.Reason != logReasonFinalizeDeadline {
+		t.Fatalf("expected chunk 0 REJECTED with finalize-deadline, got %+v", ack)
+	}
+	waitForEviction(t, h, runID)
+
+	sendInst1Chunk(h, runID, 1, "b", true)
+	if ack := waitForLogAcks(t, sender, 2)[1]; ack.Status != logAckStatusRejected ||
+		ack.Reason != logReasonFinalizeDeadline || ack.AckSeq != 1 {
+		t.Fatalf("expected chunk 1 REJECTED with finalize-deadline, got %+v", ack)
+	}
+	if envs := runLogEnvelopes(pub); len(envs) != 0 {
+		t.Fatalf("published run.log envelopes %v, want none", envs)
+	}
+	if incomplete, reason := h.runIncompleteness(runID); incomplete {
+		t.Fatalf("run incomplete with %q, want no reason of the quiet end", reason)
+	}
+}
+
 // TestDrainRetryContinuesWhileTheOwnerReadFindsTheRunLive proves that a
 // live owner answer sets no deadline. The drain keeps its chunk and keeps
 // retrying.
