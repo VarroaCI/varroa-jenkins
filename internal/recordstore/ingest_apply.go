@@ -308,8 +308,18 @@ func (g *Ingester) notify(env IngestEnvelope, res ApplyResult, err error) {
 // ErrMalformedEnvelope when env.RunID is not a valid UUID or a typed
 // payload does not decode. Any other error is a retryable database
 // failure. A nil error and a false ApplyResult.Conflict mean the write
-// committed cleanly.
+// committed cleanly. Apply never waits for an announce: it is
+// ApplyDelivery with waitAnnounce false.
 func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, error) {
+	return g.ApplyDelivery(ctx, env, false)
+}
+
+// ApplyDelivery is Apply for one delivery of a stream message. With
+// waitAnnounce true, an event that the replacement pod of a controller
+// with no cell role sends before the operator announces that pod writes
+// nothing and answers ErrAwaitingAnnounce (awaitingAnnounceSQL). With
+// waitAnnounce false, the same event takes the rule of any other sender.
+func (g *Ingester) ApplyDelivery(ctx context.Context, env IngestEnvelope, waitAnnounce bool) (ApplyResult, error) {
 	if !IsKnownKind(env.Kind) {
 		return ApplyResult{}, fmt.Errorf("%w: %s", ErrUnknownKind, env.Kind)
 	}
@@ -360,13 +370,13 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 		return ApplyResult{}, fmt.Errorf("%w: run_id is not a valid uuid: %v", ErrMalformedEnvelope, err)
 	}
 
-	dispatched, err := g.applyOnce(ctx, runID, env, false)
+	dispatched, err := g.applyOnce(ctx, runID, env, false, waitAnnounce)
 	result := ApplyResult{}
 	if err != nil {
 		if !isBuildNumberConflict(err) {
 			return result, err
 		}
-		dispatched, err = g.applyOnce(ctx, runID, env, true)
+		dispatched, err = g.applyOnce(ctx, runID, env, true, waitAnnounce)
 		if err != nil {
 			return result, err
 		}
@@ -586,7 +596,7 @@ type dispatchResult struct {
 }
 
 // applyOnce runs one attempt of env's write in its own transaction.
-func (g *Ingester) applyOnce(ctx context.Context, runID uuid.UUID, env IngestEnvelope, nullBuildNumber bool) (dispatchResult, error) {
+func (g *Ingester) applyOnce(ctx context.Context, runID uuid.UUID, env IngestEnvelope, nullBuildNumber, waitAnnounce bool) (dispatchResult, error) {
 	tx, err := g.pool.Begin(ctx)
 	if err != nil {
 		return dispatchResult{}, fmt.Errorf("begin ingest transaction: %w", err)
@@ -600,7 +610,7 @@ func (g *Ingester) applyOnce(ctx context.Context, runID uuid.UUID, env IngestEnv
 		return dispatchResult{}, err
 	}
 
-	result, err := g.dispatch(ctx, tx, intent, env, nullBuildNumber)
+	result, err := g.dispatch(ctx, tx, intent, env, nullBuildNumber, waitAnnounce)
 	if err != nil {
 		return dispatchResult{}, err
 	}
@@ -614,10 +624,22 @@ func (g *Ingester) applyOnce(ctx context.Context, runID uuid.UUID, env IngestEnv
 // dispatch first lets the replacement pod of a controller with no cell
 // role take over the run (adoptReplacementPod), then runs the write for
 // env.Kind. Every owner rule of the write then reads the moved owner.
-func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope, nullBuildNumber bool) (dispatchResult, error) {
+// With waitAnnounce true, an event that no move admitted and that can
+// come from the unannounced replacement pod answers ErrAwaitingAnnounce
+// and writes nothing (awaitsAnnounce).
+func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope, nullBuildNumber, waitAnnounce bool) (dispatchResult, error) {
 	adopted, err := adoptReplacementPod(ctx, tx, intent, env)
 	if err != nil {
 		return dispatchResult{}, err
+	}
+	if !adopted && waitAnnounce {
+		waits, err := awaitsAnnounce(ctx, tx, intent, env)
+		if err != nil {
+			return dispatchResult{}, err
+		}
+		if waits {
+			return dispatchResult{}, ErrAwaitingAnnounce
+		}
 	}
 	result, err := g.dispatchKind(ctx, tx, intent, env, nullBuildNumber)
 	if err != nil {

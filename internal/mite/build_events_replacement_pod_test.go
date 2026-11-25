@@ -17,7 +17,10 @@ import (
 // it for a run of a controller with no cell role. The intent names
 // stored. A caller that names the same controller and the pod current
 // gets its own instance back, because the placement row names that pod.
-// Every other caller gets stored. The fake records each request. When
+// While current is empty or names the stored owner, another pod of the
+// same controller gets stored with NotReady set: the operator has not
+// announced that pod yet. Every other caller gets stored. The fake
+// records each request. When
 // duringFirst is set, the fake calls it inside the first request, before
 // it answers.
 type replacementPodRequester struct {
@@ -43,9 +46,13 @@ func (f *replacementPodRequester) RequestWithContext(_ context.Context, subject 
 	if first && hook != nil {
 		hook()
 	}
-	if req.Cluster == resp.Cluster && req.Namespace == resp.Namespace && req.Cell == resp.Cell &&
-		req.Instance != "" && req.Instance == current {
+	sameController := req.Cluster == resp.Cluster && req.Namespace == resp.Namespace && req.Cell == resp.Cell
+	switch {
+	case sameController && req.Instance != "" && req.Instance == current:
 		resp.Instance = req.Instance
+	case sameController && req.Instance != "" && req.Instance != resp.Instance &&
+		(current == "" || current == resp.Instance):
+		resp.NotReady = true
 	}
 	body, err := json.Marshal(resp)
 	if err != nil {
@@ -176,4 +183,153 @@ func TestOnStreamBuildEventCompletedSecondOwnerReadNamesTheCaller(t *testing.T) 
 		t.Fatalf("group = %v, want the whole group %v", got, fullCompletedGroup)
 	}
 	assertRunTerminal(t, h, runID)
+}
+
+// announcePod sets the pod that the fake's placement row names.
+func (f *replacementPodRequester) announcePod(instance string) {
+	f.mu.Lock()
+	f.current = instance
+	f.mu.Unlock()
+}
+
+// requestCount returns the number of owner requests the fake received.
+func (f *replacementPodRequester) requestCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.requests)
+}
+
+// unannouncedChunk returns the first chunk of a resumed build from
+// inst-new.
+func unannouncedChunk(runID string) *mitev1.LogChunk {
+	return &mitev1.LogChunk{
+		RunId: runID, Seq: 0, Data: []byte("Resuming build"), CellInstance: "inst-new", JobPath: "tenant-a/build",
+	}
+}
+
+// TestOnLogChunkFromAnUnannouncedReplacementPodWaits proves the retryable
+// answer of the log path. The replacement pod of a controller with no
+// cell role sends its first chunk before the operator announces it. The
+// chunk gets BUSY, not REJECTED, so the mite keeps it and sends it again.
+// The answer marks no caller, so the first chunk after the announce reads
+// the ledger and is stored at once. Both cases of the placement row are
+// covered: it still names the replaced pod, and it names no pod.
+func TestOnLogChunkFromAnUnannouncedReplacementPodWaits(t *testing.T) {
+	for _, placement := range []string{"inst-old", ""} {
+		t.Run("placement "+placement, func(t *testing.T) {
+			h, other, ledger := newReplacementPodHandler(t)
+			ledger.announcePod(placement)
+			runID := newTestRunID()
+			h.ownerCache.observeGrant(runID, "core", "ns1", "cell2", "inst-old")
+
+			h.OnLogChunk("cell2", "ns1", unannouncedChunk(runID))
+
+			ack := waitForLogAcks(t, other, 1)[0]
+			if ack.Status != logAckStatusBusy || ack.Reason != logReasonOwnerNotReady || ack.PauseMs != logNotReadyPauseMS {
+				t.Fatalf("ack before the announce = %+v, want BUSY %s with a %d ms pause",
+					ack, logReasonOwnerNotReady, logNotReadyPauseMS)
+			}
+			if entry, ok := h.ownerCache.peek(runID); !ok || len(entry.refused) != 0 {
+				t.Fatalf("cached entry = %+v (found %v), want the replaced pod's match with no refusal mark", entry, ok)
+			}
+			if _, exists := h.lookupRunState(runID); exists {
+				t.Fatal("expected no run state for a chunk that waits for the announce")
+			}
+
+			ledger.announcePod("inst-new")
+			before := ledger.requestCount()
+			h.OnLogChunk("cell2", "ns1", unannouncedChunk(runID))
+
+			if got := waitForLogAcks(t, other, 2)[1]; got.Status != logAckStatusStored {
+				t.Fatalf("ack after the announce = %+v, want STORED", got)
+			}
+			if got := ledger.requestCount() - before; got != 1 {
+				t.Fatalf("owner requests after the announce = %d, want 1", got)
+			}
+		})
+	}
+}
+
+// TestOnLogChunkFromAnUnannouncedPodIsRefusedAfterTheWait proves the
+// bound of the retry. When no announce comes within ownerAnnounceWait,
+// the next chunk of the run gets REJECTED{foreign-run}, as a chunk of any
+// other foreign sender does, and the read marks the caller.
+func TestOnLogChunkFromAnUnannouncedPodIsRefusedAfterTheWait(t *testing.T) {
+	h, other, ledger := newReplacementPodHandler(t)
+	ledger.announcePod("inst-old")
+	runID := newTestRunID()
+
+	h.OnLogChunk("cell2", "ns1", unannouncedChunk(runID))
+	if ack := waitForLogAcks(t, other, 1)[0]; ack.Status != logAckStatusBusy {
+		t.Fatalf("first ack = %+v, want BUSY", ack)
+	}
+
+	h.ownerCache.mu.Lock()
+	h.ownerCache.announceWaits[runID] = time.Now().Add(-ownerAnnounceWait)
+	h.ownerCache.mu.Unlock()
+	h.OnLogChunk("cell2", "ns1", unannouncedChunk(runID))
+
+	ack := waitForLogAcks(t, other, 2)[1]
+	if ack.Status != logAckStatusRejected || ack.Reason != logReasonForeignRun {
+		t.Fatalf("ack after the wait = %+v, want REJECTED %s", ack, logReasonForeignRun)
+	}
+	entry, ok := h.ownerCache.peek(runID)
+	if _, marked := entry.refused[ownerCallerKey("core", "ns1", "cell2")]; !ok || !marked {
+		t.Fatalf("cached entry = %+v (found %v), want a refusal mark for the caller", entry, ok)
+	}
+}
+
+// TestOnStreamBuildEventCompletedFromAnUnannouncedPodKeepsItsFacts proves
+// the completion path. A COMPLETED event of the replacement pod before
+// the announce keeps every sender fact, because the recorder holds the
+// completion until the announce. It sets no log deadline, because no
+// answer names the sender as the owner yet.
+func TestOnStreamBuildEventCompletedFromAnUnannouncedPodKeepsItsFacts(t *testing.T) {
+	h, _, ledger := newReplacementPodHandler(t)
+	ledger.announcePod("")
+	runID := newTestRunID()
+
+	if err := h.OnStreamBuildEvent("cell2", "ns1", "inst-new", 0, fullCompletedBuildEvent(runID)); err != nil {
+		t.Fatalf("OnStreamBuildEvent: %v", err)
+	}
+
+	if got := queuedKinds(t, h); fmt.Sprint(got) != fmt.Sprint(fullCompletedGroup) {
+		t.Fatalf("group = %v, want the whole group %v", got, fullCompletedGroup)
+	}
+	if _, exists := h.lookupRunState(runID); exists {
+		t.Fatal("expected no run state: no answer names the sender as the owner")
+	}
+}
+
+// TestOwnerAnnounceWaitClock proves the clock of the wait. The first
+// not-ready answer of a run starts it. An answer inside ownerAnnounceWait
+// waits, and an answer past it does not. A clock past ownerAnnounceRetain
+// starts again. An owner move signal drops the clock.
+func TestOwnerAnnounceWaitClock(t *testing.T) {
+	c := newOwnerCache(0)
+	now := time.Now()
+	setStart := func(at time.Time) {
+		c.mu.Lock()
+		c.announceWaits["run-1"] = at
+		c.mu.Unlock()
+	}
+
+	if !c.awaitAnnounce("run-1", now) {
+		t.Fatal("first answer: want a wait")
+	}
+	if !c.awaitAnnounce("run-1", now.Add(ownerAnnounceWait-time.Second)) {
+		t.Fatal("answer inside the wait: want a wait")
+	}
+	if c.awaitAnnounce("run-1", now.Add(ownerAnnounceWait)) {
+		t.Fatal("answer at the end of the wait: want no wait")
+	}
+	setStart(now.Add(-ownerAnnounceRetain))
+	if !c.awaitAnnounce("run-1", now) {
+		t.Fatal("answer after the retain bound: want a new wait")
+	}
+	setStart(now.Add(-ownerAnnounceWait))
+	c.invalidate("run-1")
+	if !c.awaitAnnounce("run-1", now) {
+		t.Fatal("answer after an owner move: want a new wait")
+	}
 }

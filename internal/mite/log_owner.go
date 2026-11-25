@@ -34,6 +34,15 @@ const (
 	ownerRefusedMax         = 4
 	ownerRefusedRereads     = 3
 	ownerRefusedRereadAfter = 5 * time.Second
+
+	// ownerAnnounceWait bounds how long a caller that a ledger answer
+	// names not ready gets a retryable refusal. The operator announces the
+	// pod of a controller with no cell role on each reconcile tick, 30 s
+	// apart by default, so the wait spans two ticks. ownerAnnounceRetain
+	// bounds how long the clock of a run outlives its start, so a run past
+	// the wait does not start a new wait at once.
+	ownerAnnounceWait   = 60 * time.Second
+	ownerAnnounceRetain = 10 * ownerAnnounceWait
 )
 
 // ownerTuple is the ledger's answer to "who owns this run": the
@@ -59,6 +68,11 @@ type ownerTuple struct {
 // same owner tuple keeps live marks. A match read, a grant, a miss, a new
 // owner tuple, and the end of refusedUntil start them again. The map is
 // never modified after the entry is stored.
+//
+// notReady is the ownerCallerKey of the caller that a not-ready answer
+// names (ownerLookupResponse.NotReady). Only an entry that doLookup
+// returns without storing it holds the value. A stored entry never holds
+// it, so a cached decision is never a not-ready answer.
 type ownerCacheEntry struct {
 	found        bool
 	tuple        ownerTuple
@@ -66,6 +80,7 @@ type ownerCacheEntry struct {
 	refused      map[string]time.Time
 	rereads      int
 	refusedUntil time.Time
+	notReady     string
 }
 
 // needsRead reports whether a cached foreign decision for the caller key
@@ -148,7 +163,10 @@ type ownerLookupRequest struct {
 // ownerLookupResponse is the reply body of a varroa.ledger.owner call.
 // Field names mirror internal/recordstore's ownerLookupResponse exactly.
 // Error is non-empty only when the recorder's lookup itself failed (a
-// database error), never for a genuine miss.
+// database error), never for a genuine miss. NotReady is true when the
+// caller can be the replacement pod of a controller with no cell role
+// that the operator has not announced yet. Instance then names the
+// stored owner.
 type ownerLookupResponse struct {
 	Found        bool   `json:"found"`
 	Cluster      string `json:"cluster"`
@@ -157,6 +175,7 @@ type ownerLookupResponse struct {
 	Instance     string `json:"instance"`
 	Status       string `json:"status"`
 	AnchorUnixMs int64  `json:"anchorUnixMs"`
+	NotReady     bool   `json:"notReady"`
 	Error        string `json:"error"`
 }
 
@@ -202,6 +221,9 @@ type ownerCache struct {
 	// pausedUntil ends the pause that a timed-out request starts. No
 	// read begins before it. mu guards it.
 	pausedUntil time.Time
+	// announceWaits holds the time of the first not-ready answer of each
+	// run (awaitAnnounce). mu guards it.
+	announceWaits map[string]time.Time
 
 	inflightMu sync.Mutex
 	inflight   map[string][]chan ownerLookupResult
@@ -219,6 +241,8 @@ func newOwnerCache(maxSize int) *ownerCache {
 		order:    list.New(),
 		reads:    make(map[string]*ownerReads),
 		inflight: make(map[string][]chan ownerLookupResult),
+
+		announceWaits: make(map[string]time.Time),
 	}
 }
 
@@ -379,8 +403,9 @@ func (c *ownerCache) setLocked(runID string, entry ownerCacheEntry) {
 	}
 }
 
-// invalidate drops runID's cached decision, its refusal marks, and
-// refusedUntil, so the next check reads the ledger again. A resume or a
+// invalidate drops runID's cached decision, its refusal marks,
+// refusedUntil, and its announce clock, so the next check reads the
+// ledger again. A move ends the wait for an announce. A resume or a
 // takeover moves a run's owner with no claim that this replica relays,
 // so observeGrant never replaces the entry for such a run. A ledger read
 // for runID that is in flight can answer the owner from before the move.
@@ -391,12 +416,34 @@ func (c *ownerCache) invalidate(runID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.noteChangeLocked(runID)
+	delete(c.announceWaits, runID)
 	el, ok := c.entries[runID]
 	if !ok {
 		return
 	}
 	c.order.Remove(el)
 	delete(c.entries, runID)
+}
+
+// awaitAnnounce reports whether a not-ready answer for runID at now falls
+// inside ownerAnnounceWait. The first such answer starts the clock of the
+// run. A clock lives ownerAnnounceRetain after its start. A new clock
+// drops each clock past that age, so the map holds only the runs of
+// recent not-ready answers.
+func (c *ownerCache) awaitAnnounce(runID string, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	since, ok := c.announceWaits[runID]
+	if !ok || now.Sub(since) >= ownerAnnounceRetain {
+		for id, at := range c.announceWaits {
+			if now.Sub(at) >= ownerAnnounceRetain {
+				delete(c.announceWaits, id)
+			}
+		}
+		since = now
+		c.announceWaits[runID] = since
+	}
+	return now.Sub(since) < ownerAnnounceWait
 }
 
 // observeGrant records a matched owner directly from a relayed granted
@@ -469,6 +516,11 @@ func (c *ownerCache) readOwner(ctx context.Context, requester ledgerRequester, r
 // errOwnerLookupPaused. A recorder or bus outage holds every request, so
 // one stall stands for all the checks of the pause. The end of the
 // caller's own context starts no pause. A reply ends the pause.
+//
+// A not-ready answer inside ownerAnnounceWait stores nothing and marks no
+// caller. It returns an entry whose notReady names the caller, so the
+// caller retries and a later read can admit it at once. Past the wait the
+// answer is a refusal like any other.
 func (c *ownerCache) doLookup(ctx context.Context, requester ledgerRequester, runID, cluster, namespace, cell, instance string) (ownerCacheEntry, error) {
 	body, err := json.Marshal(ownerLookupRequest{
 		RunID: runID, Cluster: cluster, Namespace: namespace, Cell: cell, Instance: instance,
@@ -509,6 +561,9 @@ func (c *ownerCache) doLookup(ctx context.Context, requester ledgerRequester, ru
 			status: resp.Status, anchorUnixMs: resp.AnchorUnixMs,
 		}
 		matched := tuple.cluster == cluster && tuple.namespace == namespace && tuple.cell == cell && tuple.instance == instance
+		if !matched && resp.NotReady && c.awaitAnnounce(runID, now) {
+			return ownerCacheEntry{found: true, tuple: tuple, notReady: caller}, nil
+		}
 		entry = ownerCacheEntry{found: true, tuple: tuple, expires: now.Add(ownerMatchTTL)}
 		if !matched {
 			entry = refusalEntry(prev, hadPrev, true, tuple, caller, now)
@@ -530,6 +585,10 @@ const (
 	ownerUnknown ownerDecision = iota
 	ownerMatched
 	ownerForeign
+	// ownerNotReady means the ledger names another owner, but the caller
+	// can be the replacement pod that the operator has not announced yet.
+	// The gateway answers a retryable refusal and keeps no refusal mark.
+	ownerNotReady
 )
 
 // decide compares entry against the caller's identity.
@@ -542,6 +601,18 @@ func decideOwner(entry ownerCacheEntry, cluster, namespace, cell, instance strin
 		return ownerMatched
 	}
 	return ownerForeign
+}
+
+// decideCaller is decideOwner for an entry that a ledger read returned.
+// It answers ownerNotReady when the entry is a not-ready answer for the
+// caller's own stream identity. A waiter that joined the read for another
+// caller decides as decideOwner does.
+func decideCaller(entry ownerCacheEntry, cluster, namespace, cell, instance string) ownerDecision {
+	decision := decideOwner(entry, cluster, namespace, cell, instance)
+	if decision == ownerForeign && entry.notReady != "" && entry.notReady == ownerCallerKey(cluster, namespace, cell) {
+		return ownerNotReady
+	}
+	return decision
 }
 
 // checkOwner answers whether (cluster, namespace, cell, instance) owns
@@ -565,7 +636,9 @@ func decideOwner(entry ownerCacheEntry, cluster, namespace, cell, instance strin
 // A failed lookup writes no entry and answers ownerUnknown, never
 // ownerForeign. In the pause after a timed-out request, a check that needs
 // a lookup sends no request and answers ownerUnknown at once. A cached
-// match still admits the caller in the pause.
+// match still admits the caller in the pause. A not-ready answer inside
+// ownerAnnounceWait answers ownerNotReady, so each check of such a caller
+// reads the ledger.
 func (h *BusHandler) checkOwner(ctx context.Context, cluster, namespace, cell, instance, runID string) (ownerDecision, ownerTuple) {
 	if h.ownerCache == nil {
 		// No cache configured (e.g. a hand-built BusHandler in a test
@@ -583,7 +656,7 @@ func (h *BusHandler) checkOwner(ctx context.Context, cluster, namespace, cell, i
 	if err != nil {
 		return ownerUnknown, ownerTuple{}
 	}
-	return decideOwner(entry, cluster, namespace, cell, instance), entry.tuple
+	return decideCaller(entry, cluster, namespace, cell, instance), entry.tuple
 }
 
 // checkOwnerForCompletion answers whether the caller owns runID, for a
@@ -601,7 +674,8 @@ func (h *BusHandler) checkOwner(ctx context.Context, cluster, namespace, cell, i
 // such as a resume, leaves the old owner's match cached for up to
 // ownerMatchTTL, and the old owner is the sender most likely to send a
 // stale completion. A deadline from that match would end the new owner's
-// log on this replica.
+// log on this replica. A not-ready answer inside ownerAnnounceWait
+// answers ownerNotReady.
 func (h *BusHandler) checkOwnerForCompletion(ctx context.Context, cluster, namespace, cell, instance, runID string) (ownerDecision, ownerTuple) {
 	if h.ownerCache == nil {
 		return ownerUnknown, ownerTuple{}
@@ -610,5 +684,5 @@ func (h *BusHandler) checkOwnerForCompletion(ctx context.Context, cluster, names
 	if err != nil {
 		return ownerUnknown, ownerTuple{}
 	}
-	return decideOwner(entry, cluster, namespace, cell, instance), entry.tuple
+	return decideCaller(entry, cluster, namespace, cell, instance), entry.tuple
 }

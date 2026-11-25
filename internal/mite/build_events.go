@@ -1678,7 +1678,11 @@ func (h *BusHandler) OnStreamBuildEvent(name, ns, cellInstance string, connToken
 // (withholdSenderFacts). That is the case only when the answer names
 // another cell instance as the owner, the same instance test the record
 // store applies to run.completed. A run with no ledger row and an owner
-// with no instance keep the whole group and set no deadline. A failed
+// with no instance keep the whole group and set no deadline. A not-ready
+// answer (ownerNotReady) keeps the whole group and sets no deadline too:
+// the sender can be the replacement pod of a controller with no cell
+// role, and the recorder holds its completion until the operator
+// announces that pod. A failed
 // request keeps the whole group too: its stages, tests, quality reports,
 // artifacts, and log summary can be the owner's only record of the
 // build, and an answer that names no other owner must not drop them.
@@ -1716,6 +1720,9 @@ func (h *BusHandler) markCompletedRunTerminal(ns, name, instance string, evt *mi
 		}
 	case withhold:
 		h.log().Info("completed event from a cell instance that does not own the run, its log deadline and sender facts are withheld",
+			"controller", ns+"/"+name, "cell_instance", instance, "owner_instance", tuple.instance, "run_id", evt.RunId)
+	case decision == ownerNotReady:
+		h.log().Info("completed event from a pod that the operator has not announced yet, its log deadline is not set and its sender facts are kept",
 			"controller", ns+"/"+name, "cell_instance", instance, "owner_instance", tuple.instance, "run_id", evt.RunId)
 	case decision == ownerForeign:
 		h.log().Info("the ledger names no other owner instance for a completed event, its log deadline is not set and its sender facts are kept",

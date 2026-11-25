@@ -2,7 +2,9 @@ package recordstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -28,16 +30,84 @@ import (
 //     pod. Only the operator's pod read writes that value. A late event
 //     from the replaced pod therefore never moves the run back.
 func replacementPodSQL(intent, sender, cluster, namespace, cell string) string {
-	return `(` + intent + `.placement_generation = 0
-		AND ` + sender + `::text <> ''
-		AND COALESCE(` + intent + `.cell_instance, '') NOT IN ('', ` + sender + `::text)
-		AND ` + intent + `.cluster = ` + cluster + `::text
-		AND ` + intent + `.namespace = ` + namespace + `::text
-		AND ` + intent + `.cell = ` + cell + `::text
+	return `(` + controllerSenderSQL(intent, sender, cluster, namespace, cell) + `
 		AND EXISTS (SELECT 1 FROM varroa.tenant_placements p
 		             WHERE p.cluster = ` + intent + `.cluster AND p.tenant = ` + intent + `.tenant
 		               AND p.generation = 0 AND p.namespace = ` + intent + `.namespace
 		               AND p.cell = ` + intent + `.cell AND p.cell_instance = ` + sender + `::text))`
+}
+
+// controllerSenderSQL holds the conditions of replacementPodSQL that do
+// not read the placement row: a generation-zero intent, a sender of the
+// intent's own controller, and an intent that names another owner.
+func controllerSenderSQL(intent, sender, cluster, namespace, cell string) string {
+	return intent + `.placement_generation = 0
+		AND ` + sender + `::text <> ''
+		AND COALESCE(` + intent + `.cell_instance, '') NOT IN ('', ` + sender + `::text)
+		AND ` + intent + `.cluster = ` + cluster + `::text
+		AND ` + intent + `.namespace = ` + namespace + `::text
+		AND ` + intent + `.cell = ` + cell + `::text`
+}
+
+// awaitingAnnounceSQL is the test for a sender that can be the
+// replacement pod before the operator announces it. The operator writes
+// the pod's identifier into the placement row on its next reconcile tick,
+// so the sender's events can arrive first. The test holds the conditions
+// of controllerSenderSQL, and the placement row of the controller still
+// names the intent's owner or no pod. The row must not list the sender as
+// a dead instance, so a late event of a replaced pod never waits.
+//
+// The placement row stays the only proof of the takeover. This test
+// moves nothing: it only lets an event wait for that proof.
+func awaitingAnnounceSQL(intent, sender, cluster, namespace, cell string) string {
+	return `(` + controllerSenderSQL(intent, sender, cluster, namespace, cell) + `
+		AND EXISTS (SELECT 1 FROM varroa.tenant_placements p
+		             WHERE p.cluster = ` + intent + `.cluster AND p.tenant = ` + intent + `.tenant
+		               AND p.generation = 0 AND p.namespace = ` + intent + `.namespace
+		               AND p.cell = ` + intent + `.cell AND p.cell_instance IN ('', ` + intent + `.cell_instance)
+		               AND NOT p.dead_instances @> jsonb_build_array(jsonb_build_object('instance', ` + sender + `::text))))`
+}
+
+// ErrAwaitingAnnounce is the answer of ApplyDelivery for an event that
+// waits for the operator's announce of its sender (awaitingAnnounceSQL).
+// The write rolled back. The consumer delivers the event again after
+// announceRetryDelay.
+var ErrAwaitingAnnounce = errors.New("the sender can be a replacement pod that the operator has not announced")
+
+// announceWait bounds how long an event of an unannounced replacement pod
+// waits for the announce. The operator announces the placement row of a
+// controller with no cell role on each reconcile tick, 30 s apart by
+// default, so the wait spans two ticks. After the wait the event takes
+// the rule of any other sender. announceRetryDelay is the delay between
+// two deliveries of a waiting event.
+const (
+	announceWait       = 60 * time.Second
+	announceRetryDelay = 5 * time.Second
+)
+
+// waitsForAnnounce reports whether an event of kind waits for the
+// announce of its sender. A heartbeat does not wait, because the next
+// heartbeat after the announce moves the run.
+func waitsForAnnounce(kind string) bool {
+	return kind == KindRunCompleted || runningFactKind(kind)
+}
+
+// awaitsAnnounce reports whether env must wait for the operator's
+// announce of its sender (awaitingAnnounceSQL). It reads the placement
+// row with no lock, in the write's own transaction.
+func awaitsAnnounce(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) (bool, error) {
+	if !waitsForAnnounce(env.Kind) || intent.placementGeneration != 0 ||
+		env.CellInstance == "" || intent.cellInstanceValue() == "" || env.CellInstance == intent.cellInstanceValue() {
+		return false, nil
+	}
+	var waits bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM varroa.run_intents ri
+		                WHERE ri.run_id = $1 AND `+awaitingAnnounceSQL("ri", "$2", "$3", "$4", "$5")+`)
+	`, intent.runID, env.CellInstance, env.Cluster, env.Namespace, env.Cell).Scan(&waits); err != nil {
+		return false, fmt.Errorf("read the announce of the sender: %w", err)
+	}
+	return waits, nil
 }
 
 // adoptingKind reports whether kind compares its sender with the run's

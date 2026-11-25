@@ -28,6 +28,12 @@ const (
 	// owner lookup that failed.
 	logBusyPauseMS = 1000
 
+	// logNotReadyPauseMS is the BUSY pause for a chunk of a pod that the
+	// operator has not announced yet. Each check of such a chunk reads the
+	// ledger, so the pause paces those reads. The mite sends the refused
+	// chunk again after the pause.
+	logNotReadyPauseMS = 5000
+
 	// The gateway-budget BUSY pause is the time the measured drain rate
 	// needs to free the refused chunk's bytes, within this floor and
 	// cap. A pause longer than that time leaves the drain idle while
@@ -82,6 +88,10 @@ const (
 	logReasonGatewayBudgetFul = "gateway-budget-full"
 	logReasonOwnerLookupFail  = "owner-lookup-failed"
 	logReasonGatewayGap       = "gateway-gap"
+
+	// logReasonOwnerNotReady is the BUSY reason for a chunk of a pod that
+	// the operator has not announced yet (ownerNotReady).
+	logReasonOwnerNotReady = "owner-not-ready"
 )
 
 // runLogState is the gateway's per-run blob-writer state: the append
@@ -421,6 +431,9 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 		return
 	case ownerUnknown:
 		h.answerBusy(ns, name, chunk, logReasonOwnerLookupFail, logBusyPauseMS)
+		return
+	case ownerNotReady:
+		h.answerBusy(ns, name, chunk, logReasonOwnerNotReady, logNotReadyPauseMS)
 		return
 	}
 

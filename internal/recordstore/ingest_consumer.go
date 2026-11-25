@@ -114,7 +114,7 @@ func handleIngestMessage(ctx context.Context, ingester *Ingester, metrics *Inges
 		return
 	}
 
-	result, err := ingester.Apply(ctx, env)
+	result, err := ingester.ApplyDelivery(ctx, env, announceWaitOpen(msg))
 	switch {
 	case err == nil:
 		if result.Conflict {
@@ -209,6 +209,10 @@ func handleIngestMessage(ctx context.Context, ingester *Ingester, metrics *Inges
 			return
 		}
 		_ = msg.NakWithDelay(backoffDelay(msg))
+	case errors.Is(err, ErrAwaitingAnnounce):
+		logger.Debug("build event of a pod that the operator has not announced waits for the announce",
+			"runID", env.RunID, "kind", env.Kind, "instance", env.CellInstance)
+		_ = msg.NakWithDelay(announceRetryDelay)
 	case errors.Is(err, ErrUnknownKind):
 		metrics.addUnknown(ctx, UnknownCauseKind)
 		logger.Warn("unknown ingest kind acknowledged", "runID", env.RunID, "kind", env.Kind, "error", err)
@@ -221,6 +225,20 @@ func handleIngestMessage(ctx context.Context, ingester *Ingester, metrics *Inges
 		logger.Warn("retryable ingest failure", "runID", env.RunID, "kind", env.Kind, "error", err)
 		_ = msg.NakWithDelay(backoffDelay(msg))
 	}
+}
+
+// announceWaitOpen reports whether msg may still wait for the operator's
+// announce of its sender (ErrAwaitingAnnounce). The delivery count bounds
+// the wait, so a clock difference between two hosts cannot extend it.
+// Each waiting delivery comes announceRetryDelay after the one before, so
+// the last waiting delivery comes about announceWait after the first. A
+// message with no metadata does not wait.
+func announceWaitOpen(msg *nats.Msg) bool {
+	meta, err := msg.Metadata()
+	if err != nil || meta == nil {
+		return false
+	}
+	return meta.NumDelivered <= uint64(announceWait/announceRetryDelay)
 }
 
 // backoffDelay computes the NakWithDelay backoff for msg, doubling from
