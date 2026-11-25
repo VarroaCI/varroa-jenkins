@@ -410,8 +410,8 @@ func (a *Agent) replayRetainedLogChunks() {
 // live when the BUSY ack arrived, and only while ctx is live: after a
 // disconnect the reconnect replay re-sends every retained chunk instead.
 //
-// Call it only from the processCommands dispatch loop. That loop runs on
-// the run-loop goroutine, which is the only writer of a.sess, so it
+// Call it only from the processCommands dispatch loop. The run loop
+// writes a.sess only before that loop starts and after it returns, so it
 // reads a.sess without sendMu. It must never take sendMu: a re-send pass
 // holds sendMu while it sends, and a read loop blocked behind it stops
 // draining the stream, so flow control stalls both directions.

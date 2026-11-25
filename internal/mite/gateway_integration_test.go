@@ -98,7 +98,8 @@ func startGatewayWrapped(t *testing.T, natsURL string, wrap func(*BusHandler) St
 }
 
 // dialWithMiteCert creates a gRPC client with an mTLS cert issued by the CA.
-func dialWithMiteCert(t *testing.T, addr string, certAuth *ca.CA, name, ns string) *grpc.ClientConn {
+// opts adds dial options after the transport credentials.
+func dialWithMiteCert(t *testing.T, addr string, certAuth *ca.CA, name, ns string, opts ...grpc.DialOption) *grpc.ClientConn {
 	t.Helper()
 
 	pub, priv, err := ed25519.GenerateKey(nil)
@@ -122,9 +123,8 @@ func dialWithMiteCert(t *testing.T, addr string, certAuth *ca.CA, name, ns strin
 		MinVersion: tls.VersionTLS13,
 	}
 
-	gconn, err := grpc.NewClient(addr,
-		grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)),
-	)
+	dialOpts := append([]grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(clientTLS))}, opts...)
+	gconn, err := grpc.NewClient(addr, dialOpts...)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
