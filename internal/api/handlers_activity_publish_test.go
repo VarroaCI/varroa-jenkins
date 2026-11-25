@@ -42,9 +42,9 @@ var publishClaims = &auth.Claims{Subject: "admin", Email: "admin@example.com"}
 // fakeReconcilerAPI is an all-success controller.ReconcilerAPI double.
 type fakeReconcilerAPI struct{}
 
-func (fakeReconcilerAPI) TriggerReconcile(_, _, _ string) {}
-func (fakeReconcilerAPI) WakeController(_, _, _ string)   {}
-func (fakeReconcilerAPI) Reprovision(_, _, _ string)      {}
+func (fakeReconcilerAPI) TriggerReconcile(_ context.Context, _, _, _ string) error { return nil }
+func (fakeReconcilerAPI) WakeController(_ context.Context, _, _, _ string) error   { return nil }
+func (fakeReconcilerAPI) Reprovision(_ context.Context, _, _, _ string) error      { return nil }
 func (fakeReconcilerAPI) ApproveRestart(_ context.Context, _, _, _, _, _ string) error {
 	return nil
 }

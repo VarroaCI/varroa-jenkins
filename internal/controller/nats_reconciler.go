@@ -4,78 +4,67 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
 const (
-	natsReconcileTimeout = 5 * time.Second  // fast operation (channel send + wake)
+	natsReconcileTimeout = 5 * time.Second  // fast operation (channel send or annotation patch)
 	natsApproveTimeout   = 60 * time.Second // real work (bundle resolve, CRD patch, mite send)
 )
 
 // NATSReconcilerProxy implements ReconcilerAPI by forwarding requests over NATS
-// to the operator binary. Used in split-mode deployments where the BFF does not
-// have a local Reconciler.
+// to the operator binary. The BFF has no local Reconciler, so it uses this
+// proxy for every cluster, its own included.
 // The target cluster is always the per-call argument — the proxy itself is
 // cluster-agnostic so one instance serves the whole brood.
 type NATSReconcilerProxy struct {
-	conn   *bus.Conn
-	logger *slog.Logger
+	conn *bus.Conn
 }
 
 // NewNATSReconcilerProxy creates a new proxy that relays reconciler commands
 // to the operator over the NATS bus.
 func NewNATSReconcilerProxy(conn *bus.Conn) *NATSReconcilerProxy {
-	return &NATSReconcilerProxy{
-		conn:   conn,
-		logger: slog.Default().With("component", "nats_reconciler_proxy"),
-	}
+	return &NATSReconcilerProxy{conn: conn}
 }
 
-// SetLogger sets the logger for the proxy.
-func (p *NATSReconcilerProxy) SetLogger(l *slog.Logger) {
-	p.logger = l.With("component", "nats_reconciler_proxy")
+// TriggerReconcile relays an on-demand reconcile to the operator of cluster
+// and waits for its reply.
+func (p *NATSReconcilerProxy) TriggerReconcile(ctx context.Context, cluster, name, namespace string) error {
+	return p.requestReconcile(ctx, "reconcile", bus.OperatorReconcileSubject(cluster), namespace, name)
 }
 
-// TriggerReconcile relays an on-demand reconcile to the operator. Errors are
-// logged but not returned — this is a best-effort fire-and-forget signal.
-func (p *NATSReconcilerProxy) TriggerReconcile(cluster, name, namespace string) {
-	req := bus.ReconcileRequest{Name: name, Namespace: namespace}
-	data, _ := json.Marshal(req)
-	_, err := p.conn.Request(bus.OperatorReconcileSubject(cluster), data, natsReconcileTimeout)
+// WakeController relays a per-controller goroutine wake-up to the operator
+// of cluster and waits for its reply.
+func (p *NATSReconcilerProxy) WakeController(ctx context.Context, cluster, namespace, name string) error {
+	return p.requestReconcile(ctx, "nudge", bus.OperatorNudgeSubject(cluster), namespace, name)
+}
+
+// Reprovision relays a force-reprovision (desired-state re-push) to the
+// operator of cluster and waits for its reply.
+func (p *NATSReconcilerProxy) Reprovision(ctx context.Context, cluster, namespace, name string) error {
+	return p.requestReconcile(ctx, "reprovision", bus.OperatorReprovisionSubject(cluster), namespace, name)
+}
+
+// requestReconcile sends a ReconcileRequest on subject and decodes the
+// ReconcileResponse. The operator replies after it takes the request, not
+// after the reconcile ends. A request that gets no reply returns the bus
+// error wrapped, so bus.IsNoResponder and bus.IsNoReply still match it.
+func (p *NATSReconcilerProxy) requestReconcile(ctx context.Context, op, subject, namespace, name string) error {
+	data, _ := json.Marshal(bus.ReconcileRequest{Name: name, Namespace: namespace})
+	respMsg, err := p.conn.RequestWithContext(ctx, subject, data, natsReconcileTimeout)
 	if err != nil {
-		p.logger.Warn("trigger reconcile relay failed",
-			"controller", namespace+"/"+name,
-			"error", err)
+		return fmt.Errorf("%s relay: %w", op, err)
 	}
-}
-
-// WakeController relays a per-controller goroutine wake-up to the operator.
-// Errors are logged but not returned — this is a best-effort signal.
-func (p *NATSReconcilerProxy) WakeController(cluster, namespace, name string) {
-	req := bus.ReconcileRequest{Name: name, Namespace: namespace}
-	data, _ := json.Marshal(req)
-	_, err := p.conn.Request(bus.OperatorNudgeSubject(cluster), data, natsReconcileTimeout)
-	if err != nil {
-		p.logger.Warn("wake controller relay failed",
-			"controller", namespace+"/"+name,
-			"error", err)
+	var resp bus.ReconcileResponse
+	if err := json.Unmarshal(respMsg.Data, &resp); err != nil {
+		return fmt.Errorf("%s decode response: %w", op, err)
 	}
-}
-
-// Reprovision relays a force-reprovision (desired-state re-push) to the operator.
-// Errors are logged but not returned — this is a best-effort signal.
-func (p *NATSReconcilerProxy) Reprovision(cluster, namespace, name string) {
-	req := bus.ReconcileRequest{Name: name, Namespace: namespace}
-	data, _ := json.Marshal(req)
-	_, err := p.conn.Request(bus.OperatorReprovisionSubject(cluster), data, natsReconcileTimeout)
-	if err != nil {
-		p.logger.Warn("reprovision relay failed",
-			"controller", namespace+"/"+name,
-			"error", err)
+	if resp.Error != "" {
+		return fmt.Errorf("%s: %s", op, resp.Error)
 	}
+	return nil
 }
 
 // ApproveRestart relays an approve-restart command to the operator and returns

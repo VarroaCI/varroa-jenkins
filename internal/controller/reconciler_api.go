@@ -2,18 +2,24 @@ package controller
 
 import "context"
 
-// ReconcilerAPI defines the operations the API layer uses on the reconciler.
-// The operator's *Reconciler and the BFF's NATSReconcilerProxy implement this interface.
+// ReconcilerAPI defines the operations the API layer uses on the operator of
+// a cluster. The BFF's NATSReconcilerProxy implements this interface. Each
+// method returns the bus error when no operator replies, so the caller can
+// tell a request that no operator received from one that the operator took.
 type ReconcilerAPI interface {
-	// TriggerReconcile enqueues an on-demand reconcile for the given controller.
-	TriggerReconcile(cluster, name, namespace string)
+	// TriggerReconcile asks the operator of cluster to enqueue an on-demand
+	// reconcile for the given controller. A nil error means that the operator
+	// took the request. The reconcile itself runs later.
+	TriggerReconcile(ctx context.Context, cluster, name, namespace string) error
 
-	// WakeController signals the per-controller goroutine to reconcile immediately.
-	WakeController(cluster, namespace, name string)
+	// WakeController asks the operator of cluster to signal the
+	// per-controller goroutine to reconcile immediately.
+	WakeController(ctx context.Context, cluster, namespace, name string) error
 
-	// Reprovision forces the controller to re-push its full desired state to
-	// the mite on the next reconcile, bypassing the convergence short-circuit.
-	Reprovision(cluster, namespace, name string)
+	// Reprovision asks the operator of cluster to make the next reconcile
+	// re-push the full desired state to the mite, bypassing the convergence
+	// short-circuit. A nil error means that the operator took the request.
+	Reprovision(ctx context.Context, cluster, namespace, name string) error
 
 	// ApproveRestart applies a pending configuration change. action must be
 	// "reload" (JCasC reload) or "restart" (Jenkins safe restart). A
@@ -37,5 +43,4 @@ type ReconcilerAPI interface {
 	Wake(ctx context.Context, cluster, namespace, name string) error
 }
 
-// Compile-time check that *Reconciler satisfies ReconcilerAPI.
-var _ ReconcilerAPI = (*Reconciler)(nil)
+var _ ReconcilerAPI = (*NATSReconcilerProxy)(nil)

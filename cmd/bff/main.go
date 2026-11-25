@@ -643,7 +643,6 @@ func main() {
 
 	// --- API dependencies ---
 	reconcilerProxy := controller.NewNATSReconcilerProxy(busConn)
-	reconcilerProxy.SetLogger(logger)
 
 	// Derive dashboard host for path-mode host-equality check.
 	dashboardHost := ""

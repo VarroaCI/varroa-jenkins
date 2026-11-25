@@ -46,6 +46,8 @@ varroactl reprovision controller <namespace>/<name>
 | Reconcile | Check desired state now. |
 | Reprovision | Rebuild operator-managed resources and roll Jenkins. |
 
+Reconcile and reprovision answer `202` when the operator of the cluster takes the request. The work continues after the answer. When no operator receives the request, the API answers `503` with the code `operator_unavailable`, and nothing changes. See [API reference](../api-reference.md#requests-that-an-operator-serves).
+
 For approval and drain behavior, see [Reconciliation](reconciliation.md).
 
 A CASC configuration change (JCasC content, the security realm, or Jenkins
