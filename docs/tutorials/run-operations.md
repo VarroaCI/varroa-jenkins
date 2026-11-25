@@ -69,6 +69,11 @@ Jenkins does not run a declarative stage in these cases:
 - The `when` condition of the stage is false.
 - A restart begins at a later stage.
 
+A stage that catches its own error reads the stage result that the step sets. `catchError` sets
+its `stageResult` value, which is `SUCCESS` by default. `warnError` and `unstable` set `UNSTABLE`.
+A stage with more than one such result reads the worst one. The stage shows the same status while
+the build runs and after it ends. It carries no error text.
+
 The card uses the whole log for the log tail when no stage reports `FAILURE`. It uses the whole
 log too when the stored log index names no stage. An aborted run and a run with no stages take this
 fallback.
