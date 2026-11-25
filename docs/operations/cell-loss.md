@@ -122,10 +122,14 @@ The move also gives the run's fleet locks to the new pod. The gateway accepts th
 completion facts at once. An event from the replaced pod changes nothing after the move.
 
 A pod read of the replaced pod does not end such a build. Only `no-heartbeat`, after fifteen
-minutes with no live pod, and `heartbeat-lost` end it. The same read does not finalize its log. A
-build that marked its start and sent no start event ends `start-lost` after 75 minutes, with no
-automatic retry. A queued build keeps every reason. A cell build never moves this way, because a
-cell keeps its Jenkins home on ephemeral storage.
+minutes with no live pod, and `heartbeat-lost` end it. The same read does not finalize its log.
+
+A build that marked its start can still sit in the queue that the new pod loads from the volume.
+The new pod then claims it again. When the job's next build number on the volume is not above the
+granted number, the build did not start. The claim then gives the run to the new pod with the same
+number, and the build runs once. Any other build that marked its start and sent no start event
+ends `start-lost` after 75 minutes, with no automatic retry. A queued build keeps every reason. A
+cell build never moves this way, because a cell keeps its Jenkins home on ephemeral storage.
 
 ## The re-fire
 
