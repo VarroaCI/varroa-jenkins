@@ -108,7 +108,9 @@ finalize. When the index holds the final chunk, the sweep finalizes the log and 
 When the blob store does not answer, the sweep marks no run and tries again in the next round.
 When the store answers but the index of one run cannot be read, the sweep tries that run again in
 each round. It marks the run `not-finalized` only when a read still fails 24 hours after the first
-failure. A store that lists objects but cannot read them gets the same 24 hours.
+failure. The sweep keeps the time of the first failure across a pause in its reads. After a pause of
+24 hours or more, the next failed read therefore marks the run. A store that lists objects but cannot
+read them gets the same 24 hours.
 
 An interrupted mark finalizes the log of the run it ends, because the lost cell sends no more
 chunks. A log that the gateway already finalized keeps its state, with no reason. For any other
